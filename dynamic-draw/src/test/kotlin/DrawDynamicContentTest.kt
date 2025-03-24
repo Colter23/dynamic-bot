@@ -6,12 +6,10 @@ import org.junit.jupiter.api.TestInstance
 import top.colter.dynamic.LazyImage
 import top.colter.dynamic.data.*
 import top.colter.dynamic.draw.drawDynamicContent
-import top.colter.dynamic.draw.drawDynamicMediaPic
 import top.colter.skiko.*
 import top.colter.skiko.data.Gradient
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.layout.View
-import javax.swing.text.View
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 internal class DrawDynamicContentTest {

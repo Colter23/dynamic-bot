@@ -7,9 +7,7 @@ import com.google.zxing.client.j2se.MatrixToImageWriter
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import org.jetbrains.skia.*
-import org.jetbrains.skia.svg.SVGDOM
 import org.jetbrains.skiko.toBitmap
-import sun.swing.SwingUtilities2.drawRect
 
 
 val pointColor = 0xFF000000

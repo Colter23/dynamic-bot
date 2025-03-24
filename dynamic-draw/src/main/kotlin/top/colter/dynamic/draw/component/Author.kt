@@ -1,18 +1,12 @@
 package top.colter.dynamic.draw.component
 
-import com.sun.rowset.internal.Row
 import org.jetbrains.skia.*
-import top.colter.dynamic.draw.loadSVG
-import top.colter.dynamic.draw.makeImage
-import top.colter.dynamic.draw.qrCode
 import top.colter.skiko.*
 import top.colter.skiko.data.Gradient
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.Shadow
 import top.colter.skiko.layout.*
-import java.awt.SystemColor.text
-import java.io.File
-import javax.swing.Box
+
 
 /**
  * 作者组件

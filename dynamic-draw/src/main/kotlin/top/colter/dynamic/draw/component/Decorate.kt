@@ -8,7 +8,6 @@ import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.layout.Box
 import top.colter.skiko.layout.Image
 import top.colter.skiko.layout.Layout
-import top.colter.skiko.layout.Text
 
 
 /**

@@ -29,9 +29,7 @@ fun Application.configureRouting() {
             call.respond("List of articles sorted starting from ${article.sort}")
         }
         // Static plugin. Try to access `/static/index.html`
-        static("/static") {
-            resources("static")
-        }
+        staticResources("/static", "static")
     }
 }
 
