@@ -75,12 +75,21 @@ public data class DynamicContentNodeLink(
 /**
  * # 动态内容样式(暂定)
  *
+ * @param size 字体大小 [DynamicContentSize]
+ * @param sizeNum 指定字体大小，同时设定会覆盖 [size]
+ * @param color HEX颜色 (#FFFFFF)
+ * @param fontFamily 字体名
+ * @param isBold 是否加粗
+ * @param isItalic 是否斜体
  */
 //TODO 动态内容样式
 public data class DynamicContentStyle(
-    val size: DynamicContentSize = DynamicContentSize.NORMAL,
+    val size: DynamicContentSize? = null,
+    val sizeNum: Int? = null,
     val color: String? = null,
+    val fontFamily: String? = null,
     val isBold: Boolean = false,
+    val isItalic: Boolean = false,
 ) {
     public enum class DynamicContentSize {
         SMALL,

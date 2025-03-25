@@ -48,7 +48,8 @@ public data class DynamicMediaVideo(
     val cover: LazyImage,
     val duration: String,
     val badge: String,
-    val stats: DynamicMediaVideoStats
+    val stats: DynamicMediaVideoStats,
+    val link: String
 )
 
 /**
