@@ -15,6 +15,6 @@ public data class Publisher(
     val name: String,
     val face: LazyImage,
 
-    val pendant: LazyImage?,
-    val official: String?,
+    val pendant: LazyImage? = null,
+    val official: String? = null,
 )

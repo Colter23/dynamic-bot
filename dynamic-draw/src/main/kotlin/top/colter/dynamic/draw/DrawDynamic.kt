@@ -11,7 +11,7 @@ import top.colter.skiko.layout.Layout
 import top.colter.skiko.layout.View
 
 
-suspend fun DrawDynamic(dynamic: Dynamic): Image? {
+fun DrawDynamic(dynamic: Dynamic): Image {
     return View(
         modifier = Modifier()
             .width(1000.dp)
@@ -27,22 +27,30 @@ fun Layout.DynamicView(dynamic: Dynamic) {
 
     Column(modifier = Modifier()
         .fillMaxWidth()
-        .padding(20.dp)
-        .background(Color.WHITE.withAlpha(0.6f))
-        .border(3.dp, 15.dp)
+
+
     ) {
 
         drawPublisher(dynamic.publisher, dynamic.time.toString())
 
-        dynamic.content?.let { content -> drawDynamicContent(content) }
+        Column(modifier = Modifier()
+            .fillMaxWidth()
+            .padding(15.dp)
+            .background(Color.WHITE.withAlpha(0.6f))
+            .border(3.dp, 15.dp)
+        ) {
+            dynamic.content?.let { content -> drawDynamicContent(content) }
 
-        dynamic.media?.let { media -> drawDynamicMedia(media) }
+            dynamic.media?.let { media -> drawDynamicMedia(media) }
 
-        dynamic.origin?.let {
-            putEnv("forward", true)
-            DynamicView(it)
-            removeEnv("forward")
+            dynamic.origin?.let {
+                putEnv("forward", true)
+                DynamicView(it)
+                removeEnv("forward")
+            }
         }
+
+
 
     }
 
