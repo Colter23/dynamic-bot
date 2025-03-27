@@ -21,8 +21,9 @@ public data class Dynamic(
     val title: String? = null,
     val content: DynamicContent? = null,
     val media: DynamicMedia? = null,
-    val additional: DynamicAdditional? = null
+    val additional: DynamicAdditional? = null,
 
+    val origin: Dynamic? = null
 )
 
 

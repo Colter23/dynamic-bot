@@ -31,11 +31,12 @@ internal class DrawDynamicContentTest {
                     "开拓者好呀~今天为大家带来「流萤（毁灭•火）」的角色前瞻！ \n" +
                     "———————————————————\n" +
                     "▌官方微博：崩坏星穹铁道 \n" +
-                    "▌官方公众号：崩坏星穹铁道\n"),
-            DynamicContentNodeEmoji("aa", image = LazyImage("[阿库娅_不关我事].png"))
+                    "▌官方公众号：崩坏星穹铁道"),
+            DynamicContentNodeEmoji("aa", image = LazyImage("[阿库娅_不关我事].png")),
+            DynamicContentNodeLink("#崩坏星穹铁道# #再见匹诺康尼#"),
         ))
 
-        val i = (content.contentNodes.last() as DynamicContentNodeEmoji).image
+        val i = (content.contentNodes[2] as DynamicContentNodeEmoji).image
         i.image = loadTestResource("emoji", i.url).readBytes()
 
         View(

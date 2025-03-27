@@ -2,12 +2,24 @@ package top.colter.dynamic.draw
 
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
+import top.colter.dynamic.data.DynamicMedia
 import top.colter.dynamic.data.DynamicMediaPic
+import top.colter.dynamic.data.DynamicMediaVideo
+import top.colter.dynamic.draw.component.Media
+import top.colter.dynamic.draw.component.MediaSmall
 import top.colter.skiko.*
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.Ratio
 import top.colter.skiko.data.Shadow
 import top.colter.skiko.layout.*
+
+
+fun Layout.drawDynamicMedia(media: DynamicMedia) {
+
+    media.pics?.let { pics -> drawDynamicMediaPic(pics) }
+    media.video?.let { video -> drawDynamicMediaVideo(video) }
+
+}
 
 
 fun Layout.drawDynamicMediaPic(pics: List<DynamicMediaPic>) {
@@ -65,5 +77,26 @@ fun Layout.DynamicMediaPicItem(
                 modifier = Modifier().maxWidth(500.dp)
             )
         }
+    }
+}
+
+fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo) {
+    if (containsEnv("forward")) {
+        MediaSmall(
+            cover = video.cover.image?.makeImage()!!,
+            title = video.title,
+            desc = video.description,
+            duration = video.duration,
+            badge = video.badge
+        )
+    } else {
+        Media(
+            cover = video.cover.image?.makeImage()!!,
+            title = video.title,
+            desc = video.description,
+            duration = video.duration,
+            badge = video.badge,
+            info = "${video.stats.play}播放 ${video.stats.danmaku}弹幕"
+        )
     }
 }

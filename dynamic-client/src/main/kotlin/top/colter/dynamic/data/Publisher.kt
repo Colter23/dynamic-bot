@@ -1,5 +1,6 @@
 package top.colter.dynamic.data
 
+import top.colter.dynamic.LazyImage
 import top.colter.dynamic.enums.PublisherPlatform
 
 
@@ -12,8 +13,8 @@ public data class Publisher(
     val platform: PublisherPlatform,
     val userId: String,
     val name: String,
-    val face: String,
+    val face: LazyImage,
 
-    val pendant: String?,
+    val pendant: LazyImage?,
     val official: String?,
 )
