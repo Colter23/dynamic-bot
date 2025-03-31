@@ -7,13 +7,15 @@ import org.jetbrains.skia.Image
 import org.jetbrains.skia.Surface
 import org.jetbrains.skia.svg.SVGDOM
 import java.io.IOException
+import java.lang.ClassLoader.getSystemResourceAsStream
 
 
 //internal val logger  = KotlinLogging.logger {}
 
 fun loadResourceBytes(path: String): ByteArray? {
     return try {
-        object {}.javaClass.getResourceAsStream(path)?.readBytes()
+        getSystemResourceAsStream(path)?.readBytes()
+//        object {}.javaClass.getResourceAsStream(path)?.readBytes()
     } catch (e: IOException) {
 //        logger.error(e) { "加载资源失败 $path" }
         null

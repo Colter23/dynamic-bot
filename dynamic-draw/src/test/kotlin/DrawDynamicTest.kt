@@ -8,6 +8,7 @@ import top.colter.dynamic.data.*
 import top.colter.dynamic.draw.DrawDynamic
 import top.colter.dynamic.draw.drawDynamicContent
 import top.colter.dynamic.enums.PublisherPlatform
+import top.colter.dynamic.forEachLazyImageFields
 import top.colter.skiko.*
 import top.colter.skiko.data.Gradient
 import top.colter.skiko.data.LayoutAlignment
@@ -34,11 +35,11 @@ internal class DrawDynamicTest {
                     "———————————————————\n" +
                     "▌官方微博：崩坏星穹铁道 \n" +
                     "▌官方公众号：崩坏星穹铁道"),
-            DynamicContentNodeEmoji("aa", image = LazyImage("[阿库娅_不关我事].png")),
+//            DynamicContentNodeEmoji("aa", image = LazyImage("[阿库娅_不关我事].png")),
             DynamicContentNodeLink("#崩坏星穹铁道# #再见匹诺康尼#"),
         ))
-        val i = (content.contentNodes[2] as DynamicContentNodeEmoji).image
-        i.image = loadTestResource("emoji", i.url).readBytes()
+//        val i = (content.contentNodes[2] as DynamicContentNodeEmoji).image
+//        i.image = loadTestResource("emoji", i.url).readBytes()
 
         val pics: List<DynamicMediaPic> = listOf(
             DynamicMediaPic(LazyImage("b410195c3be40f6195dcd90a02b913311340190821.png"), 1080, 1920),
@@ -52,11 +53,25 @@ internal class DrawDynamicTest {
             DynamicMediaPic(LazyImage("22a21643280b17df3325ce95f650f3651340190821.jpg"), 900, 5296, badge = "长图"),
         )
 
-        pics.forEach {
-            it.pic.image = loadTestResource("image", it.pic.url).readBytes()
-        }
+//        pics.forEach {
+//            it.pic.image = loadTestResource("image", it.pic.url).readBytes()
+//        }
+
+
+        val video = DynamicMediaVideo(
+            "",
+            "视频",
+            "测试简介",
+            LazyImage("cover01.jpg"),
+            duration = "1:10",
+            badge = "视频",
+            stats = DynamicMediaVideoStats("100", "200", "300"),
+            link = "http",
+        )
+
         val media = DynamicMedia(
             pics = pics,
+            video = video,
         )
 
         val dynamic = Dynamic(
@@ -68,16 +83,22 @@ internal class DrawDynamicTest {
                 name = "Colter_null",
                 face = LazyImage("avatar.jpg"),
                 pendant = LazyImage("pendant.png"),
+                head = LazyImage("head.png"),
                 official = null
             ),
             time = 1111111111111L,
-            title = "",
+            title = "测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试",
             content = content,
             media = media,
         )
 
-        dynamic.publisher.face.image = loadTestResource("image", dynamic.publisher.face.url).readBytes()
-        dynamic.publisher.pendant?.image = loadTestResource("image", dynamic.publisher.pendant?.url!!).readBytes()
+
+        forEachLazyImageFields(dynamic) {
+            this.image = loadTestResource("image", this.url).readBytes()
+        }
+//        dynamic.publisher.face.image = loadTestResource("image", dynamic.publisher.face.url).readBytes()
+//        dynamic.publisher.pendant?.image = loadTestResource("image", dynamic.publisher.pendant?.url!!).readBytes()
+//        dynamic.publisher.head?.image = loadTestResource("image", dynamic.publisher.head?.url!!).readBytes()
 
         val image = DrawDynamic(dynamic)
         testOutput.resolve("dynamic.png").writeBytes(image.encodeToData()!!.bytes)

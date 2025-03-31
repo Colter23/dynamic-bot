@@ -1,5 +1,7 @@
 package top.colter.dynamic.data
 
+import top.colter.dynamic.ImageType
+import top.colter.dynamic.ImgType
 import top.colter.dynamic.LazyImage
 
 
@@ -53,6 +55,7 @@ public data class DynamicContentNodeText(
 public data class DynamicContentNodeEmoji(
     override val text: String,
     override val style: DynamicContentStyle? = null,
+    @ImgType(ImageType.EMOJI)
     val image: LazyImage
 ) : DynamicContentNode
 
@@ -67,6 +70,7 @@ public data class DynamicContentNodeEmoji(
 public data class DynamicContentNodeLink(
     override val text: String,
     override val style: DynamicContentStyle? = null,
+    @ImgType(ImageType.OTHER)
     val icon: LazyImage? = null,
     val url: String? = null
 ) : DynamicContentNode

@@ -25,7 +25,7 @@ fun Layout.drawDynamicContent(content: DynamicContent) {
 
     RichText(
         paragraph = paragraph.build(),
-        modifier = Modifier().margin(vertical = 20.dp).fillMaxWidth()
+        modifier = Modifier().margin(bottom = 20.dp).fillMaxWidth()
     )
 
 }
