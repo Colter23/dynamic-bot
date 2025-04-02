@@ -60,17 +60,17 @@ internal class DrawDynamicTest {
 
         val video = DynamicMediaVideo(
             "",
-            "视频",
-            "测试简介",
+            "《崩坏：星穹铁道》EP：「希望有羽毛和翅膀」",
+            "希望在我的灵魂中筑巢栖息，唱着没有词的歌曲，似乎永远不会停息。《希望有羽毛和翅膀》 作曲 Composer：王可鑫 Eli.W (HOYO-MiX) 作词 Lyricist：Ruby Qu",
             LazyImage("cover01.jpg"),
-            duration = "1:10",
+            duration = "02:58",
             badge = "视频",
-            stats = DynamicMediaVideoStats("100", "200", "300"),
+            stats = DynamicMediaVideoStats("1428.2万", "4.3万", "300"),
             link = "http",
         )
 
         val media = DynamicMedia(
-            pics = pics,
+//            pics = pics,
             video = video,
         )
 

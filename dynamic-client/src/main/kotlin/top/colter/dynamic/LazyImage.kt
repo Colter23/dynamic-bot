@@ -16,17 +16,20 @@ public fun forEachLazyImageFields(obj: Any, block: LazyImage.(ImageType) -> Unit
     obj::class.declaredMemberProperties.forEach { property ->
         val type = property.returnType.jvmErasure
         if (type == LazyImage::class) {
-            (property.apply { isAccessible = true }.getter.call(obj) as LazyImage)
-                .block(property.findAnnotation<ImgType>()?.type?:ImageType.UNKNOWN)
+            property.apply { isAccessible = true }.getter.call(obj)?.let {
+                (it as LazyImage).block(property.findAnnotation<ImgType>()?.type?:ImageType.UNKNOWN)
+            }
         } else if (type == List::class) {
-            val list = property.apply { isAccessible = true }.getter.call(obj) as List<*>
-            if (list.isNotEmpty()) {
-                if (list.first()!!::class == LazyImage::class) {
-                    list.forEach {
-                        (it as LazyImage).block(property.findAnnotation<ImgType>()?.type?:ImageType.UNKNOWN)
+            property.apply { isAccessible = true }.getter.call(obj)?.let { l ->
+                val list = l as List<*>
+                if (list.isNotEmpty()) {
+                    if (list.first()!!::class == LazyImage::class) {
+                        list.forEach {
+                            (it as LazyImage).block(property.findAnnotation<ImgType>()?.type?:ImageType.UNKNOWN)
+                        }
+                    }else if (list.first()!!::class.isData) {
+                        list.forEach { forEachLazyImageFields(it!!, block) }
                     }
-                }else if (list.first()!!::class.isData) {
-                    list.forEach { forEachLazyImageFields(it!!, block) }
                 }
             }
         } else if (type.isData) {
