@@ -3,6 +3,7 @@ package top.colter.dynamic.draw
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
 import top.colter.dynamic.data.DynamicMedia
+import top.colter.dynamic.data.DynamicMediaArticle
 import top.colter.dynamic.data.DynamicMediaPic
 import top.colter.dynamic.data.DynamicMediaVideo
 import top.colter.dynamic.draw.component.Media
@@ -18,6 +19,7 @@ fun Layout.drawDynamicMedia(media: DynamicMedia) {
 
     media.pics?.let { pics -> drawDynamicMediaPic(pics) }
     media.video?.let { video -> drawDynamicMediaVideo(video) }
+    media.article?.let { article -> drawDynamicMediaArticle(article) }
 
 }
 
@@ -80,6 +82,7 @@ fun Layout.DynamicMediaPicItem(
     }
 }
 
+
 fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo) {
     if (containsEnv("forward")) {
         MediaSmall(
@@ -99,4 +102,15 @@ fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo) {
             info = "${video.stats.play}播放 ${video.stats.danmaku}弹幕"
         )
     }
+}
+
+
+fun Layout.drawDynamicMediaArticle(article: DynamicMediaArticle) {
+    Media(
+        cover = article.cover.image?.makeImage()!!,
+        title = article.title,
+        desc = article.description,
+        badge = article.badge,
+        coverRatio = Ratio.BANNER
+    )
 }

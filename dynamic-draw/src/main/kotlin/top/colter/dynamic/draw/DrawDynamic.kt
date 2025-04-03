@@ -53,7 +53,7 @@ fun Layout.DynamicView(dynamic: Dynamic) {
             dynamic.title?.let { title ->
                 Text(
                     text = title,
-                    fontSize = 35.dp,
+                    fontSize = 36.dp,
                     fontStyle = FontStyle.BOLD,
                     maxLinesCount = 2,
                     modifier = Modifier().margin(bottom = 20.dp)

@@ -10,16 +10,15 @@ import top.colter.dynamic.LazyImage
  * @param pics 图片
  * @param video 视频
  * @param article 文章
- * @param card 卡片（预留）
- * @param smallCard 小卡片（预留）
  */
 public data class DynamicMedia(
     val pics: List<DynamicMediaPic>? = null,
     val video: DynamicMediaVideo? = null,
-    val article: String? = null,
-    val card: String? = null,
-    val smallCard: String? = null,
-    val miniCard: String? = null,
+    val article: DynamicMediaArticle? = null,
+
+    val card: DynamicMediaCard? = null,
+    val smallCard: DynamicMediaCard? = null,
+    val miniCard: DynamicMediaCard? = null,
 )
 
 /**
@@ -48,8 +47,7 @@ public data class DynamicMediaVideo(
     val id: String,
     val title: String,
     val description: String,
-//    @ImgType(ImageType.COVER)
-    @ImgType(ImageType.IMAGES)
+    @ImgType(ImageType.COVER)
     val cover: LazyImage,
     val duration: String,
     val badge: String,
@@ -66,4 +64,37 @@ public data class DynamicMediaVideoStats(
     val play: String,
     val danmaku: String,
     val like: String,
+)
+
+
+/**
+ * 动态媒体文章
+ *
+ */
+public data class DynamicMediaArticle(
+    val id: String,
+    val title: String,
+    val description: String,
+    @ImgType(ImageType.COVER)
+    val cover: LazyImage,
+    val badge: String,
+    val link: String
+)
+
+
+/**
+ * 动态媒体文章
+ *
+ */
+public data class DynamicMediaCard(
+    val id: String,
+    val type: String,
+    val title: String,
+    val description: String,
+    val duration: String? = null,
+    val info: String? = null,
+    val badge: String,
+    @ImgType(ImageType.COVER)
+    val cover: LazyImage,
+    val link: String
 )

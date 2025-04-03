@@ -15,12 +15,12 @@ public data class Publisher(
     val platform: PublisherPlatform,
     val userId: String,
     val name: String,
-    @ImgType(ImageType.IMAGES)
+    @ImgType(ImageType.USER)
     val face: LazyImage,
 
-    @ImgType(ImageType.IMAGES)
+    @ImgType(ImageType.USER)
     val head: LazyImage? = null,
-    @ImgType(ImageType.IMAGES)
+    @ImgType(ImageType.USER)
     val pendant: LazyImage? = null,
     val official: String? = null,
 )
