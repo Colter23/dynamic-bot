@@ -8,6 +8,7 @@ import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
 import org.jetbrains.skia.*
 import org.jetbrains.skiko.toBitmap
+import top.colter.dynamic.draw.tools.loadResourceBytes
 
 
 val pointColor = 0xFF000000

@@ -1,5 +1,7 @@
 package top.colter.dynamic.enums
 
+import kotlinx.serialization.Serializable
+
 
 /**
  * # 订阅者平台
@@ -17,6 +19,7 @@ package top.colter.dynamic.enums
  * [Other] : 其他目标
  *
  */
+@Serializable
 public enum class SubscriberPlatform(public val value: Int) {
     QQ(1),
     QQChannel(2),

@@ -1,5 +1,7 @@
 package top.colter.dynamic.enums
 
+import kotlinx.serialization.Serializable
+
 
 /**
  * # 订阅者类型
@@ -13,6 +15,7 @@ package top.colter.dynamic.enums
  * [Other] : 其他
  *
  */
+@Serializable
 public enum class SubscriberType(public val value: Int) {
     User(1),
     Group(2),

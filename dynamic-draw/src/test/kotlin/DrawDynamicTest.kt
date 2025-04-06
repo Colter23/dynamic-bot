@@ -7,6 +7,7 @@ import top.colter.dynamic.LazyImage
 import top.colter.dynamic.data.*
 import top.colter.dynamic.draw.DrawDynamic
 import top.colter.dynamic.draw.drawDynamicContent
+import top.colter.dynamic.encode
 import top.colter.dynamic.enums.PublisherPlatform
 import top.colter.dynamic.forEachLazyImageFields
 import top.colter.skiko.*
@@ -86,7 +87,7 @@ internal class DrawDynamicTest {
                 head = LazyImage("head.png"),
                 official = null
             ),
-            time = 1111111111111L,
+            time = 1743911606,
             title = "测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试测试",
             content = content,
             media = media,
@@ -102,6 +103,8 @@ internal class DrawDynamicTest {
 
         val image = DrawDynamic(dynamic)
         testOutput.resolve("dynamic.png").writeBytes(image.encodeToData()!!.bytes)
+
+        testOutput.resolve("dynamic.json").writeText(dynamic.encode())
 
     }
 }

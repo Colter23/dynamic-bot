@@ -1,6 +1,5 @@
-package top.colter.dynamic.draw
+package top.colter.dynamic.draw.tools
 
-import io.github.oshai.kotlinlogging.KotlinLogging
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Data
 import org.jetbrains.skia.Image

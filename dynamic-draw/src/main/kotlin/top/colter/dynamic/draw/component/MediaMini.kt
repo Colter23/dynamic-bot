@@ -16,6 +16,7 @@ fun Layout.MediaMini(
     title: String,
     desc: String,
     badge: String? = null,
+    coverRatio: Float = Ratio.COVER_2,
     modifier: Modifier = Modifier()
 ) = Row (
     modifier = modifier
@@ -31,7 +32,7 @@ fun Layout.MediaMini(
     if (cover != null) {
         Image(
             image = cover,
-            ratio = Ratio.COVER_2,
+            ratio = coverRatio,
             modifier = Modifier().fillMaxHeight().border(3.dp, 10.dp).shadows(Shadow.ELEVATION_2)
         )
     }

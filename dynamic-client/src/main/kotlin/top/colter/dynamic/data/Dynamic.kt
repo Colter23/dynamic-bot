@@ -1,7 +1,9 @@
 package top.colter.dynamic.data
 
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonNames
 import top.colter.dynamic.enums.PublisherPlatform
-import top.colter.dynamic.enums.PublisherType
 
 
 /**
@@ -9,7 +11,7 @@ import top.colter.dynamic.enums.PublisherType
  * @param platform 发布者平台 [PublisherPlatform]
  *
  */
-
+@Serializable
 public data class Dynamic(
     val platform: PublisherPlatform,
     val dynamicId: String,

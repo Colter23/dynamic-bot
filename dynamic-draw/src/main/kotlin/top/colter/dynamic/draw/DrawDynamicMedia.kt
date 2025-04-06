@@ -2,12 +2,11 @@ package top.colter.dynamic.draw
 
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
-import top.colter.dynamic.data.DynamicMedia
-import top.colter.dynamic.data.DynamicMediaArticle
-import top.colter.dynamic.data.DynamicMediaPic
-import top.colter.dynamic.data.DynamicMediaVideo
+import top.colter.dynamic.data.*
 import top.colter.dynamic.draw.component.Media
+import top.colter.dynamic.draw.component.MediaMini
 import top.colter.dynamic.draw.component.MediaSmall
+import top.colter.dynamic.draw.tools.makeImage
 import top.colter.skiko.*
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.Ratio
@@ -19,7 +18,11 @@ fun Layout.drawDynamicMedia(media: DynamicMedia) {
 
     media.pics?.let { pics -> drawDynamicMediaPic(pics) }
     media.video?.let { video -> drawDynamicMediaVideo(video) }
-    media.article?.let { article -> drawDynamicMediaArticle(article) }
+//    media.article?.let { article -> drawDynamicMediaArticle(article) }
+
+    media.card?.let { card -> drawDynamicMediaCard(card) }
+    media.smallCard?.let { card -> drawDynamicMediaSmallCard(card) }
+    media.miniCard?.let { card -> drawDynamicMediaMiniCard(card) }
 
 }
 
@@ -105,12 +108,32 @@ fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo) {
 }
 
 
-fun Layout.drawDynamicMediaArticle(article: DynamicMediaArticle) {
+fun Layout.drawDynamicMediaCard(card: DynamicMediaCard) {
     Media(
-        cover = article.cover.image?.makeImage()!!,
-        title = article.title,
-        desc = article.description,
-        badge = article.badge,
-        coverRatio = Ratio.BANNER
+        cover = card.cover.image?.makeImage()!!,
+        title = card.title,
+        desc = card.description,
+        badge = card.badge,
+        coverRatio = card.coverRatio ?: Ratio.COVER_1
+    )
+}
+
+fun Layout.drawDynamicMediaSmallCard(card: DynamicMediaCard) {
+    MediaSmall(
+        cover = card.cover.image?.makeImage()!!,
+        title = card.title,
+        desc = card.description,
+        badge = card.badge,
+        coverRatio = card.coverRatio ?: Ratio.COVER_1
+    )
+}
+
+fun Layout.drawDynamicMediaMiniCard(card: DynamicMediaCard) {
+    MediaMini(
+        cover = card.cover.image?.makeImage()!!,
+        title = card.title,
+        desc = card.description,
+        badge = card.badge,
+        coverRatio = card.coverRatio ?: Ratio.COVER_1
     )
 }

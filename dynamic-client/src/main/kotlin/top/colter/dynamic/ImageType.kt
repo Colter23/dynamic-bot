@@ -2,7 +2,9 @@ package top.colter.dynamic
 
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialInfo
+import kotlinx.serialization.Serializable
 
+@Serializable
 public enum class ImageType {
     USER,
     EMOJI,

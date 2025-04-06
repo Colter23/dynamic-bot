@@ -4,6 +4,8 @@ import org.jetbrains.skia.Color
 import org.jetbrains.skia.FontStyle
 import org.jetbrains.skia.paragraph.TextStyle
 import top.colter.dynamic.data.*
+import top.colter.dynamic.draw.tools.makeImage
+import top.colter.dynamic.draw.tools.makeRGB
 import top.colter.skiko.*
 import top.colter.skiko.data.RichParagraphBuilder
 import top.colter.skiko.layout.Layout

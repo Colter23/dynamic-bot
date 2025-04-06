@@ -1,5 +1,7 @@
 package top.colter.dynamic.data
 
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
 import top.colter.dynamic.ImageType
 import top.colter.dynamic.ImgType
 import top.colter.dynamic.LazyImage
@@ -12,6 +14,7 @@ import top.colter.dynamic.LazyImage
  * @param contentNodes 内容节点 [DynamicContentNode]
  *
  */
+@Serializable
 public data class DynamicContent(
     val text: String,
     val contentNodes: List<DynamicContentNode>
@@ -28,7 +31,8 @@ public data class DynamicContent(
  * [DynamicContentNodeLink] 链接节点
  *
  */
-public interface DynamicContentNode {
+@Serializable
+public sealed interface DynamicContentNode {
     public val text: String
     public val style: DynamicContentStyle?
 }
@@ -40,6 +44,8 @@ public interface DynamicContentNode {
  * @param text 文本
  * @param style 样式 [DynamicContentStyle]
  */
+@Serializable
+@SerialName("TEXT")
 public data class DynamicContentNodeText(
     override val text: String,
     override val style: DynamicContentStyle? = null
@@ -52,6 +58,8 @@ public data class DynamicContentNodeText(
  * @param style 样式 [DynamicContentStyle]
  * @param image Emoji图片
  */
+@Serializable
+@SerialName("EMOJI")
 public data class DynamicContentNodeEmoji(
     override val text: String,
     override val style: DynamicContentStyle? = null,
@@ -67,6 +75,8 @@ public data class DynamicContentNodeEmoji(
  * @param icon 链接图标
  * @param url 链接
  */
+@Serializable
+@SerialName("LINK")
 public data class DynamicContentNodeLink(
     override val text: String,
     override val style: DynamicContentStyle? = null,
@@ -87,6 +97,7 @@ public data class DynamicContentNodeLink(
  * @param isItalic 是否斜体
  */
 //TODO 动态内容样式
+@Serializable
 public data class DynamicContentStyle(
     val size: DynamicContentSize? = null,
     val sizeNum: Int? = null,
@@ -95,6 +106,7 @@ public data class DynamicContentStyle(
     val isBold: Boolean = false,
     val isItalic: Boolean = false,
 ) {
+    @Serializable
     public enum class DynamicContentSize {
         SMALL,
         NORMAL,

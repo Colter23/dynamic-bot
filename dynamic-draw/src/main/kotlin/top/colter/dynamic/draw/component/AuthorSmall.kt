@@ -2,8 +2,8 @@ package top.colter.dynamic.draw.component
 
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
-import top.colter.dynamic.draw.loadSVG
-import top.colter.dynamic.draw.makeImage
+import top.colter.dynamic.draw.tools.loadSVG
+import top.colter.dynamic.draw.tools.makeImage
 import top.colter.skiko.*
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.layout.Layout

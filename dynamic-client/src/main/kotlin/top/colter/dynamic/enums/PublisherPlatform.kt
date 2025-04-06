@@ -1,5 +1,7 @@
 package top.colter.dynamic.enums
 
+import kotlinx.serialization.Serializable
+
 /**
  * # 发布者平台
  *
@@ -16,6 +18,7 @@ package top.colter.dynamic.enums
  * [Other] : 其他来源
  *
  */
+@Serializable
 public enum class PublisherPlatform(public val value: Int) {
     BiliBili(1),
     Weibo(2),

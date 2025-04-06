@@ -1,5 +1,7 @@
 package top.colter.dynamic.enums
 
+import kotlinx.serialization.Serializable
+
 
 /**
  * # 动态内容类型 (暂时没用)
@@ -11,6 +13,7 @@ package top.colter.dynamic.enums
  * [LINK] : 链接
  *
  */
+@Serializable
 public enum class DynamicContentType {
     TEXT,
     EMOJI,

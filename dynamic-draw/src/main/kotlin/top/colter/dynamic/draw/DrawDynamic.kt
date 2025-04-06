@@ -5,6 +5,7 @@ import org.jetbrains.skia.FontStyle
 import org.jetbrains.skia.Image
 import top.colter.dynamic.data.Dynamic
 import top.colter.dynamic.data.DynamicContent
+import top.colter.dynamic.draw.tools.formatTime
 import top.colter.skiko.*
 import top.colter.skiko.data.Gradient
 import top.colter.skiko.data.LayoutAlignment
@@ -40,7 +41,7 @@ fun Layout.DynamicView(dynamic: Dynamic) {
 
     ) {
 
-        drawPublisher(dynamic.publisher, dynamic.time.toString())
+        drawPublisher(dynamic.publisher, dynamic.time.formatTime)
 
         Column(modifier = Modifier()
             .fillMaxWidth()

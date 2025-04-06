@@ -1,13 +1,35 @@
 package top.colter.dynamic
 
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
 import kotlin.reflect.full.declaredMemberProperties
 import kotlin.reflect.full.findAnnotation
 import kotlin.reflect.jvm.isAccessible
 import kotlin.reflect.jvm.jvmErasure
 
+@Serializable(LazyImageSerializer::class)
 public data class LazyImage(val url: String) {
     var image: ByteArray? = null
 }
+
+public object LazyImageSerializer: KSerializer<LazyImage> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor(LazyImage::class.qualifiedName!!, PrimitiveKind.STRING)
+    private const val prefix = "DYNAMIC_TYPE_"
+    override fun deserialize(decoder: Decoder): LazyImage {
+        return LazyImage(decoder.decodeString())
+
+    }
+    override fun serialize(encoder: Encoder, value: LazyImage) {
+        encoder.encodeString(value.url)
+    }
+}
+
 
 /**
  * 查找对象中所有 LazyImage 类型的属性

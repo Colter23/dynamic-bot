@@ -1,5 +1,6 @@
 package top.colter.dynamic.data
 
+import kotlinx.serialization.Serializable
 import top.colter.dynamic.ImageType
 import top.colter.dynamic.ImgType
 import top.colter.dynamic.LazyImage
@@ -11,10 +12,11 @@ import top.colter.dynamic.LazyImage
  * @param video 视频
  * @param article 文章
  */
+@Serializable
 public data class DynamicMedia(
     val pics: List<DynamicMediaPic>? = null,
     val video: DynamicMediaVideo? = null,
-    val article: DynamicMediaArticle? = null,
+//    val article: DynamicMediaArticle? = null,
 
     val card: DynamicMediaCard? = null,
     val smallCard: DynamicMediaCard? = null,
@@ -30,6 +32,7 @@ public data class DynamicMedia(
  * @param size 大小
  * @param badge 徽章（动图/长图/视频）
  */
+@Serializable
 public data class DynamicMediaPic(
     @ImgType(ImageType.IMAGES)
     val pic: LazyImage,
@@ -43,6 +46,7 @@ public data class DynamicMediaPic(
  * 动态媒体视频
  *
  */
+@Serializable
 public data class DynamicMediaVideo(
     val id: String,
     val title: String,
@@ -60,6 +64,7 @@ public data class DynamicMediaVideo(
  * @param danmaku 弹幕数
  * @param play 播放数
  */
+@Serializable
 public data class DynamicMediaVideoStats(
     val play: String,
     val danmaku: String,
@@ -67,34 +72,35 @@ public data class DynamicMediaVideoStats(
 )
 
 
-/**
- * 动态媒体文章
- *
- */
-public data class DynamicMediaArticle(
-    val id: String,
-    val title: String,
-    val description: String,
-    @ImgType(ImageType.COVER)
-    val cover: LazyImage,
-    val badge: String,
-    val link: String
-)
+///**
+// * 动态媒体文章
+// *
+// */
+//public data class DynamicMediaArticle(
+//    val id: String,
+//    val title: String,
+//    val description: String,
+//    @ImgType(ImageType.COVER)
+//    val cover: LazyImage,
+//    val badge: String,
+//    val link: String
+//)
 
 
 /**
- * 动态媒体文章
+ * 动态媒体卡片
  *
  */
+@Serializable
 public data class DynamicMediaCard(
     val id: String,
     val type: String,
     val title: String,
     val description: String,
-    val duration: String? = null,
-    val info: String? = null,
     val badge: String,
     @ImgType(ImageType.COVER)
     val cover: LazyImage,
+    val coverRatio: Float? = null,
+    val info: String? = null,
     val link: String
 )

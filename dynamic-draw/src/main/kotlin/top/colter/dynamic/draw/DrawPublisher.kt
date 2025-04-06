@@ -4,6 +4,8 @@ import org.jetbrains.skia.Image
 import top.colter.dynamic.data.Publisher
 import top.colter.dynamic.draw.component.Author
 import top.colter.dynamic.draw.component.AuthorSmall
+import top.colter.dynamic.draw.tools.loadResourceBytes
+import top.colter.dynamic.draw.tools.makeImage
 import top.colter.skiko.*
 import top.colter.skiko.layout.Layout
 

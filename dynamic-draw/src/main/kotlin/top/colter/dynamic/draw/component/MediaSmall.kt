@@ -16,6 +16,7 @@ fun Layout.MediaSmall(
     desc: String = "",
     duration: String? = null,
     badge: String? = null,
+    coverRatio: Float = Ratio.COVER_2,
     modifier: Modifier = Modifier()
 ) = Row (
     modifier = modifier
@@ -34,7 +35,7 @@ fun Layout.MediaSmall(
         // 封面
         Image(
             image = cover,
-            ratio = Ratio.COVER_2,
+            ratio = coverRatio,
             modifier = Modifier().border(3.dp, 10.dp).shadows(Shadow.ELEVATION_2)
         )
 
