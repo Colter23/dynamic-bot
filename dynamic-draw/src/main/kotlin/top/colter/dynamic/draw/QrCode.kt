@@ -14,8 +14,8 @@ import kotlin.math.round
 import kotlin.math.roundToInt
 
 
-val pointColor = 0xFF000000
-val bgColor = 0xFFFFFFFF
+val pointColor = 0xFFFE65A6
+val bgColor = 0x00FFFFFF
 val qrCodeWriter = QRCodeWriter()
 
 fun qrCode(url: String): Image {
@@ -44,8 +44,13 @@ fun qrCode(url: String): Image {
     val rectangle = bitMatrix.enclosingRectangle
 
     val bitNum = (rectangle[2]) / bitSize
-    println((bitNum / 4f).toInt())
-    val logoSize = (bitNum / 4f).toInt() * bitSize
+
+
+    var logoNum = (bitNum / 4f).roundToInt()
+
+    if (logoNum % 2 == 0) logoNum -= 1
+
+    val logoSize = logoNum * bitSize
 
     val logoX = x + rectangle[2] / 2 - logoSize / 2
 
@@ -58,8 +63,6 @@ fun qrCode(url: String): Image {
             }
         }
     }
-    println(bitMatrix)
-//    matrix.setRegion(0, 0, bitMatrix.width/2, bitMatrix.height/2)
 
     val config = MatrixToImageConfig(pointColor.toInt(), bgColor.toInt())
 
@@ -77,10 +80,10 @@ fun qrCode(url: String): Image {
 //            drawRect(Rect.Companion.makeWH(108f, 108f).offset(196f, 196f), Paint().apply {
 //                color = Color.WHITE
 //            })
-//
-//            drawRRect(RRect.makeXYWH(208f, 208f, 84f, 84f, 10f), Paint().apply {
-//                color = Color.makeRGB(254,101,166)
-//            })
+
+            drawRRect(RRect.makeXYWH(208f, 208f, 84f, 84f, 10f), Paint().apply {
+                color = Color.makeRGB(254,101,166)
+            })
 
 
             val logo = Image.makeFromEncoded(loadResourceBytes("image/bilibili.png")!!)

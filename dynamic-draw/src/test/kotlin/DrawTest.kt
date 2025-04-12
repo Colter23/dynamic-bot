@@ -300,7 +300,7 @@ internal class DrawTest {
 
     @Test
     fun `test qrCode`(): Unit = runBlocking {
-        val image = qrCode("https://www.bilibili.com/")
+        val image = qrCode("https://www.bilibili.com/123123123789872123")
         testOutput.resolve("qrcode.png").writeBytes(image.encodeToData()!!.bytes)
     }
 
