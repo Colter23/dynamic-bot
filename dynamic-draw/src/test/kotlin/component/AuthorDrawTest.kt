@@ -102,11 +102,10 @@ internal class AuthorDrawTest {
                 Author(
                     face = face,
                     head = head,
-                    official = null,
                     name = "优妮-Uni_Kokoro",
                     time = "2023年03月14月 22:00:45",
                     ornament = logo,
-                    badgeImage = official,
+                    badge = official,
                     modifier = Modifier()
                 )
 
@@ -114,11 +113,10 @@ internal class AuthorDrawTest {
                     face = face,
                     pendant = pendant,
                     head = head,
-                    official = null,
                     name = "优妮-Uni_Kokoro",
                     time = "2023年03月14月 22:00:45",
                     qrCode = qrCode,
-                    badgeImage = official,
+                    badge = official,
                     modifier = Modifier().margin(top = 100.dp)
                 )
             }

@@ -48,7 +48,7 @@ fun DynamicContentStyle.toTextStyle(textStyle: TextStyle = TextStyle()) = textSt
         it.color = Color.makeRGB(color!!)
     }
 
-    if (fontFamily != null && FontUtils.matchFamily(fontFamily!!) != null) {
+    if (fontFamily != null && FontUtils.matchFamily(fontFamily!!).count() != 0) {
         it.setFontFamily(fontFamily!!)
     }
 

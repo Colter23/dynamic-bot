@@ -15,11 +15,10 @@ fun Layout.Author(
     face: Image,
     pendant: Image? = null,
     head: Image? = null,
-    official: String? = null,
     name: String,
     time: String,
     ornament: Image? = null,
-    badgeImage: Image? = null,
+    badge: Image? = null,
     qrCode: Image? = null,
     alignment: LayoutAlignment = LayoutAlignment.CENTER,
     modifier: Modifier
@@ -55,7 +54,7 @@ fun Layout.Author(
         Avatar(
             face = face,
             pendant = pendant,
-            badge = badgeImage,
+            badge = badge,
             modifier = Modifier()
                 .height(this.modifier.height)
                 .padding(horizontal = 5.dp, vertical = 20.dp)

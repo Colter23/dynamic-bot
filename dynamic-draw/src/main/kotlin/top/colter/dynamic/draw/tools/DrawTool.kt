@@ -21,6 +21,10 @@ fun loadResourceBytes(path: String): ByteArray? {
     }
 }
 
+fun loadResourceImage(path: String): Image? {
+    return loadResourceBytes(path)?.let { Image.makeFromEncoded(it) }
+}
+
 /**
  * 渲染 SVG 图片
  */

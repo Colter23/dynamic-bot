@@ -34,12 +34,7 @@ fun DrawDynamic(dynamic: Dynamic): Image {
 
 
 fun Layout.DynamicView(dynamic: Dynamic) {
-
-    Column(modifier = Modifier()
-        .fillMaxWidth()
-
-
-    ) {
+    Column(modifier = Modifier().fillMaxWidth()) {
 
         drawPublisher(dynamic.publisher, dynamic.time.formatTime)
 
@@ -50,7 +45,6 @@ fun Layout.DynamicView(dynamic: Dynamic) {
             .background(Color.WHITE.withAlpha(0.6f))
             .border(3.dp, 15.dp)
         ) {
-
             dynamic.title?.let { title ->
                 Text(
                     text = title,
@@ -72,8 +66,5 @@ fun Layout.DynamicView(dynamic: Dynamic) {
             }
         }
 
-
-
     }
-
 }

@@ -16,9 +16,9 @@ import java.io.File
  */
 fun Layout.AuthorSmall(
     face: Image,
-    official: String? = null,
     name: String,
     time: String,
+    badge: Image? = null,
     alignment: LayoutAlignment = LayoutAlignment.CENTER,
     modifier: Modifier
 ) = Row (
@@ -27,16 +27,9 @@ fun Layout.AuthorSmall(
 ) {
     require(modifier.height.isNotNull()) { "必须指定高度" }
 
-    val badgeImage = when (official) {
-        "OfficialVerifyType.NONE" -> null
-        "OfficialVerifyType.PERSONA" -> loadSVG(File("src/main/resources/icon/PERSONAL_OFFICIAL_VERIFY.svg").readBytes()).makeImage(100, 100)
-        "OfficialVerifyType.ORGANIZATION" -> loadSVG(File("src/main/resources/icon/ORGANIZATION_OFFICIAL_VERIFY.svg").readBytes()).makeImage(100, 100)
-        else -> { null }
-    }
-
     Avatar(
         face = face,
-        badge = badgeImage,
+        badge = badge,
         modifier = Modifier().height(modifier.height).margin(15.dp)
     )
     Row(

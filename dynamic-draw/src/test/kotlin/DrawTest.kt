@@ -6,6 +6,7 @@ import org.jetbrains.skia.paragraph.TextStyle
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestInstance
+import top.colter.dynamic.draw.qrCode
 import top.colter.skiko.*
 import top.colter.skiko.data.*
 import top.colter.skiko.layout.*
@@ -295,6 +296,12 @@ internal class DrawTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun `test qrCode`(): Unit = runBlocking {
+        val image = qrCode("https://www.bilibili.com/")
+        testOutput.resolve("qrcode.png").writeBytes(image.encodeToData()!!.bytes)
     }
 
 }
