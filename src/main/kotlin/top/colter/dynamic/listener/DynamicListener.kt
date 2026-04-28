@@ -1,22 +1,30 @@
 package top.colter.dynamic.listener
 
-import top.colter.dynamic.core.data.Dynamic
-import top.colter.dynamic.core.data.PublisherPlatform
+import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.event.DynamicEvent
 import top.colter.dynamic.core.event.Listener
-import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.draw.DrawConfig
-import top.colter.dynamic.draw.DrawDynamic
+import top.colter.dynamic.core.event.MessageEvent
+import top.colter.dynamic.core.event.broadcast
 
-
-class DynamicListener: Listener<DynamicEvent> {
+public class DynamicListener : Listener<DynamicEvent> {
     override suspend fun onMessage(event: DynamicEvent) {
+        val publisher = event.dynamic.publisher
 
-        PublisherRepository.findById()
+        println("接收到动态：" + event.dynamic.dynamicId)
 
-        val draw = DrawDynamic(event.dynamic, DrawConfig(PublisherPlatform("", "", "", "")))
-
-
-
+        MessageEvent(
+            source = "main",
+            message = Message(
+                platform = event.target.platform,
+                name = publisher.name ?: "unknown",
+                uid = publisher.userId ?: "",
+                did = event.dynamic.dynamicId,
+                time = event.dynamic.time.toString(),
+                content = event.dynamic.content?.text ?: event.dynamic.title ?: "",
+                link = event.dynamic.link,
+                image = "",
+                draw = "",
+            )
+        ).broadcast()
     }
 }

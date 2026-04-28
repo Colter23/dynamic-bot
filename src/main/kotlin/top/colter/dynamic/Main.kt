@@ -1,9 +1,19 @@
 package top.colter.dynamic
 
-import java.util.jar.JarFile
+import java.util.concurrent.CountDownLatch
 
-fun main() {
-//    DynamicApplication.run()
+public fun main() {
+    val shutdownLatch = CountDownLatch(1)
 
+    Runtime.getRuntime().addShutdownHook(
+        Thread {
+            println("Shutdown signal received, stopping application...")
+            DynamicApplication.shutdown()
+            shutdownLatch.countDown()
+        }
+    )
 
+    DynamicApplication.run()
+    println("Application is running. Press Ctrl+C to exit.")
+    shutdownLatch.await()
 }

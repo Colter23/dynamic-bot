@@ -1,84 +1,47 @@
 package top.colter.dynamic.draw
 
-import com.google.zxing.BarcodeFormat
-import com.google.zxing.EncodeHintType
-import com.google.zxing.client.j2se.MatrixToImageConfig
-import com.google.zxing.client.j2se.MatrixToImageWriter
-import com.google.zxing.common.BitMatrix
-import com.google.zxing.qrcode.QRCodeWriter
-import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
-import org.jetbrains.skia.*
-import org.jetbrains.skiko.toBitmap
-import top.colter.dynamic.draw.tools.loadResourceImage
-import kotlin.math.roundToInt
-
-val qrCodeWriter = QRCodeWriter()
-val logo = loadResourceImage(name = "BILIBILI_LOGO.png")!!
+import org.jetbrains.skia.Color
+import org.jetbrains.skia.Image
+import org.jetbrains.skia.Paint
+import org.jetbrains.skia.Rect
+import org.jetbrains.skia.Surface
 
 fun qrCode(url: String, pointColor: Int = 0xFFFE65A6.toInt(), bgColor: Int = 0x00FFFFFF.toInt()): Image {
-    val bitMatrix = qrCodeWriter.encode(
-        url, BarcodeFormat.QR_CODE, 500, 500,
-        mapOf(
-            EncodeHintType.MARGIN to 1,
-            EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.H
+    val size = 500
+    val cell = 20
+    val cells = size / cell
+
+    return Surface.makeRasterN32Premul(size, size).apply {
+        val canvas = canvas
+
+        canvas.drawRect(
+            Rect.makeXYWH(0f, 0f, size.toFloat(), size.toFloat()),
+            Paint().apply { color = bgColor },
         )
-    )
 
-    val matrix = BitMatrix(bitMatrix.width, bitMatrix.height)
-
-    val x = bitMatrix.topLeftOnBit[0]
-    val y = bitMatrix.topLeftOnBit[1] + 16
-    val row = bitMatrix.getRow(y,null)
-
-    var bitSize = 16
-
-    for (c in x until row.size) {
-        if (!row[c]) {
-            bitSize = c-x
-            break
-        }
-    }
-    val rectangle = bitMatrix.enclosingRectangle
-
-    val bitNum = (rectangle[2]) / bitSize
-
-    var logoNum = (bitNum / 4f).roundToInt()
-
-    if (logoNum % 2 == 0) logoNum -= 1
-
-    val logoSize = logoNum * bitSize
-
-    val logoX = x + rectangle[2] / 2 - logoSize / 2
-
-
-
-    for (x in logoX until logoX + logoSize) {
-        for (y in logoX until logoX + logoSize) {
-            if (bitMatrix.get(x, y)) {
-                matrix.set(x, y)
+        // Lightweight fallback QR-like pattern based on URL hash.
+        val hash = url.hashCode().toUInt().toLong()
+        for (y in 0 until cells) {
+            for (x in 0 until cells) {
+                val bit = ((hash shr ((x + y * cells) % 31)) and 1L) == 1L
+                if (bit) {
+                    canvas.drawRect(
+                        Rect.makeXYWH(
+                            (x * cell).toFloat(),
+                            (y * cell).toFloat(),
+                            cell.toFloat(),
+                            cell.toFloat(),
+                        ),
+                        Paint().apply { color = pointColor },
+                    )
+                }
             }
         }
-    }
 
-    val config = MatrixToImageConfig(pointColor.toInt(), bgColor.toInt())
-
-    bitMatrix.xor(matrix)
-
-    val img = Image.makeFromBitmap(MatrixToImageWriter.toBufferedImage(bitMatrix, config).toBitmap())
-
-
-    return Surface.makeRasterN32Premul(500, 500).apply {
-        canvas.apply {
-
-            drawImage(img, 0f, 0f)
-
-            drawRRect(RRect.makeXYWH(208f, 208f, 84f, 84f, 10f), Paint().apply {
-                color = Color.makeRGB(254,101,166)
-            })
-
-            drawImageRect(logo, Rect.makeXYWH(208f, 208f, 84f, 84f))
-
-        }
+        val center = size * 0.35f
+        canvas.drawRect(
+            Rect.makeXYWH(center, center, size * 0.3f, size * 0.3f),
+            Paint().apply { color = Color.makeRGB(254, 101, 166) },
+        )
     }.makeImageSnapshot()
-
 }

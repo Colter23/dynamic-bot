@@ -3,7 +3,7 @@ plugins {
 }
 
 group = "top.colter.dynamic"
-version = "1.0-SNAPSHOT"
+version = "0.0.1"
 
 repositories {
     mavenLocal()
@@ -18,9 +18,7 @@ dependencies {
     implementation("org.jetbrains.skiko:skiko-awt:$skikoVersion")
 
     implementation("top.colter.dynamic:dynamic-bot-core:0.0.1")
-
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
-
 
     val osName = System.getProperty("os.name")
     val targetOs = when {
@@ -44,6 +42,32 @@ dependencies {
 tasks.test {
     useJUnitPlatform()
 }
+
+tasks.jar {
+    manifest {
+        attributes["Main-Class"] = "top.colter.dynamic.MainKt"
+    }
+}
+
+tasks.register<Jar>("fatJar") {
+    group = "build"
+    description = "Builds an executable fat jar with runtime dependencies."
+    archiveClassifier.set("all")
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    manifest {
+        attributes["Main-Class"] = "top.colter.dynamic.MainKt"
+    }
+
+    from(sourceSets.main.get().output)
+    dependsOn(configurations.runtimeClasspath)
+    from({
+        configurations.runtimeClasspath.get().filter { it.exists() }.map { file ->
+            if (file.isDirectory) file else zipTree(file)
+        }
+    })
+}
+
 kotlin {
     jvmToolchain(21)
 }
