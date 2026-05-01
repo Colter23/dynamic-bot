@@ -6,6 +6,7 @@ import kotlinx.coroutines.Job
 import top.colter.dynamic.core.event.DynamicEvent
 import top.colter.dynamic.core.event.EventManger
 import top.colter.dynamic.core.event.Listener
+import top.colter.dynamic.core.event.ListenerToken
 import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.register
 import top.colter.dynamic.core.plugin.PluginManager
@@ -16,6 +17,7 @@ public object DynamicApplication : CoroutineScope {
     override val coroutineContext = Dispatchers.Default + job
 
     private val pluginManager: PluginManager = PluginManager(pluginDirPath = "plugins")
+    private val listenerTokens: MutableList<ListenerToken> = mutableListOf()
 
     public fun run() {
         EventManger.configureScope(this)
@@ -33,9 +35,9 @@ public object DynamicApplication : CoroutineScope {
     }
 
     private fun registerCoreListeners() {
-        DynamicListener().register<DynamicEvent>()
+        listenerTokens += DynamicListener().register<DynamicEvent>()
 
-        object : Listener<MessageEvent> {
+        listenerTokens += object : Listener<MessageEvent> {
             override suspend fun onMessage(event: MessageEvent) {
                 println("message event received: ${event.message.did}")
                 pluginManager.dispatchMessageToSubscribers(event)
@@ -44,6 +46,8 @@ public object DynamicApplication : CoroutineScope {
     }
 
     public fun shutdown() {
+        listenerTokens.forEach { EventManger.removeListener(it) }
+        listenerTokens.clear()
         pluginManager.shutdown()
         EventManger.shutdown()
         job.cancel()

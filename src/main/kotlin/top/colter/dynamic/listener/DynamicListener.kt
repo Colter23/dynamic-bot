@@ -24,6 +24,8 @@ public class DynamicListener : Listener<DynamicEvent> {
                 link = event.dynamic.link,
                 image = "",
                 draw = "",
+                targetType = event.target.type?.name ?: "OTHER",
+                targetId = event.target.userId,
             )
         ).broadcast()
     }
