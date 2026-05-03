@@ -3,6 +3,9 @@ package top.colter.dynamic
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import top.colter.dynamic.command.CommandListener
+import top.colter.dynamic.core.event.CommandEvent
+import top.colter.dynamic.core.event.CommandResultEvent
 import top.colter.dynamic.core.event.DynamicEvent
 import top.colter.dynamic.core.event.EventManger
 import top.colter.dynamic.core.event.Listener
@@ -10,6 +13,7 @@ import top.colter.dynamic.core.event.ListenerToken
 import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.register
 import top.colter.dynamic.core.plugin.PluginManager
+import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.listener.DynamicListener
 
 public object DynamicApplication : CoroutineScope {
@@ -20,6 +24,15 @@ public object DynamicApplication : CoroutineScope {
     private val listenerTokens: MutableList<ListenerToken> = mutableListOf()
 
     public fun run() {
+        val dbPath = "data/dynamic.db"
+        try {
+            PersistenceManager.init(dbPath)
+            println("Database initialized: $dbPath")
+        } catch (e: Exception) {
+            println("Database initialization failed: path=$dbPath, error=${e.message}")
+            throw e
+        }
+
         EventManger.configureScope(this)
         registerCoreListeners()
 
@@ -36,13 +49,35 @@ public object DynamicApplication : CoroutineScope {
 
     private fun registerCoreListeners() {
         listenerTokens += DynamicListener().register<DynamicEvent>()
+        listenerTokens += CommandListener(resolveAdminUsers()).register<CommandEvent>()
+        listenerTokens += object : Listener<CommandEvent> {
+            override suspend fun onMessage(event: CommandEvent) {
+                pluginManager.dispatchCommandToSubscribers(event)
+            }
+        }.register<CommandEvent>()
 
         listenerTokens += object : Listener<MessageEvent> {
             override suspend fun onMessage(event: MessageEvent) {
-                println("message event received: ${event.message.did}")
+                println("message event received: ${event.message.id}")
                 pluginManager.dispatchMessageToSubscribers(event)
             }
         }.register<MessageEvent>()
+
+        listenerTokens += object : Listener<CommandResultEvent> {
+            override suspend fun onMessage(event: CommandResultEvent) {
+                pluginManager.dispatchCommandResultToSubscribers(event)
+            }
+        }.register<CommandResultEvent>()
+    }
+
+    private fun resolveAdminUsers(): Set<String> {
+        val fromEnv = System.getenv("DYNAMIC_BOT_ADMIN_USERS")
+            ?.split(",")
+            ?.map { it.trim() }
+            ?.filter { it.isNotBlank() }
+            ?.toSet()
+            ?: emptySet()
+        return fromEnv
     }
 
     public fun shutdown() {

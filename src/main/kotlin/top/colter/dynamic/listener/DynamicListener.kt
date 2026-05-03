@@ -15,17 +15,10 @@ public class DynamicListener : Listener<DynamicEvent> {
         MessageEvent(
             source = "main",
             message = Message(
-                platform = event.target.platform,
-                name = publisher.name ?: "unknown",
-                uid = publisher.userId ?: "",
-                did = event.dynamic.dynamicId,
-                time = event.dynamic.time.toString(),
-                content = event.dynamic.content?.text ?: event.dynamic.title ?: "",
-                link = event.dynamic.link,
-                image = "",
-                draw = "",
-                targetType = event.target.type?.name ?: "OTHER",
-                targetId = event.target.userId,
+                id = 1L,
+                time = 1L,
+                subscriber = listOf(),
+                chain = listOf()
             )
         ).broadcast()
     }

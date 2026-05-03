@@ -17,7 +17,7 @@ dependencies {
     implementation("top.colter.skiko:skiko-layout:0.0.3")
     implementation("org.jetbrains.skiko:skiko-awt:$skikoVersion")
 
-    implementation("top.colter.dynamic:dynamic-bot-core:0.0.1")
+    implementation("top.colter.dynamic:dynamic-bot-core:0.0.2")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
 
     val osName = System.getProperty("os.name")
