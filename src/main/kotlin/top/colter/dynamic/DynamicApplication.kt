@@ -49,12 +49,9 @@ public object DynamicApplication : CoroutineScope {
 
     private fun registerCoreListeners() {
         listenerTokens += DynamicListener().register<DynamicEvent>()
-        listenerTokens += CommandListener(resolveAdminUsers()).register<CommandEvent>()
-        listenerTokens += object : Listener<CommandEvent> {
-            override suspend fun onMessage(event: CommandEvent) {
-                pluginManager.dispatchCommandToSubscribers(event)
-            }
-        }.register<CommandEvent>()
+        listenerTokens += CommandListener(
+            platformPluginResolver = { platformId -> pluginManager.findPlatformPublisherPlugin(platformId) }
+        ).register<CommandEvent>()
 
         listenerTokens += object : Listener<MessageEvent> {
             override suspend fun onMessage(event: MessageEvent) {
@@ -68,16 +65,6 @@ public object DynamicApplication : CoroutineScope {
                 pluginManager.dispatchCommandResultToSubscribers(event)
             }
         }.register<CommandResultEvent>()
-    }
-
-    private fun resolveAdminUsers(): Set<String> {
-        val fromEnv = System.getenv("DYNAMIC_BOT_ADMIN_USERS")
-            ?.split(",")
-            ?.map { it.trim() }
-            ?.filter { it.isNotBlank() }
-            ?.toSet()
-            ?: emptySet()
-        return fromEnv
     }
 
     public fun shutdown() {
