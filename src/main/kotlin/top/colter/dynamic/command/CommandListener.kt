@@ -14,6 +14,8 @@ import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.command.CommandExecutionResult
 import top.colter.dynamic.core.command.CommandExecutionStatus
 import top.colter.dynamic.core.command.CommandHandler
+import top.colter.dynamic.core.command.CommandInvocation
+import top.colter.dynamic.core.command.CommandParser
 import top.colter.dynamic.core.command.CommandRegistry
 import top.colter.dynamic.core.command.CommandSpec
 import top.colter.dynamic.core.config.ConfigService
@@ -49,7 +51,6 @@ import javax.imageio.ImageIO
 
 public class CommandListener(
     private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
-    private val commandPrefix: String = "/db",
     config: MainDynamicConfig? = null,
     private val configService: ConfigService = DefaultConfigService,
 ) : Listener<CommandEvent> {
@@ -57,8 +58,15 @@ public class CommandListener(
         private const val MAIN_OWNER: String = "main"
     }
 
-    private val config: MainDynamicConfig by lazy {
+    private val runtimeConfig: MainDynamicConfig by lazy {
         config ?: configService.loadOrCreate(MainDynamicConfig.CONFIG_ID) { MainDynamicConfig() }
+    }
+
+    private val commandPrefix: String
+        get() = runtimeConfig.command.prefix
+
+    private val permissionResolver: CommandPermissionResolver by lazy {
+        CommandPermissionResolver(runtimeConfig.command.permissions)
     }
 
     init {
@@ -66,15 +74,8 @@ public class CommandListener(
     }
 
     override suspend fun onMessage(event: CommandEvent) {
-        val tokens = event.commandTokens.ifEmpty {
-            buildList {
-                if (event.commandName.isNotBlank()) {
-                    add(event.commandName)
-                }
-                addAll(event.args)
-            }
-        }
-        if (tokens.isEmpty()) return
+        val parsed = CommandParser.parse(event.rawText, commandPrefix) ?: return
+        val tokens = parsed.tokens
 
         val match = CommandRegistry.match(tokens)
         if (match == null) {
@@ -88,22 +89,27 @@ public class CommandListener(
             return
         }
 
-        if (!event.context.role.satisfies(match.spec.requiredRole)) {
+        val role = permissionResolver.resolve(event.context)
+        if (!role.satisfies(match.spec.requiredRole)) {
             reply(event, CommandExecutionResult(CommandExecutionStatus.REJECTED, "permission denied"))
             return
         }
 
-        val invocationEvent = event.copy(
-            commandName = match.spec.path.last(),
-            args = match.args,
+        val invocation = CommandInvocation(
+            sourcePlugin = event.sourcePlugin,
+            context = event.context,
+            rawText = event.rawText,
+            traceId = event.traceId,
+            tokens = tokens,
             matchedPath = match.matchedPath,
-            commandTokens = tokens,
+            args = match.args,
+            role = role,
         )
 
-        val result = runCatching { match.handler.handle(invocationEvent) }
+        val result = runCatching { match.handler.handle(invocation) }
             .getOrElse { CommandExecutionResult(CommandExecutionStatus.FAILED, "command failed: ${it.message}") }
 
-        reply(invocationEvent, result)
+        reply(event, result)
         runCatching { result.afterReply?.invoke() }
     }
 
@@ -132,12 +138,12 @@ public class CommandListener(
         CommandRegistry.unregisterByOwner(MAIN_OWNER)
         CommandRegistry.register(HelpCommandHandler(commandPrefix), MAIN_OWNER)
         CommandRegistry.register(StatusCommandHandler(), MAIN_OWNER)
-        CommandRegistry.register(SubscribeCommandHandler(platformPluginResolver), MAIN_OWNER)
+        CommandRegistry.register(SubscribeCommandHandler(platformPluginResolver, commandPrefix), MAIN_OWNER)
         CommandRegistry.register(LoginCommandHandler(platformPluginResolver, commandPrefix), MAIN_OWNER)
-        CommandRegistry.register(UnsubscribeCommandHandler(), MAIN_OWNER)
+        CommandRegistry.register(UnsubscribeCommandHandler(commandPrefix), MAIN_OWNER)
         CommandRegistry.register(ListCommandHandler(), MAIN_OWNER)
-        CommandRegistry.register(TemplateListCommandHandler { config }, MAIN_OWNER)
-        CommandRegistry.register(TemplateSetCommandHandler({ config }, commandPrefix), MAIN_OWNER)
+        CommandRegistry.register(TemplateListCommandHandler { runtimeConfig }, MAIN_OWNER)
+        CommandRegistry.register(TemplateSetCommandHandler({ runtimeConfig }, commandPrefix), MAIN_OWNER)
         CommandRegistry.register(TemplateRemoveCommandHandler(commandPrefix), MAIN_OWNER)
     }
 }
@@ -150,11 +156,10 @@ private class HelpCommandHandler(
         description = "show available commands",
         usage = "help",
         requiredRole = CommandRole.USER,
-        ownerPluginId = "main",
     )
 
-    override suspend fun handle(event: CommandEvent): CommandExecutionResult {
-        val visibleCommands = CommandRegistry.visibleCommandsFor(event.context.role)
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        val visibleCommands = CommandRegistry.visibleCommandsFor(invocation.role)
         if (visibleCommands.isEmpty()) {
             return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no commands available")
         }
@@ -182,22 +187,21 @@ private class LoginCommandHandler(
         description = "login a publisher platform account",
         usage = "login <platform> <cookie|qr> [cookie]",
         requiredRole = CommandRole.ADMIN,
-        ownerPluginId = "main",
     )
 
-    override suspend fun handle(event: CommandEvent): CommandExecutionResult {
-        if (event.args.size < 2) {
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.size < 2) {
             return failedUsage()
         }
 
-        val platform = event.args[0].lowercase()
-        val method = event.args[1].lowercase()
+        val platform = invocation.args[0].lowercase()
+        val method = invocation.args[1].lowercase()
         val plugin = platformPluginResolver(platform)
             ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "platform plugin not found: $platform")
 
         return when (method) {
-            "cookie" -> handleCookieLogin(plugin, platform, event.args.drop(2).joinToString(" ").trim())
-            "qr", "qrcode", "qr-code" -> handleQrLogin(plugin, platform, event)
+            "cookie" -> handleCookieLogin(plugin, platform, invocation.args.drop(2).joinToString(" ").trim())
+            "qr", "qrcode", "qr-code" -> handleQrLogin(plugin, platform, invocation)
             else -> failedUsage()
         }
     }
@@ -230,12 +234,12 @@ private class LoginCommandHandler(
     private suspend fun handleQrLogin(
         plugin: PlatformPublisherPlugin,
         platform: String,
-        event: CommandEvent,
+        invocation: CommandInvocation,
     ): CommandExecutionResult {
         if (!plugin.supportedLoginMethods.contains(PublisherLoginMethod.QR_CODE)) {
             return CommandExecutionResult(CommandExecutionStatus.FAILED, "QR code login is unsupported on $platform")
         }
-        if (event.args.size > 2) {
+        if (invocation.args.size > 2) {
             return failedUsage()
         }
 
@@ -268,7 +272,7 @@ private class LoginCommandHandler(
             }
             finalResult.complete(result)
             if (shouldBroadcastFinal.await()) {
-                broadcastLoginResult(event, platform, result)
+                broadcastLoginResult(invocation, platform, result)
             }
         }
 
@@ -346,7 +350,7 @@ private class LoginCommandHandler(
         return CommandExecutionResult(status, message)
     }
 
-    private fun broadcastLoginResult(event: CommandEvent, platform: String, result: PublisherLoginResult) {
+    private fun broadcastLoginResult(invocation: CommandInvocation, platform: String, result: PublisherLoginResult) {
         val commandResult = toCommandResult(platform, result)
         val status = when (commandResult.status) {
             CommandExecutionStatus.SUCCESS -> CommandStatus.SUCCESS
@@ -356,13 +360,13 @@ private class LoginCommandHandler(
         CommandResultEvent(
             sourcePlugin = "main",
             target = CommandTarget(
-                platform = event.context.platform,
-                chatType = event.context.chatType,
-                chatId = event.context.chatId,
-                senderId = event.context.senderId,
+                platform = invocation.context.platform,
+                chatType = invocation.context.chatType,
+                chatId = invocation.context.chatId,
+                senderId = invocation.context.senderId,
             ),
             chain = commandResult.chain ?: listOf(MessageChain(listOf(MessageContent.Text(commandResult.message)))),
-            inReplyTo = event.traceId,
+            inReplyTo = invocation.traceId,
             status = status,
             errorMessage = if (status == CommandStatus.FAILED) commandResult.message else null,
         ).broadcast()
@@ -408,10 +412,9 @@ private class StatusCommandHandler : CommandHandler {
         description = "show command registry status",
         usage = "status",
         requiredRole = CommandRole.ADMIN,
-        ownerPluginId = "main",
     )
 
-    override suspend fun handle(event: CommandEvent): CommandExecutionResult {
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
         val commandCount = CommandRegistry.listCommands().size
         return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "ok, commands=$commandCount")
     }
@@ -419,22 +422,22 @@ private class StatusCommandHandler : CommandHandler {
 
 private class SubscribeCommandHandler(
     private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
+    private val commandPrefix: String,
 ) : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("subscribe"),
         description = "subscribe to a publisher on a supported platform",
         usage = "subscribe <platform> <publisherUserId>",
         requiredRole = CommandRole.USER,
-        ownerPluginId = "main",
     )
 
-    override suspend fun handle(event: CommandEvent): CommandExecutionResult {
-        if (event.args.size < 2) {
-            return CommandExecutionResult(CommandExecutionStatus.FAILED, "usage: /db ${spec.usage}")
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.size < 2) {
+            return CommandExecutionResult(CommandExecutionStatus.FAILED, "usage: $commandPrefix ${spec.usage}")
         }
 
-        val platform = event.args[0].lowercase()
-        val publisherUserId = event.args[1]
+        val platform = invocation.args[0].lowercase()
+        val publisherUserId = invocation.args[1]
         val plugin = platformPluginResolver(platform)
             ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "platform plugin not found: $platform")
 
@@ -476,9 +479,9 @@ private class SubscribeCommandHandler(
 
         val publisherUpsert = PublisherRepository.upsert(profile)
         val subscriber = SubscriberRepository.ensure(
-            platform = event.context.platform,
-            userId = event.context.senderId,
-            name = event.context.senderId,
+            platform = invocation.context.platform,
+            userId = invocation.context.senderId,
+            name = invocation.context.senderId,
         )
         val created = SubscribeRepository.subscribe(subscriber.id.toString(), publisherUpsert.value.id.toString())
 
@@ -493,25 +496,26 @@ private class SubscribeCommandHandler(
     }
 }
 
-private class UnsubscribeCommandHandler : CommandHandler {
+private class UnsubscribeCommandHandler(
+    private val commandPrefix: String,
+) : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("unsubscribe"),
         description = "unsubscribe from a publisher",
         usage = "unsubscribe <platform> <publisherUserId>",
         requiredRole = CommandRole.USER,
-        ownerPluginId = "main",
     )
 
-    override suspend fun handle(event: CommandEvent): CommandExecutionResult {
-        if (event.args.size < 2) {
-            return CommandExecutionResult(CommandExecutionStatus.FAILED, "usage: /db ${spec.usage}")
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.size < 2) {
+            return CommandExecutionResult(CommandExecutionStatus.FAILED, "usage: $commandPrefix ${spec.usage}")
         }
-        val platform = event.args[0].lowercase()
-        val publisherUserId = event.args[1]
+        val platform = invocation.args[0].lowercase()
+        val publisherUserId = invocation.args[1]
         val publisher = PublisherRepository.findByPlatformAndUserId(platform, publisherUserId)
             ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "publisher not found: $platform:$publisherUserId")
 
-        val subscriber = SubscriberRepository.findByPlatformAndUserId(event.context.platform, event.context.senderId)
+        val subscriber = SubscriberRepository.findByPlatformAndUserId(invocation.context.platform, invocation.context.senderId)
             ?: return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
         val removed = SubscribeRepository.unsubscribe(subscriber.id.toString(), publisher.id.toString())
         return if (removed) {
@@ -528,11 +532,10 @@ private class ListCommandHandler : CommandHandler {
         description = "list subscriptions for the current sender",
         usage = "list",
         requiredRole = CommandRole.USER,
-        ownerPluginId = "main",
     )
 
-    override suspend fun handle(event: CommandEvent): CommandExecutionResult {
-        val subscriber = SubscriberRepository.findByPlatformAndUserId(event.context.platform, event.context.senderId)
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        val subscriber = SubscriberRepository.findByPlatformAndUserId(invocation.context.platform, invocation.context.senderId)
             ?: return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
         val publisherIds = SubscribeRepository.findPublisherIdsBySubscriberId(subscriber.id.toString())
         if (publisherIds.isEmpty()) return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
@@ -554,10 +557,9 @@ private class TemplateListCommandHandler(
         description = "list message templates and publisher bindings",
         usage = "template list",
         requiredRole = CommandRole.USER,
-        ownerPluginId = "main",
     )
 
-    override suspend fun handle(event: CommandEvent): CommandExecutionResult {
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
         val templateNames = configProvider().templates.keys.sorted()
         val bindings = PublisherTemplateRepository.findAll()
             .sortedWith(compareBy({ it.publisherId.toIntOrNull() ?: Int.MAX_VALUE }, { it.publisherId }))
@@ -588,16 +590,15 @@ private class TemplateSetCommandHandler(
         description = "bind a publisher to a message template",
         usage = "template set <platform> <publisherUserId> <templateName>",
         requiredRole = CommandRole.ADMIN,
-        ownerPluginId = "main",
     )
 
-    override suspend fun handle(event: CommandEvent): CommandExecutionResult {
-        if (event.args.size < 3) {
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.size < 3) {
             return CommandExecutionResult(CommandExecutionStatus.FAILED, "usage: $commandPrefix ${spec.usage}")
         }
-        val platform = event.args[0].lowercase()
-        val publisherUserId = event.args[1]
-        val templateName = event.args[2]
+        val platform = invocation.args[0].lowercase()
+        val publisherUserId = invocation.args[1]
+        val templateName = invocation.args[2]
         val config = configProvider()
         if (!config.templates.containsKey(templateName)) {
             return CommandExecutionResult(
@@ -628,15 +629,14 @@ private class TemplateRemoveCommandHandler(
         description = "remove a publisher message template binding",
         usage = "template remove <platform> <publisherUserId>",
         requiredRole = CommandRole.ADMIN,
-        ownerPluginId = "main",
     )
 
-    override suspend fun handle(event: CommandEvent): CommandExecutionResult {
-        if (event.args.size < 2) {
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.size < 2) {
             return CommandExecutionResult(CommandExecutionStatus.FAILED, "usage: $commandPrefix ${spec.usage}")
         }
-        val platform = event.args[0].lowercase()
-        val publisherUserId = event.args[1]
+        val platform = invocation.args[0].lowercase()
+        val publisherUserId = invocation.args[1]
         val publisher = PublisherRepository.findByPlatformAndUserId(platform, publisherUserId)
             ?: return CommandExecutionResult(
                 CommandExecutionStatus.FAILED,

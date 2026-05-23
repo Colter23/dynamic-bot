@@ -64,13 +64,13 @@ public object DynamicApplication : CoroutineScope {
         listenerTokens += object : Listener<MessageEvent> {
             override suspend fun onMessage(event: MessageEvent) {
                 println("message event received: ${event.message.id}")
-                pluginManager.dispatchMessageToSubscribers(event)
+                pluginManager.dispatchMessageToSinks(event)
             }
         }.register<MessageEvent>()
 
         listenerTokens += object : Listener<CommandResultEvent> {
             override suspend fun onMessage(event: CommandResultEvent) {
-                pluginManager.dispatchCommandResultToSubscribers(event)
+                pluginManager.dispatchCommandResultToSinks(event)
             }
         }.register<CommandResultEvent>()
     }

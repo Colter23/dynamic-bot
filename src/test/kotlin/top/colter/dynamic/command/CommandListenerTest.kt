@@ -3,6 +3,9 @@ package top.colter.dynamic.command
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import top.colter.dynamic.CommandConfig
+import top.colter.dynamic.CommandPermissionRule
+import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.command.CommandRegistry
 import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.data.CommandContext
@@ -31,7 +34,6 @@ import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
 import top.colter.dynamic.core.repository.SubscribeRepository
-import top.colter.dynamic.MainDynamicConfig
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -56,9 +58,6 @@ class CommandListenerTest {
         val result = dispatch(
             listener = listener,
             event = commandEvent(
-                role = CommandRole.USER,
-                commandName = "help",
-                args = emptyList(),
                 commandTokens = listOf("help"),
             ),
         )
@@ -83,8 +82,6 @@ class CommandListenerTest {
         val result = dispatch(
             listener = listener,
             event = commandEvent(
-                commandName = "subscribe",
-                args = listOf("bilibili", "123"),
                 commandTokens = listOf("subscribe", "bilibili", "123"),
             ),
         )
@@ -114,8 +111,6 @@ class CommandListenerTest {
         val result = dispatch(
             listener = listener,
             event = commandEvent(
-                commandName = "subscribe",
-                args = listOf("bilibili", "123"),
                 commandTokens = listOf("subscribe", "bilibili", "123"),
             ),
         )
@@ -138,8 +133,6 @@ class CommandListenerTest {
         val result = dispatch(
             listener = listener,
             event = commandEvent(
-                commandName = "subscribe",
-                args = listOf("bilibili", "123"),
                 commandTokens = listOf("subscribe", "bilibili", "123"),
             ),
         )
@@ -163,8 +156,6 @@ class CommandListenerTest {
         dispatch(
             listener = listener,
             event = commandEvent(
-                commandName = "subscribe",
-                args = listOf("bilibili", "123"),
                 commandTokens = listOf("subscribe", "bilibili", "123"),
                 traceId = "trace-1",
             ),
@@ -172,8 +163,6 @@ class CommandListenerTest {
         val second = dispatch(
             listener = listener,
             event = commandEvent(
-                commandName = "subscribe",
-                args = listOf("bilibili", "123"),
                 commandTokens = listOf("subscribe", "bilibili", "123"),
                 traceId = "trace-2",
             ),
@@ -194,8 +183,6 @@ class CommandListenerTest {
         val result = dispatch(
             listener = listener,
             event = commandEvent(
-                commandName = "subscribe",
-                args = listOf("bilibili", "123"),
                 commandTokens = listOf("subscribe", "bilibili", "123"),
             ),
         )
@@ -216,14 +203,14 @@ class CommandListenerTest {
                 account = PublisherLoginAccount(userId = "123", name = "demo-up"),
             ),
         )
-        val listener = CommandListener(platformPluginResolver = { if (it == "bilibili") plugin else null })
+        val listener = CommandListener(
+            platformPluginResolver = { if (it == "bilibili") plugin else null },
+            config = adminConfig(),
+        )
 
         val results = dispatchMany(
             listener = listener,
             event = commandEvent(
-                role = CommandRole.ADMIN,
-                commandName = "login",
-                args = listOf("bilibili", "qr"),
                 commandTokens = listOf("login", "bilibili", "qr"),
             ),
             expectedCount = 2,
@@ -250,14 +237,14 @@ class CommandListenerTest {
             supportedLoginMethods = setOf(PublisherLoginMethod.QR_CODE),
             qrLoginResult = PublisherLoginResult(PublisherLoginStatus.FAILED, "QR code expired"),
         )
-        val listener = CommandListener(platformPluginResolver = { if (it == "bilibili") plugin else null })
+        val listener = CommandListener(
+            platformPluginResolver = { if (it == "bilibili") plugin else null },
+            config = adminConfig(),
+        )
 
         val results = dispatchMany(
             listener = listener,
             event = commandEvent(
-                role = CommandRole.ADMIN,
-                commandName = "login",
-                args = listOf("bilibili", "qr"),
                 commandTokens = listOf("login", "bilibili", "qr"),
             ),
             expectedCount = 2,
@@ -280,9 +267,6 @@ class CommandListenerTest {
         val result = dispatch(
             listener = listener,
             event = commandEvent(
-                role = CommandRole.USER,
-                commandName = "login",
-                args = listOf("bilibili", "qr"),
                 commandTokens = listOf("login", "bilibili", "qr"),
             ),
         )
@@ -298,15 +282,12 @@ class CommandListenerTest {
         val publisher = createPublisher()
         val listener = CommandListener(
             platformPluginResolver = { null },
-            config = MainDynamicConfig(templates = mapOf("default" to "default", "bili-video" to "video")),
+            config = adminConfig(templates = mapOf("default" to "default", "bili-video" to "video")),
         )
 
         val result = dispatch(
             listener = listener,
             event = commandEvent(
-                role = CommandRole.ADMIN,
-                commandName = "set",
-                args = listOf("bilibili", "123", "bili-video"),
                 commandTokens = listOf("template", "set", "bilibili", "123", "bili-video"),
             ),
         )
@@ -323,15 +304,12 @@ class CommandListenerTest {
         createPublisher()
         val listener = CommandListener(
             platformPluginResolver = { null },
-            config = MainDynamicConfig(templates = mapOf("default" to "default")),
+            config = adminConfig(templates = mapOf("default" to "default")),
         )
 
         val result = dispatch(
             listener = listener,
             event = commandEvent(
-                role = CommandRole.ADMIN,
-                commandName = "set",
-                args = listOf("bilibili", "123", "missing"),
                 commandTokens = listOf("template", "set", "bilibili", "123", "missing"),
             ),
         )
@@ -346,14 +324,11 @@ class CommandListenerTest {
         CommandRegistry.clear()
         val publisher = createPublisher()
         PublisherTemplateRepository.setTemplate(publisher.id.toString(), "bili-video")
-        val listener = CommandListener(platformPluginResolver = { null })
+        val listener = CommandListener(platformPluginResolver = { null }, config = adminConfig())
 
         val result = dispatch(
             listener = listener,
             event = commandEvent(
-                role = CommandRole.ADMIN,
-                commandName = "remove",
-                args = listOf("bilibili", "123"),
                 commandTokens = listOf("template", "remove", "bilibili", "123"),
             ),
         )
@@ -376,8 +351,6 @@ class CommandListenerTest {
         val result = dispatch(
             listener = listener,
             event = commandEvent(
-                commandName = "list",
-                args = emptyList(),
                 commandTokens = listOf("template", "list"),
             ),
         )
@@ -420,9 +393,6 @@ class CommandListenerTest {
     }
 
     private fun commandEvent(
-        role: CommandRole = CommandRole.USER,
-        commandName: String,
-        args: List<String>,
         commandTokens: List<String>,
         traceId: String = "trace",
     ): CommandEvent {
@@ -433,13 +403,26 @@ class CommandListenerTest {
                 chatType = ChatType.GROUP,
                 chatId = "100",
                 senderId = "sender",
-                role = role,
             ),
             rawText = "/db ${commandTokens.joinToString(" ")}",
-            commandName = commandName,
-            args = args,
             traceId = traceId,
-            commandTokens = commandTokens,
+        )
+    }
+
+    private fun adminConfig(
+        templates: Map<String, String> = mapOf("default" to "default"),
+    ): MainDynamicConfig {
+        return MainDynamicConfig(
+            templates = templates,
+            command = CommandConfig(
+                permissions = listOf(
+                    CommandPermissionRule(
+                        platform = "onebot",
+                        senderId = "sender",
+                        role = CommandRole.ADMIN,
+                    )
+                )
+            ),
         )
     }
 
