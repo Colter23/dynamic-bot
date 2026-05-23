@@ -9,6 +9,7 @@ import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.LazyImage
+import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.PublisherProfile
 import top.colter.dynamic.core.data.PublisherType
 import top.colter.dynamic.core.event.CommandEvent
@@ -20,6 +21,11 @@ import top.colter.dynamic.core.plugin.FollowActionResult
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.PlatformPublisherPlugin
+import top.colter.dynamic.core.plugin.PublisherLoginAccount
+import top.colter.dynamic.core.plugin.PublisherLoginMethod
+import top.colter.dynamic.core.plugin.PublisherLoginResult
+import top.colter.dynamic.core.plugin.PublisherLoginStatus
+import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
 import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
@@ -199,6 +205,93 @@ class CommandListenerTest {
     }
 
     @Test
+    fun `login qr should send QR image and final result automatically`() = runBlocking {
+        initDb("login-qr-success")
+        CommandRegistry.clear()
+        val plugin = FakePlatformPublisherPlugin(
+            supportedLoginMethods = setOf(PublisherLoginMethod.QR_CODE),
+            qrLoginResult = PublisherLoginResult(
+                status = PublisherLoginStatus.SUCCESS,
+                message = "login success",
+                account = PublisherLoginAccount(userId = "123", name = "demo-up"),
+            ),
+        )
+        val listener = CommandListener(platformPluginResolver = { if (it == "bilibili") plugin else null })
+
+        val results = dispatchMany(
+            listener = listener,
+            event = commandEvent(
+                role = CommandRole.ADMIN,
+                commandName = "login",
+                args = listOf("bilibili", "qr"),
+                commandTokens = listOf("login", "bilibili", "qr"),
+            ),
+            expectedCount = 2,
+        )
+
+        val qrResult = results.first { renderMessage(it).contains("QR login started") }
+        val finalResult = results.first { renderMessage(it).contains("bilibili login success") }
+        val qrMessage = renderMessage(qrResult)
+
+        assertEquals(CommandStatus.SUCCESS, qrResult.status)
+        assertTrue(qrResult.chain.flatMap { it.content }.any { it is MessageContent.Image })
+        assertTrue(!qrMessage.contains("sessionId"))
+        assertTrue(!qrMessage.contains("login bilibili qr "))
+        assertEquals(CommandStatus.SUCCESS, finalResult.status)
+        assertTrue(renderMessage(finalResult).contains("demo-up"))
+        assertEquals(1, plugin.qrLoginCalls)
+    }
+
+    @Test
+    fun `login qr should send final failure automatically`() = runBlocking {
+        initDb("login-qr-fail")
+        CommandRegistry.clear()
+        val plugin = FakePlatformPublisherPlugin(
+            supportedLoginMethods = setOf(PublisherLoginMethod.QR_CODE),
+            qrLoginResult = PublisherLoginResult(PublisherLoginStatus.FAILED, "QR code expired"),
+        )
+        val listener = CommandListener(platformPluginResolver = { if (it == "bilibili") plugin else null })
+
+        val results = dispatchMany(
+            listener = listener,
+            event = commandEvent(
+                role = CommandRole.ADMIN,
+                commandName = "login",
+                args = listOf("bilibili", "qr"),
+                commandTokens = listOf("login", "bilibili", "qr"),
+            ),
+            expectedCount = 2,
+        )
+
+        val finalResult = results.first { renderMessage(it).contains("QR code expired") }
+        assertEquals(CommandStatus.FAILED, finalResult.status)
+        assertEquals(1, plugin.qrLoginCalls)
+    }
+
+    @Test
+    fun `login should reject non-admin before starting qr login`() = runBlocking {
+        initDb("login-user-rejected")
+        CommandRegistry.clear()
+        val plugin = FakePlatformPublisherPlugin(
+            supportedLoginMethods = setOf(PublisherLoginMethod.QR_CODE),
+        )
+        val listener = CommandListener(platformPluginResolver = { if (it == "bilibili") plugin else null })
+
+        val result = dispatch(
+            listener = listener,
+            event = commandEvent(
+                role = CommandRole.USER,
+                commandName = "login",
+                args = listOf("bilibili", "qr"),
+                commandTokens = listOf("login", "bilibili", "qr"),
+            ),
+        )
+
+        assertEquals(CommandStatus.REJECTED, result.status)
+        assertEquals(0, plugin.qrLoginCalls)
+    }
+
+    @Test
     fun `template set should bind publisher to existing template`() = runBlocking {
         initDb("template-set")
         CommandRegistry.clear()
@@ -297,12 +390,22 @@ class CommandListenerTest {
     }
 
     private suspend fun dispatch(listener: CommandListener, event: CommandEvent): CommandResultEvent {
+        return dispatchMany(listener, event, expectedCount = 1).single()
+    }
+
+    private suspend fun dispatchMany(
+        listener: CommandListener,
+        event: CommandEvent,
+        expectedCount: Int,
+    ): List<CommandResultEvent> {
         EventManger.shutdown()
-        val received = CompletableDeferred<CommandResultEvent>()
+        val received = CompletableDeferred<List<CommandResultEvent>>()
+        val results = mutableListOf<CommandResultEvent>()
         object : Listener<CommandResultEvent> {
             override suspend fun onMessage(event: CommandResultEvent) {
-                if (!received.isCompleted) {
-                    received.complete(event)
+                results += event
+                if (results.size >= expectedCount && !received.isCompleted) {
+                    received.complete(results.toList())
                 }
             }
         }.register<CommandResultEvent>()
@@ -376,14 +479,20 @@ class CommandListenerTest {
             header = null,
             pendant = null,
         ),
-        private val followState: FollowState,
-        private val followActionResult: FollowActionResult,
+        private val followState: FollowState = FollowState.FOLLOWING,
+        private val followActionResult: FollowActionResult = FollowActionResult(FollowActionStatus.FOLLOWED),
+        override val supportedLoginMethods: Set<PublisherLoginMethod> = emptySet(),
+        private val qrLoginResult: PublisherLoginResult = PublisherLoginResult(
+            PublisherLoginStatus.SUCCESS,
+            "login success",
+        ),
     ) : PlatformPublisherPlugin {
         override val platformId: String = "bilibili"
 
         var fetchProfileCalls: Int = 0
         var queryFollowCalls: Int = 0
         var followCalls: Int = 0
+        var qrLoginCalls: Int = 0
 
         override suspend fun fetchPublisherProfile(userId: String): PublisherProfile? {
             fetchProfileCalls += 1
@@ -398,6 +507,22 @@ class CommandListenerTest {
         override suspend fun followPublisher(userId: String): FollowActionResult {
             followCalls += 1
             return followActionResult
+        }
+
+        override suspend fun loginByQrCode(
+            onQrCode: suspend (PublisherQrLoginChallenge) -> Unit,
+            onStatusChanged: suspend (PublisherLoginResult) -> Unit,
+        ): PublisherLoginResult {
+            qrLoginCalls += 1
+            onQrCode(
+                PublisherQrLoginChallenge(
+                    qrContent = "https://example.com/login-qr",
+                    expiresAtEpochSeconds = 1710000000,
+                    message = "scan me",
+                )
+            )
+            onStatusChanged(PublisherLoginResult(PublisherLoginStatus.PENDING, "waiting for scan"))
+            return qrLoginResult
         }
 
         override fun init() {

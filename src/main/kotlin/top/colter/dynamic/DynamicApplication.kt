@@ -13,6 +13,7 @@ import top.colter.dynamic.core.event.ListenerToken
 import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.register
 import top.colter.dynamic.core.plugin.PluginManager
+import top.colter.dynamic.core.plugin.PluginState
 import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.listener.DynamicListener
 
@@ -43,6 +44,13 @@ public object DynamicApplication : CoroutineScope {
             }
         }
         pluginManager.initAndStartAllPlugins()
+
+        pluginManager.getAllPlugins()
+            .filter { it.state == PluginState.FAILED }
+            .forEach { info ->
+                val error = info.error?.message ?: info.error?.javaClass?.name ?: "Unknown error"
+                println("Plugin start failed: ${info.descriptor.id} -> $error")
+            }
 
         println("DynamicApplication started. Loaded plugins: ${loadResult.loadedPlugins}")
     }

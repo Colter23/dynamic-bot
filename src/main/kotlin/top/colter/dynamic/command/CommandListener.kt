@@ -4,6 +4,12 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.command.CommandExecutionResult
 import top.colter.dynamic.core.command.CommandExecutionStatus
@@ -98,6 +104,7 @@ public class CommandListener(
             .getOrElse { CommandExecutionResult(CommandExecutionStatus.FAILED, "command failed: ${it.message}") }
 
         reply(invocationEvent, result)
+        runCatching { result.afterReply?.invoke() }
     }
 
     private fun reply(event: CommandEvent, result: CommandExecutionResult) {
@@ -164,11 +171,16 @@ private class LoginCommandHandler(
     private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
     private val commandPrefix: String,
     private val qrCodeRenderer: LoginQrCodeRenderer = LoginQrCodeRenderer(),
+    private val loginScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) : CommandHandler {
+    private companion object {
+        private const val QR_CHALLENGE_TIMEOUT_MS: Long = 10_000
+    }
+
     override val spec: CommandSpec = CommandSpec(
         path = listOf("login"),
         description = "login a publisher platform account",
-        usage = "login <platform> <cookie|qr> [cookie|sessionId]",
+        usage = "login <platform> <cookie|qr> [cookie]",
         requiredRole = CommandRole.ADMIN,
         ownerPluginId = "main",
     )
@@ -185,7 +197,7 @@ private class LoginCommandHandler(
 
         return when (method) {
             "cookie" -> handleCookieLogin(plugin, platform, event.args.drop(2).joinToString(" ").trim())
-            "qr", "qrcode", "qr-code" -> handleQrLogin(plugin, platform, event.args.drop(2).firstOrNull())
+            "qr", "qrcode", "qr-code" -> handleQrLogin(plugin, platform, event)
             else -> failedUsage()
         }
     }
@@ -218,46 +230,88 @@ private class LoginCommandHandler(
     private suspend fun handleQrLogin(
         plugin: PlatformPublisherPlugin,
         platform: String,
-        sessionId: String?,
+        event: CommandEvent,
     ): CommandExecutionResult {
         if (!plugin.supportedLoginMethods.contains(PublisherLoginMethod.QR_CODE)) {
             return CommandExecutionResult(CommandExecutionStatus.FAILED, "QR code login is unsupported on $platform")
         }
-
-        if (sessionId.isNullOrBlank()) {
-            val challenge = runCatching { plugin.startQrLogin() }
-                .getOrElse { throwable ->
-                    return CommandExecutionResult(
-                        CommandExecutionStatus.FAILED,
-                        throwable.message ?: "failed to start QR code login",
-                    )
-                }
-                ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "failed to start QR code login")
-            return renderQrChallenge(platform, challenge)
+        if (event.args.size > 2) {
+            return failedUsage()
         }
 
-        val result = runCatching { plugin.pollQrLogin(sessionId) }
-            .getOrElse { throwable ->
+        val challenge = CompletableDeferred<PublisherQrLoginChallenge?>()
+        val finalResult = CompletableDeferred<PublisherLoginResult>()
+        val shouldBroadcastFinal = CompletableDeferred<Boolean>()
+
+        loginScope.launch {
+            val result = runCatching {
+                plugin.loginByQrCode(
+                    onQrCode = { qrChallenge ->
+                        if (!challenge.isCompleted) {
+                            challenge.complete(qrChallenge)
+                        }
+                    },
+                    onStatusChanged = {},
+                )
+            }.getOrElse { throwable ->
+                if (!challenge.isCompleted) {
+                    challenge.complete(null)
+                }
                 PublisherLoginResult(
                     status = PublisherLoginStatus.FAILED,
                     message = throwable.message ?: "QR code login failed",
                 )
             }
-        return toCommandResult(platform, result)
+
+            if (!challenge.isCompleted) {
+                challenge.complete(null)
+            }
+            finalResult.complete(result)
+            if (shouldBroadcastFinal.await()) {
+                broadcastLoginResult(event, platform, result)
+            }
+        }
+
+        val qrChallenge = withTimeoutOrNull(QR_CHALLENGE_TIMEOUT_MS) { challenge.await() }
+        if (qrChallenge == null) {
+            shouldBroadcastFinal.complete(false)
+            val result = if (finalResult.isCompleted) {
+                finalResult.await()
+            } else {
+                PublisherLoginResult(
+                    status = PublisherLoginStatus.FAILED,
+                    message = "failed to start QR code login",
+                )
+            }
+            return toCommandResult(platform, result)
+        }
+
+        return renderQrChallenge(
+            platform = platform,
+            challenge = qrChallenge,
+            afterReply = {
+                if (!shouldBroadcastFinal.isCompleted) {
+                    shouldBroadcastFinal.complete(true)
+                }
+            },
+        )
     }
 
-    private fun renderQrChallenge(platform: String, challenge: PublisherQrLoginChallenge): CommandExecutionResult {
+    private fun renderQrChallenge(
+        platform: String,
+        challenge: PublisherQrLoginChallenge,
+        afterReply: suspend () -> Unit,
+    ): CommandExecutionResult {
         val expiresText = challenge.expiresAtEpochSeconds?.let { "expiresAt=$it" } ?: "expiresAt=unknown"
         val message = buildString {
             appendLine("$platform QR login started.")
-            appendLine("sessionId=${challenge.sessionId}")
-            appendLine("scan the QR code, then run: $commandPrefix login $platform qr ${challenge.sessionId}")
+            appendLine("scan the QR code in Bilibili app; the login result will be sent automatically.")
             append(expiresText)
             challenge.message?.takeIf { it.isNotBlank() }?.let { appendLine().append(it) }
         }
 
         val imagePath = runCatching {
-            qrCodeRenderer.render(challenge.qrContent, challenge.sessionId)
+            qrCodeRenderer.render(challenge.qrContent)
         }.getOrNull()
 
         val contents = buildList {
@@ -270,6 +324,7 @@ private class LoginCommandHandler(
             status = CommandExecutionStatus.SUCCESS,
             message = message,
             chain = listOf(MessageChain(contents)),
+            afterReply = afterReply,
         )
     }
 
@@ -291,6 +346,28 @@ private class LoginCommandHandler(
         return CommandExecutionResult(status, message)
     }
 
+    private fun broadcastLoginResult(event: CommandEvent, platform: String, result: PublisherLoginResult) {
+        val commandResult = toCommandResult(platform, result)
+        val status = when (commandResult.status) {
+            CommandExecutionStatus.SUCCESS -> CommandStatus.SUCCESS
+            CommandExecutionStatus.REJECTED -> CommandStatus.REJECTED
+            CommandExecutionStatus.FAILED -> CommandStatus.FAILED
+        }
+        CommandResultEvent(
+            sourcePlugin = "main",
+            target = CommandTarget(
+                platform = event.context.platform,
+                chatType = event.context.chatType,
+                chatId = event.context.chatId,
+                senderId = event.context.senderId,
+            ),
+            chain = commandResult.chain ?: listOf(MessageChain(listOf(MessageContent.Text(commandResult.message)))),
+            inReplyTo = event.traceId,
+            status = status,
+            errorMessage = if (status == CommandStatus.FAILED) commandResult.message else null,
+        ).broadcast()
+    }
+
     private fun failedUsage(): CommandExecutionResult {
         return CommandExecutionResult(
             CommandExecutionStatus.FAILED,
@@ -302,10 +379,11 @@ private class LoginCommandHandler(
 private class LoginQrCodeRenderer(
     private val outputDir: Path = Paths.get("data", "login-qr"),
 ) {
-    fun render(content: String, sessionId: String): String {
+    fun render(content: String): String {
         Files.createDirectories(outputDir)
-        val safeSessionId = sessionId.replace(Regex("[^A-Za-z0-9._-]"), "_")
-        val outputPath = outputDir.resolve("$safeSessionId.png").toAbsolutePath()
+        val outputPath = outputDir
+            .resolve("qr-${System.currentTimeMillis()}-${content.hashCode().toUInt().toString(16)}.png")
+            .toAbsolutePath()
         val hints = mapOf(
             EncodeHintType.CHARACTER_SET to "UTF-8",
             EncodeHintType.ERROR_CORRECTION to ErrorCorrectionLevel.M,
@@ -321,6 +399,7 @@ private class LoginQrCodeRenderer(
         ImageIO.write(image, "png", outputPath.toFile())
         return outputPath.toString()
     }
+
 }
 
 private class StatusCommandHandler : CommandHandler {
