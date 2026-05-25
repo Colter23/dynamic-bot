@@ -1,9 +1,13 @@
 package top.colter.dynamic
 
+import java.nio.file.Paths
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.command.CommandListener
+import top.colter.dynamic.core.config.DefaultConfigService
+import top.colter.dynamic.core.config.loadOrCreate
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
 import top.colter.dynamic.core.event.DynamicEvent
@@ -15,7 +19,12 @@ import top.colter.dynamic.core.event.register
 import top.colter.dynamic.core.plugin.PluginManager
 import top.colter.dynamic.core.plugin.PluginState
 import top.colter.dynamic.core.repository.PersistenceManager
+import top.colter.dynamic.core.task.TaskDefinition
+import top.colter.dynamic.core.task.TaskSchedule
+import top.colter.dynamic.core.task.TaskScheduler
+import top.colter.dynamic.draw.DynamicImageCache
 import top.colter.dynamic.listener.DynamicListener
+import top.colter.dynamic.listener.ImageFileCleaner
 
 public object DynamicApplication : CoroutineScope {
     private val job: Job = Job()
@@ -23,6 +32,7 @@ public object DynamicApplication : CoroutineScope {
 
     private val pluginManager: PluginManager = PluginManager(pluginDirPath = "plugins")
     private val listenerTokens: MutableList<ListenerToken> = mutableListOf()
+    private val taskScheduler: TaskScheduler = TaskScheduler(scope = this)
 
     public fun run() {
         val dbPath = "data/dynamic.db"
@@ -56,8 +66,13 @@ public object DynamicApplication : CoroutineScope {
     }
 
     private fun registerCoreListeners() {
-        listenerTokens += DynamicListener().register<DynamicEvent>()
+        val config = DefaultConfigService.loadOrCreate(MainDynamicConfig.CONFIG_ID) { MainDynamicConfig() }
+        DynamicImageCache.configure(Paths.get(config.imageCache.sourceRoot))
+        registerImageCleanupTask(config)
+
+        listenerTokens += DynamicListener(config = config).register<DynamicEvent>()
         listenerTokens += CommandListener(
+            config = config,
             platformPluginResolver = { platformId -> pluginManager.findPlatformPublisherPlugin(platformId) }
         ).register<CommandEvent>()
 
@@ -75,9 +90,41 @@ public object DynamicApplication : CoroutineScope {
         }.register<CommandResultEvent>()
     }
 
+    private fun registerImageCleanupTask(config: MainDynamicConfig) {
+        val imageCacheConfig = config.imageCache
+        if (!imageCacheConfig.sourceCleanup.enabled && !imageCacheConfig.renderedCleanup.enabled) return
+
+        taskScheduler.start(
+            TaskDefinition(
+                id = "main-image-cleanup",
+                schedule = TaskSchedule.Cron(imageCacheConfig.cleanupCron),
+                action = {
+                    val cleaner = ImageFileCleaner()
+                    if (imageCacheConfig.sourceCleanup.enabled) {
+                        val result = cleaner.clean(
+                            Paths.get(imageCacheConfig.sourceRoot),
+                            imageCacheConfig.sourceCleanup.maxIdleDays,
+                        )
+                        println("image cleanup source: deletedFiles=${result.deletedFiles}, deletedBytes=${result.deletedBytes}")
+                    }
+                    if (imageCacheConfig.renderedCleanup.enabled) {
+                        val result = cleaner.clean(
+                            Paths.get(imageCacheConfig.renderedRoot),
+                            imageCacheConfig.renderedCleanup.maxIdleDays,
+                        )
+                        println("image cleanup rendered: deletedFiles=${result.deletedFiles}, deletedBytes=${result.deletedBytes}")
+                    }
+                },
+            )
+        )
+    }
+
     public fun shutdown() {
         listenerTokens.forEach { EventManger.removeListener(it) }
         listenerTokens.clear()
+        runBlocking {
+            taskScheduler.stopAll()
+        }
         pluginManager.shutdown()
         EventManger.shutdown()
         job.cancel()

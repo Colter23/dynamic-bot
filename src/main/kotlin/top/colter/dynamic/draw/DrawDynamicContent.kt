@@ -4,7 +4,6 @@ import org.jetbrains.skia.Color
 import org.jetbrains.skia.FontStyle
 import org.jetbrains.skia.paragraph.TextStyle
 import top.colter.dynamic.core.data.*
-import top.colter.dynamic.draw.tools.makeImage
 import top.colter.dynamic.draw.tools.makeRGB
 import top.colter.skiko.*
 import top.colter.skiko.data.RichParagraphBuilder
@@ -12,7 +11,7 @@ import top.colter.skiko.layout.Layout
 import top.colter.skiko.layout.RichText
 
 
-fun Layout.drawDynamicContent(content: DynamicContent) {
+fun Layout.drawDynamicContent(content: DynamicContent, config: DrawConfig) {
     if (content.contentNodes.isEmpty()) return
 
     val style = TextStyle().setColor(Color.BLACK).setFontSize(30.px).setFontFamily(FontUtils.defaultFont!!.familyName)
@@ -25,7 +24,7 @@ fun Layout.drawDynamicContent(content: DynamicContent) {
             is DynamicContentNodeLink -> paragraph.addText(it.text, it.style?.toTextStyle(linkStyle) ?: linkStyle)
             is DynamicContentNodeEmoji -> paragraph.addEmoji(
                 it.text,
-                DynamicImageCache.bytes(it.image).makeImage(),
+                config.image(it.image),
                 it.style?.toTextStyle(linkStyle) ?: linkStyle,
             )
         }

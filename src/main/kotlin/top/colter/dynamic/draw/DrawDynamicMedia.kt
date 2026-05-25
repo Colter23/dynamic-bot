@@ -6,7 +6,6 @@ import top.colter.dynamic.core.data.*
 import top.colter.dynamic.draw.component.Media
 import top.colter.dynamic.draw.component.MediaMini
 import top.colter.dynamic.draw.component.MediaSmall
-import top.colter.dynamic.draw.tools.makeImage
 import top.colter.skiko.*
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.Ratio
@@ -14,21 +13,21 @@ import top.colter.skiko.data.Shadow
 import top.colter.skiko.layout.*
 
 
-fun Layout.drawDynamicMedia(media: DynamicMedia) {
+fun Layout.drawDynamicMedia(media: DynamicMedia, config: DrawConfig) {
 
-    media.pics?.let { pics -> drawDynamicMediaPic(pics) }
-    media.video?.let { video -> drawDynamicMediaVideo(video) }
+    media.pics?.let { pics -> drawDynamicMediaPic(pics, config) }
+    media.video?.let { video -> drawDynamicMediaVideo(video, config) }
 //    media.article?.let { article -> drawDynamicMediaArticle(article) }
 
-    media.card?.let { card -> drawDynamicMediaCard(card) }
-    media.smallCard?.let { card -> drawDynamicMediaSmallCard(card) }
-    media.miniCard?.let { card -> drawDynamicMediaMiniCard(card) }
+    media.card?.let { card -> drawDynamicMediaCard(card, config) }
+    media.smallCard?.let { card -> drawDynamicMediaSmallCard(card, config) }
+    media.miniCard?.let { card -> drawDynamicMediaMiniCard(card, config) }
 
 }
 
 
-fun Layout.drawDynamicMediaPic(pics: List<DynamicMediaPic>) {
-    val imgList = pics.map { it to DynamicImageCache.bytes(it.pic).makeImage() }
+fun Layout.drawDynamicMediaPic(pics: List<DynamicMediaPic>, config: DrawConfig) {
+    val imgList = pics.map { it to config.image(it.pic) }
     val imgModifier = Modifier().background(Color.WHITE.withAlpha(0.6f)).border(2.dp, 10.dp).shadows(Shadow.ELEVATION_1)
     if (imgList.size == 1) imgModifier.fillMaxWidth()
     val lineCount = if (imgList.size == 1) 1 else if (imgList.size == 2 || imgList.size == 4) 2 else 3
@@ -86,10 +85,10 @@ fun Layout.DynamicMediaPicItem(
 }
 
 
-fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo) {
+fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo, config: DrawConfig) {
     if (containsEnv("FORWARD")) {
         MediaSmall(
-            cover = DynamicImageCache.bytes(video.cover).makeImage(),
+            cover = config.image(video.cover),
             title = video.title,
             desc = video.description,
             duration = video.duration,
@@ -97,7 +96,7 @@ fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo) {
         )
     } else {
         Media(
-            cover = DynamicImageCache.bytes(video.cover).makeImage(),
+            cover = config.image(video.cover),
             title = video.title,
             desc = video.description,
             duration = video.duration,
@@ -108,9 +107,9 @@ fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo) {
 }
 
 
-fun Layout.drawDynamicMediaCard(card: DynamicMediaCard) {
+fun Layout.drawDynamicMediaCard(card: DynamicMediaCard, config: DrawConfig) {
     Media(
-        cover = DynamicImageCache.bytes(card.cover).makeImage(),
+        cover = config.image(card.cover),
         title = card.title,
         desc = card.description,
         badge = card.badge,
@@ -118,9 +117,9 @@ fun Layout.drawDynamicMediaCard(card: DynamicMediaCard) {
     )
 }
 
-fun Layout.drawDynamicMediaSmallCard(card: DynamicMediaCard) {
+fun Layout.drawDynamicMediaSmallCard(card: DynamicMediaCard, config: DrawConfig) {
     MediaSmall(
-        cover = DynamicImageCache.bytes(card.cover).makeImage(),
+        cover = config.image(card.cover),
         title = card.title,
         desc = card.description,
         badge = card.badge,
@@ -128,9 +127,9 @@ fun Layout.drawDynamicMediaSmallCard(card: DynamicMediaCard) {
     )
 }
 
-fun Layout.drawDynamicMediaMiniCard(card: DynamicMediaCard) {
+fun Layout.drawDynamicMediaMiniCard(card: DynamicMediaCard, config: DrawConfig) {
     MediaMini(
-        cover = DynamicImageCache.bytes(card.cover).makeImage(),
+        cover = config.image(card.cover),
         title = card.title,
         desc = card.description,
         badge = card.badge,

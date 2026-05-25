@@ -6,3 +6,15 @@ command:
   permissions: []
 subscription:
   unfollowWhenNoSubscribers: false
+imageCache:
+  sourceRoot: "data/image-cache/source"
+  renderedRoot: "data/dynamic-images"
+  downloadTimeoutMs: 10000
+  maxConcurrentDownloads: 8
+  cleanupCron: "0 4 * * *"
+  sourceCleanup:
+    enabled: true
+    maxIdleDays: 30
+  renderedCleanup:
+    enabled: true
+    maxIdleDays: 30

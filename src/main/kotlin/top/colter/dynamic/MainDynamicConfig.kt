@@ -7,6 +7,7 @@ public data class MainDynamicConfig(
     val templates: Map<String, String> = mapOf(DEFAULT_TEMPLATE_NAME to DEFAULT_TEMPLATE),
     val command: CommandConfig = CommandConfig(),
     val subscription: SubscriptionConfig = SubscriptionConfig(),
+    val imageCache: ImageCacheConfig = ImageCacheConfig(),
 ) {
     public companion object {
         public const val CONFIG_ID: String = "main"
@@ -17,6 +18,21 @@ public data class MainDynamicConfig(
 
 public data class SubscriptionConfig(
     val unfollowWhenNoSubscribers: Boolean = false,
+)
+
+public data class ImageCacheConfig(
+    val sourceRoot: String = "data/image-cache/source",
+    val renderedRoot: String = "data/dynamic-images",
+    val downloadTimeoutMs: Long = 10_000,
+    val maxConcurrentDownloads: Int = 8,
+    val cleanupCron: String = "0 4 * * *",
+    val sourceCleanup: ImageCleanupConfig = ImageCleanupConfig(),
+    val renderedCleanup: ImageCleanupConfig = ImageCleanupConfig(),
+)
+
+public data class ImageCleanupConfig(
+    val enabled: Boolean = true,
+    val maxIdleDays: Long = 30,
 )
 
 public data class CommandConfig(

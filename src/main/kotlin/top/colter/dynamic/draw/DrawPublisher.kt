@@ -4,7 +4,6 @@ import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.draw.component.Author
 import top.colter.dynamic.draw.component.AuthorSmall
 import top.colter.dynamic.draw.tools.loadResourceImage
-import top.colter.dynamic.draw.tools.makeImage
 import top.colter.skiko.*
 import top.colter.skiko.layout.Layout
 
@@ -15,7 +14,7 @@ fun Layout.drawPublisher(publisher: Publisher, time: String, link: String, confi
 
     if (containsEnv("FORWARD")) {
         AuthorSmall(
-            face = DynamicImageCache.bytes(publisher.face).makeImage(),
+            face = config.image(publisher.face),
             name = publisher.name,
             time = time,
             badge = officialImage,
@@ -30,9 +29,9 @@ fun Layout.drawPublisher(publisher: Publisher, time: String, link: String, confi
         }
 
         Author(
-            face = DynamicImageCache.bytes(publisher.face).makeImage(),
-            pendant = publisher.pendant?.let { DynamicImageCache.bytes(it).makeImage() },
-            head = publisher.header?.let { DynamicImageCache.bytes(it).makeImage() },
+            face = config.image(publisher.face),
+            pendant = publisher.pendant?.let { config.image(it) },
+            head = publisher.header?.let { config.image(it) },
             ornament = ornamentImage,
             badge = officialImage,
             name = publisher.name,

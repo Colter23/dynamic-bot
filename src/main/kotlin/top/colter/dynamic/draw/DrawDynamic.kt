@@ -54,9 +54,9 @@ fun Layout.DynamicView(dynamic: Dynamic, config: DrawConfig) {
                     modifier = Modifier().margin(bottom = 20.dp)
                 )
             }
-            dynamic.content?.let { content -> drawDynamicContent(content) }
+            dynamic.content?.let { content -> drawDynamicContent(content, config) }
 
-            dynamic.media?.let { media -> drawDynamicMedia(media) }
+            dynamic.media?.let { media -> drawDynamicMedia(media, config) }
 
             dynamic.origin?.let {
                 putEnv("FORWARD", true)

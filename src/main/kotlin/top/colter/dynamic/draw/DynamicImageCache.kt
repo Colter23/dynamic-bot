@@ -1,18 +1,212 @@
 package top.colter.dynamic.draw
 
+import java.awt.Color
+import java.awt.image.BufferedImage
+import java.io.ByteArrayOutputStream
+import java.net.URI
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
+import java.nio.file.Files
+import java.nio.file.InvalidPathException
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
+import java.nio.file.attribute.FileTime
 import java.util.concurrent.ConcurrentHashMap
+import javax.imageio.ImageIO
+import org.jetbrains.skia.Image
+import top.colter.dynamic.core.data.ImageType
 import top.colter.dynamic.core.data.LazyImage
 
-public object DynamicImageCache {
+public object DynamicImageCache : DynamicImageResolver {
     private val images: ConcurrentHashMap<String, ByteArray> = ConcurrentHashMap()
+    private val imageFiles: ConcurrentHashMap<String, Path> = ConcurrentHashMap()
 
-    public fun contains(image: LazyImage): Boolean = images.containsKey(image.uri)
+    @Volatile
+    private var sourceRoot: Path = Paths.get("data", "image-cache", "source")
+
+    private val placeholderBytes: ByteArray by lazy { createPlaceholderBytes() }
+
+    public fun configure(sourceRoot: Path) {
+        this.sourceRoot = sourceRoot.toAbsolutePath().normalize()
+    }
+
+    public fun contains(image: LazyImage): Boolean {
+        return images.containsKey(image.uri) || imageFiles[image.uri]?.existsAndTouch() == true
+    }
 
     public fun put(image: LazyImage, bytes: ByteArray) {
         images[image.uri] = bytes
     }
 
+    public fun putPlaceholder(image: LazyImage) {
+        images[image.uri] = placeholderBytes
+    }
+
     public fun bytes(image: LazyImage): ByteArray {
-        return images[image.uri] ?: error("image is not loaded: ${image.uri}")
+        images[image.uri]?.let { return it }
+
+        imageFiles[image.uri]?.readAndTouch()?.let { bytes ->
+            images[image.uri] = bytes
+            return bytes
+        }
+
+        readLocalFile(image.uri)?.let { bytes ->
+            images[image.uri] = bytes
+            return bytes
+        }
+
+        return placeholderBytes
+    }
+
+    override fun image(image: LazyImage): Image {
+        return decode(bytes(image)) ?: placeholderImage()
+    }
+
+    public fun loadFromDisk(image: LazyImage, platformId: String, imageType: ImageType): Boolean {
+        val path = pathFor(platformId, imageType, image.uri)
+        val bytes = path.readAndTouch() ?: return false
+        imageFiles[image.uri] = path
+        images[image.uri] = bytes
+        return true
+    }
+
+    public fun store(image: LazyImage, platformId: String, imageType: ImageType, bytes: ByteArray): Path {
+        val path = pathFor(platformId, imageType, image.uri)
+        Files.createDirectories(path.parent)
+
+        if (!Files.exists(path)) {
+            val tempPath = Files.createTempFile(path.parent, "${path.fileName}.", ".tmp")
+            Files.write(tempPath, bytes)
+            runCatching {
+                Files.move(tempPath, path, StandardCopyOption.ATOMIC_MOVE)
+            }.recoverCatching {
+                if (Files.exists(path)) {
+                    Files.deleteIfExists(tempPath)
+                    path
+                } else {
+                    Files.move(tempPath, path)
+                }
+            }.onFailure {
+                runCatching { Files.deleteIfExists(tempPath) }
+            }.getOrThrow()
+        }
+
+        path.touch()
+        imageFiles[image.uri] = path
+        images[image.uri] = path.readAndTouch() ?: bytes
+        return path
+    }
+
+    public fun pathFor(platformId: String, imageType: ImageType, uri: String): Path {
+        return sourceRoot
+            .resolve(safePathSegment(platformId.ifBlank { "unknown" }))
+            .resolve(imageType.name)
+            .resolve(fileNameForUri(uri))
+            .toAbsolutePath()
+            .normalize()
+    }
+
+    public fun cacheKey(platformId: String, imageType: ImageType, uri: String): String {
+        return listOf(
+            safePathSegment(platformId.ifBlank { "unknown" }),
+            imageType.name,
+            fileNameForUri(uri),
+        ).joinToString("/")
+    }
+
+    public fun fileNameForUri(uri: String): String {
+        val trimmed = uri.trim()
+        val rawName = uriPathFileName(trimmed)
+            ?.takeIf { it.isNotBlank() }
+            ?: trimmed.substringBefore('?').substringBefore('#')
+                .replace('\\', '/')
+                .substringAfterLast('/')
+                .takeIf { it.isNotBlank() }
+
+        val decoded = rawName
+            ?.let { runCatching { URLDecoder.decode(it, StandardCharsets.UTF_8) }.getOrDefault(it) }
+            .orEmpty()
+        val safe = decoded
+            .replace(Regex("""[<>:"/\\|?*\u0000-\u001F]+"""), "_")
+            .trim { it <= ' ' || it == '.' || it == '_' }
+        return safe.ifBlank { "image.img" }
+    }
+
+    private fun uriPathFileName(uri: String): String? {
+        return runCatching {
+            URI(uri).rawPath
+                ?.replace('\\', '/')
+                ?.substringAfterLast('/')
+        }.getOrNull()
+    }
+
+    private fun safePathSegment(value: String): String {
+        return value
+            .replace(Regex("""[<>:"/\\|?*\u0000-\u001F]+"""), "_")
+            .trim { it <= ' ' || it == '.' || it == '_' }
+            .ifBlank { "unknown" }
+    }
+
+    private fun readLocalFile(uri: String): ByteArray? {
+        val path = runCatching {
+            val parsed = URI(uri)
+            if (parsed.scheme.equals("file", ignoreCase = true)) Paths.get(parsed) else Paths.get(uri)
+        }.recoverCatching { error ->
+            if (error is InvalidPathException) throw error
+            Paths.get(uri)
+        }.getOrNull() ?: return null
+
+        return path.readAndTouch()
+    }
+
+    private fun Path.readAndTouch(): ByteArray? {
+        if (!Files.isRegularFile(this)) return null
+        return runCatching {
+            touch()
+            Files.readAllBytes(this)
+        }.getOrNull()
+    }
+
+    private fun Path.existsAndTouch(): Boolean {
+        if (!Files.isRegularFile(this)) return false
+        touch()
+        return true
+    }
+
+    private fun Path.touch() {
+        runCatching {
+            Files.setLastModifiedTime(this, FileTime.fromMillis(System.currentTimeMillis()))
+        }
+    }
+
+    private fun decode(bytes: ByteArray): Image? {
+        return runCatching { Image.makeFromEncoded(bytes) }.getOrNull()
+    }
+
+    private fun placeholderImage(): Image {
+        return Image.makeFromEncoded(placeholderBytes)
+    }
+
+    private fun createPlaceholderBytes(): ByteArray {
+        val width = 160
+        val height = 90
+        val image = BufferedImage(width, height, BufferedImage.TYPE_INT_RGB)
+        val graphics = image.createGraphics()
+        try {
+            graphics.color = Color(242, 244, 247)
+            graphics.fillRect(0, 0, width, height)
+            graphics.color = Color(206, 212, 220)
+            graphics.drawRect(0, 0, width - 1, height - 1)
+            graphics.drawLine(0, height - 1, width - 1, 0)
+            graphics.drawLine(0, 0, width - 1, height - 1)
+        } finally {
+            graphics.dispose()
+        }
+
+        return ByteArrayOutputStream().use { output ->
+            ImageIO.write(image, "png", output)
+            output.toByteArray()
+        }
     }
 }

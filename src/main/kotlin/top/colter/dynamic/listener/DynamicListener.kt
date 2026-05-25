@@ -1,5 +1,6 @@
 package top.colter.dynamic.listener
 
+import java.nio.file.Paths
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.config.DefaultConfigService
@@ -23,11 +24,17 @@ public class DynamicListener(
     config: MainDynamicConfig? = null,
     private val configService: ConfigService = DefaultConfigService,
     private val templateRenderer: DynamicTemplateRenderer = DynamicTemplateRenderer(),
-    private val imageLoader: DynamicImageLoader = UrlDynamicImageLoader(),
-    private val imageRenderer: DynamicImageRenderer = FileDynamicImageRenderer(),
+    imageLoader: DynamicImageLoader? = null,
+    imageRenderer: DynamicImageRenderer? = null,
 ) : Listener<DynamicEvent> {
-    private val config: MainDynamicConfig by lazy {
+    private val runtimeConfig: MainDynamicConfig by lazy {
         config ?: configService.loadOrCreate(MainDynamicConfig.CONFIG_ID) { MainDynamicConfig() }
+    }
+    private val runtimeImageLoader: DynamicImageLoader by lazy {
+        imageLoader ?: CachedDynamicImageLoader(runtimeConfig.imageCache)
+    }
+    private val runtimeImageRenderer: DynamicImageRenderer by lazy {
+        imageRenderer ?: FileDynamicImageRenderer(Paths.get(runtimeConfig.imageCache.renderedRoot))
     }
 
     override suspend fun onMessage(event: DynamicEvent) {
@@ -61,7 +68,7 @@ public class DynamicListener(
             .filter { it.state == EntityState.ACTIVE }
     }
 
-    private fun buildMessageChain(dynamic: Dynamic): MessageChain {
+    private suspend fun buildMessageChain(dynamic: Dynamic): MessageChain {
         val contents = mutableListOf<MessageContent>()
         renderImage(dynamic)?.let { imagePath ->
             contents += MessageContent.Image(
@@ -76,10 +83,10 @@ public class DynamicListener(
         return MessageChain(contents)
     }
 
-    private fun renderImage(dynamic: Dynamic): String? {
+    private suspend fun renderImage(dynamic: Dynamic): String? {
         return runCatching {
-            imageLoader.load(dynamic)
-            imageRenderer.render(dynamic).toString()
+            runtimeImageLoader.load(dynamic)
+            runtimeImageRenderer.render(dynamic).toString()
         }.onFailure {
             println("dynamic draw failed: ${dynamic.dynamicId}, error=${it.message}")
         }.getOrNull()
@@ -92,8 +99,8 @@ public class DynamicListener(
             dynamicType = dynamicType(dynamic),
         )
         return templateName
-            ?.let { config.templates[it] }
-            ?: config.templates[MainDynamicConfig.DEFAULT_TEMPLATE_NAME]
+            ?.let { runtimeConfig.templates[it] }
+            ?: runtimeConfig.templates[MainDynamicConfig.DEFAULT_TEMPLATE_NAME]
             ?: MainDynamicConfig.DEFAULT_TEMPLATE
     }
 
