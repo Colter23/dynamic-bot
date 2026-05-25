@@ -8,10 +8,13 @@ import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.data.Dynamic
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicContentNodeText
+import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.PlatformDescriptor
+import top.colter.dynamic.core.data.PlatformKind
 import top.colter.dynamic.core.data.Publisher
-import top.colter.dynamic.core.data.PublisherPlatform
+import top.colter.dynamic.core.data.PublisherType
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.SubscriberType
 import top.colter.dynamic.core.event.DynamicEvent
@@ -23,7 +26,7 @@ import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
-import top.colter.dynamic.core.repository.SubscribeRepository
+import top.colter.dynamic.core.repository.SubscriptionRepository
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -43,8 +46,8 @@ class DynamicListenerTest {
         initDb("dynamic-listener-bound-template")
         val publisher = createPublisher()
         val subscriber = createSubscriber()
-        SubscribeRepository.subscribe(subscriber.id.toString(), publisher.id.toString())
-        PublisherTemplateRepository.setTemplate(publisher.id.toString(), "bili-video")
+        SubscriptionRepository.subscribe(subscriber.id, publisher.id)
+        PublisherTemplateRepository.setPublisherTemplate(publisher.id, "bili-video")
 
         val listener = DynamicListener(
             config = MainDynamicConfig(
@@ -61,11 +64,11 @@ class DynamicListenerTest {
         listener.onMessage(DynamicEvent(source = "test", dynamic = demoDynamic(publisher)))
         val event = withTimeout(3_000) { received.await() }
 
-        assertEquals(listOf(subscriber), event.message.subscriber)
+        assertEquals(listOf(subscriber.toMessageTarget()), event.message.targets)
         val contents = event.message.chain.single().content
         assertTrue(contents.first() is MessageContent.Image)
-        assertEquals("D:\\tmp\\dynamic.png", (contents.first() as MessageContent.Image).image.url)
-        assertEquals("video Demo UP Demo content", contents.filterIsInstance<MessageContent.Text>().single().text)
+        assertEquals("D:\\tmp\\dynamic.png", (contents.first() as MessageContent.Image).image.uri)
+        assertEquals("video Demo UP Demo content", contents.filterIsInstance<MessageContent.Text>().single().fallbackText)
     }
 
     @Test
@@ -86,7 +89,7 @@ class DynamicListenerTest {
 
         val contents = event.message.chain.single().content
         assertEquals(1, contents.size)
-        assertEquals("fallback Demo UP", contents.single().text)
+        assertEquals("fallback Demo UP", contents.single().fallbackText)
     }
 
     private fun captureMessageEvent(): CompletableDeferred<MessageEvent> {
@@ -108,37 +111,44 @@ class DynamicListenerTest {
         PublisherRepository.create(
             Publisher(
                 id = 1,
-                platform = "bilibili",
-                userId = "123",
+                platformId = "bilibili",
+                type = PublisherType.USER,
+                externalId = "123",
                 name = "Demo UP",
-                state = 1,
+                state = EntityState.ACTIVE,
                 face = LazyImage("https://example.com/face.png"),
                 createTime = 1,
                 createUser = 1,
             )
         )
-        return assertNotNull(PublisherRepository.findByPlatformAndUserId("bilibili", "123"))
+        return assertNotNull(PublisherRepository.findByPlatformAndExternalId("bilibili", "123"))
     }
 
     private fun createSubscriber(): Subscriber {
         SubscriberRepository.create(
             Subscriber(
                 id = 10,
-                platform = "onebot",
+                platformId = "onebot",
                 type = SubscriberType.GROUP,
-                userId = "100",
+                targetId = "100",
                 name = "group",
-                state = 1,
+                state = EntityState.ACTIVE,
                 createTime = 1,
                 createUser = 1,
             )
         )
-        return assertNotNull(SubscriberRepository.findByPlatformAndUserId("onebot", "100"))
+        return assertNotNull(SubscriberRepository.findByPlatformAndTarget("onebot", SubscriberType.GROUP, "100"))
     }
 
     private fun demoDynamic(publisher: Publisher): Dynamic {
         return Dynamic(
-            platform = PublisherPlatform("bilibili", "BiliBili", "https://www.bilibili.com", ""),
+            platform = PlatformDescriptor(
+                id = "bilibili",
+                name = "BiliBili",
+                homepage = "https://www.bilibili.com",
+                iconUri = "",
+                kind = PlatformKind.PUBLISHER,
+            ),
             dynamicId = "dynamic-1",
             publisher = publisher,
             time = 1_710_000_000,

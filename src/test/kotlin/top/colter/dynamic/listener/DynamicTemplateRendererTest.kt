@@ -4,9 +4,12 @@ import top.colter.dynamic.core.data.Dynamic
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicContentNodeText
 import top.colter.dynamic.core.data.DynamicStats
+import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LazyImage
+import top.colter.dynamic.core.data.PlatformDescriptor
+import top.colter.dynamic.core.data.PlatformKind
 import top.colter.dynamic.core.data.Publisher
-import top.colter.dynamic.core.data.PublisherPlatform
+import top.colter.dynamic.core.data.PublisherType
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
@@ -38,14 +41,21 @@ class DynamicTemplateRendererTest {
 
     private fun demoDynamic(): Dynamic {
         return Dynamic(
-            platform = PublisherPlatform("bilibili", "BiliBili", "https://www.bilibili.com", ""),
+            platform = PlatformDescriptor(
+                id = "bilibili",
+                name = "BiliBili",
+                homepage = "https://www.bilibili.com",
+                iconUri = "",
+                kind = PlatformKind.PUBLISHER,
+            ),
             dynamicId = "dynamic-1",
             publisher = Publisher(
                 id = 1,
-                platform = "bilibili",
-                userId = "123",
+                platformId = "bilibili",
+                type = PublisherType.USER,
+                externalId = "123",
                 name = "Demo UP",
-                state = 1,
+                state = EntityState.ACTIVE,
                 face = LazyImage("https://example.com/face.png"),
                 createTime = 1,
                 createUser = 1,

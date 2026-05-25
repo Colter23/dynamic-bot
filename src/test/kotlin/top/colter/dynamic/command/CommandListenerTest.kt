@@ -11,10 +11,12 @@ import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
+import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.PublisherProfile
 import top.colter.dynamic.core.data.PublisherType
+import top.colter.dynamic.core.data.SubscriberType
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
 import top.colter.dynamic.core.event.EventManger
@@ -33,7 +35,7 @@ import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
-import top.colter.dynamic.core.repository.SubscribeRepository
+import top.colter.dynamic.core.repository.SubscriptionRepository
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -90,8 +92,8 @@ class CommandListenerTest {
         assertEquals(0, plugin.followCalls)
         assertEquals(1, plugin.fetchProfileCalls)
         assertEquals(1, plugin.queryFollowCalls)
-        assertEquals("bilibili", PublisherRepository.findByPlatformAndUserId("bilibili", "123")?.platform)
-        assertEquals(1, SubscribeRepository.findPublisherIdsBySubscriberId(subscriberId("onebot", "sender")!!).size)
+        assertEquals("bilibili", PublisherRepository.findByPlatformAndExternalId("bilibili", "123")?.platformId)
+        assertEquals(1, SubscriptionRepository.findPublisherIdsBySubscriberId(subscriberId("onebot", SubscriberType.GROUP, "100")!!).size)
         val message = renderMessage(result)
         assertTrue(message.contains("auto-followed=no"))
         assertTrue(message.contains("publisher=new"))
@@ -139,8 +141,8 @@ class CommandListenerTest {
 
         assertEquals(CommandStatus.FAILED, result.status)
         assertTrue(renderMessage(result).contains("follow failed"))
-        assertNull(PublisherRepository.findByPlatformAndUserId("bilibili", "123"))
-        assertNull(SubscriberRepository.findByPlatformAndUserId("onebot", "sender"))
+        assertNull(PublisherRepository.findByPlatformAndExternalId("bilibili", "123"))
+        assertNull(SubscriberRepository.findByPlatformAndTarget("onebot", SubscriberType.GROUP, "100"))
     }
 
     @Test
@@ -293,7 +295,7 @@ class CommandListenerTest {
         )
 
         assertEquals(CommandStatus.SUCCESS, result.status)
-        assertEquals("bili-video", PublisherTemplateRepository.findTemplateNameByPublisherId(publisher.id.toString()))
+        assertEquals("bili-video", PublisherTemplateRepository.findTemplateName(publisher.id, "bilibili", "text"))
         assertTrue(renderMessage(result).contains("template binding updated"))
     }
 
@@ -323,7 +325,7 @@ class CommandListenerTest {
         initDb("template-remove")
         CommandRegistry.clear()
         val publisher = createPublisher()
-        PublisherTemplateRepository.setTemplate(publisher.id.toString(), "bili-video")
+        PublisherTemplateRepository.setPublisherTemplate(publisher.id, "bili-video")
         val listener = CommandListener(platformPluginResolver = { null }, config = adminConfig())
 
         val result = dispatch(
@@ -334,7 +336,7 @@ class CommandListenerTest {
         )
 
         assertEquals(CommandStatus.SUCCESS, result.status)
-        assertNull(PublisherTemplateRepository.findTemplateNameByPublisherId(publisher.id.toString()))
+        assertNull(PublisherTemplateRepository.findTemplateName(publisher.id, "bilibili", "text"))
     }
 
     @Test
@@ -342,7 +344,7 @@ class CommandListenerTest {
         initDb("template-list")
         CommandRegistry.clear()
         val publisher = createPublisher()
-        PublisherTemplateRepository.setTemplate(publisher.id.toString(), "bili-video")
+        PublisherTemplateRepository.setPublisherTemplate(publisher.id, "bili-video")
         val listener = CommandListener(
             platformPluginResolver = { null },
             config = MainDynamicConfig(templates = mapOf("default" to "default", "bili-video" to "video")),
@@ -427,37 +429,38 @@ class CommandListenerTest {
     }
 
     private fun renderMessage(result: CommandResultEvent): String {
-        return result.chain.flatMap { it.content }.joinToString("\n") { it.text }
+        return result.chain.flatMap { it.content }.joinToString("\n") { it.fallbackText }
     }
 
-    private fun subscriberId(platform: String, userId: String): String? {
-        return SubscriberRepository.findByPlatformAndUserId(platform, userId)?.id?.toString()
+    private fun subscriberId(platformId: String, type: SubscriberType, targetId: String): Int? {
+        return SubscriberRepository.findByPlatformAndTarget(platformId, type, targetId)?.id
     }
 
     private fun createPublisher(): top.colter.dynamic.core.data.Publisher {
         PublisherRepository.create(
             top.colter.dynamic.core.data.Publisher(
                 id = 1,
-                platform = "bilibili",
-                userId = "123",
+                platformId = "bilibili",
+                type = PublisherType.USER,
+                externalId = "123",
                 name = "demo-up",
-                state = 1,
+                state = EntityState.ACTIVE,
                 face = LazyImage("https://example.com/face.png"),
                 createTime = 1L,
                 createUser = 1,
             )
         )
-        return PublisherRepository.findByPlatformAndUserId("bilibili", "123")!!
+        return PublisherRepository.findByPlatformAndExternalId("bilibili", "123")!!
     }
 
     private class FakePlatformPublisherPlugin(
         private val profile: PublisherProfile = PublisherProfile(
-            platform = "bilibili",
-            userId = "123",
+            platformId = "bilibili",
+            externalId = "123",
             type = PublisherType.USER,
             name = "demo-up",
             official = null,
-            state = 1,
+            state = EntityState.ACTIVE,
             face = LazyImage("https://example.com/face.png"),
             header = null,
             pendant = null,
@@ -479,7 +482,7 @@ class CommandListenerTest {
 
         override suspend fun fetchPublisherProfile(userId: String): PublisherProfile? {
             fetchProfileCalls += 1
-            return if (userId == profile.userId) profile else null
+            return if (userId == profile.externalId) profile else null
         }
 
         override suspend fun queryFollowState(userId: String): FollowState {

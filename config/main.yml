@@ -1,0 +1,8 @@
+---
+templates:
+  default: "{publisher.name} 发布了新动态\n{dynamic.text}\n{dynamic.link}"
+command:
+  prefix: "/db"
+  permissions: []
+subscription:
+  unfollowWhenNoSubscribers: false
