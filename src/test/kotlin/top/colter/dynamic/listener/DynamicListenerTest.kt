@@ -4,10 +4,13 @@ import java.nio.file.Paths
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.data.Dynamic
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicContentNodeText
+import top.colter.dynamic.core.data.DynamicElementType
+import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.MessageContent
@@ -22,6 +25,8 @@ import top.colter.dynamic.core.event.EventManger
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.register
+import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
+import top.colter.dynamic.core.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
@@ -32,6 +37,7 @@ import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class DynamicListenerTest {
@@ -92,6 +98,87 @@ class DynamicListenerTest {
         assertEquals("fallback Demo UP", contents.single().fallbackText)
     }
 
+    @Test
+    fun shouldSkipRenderingAndDeliveryWhenAllTargetsAreFiltered() = runBlocking {
+        initDb("dynamic-listener-filter-all")
+        val publisher = createPublisher()
+        val subscriber = createSubscriber()
+        SubscriptionRepository.subscribe(subscriber.id, publisher.id)
+        val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!
+        DynamicFilterRuleRepository.addElementRule(subscription.id, DynamicElementType.TEXT)
+
+        var loadCalls = 0
+        var renderCalls = 0
+        val listener = DynamicListener(
+            config = MainDynamicConfig(templates = mapOf("default" to "filtered {publisher.name}")),
+            imageLoader = DynamicImageLoader { loadCalls += 1 },
+            imageRenderer = DynamicImageRenderer {
+                renderCalls += 1
+                Paths.get("D:/tmp/filtered.png")
+            },
+        )
+
+        val received = captureMessageEvent()
+        listener.onMessage(DynamicEvent(source = "test", dynamic = demoDynamic(publisher)))
+        val event = withTimeoutOrNull(300) { received.await() }
+
+        assertNull(event)
+        assertEquals(0, loadCalls)
+        assertEquals(0, renderCalls)
+        assertEquals(0, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
+    }
+
+    @Test
+    fun shouldDeliverOnlyUnfilteredTargets() = runBlocking {
+        initDb("dynamic-listener-filter-partial")
+        val publisher = createPublisher()
+        val filteredSubscriber = createSubscriber(id = 10, targetId = "100")
+        val allowedSubscriber = createSubscriber(id = 11, targetId = "200")
+        SubscriptionRepository.subscribe(filteredSubscriber.id, publisher.id)
+        SubscriptionRepository.subscribe(allowedSubscriber.id, publisher.id)
+        val filteredSubscription = SubscriptionRepository.findBySubscriberAndPublisher(filteredSubscriber.id, publisher.id)!!
+        DynamicFilterRuleRepository.addElementRule(filteredSubscription.id, DynamicElementType.TEXT)
+
+        val listener = DynamicListener(
+            config = MainDynamicConfig(templates = mapOf("default" to "allowed {publisher.name}")),
+            imageLoader = DynamicImageLoader { },
+            imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/allowed.png") },
+        )
+
+        val received = captureMessageEvent()
+        listener.onMessage(DynamicEvent(source = "test", dynamic = demoDynamic(publisher)))
+        val event = withTimeout(3_000) { received.await() }
+
+        assertEquals(listOf(allowedSubscriber.toMessageTarget()), event.message.targets)
+        assertEquals(1, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
+    }
+
+    @Test
+    fun shouldApplyFiltersToTargetEventsOnlyWhenSubscriptionExists() = runBlocking {
+        initDb("dynamic-listener-filter-target")
+        val publisher = createPublisher()
+        val filteredSubscriber = createSubscriber(id = 10, targetId = "100")
+        val directSubscriber = createSubscriber(id = 11, targetId = "200")
+        SubscriptionRepository.subscribe(filteredSubscriber.id, publisher.id)
+        val filteredSubscription = SubscriptionRepository.findBySubscriberAndPublisher(filteredSubscriber.id, publisher.id)!!
+        DynamicFilterRuleRepository.addElementRule(filteredSubscription.id, DynamicElementType.TEXT)
+
+        val listener = DynamicListener(
+            config = MainDynamicConfig(templates = mapOf("default" to "direct {publisher.name}")),
+            imageLoader = DynamicImageLoader { },
+            imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/direct.png") },
+        )
+
+        val received = captureMessageEvent()
+        listener.onMessage(DynamicEvent(source = "test", target = filteredSubscriber, dynamic = demoDynamic(publisher)))
+        assertNull(withTimeoutOrNull(300) { received.await() })
+
+        listener.onMessage(DynamicEvent(source = "test", target = directSubscriber, dynamic = demoDynamic(publisher)))
+        val event = withTimeout(3_000) { received.await() }
+
+        assertEquals(listOf(directSubscriber.toMessageTarget()), event.message.targets)
+    }
+
     private fun captureMessageEvent(): CompletableDeferred<MessageEvent> {
         val received = CompletableDeferred<MessageEvent>()
         object : Listener<MessageEvent> {
@@ -124,20 +211,20 @@ class DynamicListenerTest {
         return assertNotNull(PublisherRepository.findByPlatformAndExternalId("bilibili", "123"))
     }
 
-    private fun createSubscriber(): Subscriber {
+    private fun createSubscriber(id: Int = 10, targetId: String = "100"): Subscriber {
         SubscriberRepository.create(
             Subscriber(
-                id = 10,
+                id = id,
                 platformId = "onebot",
                 type = SubscriberType.GROUP,
-                targetId = "100",
+                targetId = targetId,
                 name = "group",
                 state = EntityState.ACTIVE,
                 createTime = 1,
                 createUser = 1,
             )
         )
-        return assertNotNull(SubscriberRepository.findByPlatformAndTarget("onebot", SubscriberType.GROUP, "100"))
+        return assertNotNull(SubscriberRepository.findByPlatformAndTarget("onebot", SubscriberType.GROUP, targetId))
     }
 
     private fun demoDynamic(publisher: Publisher): Dynamic {

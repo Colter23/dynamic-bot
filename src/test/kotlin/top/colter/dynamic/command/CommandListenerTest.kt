@@ -11,6 +11,7 @@ import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
+import top.colter.dynamic.core.data.DynamicElementType
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.MessageContent
@@ -31,6 +32,7 @@ import top.colter.dynamic.core.plugin.PublisherLoginMethod
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
+import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
@@ -364,6 +366,112 @@ class CommandListenerTest {
         assertTrue(message.contains("-> bili-video"))
     }
 
+    @Test
+    fun `filter commands should add list remove and clear rules`() = runBlocking {
+        initDb("filter-manage")
+        CommandRegistry.clear()
+        val subscriptionId = createCurrentSubscription()
+        val listener = CommandListener(platformPluginResolver = { null })
+
+        val addElement = dispatch(
+            listener = listener,
+            event = commandEvent(listOf("filter", "add", "element", "bilibili", "123", "image")),
+        )
+        val addContent = dispatch(
+            listener = listener,
+            event = commandEvent(listOf("filter", "add", "content", "bilibili", "123", "keyword", "spoiler", "phrase")),
+        )
+        val list = dispatch(
+            listener = listener,
+            event = commandEvent(listOf("filter", "list", "bilibili", "123")),
+        )
+
+        assertEquals(CommandStatus.SUCCESS, addElement.status)
+        assertTrue(renderMessage(addElement).contains("filter rule created"))
+        assertEquals(CommandStatus.SUCCESS, addContent.status)
+        assertTrue(renderMessage(addContent).contains("spoiler phrase"))
+        assertEquals(2, DynamicFilterRuleRepository.findBySubscriptionId(subscriptionId).size)
+        assertTrue(renderMessage(list).contains("element has_element image"))
+        assertTrue(renderMessage(list).contains("content keyword spoiler phrase"))
+
+        val imageRule = DynamicFilterRuleRepository.findBySubscriptionId(subscriptionId).single { it.value == "IMAGE" }
+        val remove = dispatch(
+            listener = listener,
+            event = commandEvent(listOf("filter", "remove", imageRule.id.toString())),
+        )
+        val clear = dispatch(
+            listener = listener,
+            event = commandEvent(listOf("filter", "clear", "bilibili", "123")),
+        )
+
+        assertEquals(CommandStatus.SUCCESS, remove.status)
+        assertEquals(CommandStatus.SUCCESS, clear.status)
+        assertTrue(renderMessage(clear).contains("count=1"))
+        assertTrue(DynamicFilterRuleRepository.findBySubscriptionId(subscriptionId).isEmpty())
+    }
+
+    @Test
+    fun `filter add should reject invalid element regex and unsubscribed publisher`() = runBlocking {
+        initDb("filter-invalid")
+        CommandRegistry.clear()
+        createPublisher()
+        val listener = CommandListener(platformPluginResolver = { null })
+
+        val notSubscribed = dispatch(
+            listener = listener,
+            event = commandEvent(listOf("filter", "add", "element", "bilibili", "123", "image")),
+        )
+        createCurrentSubscription()
+        val unknownElement = dispatch(
+            listener = listener,
+            event = commandEvent(listOf("filter", "add", "element", "bilibili", "123", "unknown")),
+        )
+        val invalidRegex = dispatch(
+            listener = listener,
+            event = commandEvent(listOf("filter", "add", "content", "bilibili", "123", "regex", "[")),
+        )
+
+        assertEquals(CommandStatus.FAILED, notSubscribed.status)
+        assertTrue(renderMessage(notSubscribed).contains("not subscribed"))
+        assertEquals(CommandStatus.FAILED, unknownElement.status)
+        assertTrue(renderMessage(unknownElement).contains("unknown dynamic element"))
+        assertEquals(CommandStatus.FAILED, invalidRegex.status)
+        assertTrue(renderMessage(invalidRegex).contains("filter rule rejected"))
+    }
+
+    @Test
+    fun `filter remove should only remove rules for current target`() = runBlocking {
+        initDb("filter-remove-owner")
+        CommandRegistry.clear()
+        val publisher = createPublisher()
+        val currentSubscriber = SubscriberRepository.upsert(
+            platformId = "onebot",
+            targetId = "100",
+            name = "current",
+            type = SubscriberType.GROUP,
+        ).value
+        val otherSubscriber = SubscriberRepository.upsert(
+            platformId = "onebot",
+            targetId = "200",
+            name = "other",
+            type = SubscriberType.GROUP,
+        ).value
+        SubscriptionRepository.subscribe(currentSubscriber.id, publisher.id)
+        SubscriptionRepository.subscribe(otherSubscriber.id, publisher.id)
+        val otherSubscription = SubscriptionRepository.findBySubscriberAndPublisher(otherSubscriber.id, publisher.id)!!
+        val otherRule = DynamicFilterRuleRepository.addElementRule(otherSubscription.id, DynamicElementType.TEXT).value
+        val listener = CommandListener(platformPluginResolver = { null })
+
+        val result = dispatch(
+            listener = listener,
+            event = commandEvent(listOf("filter", "remove", otherRule.id.toString())),
+        )
+
+        assertEquals(CommandStatus.FAILED, result.status)
+        assertTrue(renderMessage(result).contains("filter rule not found"))
+        assertEquals(otherRule, DynamicFilterRuleRepository.findById(otherRule.id))
+    }
+
     private suspend fun dispatch(listener: CommandListener, event: CommandEvent): CommandResultEvent {
         return dispatchMany(listener, event, expectedCount = 1).single()
     }
@@ -451,6 +559,18 @@ class CommandListenerTest {
             )
         )
         return PublisherRepository.findByPlatformAndExternalId("bilibili", "123")!!
+    }
+
+    private fun createCurrentSubscription(): Int {
+        val publisher = PublisherRepository.findByPlatformAndExternalId("bilibili", "123") ?: createPublisher()
+        val subscriber = SubscriberRepository.upsert(
+            platformId = "onebot",
+            targetId = "100",
+            name = "group",
+            type = SubscriberType.GROUP,
+        ).value
+        SubscriptionRepository.subscribe(subscriber.id, publisher.id)
+        return SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!.id
     }
 
     private class FakePlatformPublisherPlugin(

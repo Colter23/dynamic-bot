@@ -11,11 +11,14 @@ import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageChain
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.Subscription
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.event.DynamicEvent
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.broadcast
+import top.colter.dynamic.core.filter.DynamicFilterEvaluator
+import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
@@ -39,9 +42,15 @@ public class DynamicListener(
 
     override suspend fun onMessage(event: DynamicEvent) {
         val dynamic = event.dynamic
-        val subscribers = resolveSubscribers(event)
-        if (subscribers.isEmpty()) {
+        val targets = resolveTargets(event)
+        if (targets.isEmpty()) {
             println("dynamic event skipped: ${dynamic.dynamicId}, reason=no_subscriber")
+            return
+        }
+
+        val deliverableTargets = applyFilters(dynamic, targets)
+        if (deliverableTargets.isEmpty()) {
+            println("dynamic event skipped: ${dynamic.dynamicId}, reason=filtered")
             return
         }
 
@@ -50,7 +59,7 @@ public class DynamicListener(
         val message = Message(
             id = messageId(dynamic),
             time = System.currentTimeMillis() / 1000,
-            targets = subscribers.map { it.toMessageTarget() },
+            targets = deliverableTargets.map { it.subscriber.toMessageTarget() },
             chain = listOf(buildMessageChain(dynamic)),
         )
         MessageDeliveryRepository.createPending(message)
@@ -61,11 +70,43 @@ public class DynamicListener(
         ).broadcast()
     }
 
-    private fun resolveSubscribers(event: DynamicEvent): List<Subscriber> {
-        event.target?.let { return listOf(it).filter { subscriber -> subscriber.state == EntityState.ACTIVE } }
+    private fun resolveTargets(event: DynamicEvent): List<DeliveryTarget> {
+        event.target?.let { target ->
+            if (target.state != EntityState.ACTIVE) return emptyList()
+            return listOf(
+                DeliveryTarget(
+                    subscriber = target,
+                    subscription = SubscriptionRepository.findBySubscriberAndPublisher(
+                        subscriberId = target.id,
+                        publisherId = event.dynamic.publisher.id,
+                    ),
+                )
+            )
+        }
         return SubscriptionRepository
-            .findSubscribersByPublisherId(event.dynamic.publisher.id)
-            .filter { it.state == EntityState.ACTIVE }
+            .findSubscriptionsWithSubscribersByPublisherId(event.dynamic.publisher.id)
+            .filter { it.subscriber.state == EntityState.ACTIVE }
+            .map { DeliveryTarget(subscriber = it.subscriber, subscription = it.subscription) }
+    }
+
+    private fun applyFilters(dynamic: Dynamic, targets: List<DeliveryTarget>): List<DeliveryTarget> {
+        val subscriptionIds = targets.mapNotNull { it.subscription?.id }
+        if (subscriptionIds.isEmpty()) return targets
+
+        val rulesBySubscriptionId = DynamicFilterRuleRepository.findBySubscriptionIds(subscriptionIds)
+        return targets.filter { target ->
+            val rules = target.subscription
+                ?.let { rulesBySubscriptionId[it.id] }
+                .orEmpty()
+            val blocked = rules.isNotEmpty() && DynamicFilterEvaluator.isBlocked(dynamic, rules)
+            if (blocked) {
+                println(
+                    "dynamic event target filtered: ${dynamic.dynamicId}, " +
+                        "subscriberId=${target.subscriber.id}, subscriptionId=${target.subscription?.id}"
+                )
+            }
+            !blocked
+        }
     }
 
     private suspend fun buildMessageChain(dynamic: Dynamic): MessageChain {
@@ -117,4 +158,9 @@ public class DynamicListener(
     private fun messageId(dynamic: Dynamic): Long {
         return "${dynamic.platform.id}:${dynamic.publisher.id}:${dynamic.dynamicId}".hashCode().toLong() and Long.MAX_VALUE
     }
+
+    private data class DeliveryTarget(
+        val subscriber: Subscriber,
+        val subscription: Subscription?,
+    )
 }

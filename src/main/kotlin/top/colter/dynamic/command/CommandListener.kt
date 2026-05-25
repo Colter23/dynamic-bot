@@ -26,10 +26,16 @@ import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
 import top.colter.dynamic.core.data.DeliveryStatus
+import top.colter.dynamic.core.data.DynamicElementType
+import top.colter.dynamic.core.data.DynamicFilterMatcher
+import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.MessageChain
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.Publisher
+import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.SubscriberType
+import top.colter.dynamic.core.data.Subscription
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
 import top.colter.dynamic.core.event.Listener
@@ -41,6 +47,7 @@ import top.colter.dynamic.core.plugin.PublisherLoginMethod
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
+import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
@@ -149,6 +156,11 @@ public class CommandListener(
         CommandRegistry.register(TemplateListCommandHandler { runtimeConfig }, MAIN_OWNER)
         CommandRegistry.register(TemplateSetCommandHandler({ runtimeConfig }, commandPrefix), MAIN_OWNER)
         CommandRegistry.register(TemplateRemoveCommandHandler(commandPrefix), MAIN_OWNER)
+        CommandRegistry.register(FilterAddElementCommandHandler(commandPrefix), MAIN_OWNER)
+        CommandRegistry.register(FilterAddContentCommandHandler(commandPrefix), MAIN_OWNER)
+        CommandRegistry.register(FilterListCommandHandler(commandPrefix), MAIN_OWNER)
+        CommandRegistry.register(FilterRemoveCommandHandler(commandPrefix), MAIN_OWNER)
+        CommandRegistry.register(FilterClearCommandHandler(commandPrefix), MAIN_OWNER)
     }
 }
 
@@ -158,6 +170,77 @@ private fun ChatType.toSubscriberType(): SubscriberType {
         ChatType.PRIVATE -> SubscriberType.USER
         ChatType.CHANNEL -> SubscriberType.CHANNEL
     }
+}
+
+private fun CommandInvocation.currentSubscriber(): Subscriber? {
+    return SubscriberRepository.findByPlatformAndTarget(
+        platformId = context.platform,
+        type = context.chatType.toSubscriberType(),
+        targetId = context.chatId,
+    )
+}
+
+private fun success(message: String): CommandExecutionResult {
+    return CommandExecutionResult(CommandExecutionStatus.SUCCESS, message)
+}
+
+private fun failed(message: String): CommandExecutionResult {
+    return CommandExecutionResult(CommandExecutionStatus.FAILED, message)
+}
+
+private fun parseDynamicElementType(value: String): DynamicElementType? {
+    return DynamicElementType.entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
+}
+
+private fun parseContentMatcher(value: String): DynamicFilterMatcher? {
+    return when (value.lowercase()) {
+        "keyword" -> DynamicFilterMatcher.KEYWORD
+        "regex" -> DynamicFilterMatcher.REGEX
+        else -> null
+    }
+}
+
+private fun resolveFilterTarget(
+    invocation: CommandInvocation,
+    platform: String,
+    publisherUserId: String,
+): FilterTargetResolveResult {
+    val normalizedPlatform = platform.lowercase()
+    val publisher = PublisherRepository.findByPlatformAndExternalId(normalizedPlatform, publisherUserId)
+        ?: return FilterTargetResolveResult.Failed(failed("publisher not found: $normalizedPlatform:$publisherUserId"))
+    val subscriber = invocation.currentSubscriber()
+        ?: return FilterTargetResolveResult.Failed(failed("not subscribed: $normalizedPlatform:$publisherUserId"))
+    val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)
+        ?: return FilterTargetResolveResult.Failed(failed("not subscribed: ${publisher.platformId}:${publisher.externalId}"))
+
+    return FilterTargetResolveResult.Found(
+        ResolvedFilterTarget(
+            publisher = publisher,
+            subscriber = subscriber,
+            subscription = subscription,
+        )
+    )
+}
+
+private fun formatFilterRule(rule: DynamicFilterRule, publisher: Publisher? = null): String {
+    val owner = publisher?.let { "${it.platformId}:${it.externalId}" } ?: "subscriptionId=${rule.subscriptionId}"
+    val value = if (rule.matcher == DynamicFilterMatcher.HAS_ELEMENT) {
+        rule.value.lowercase()
+    } else {
+        rule.value
+    }
+    return "#${rule.id} $owner ${rule.ruleType.name.lowercase()} ${rule.matcher.name.lowercase()} $value"
+}
+
+private data class ResolvedFilterTarget(
+    val publisher: Publisher,
+    val subscriber: Subscriber,
+    val subscription: Subscription,
+)
+
+private sealed interface FilterTargetResolveResult {
+    data class Found(val target: ResolvedFilterTarget) : FilterTargetResolveResult
+    data class Failed(val result: CommandExecutionResult) : FilterTargetResolveResult
 }
 
 private class HelpCommandHandler(
@@ -689,4 +772,193 @@ private class TemplateRemoveCommandHandler(
             )
         }
     }
+}
+
+private class FilterAddElementCommandHandler(
+    private val commandPrefix: String,
+) : CommandHandler {
+    override val spec: CommandSpec = CommandSpec(
+        path = listOf("filter", "add", "element"),
+        description = "add an element block filter for a subscription",
+        usage = "filter add element <platform> <publisherUserId> <text|image|video|card|origin>",
+        requiredRole = CommandRole.USER,
+    )
+
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.size != 3) {
+            return failed("usage: $commandPrefix ${spec.usage}")
+        }
+
+        val platform = invocation.args[0]
+        val publisherUserId = invocation.args[1]
+        val element = parseDynamicElementType(invocation.args[2])
+            ?: return failed("unknown dynamic element: ${invocation.args[2]}")
+        val target = when (val resolved = resolveFilterTarget(invocation, platform, publisherUserId)) {
+            is FilterTargetResolveResult.Failed -> return resolved.result
+            is FilterTargetResolveResult.Found -> resolved.target
+        }
+
+        val result = DynamicFilterRuleRepository.addElementRule(target.subscription.id, element)
+        val state = if (result.created) "created" else "existing"
+        return success("filter rule $state: ${formatFilterRule(result.value, target.publisher)}")
+    }
+}
+
+private class FilterAddContentCommandHandler(
+    private val commandPrefix: String,
+) : CommandHandler {
+    override val spec: CommandSpec = CommandSpec(
+        path = listOf("filter", "add", "content"),
+        description = "add a content block filter for a subscription",
+        usage = "filter add content <platform> <publisherUserId> <keyword|regex> <pattern...>",
+        requiredRole = CommandRole.USER,
+    )
+
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.size < 4) {
+            return failed("usage: $commandPrefix ${spec.usage}")
+        }
+
+        val platform = invocation.args[0]
+        val publisherUserId = invocation.args[1]
+        val matcher = parseContentMatcher(invocation.args[2])
+            ?: return failed("unknown content matcher: ${invocation.args[2]}")
+        val pattern = invocation.args.drop(3).joinToString(" ").trim()
+        if (pattern.isBlank()) {
+            return failed("filter pattern must not be blank")
+        }
+        val target = when (val resolved = resolveFilterTarget(invocation, platform, publisherUserId)) {
+            is FilterTargetResolveResult.Failed -> return resolved.result
+            is FilterTargetResolveResult.Found -> resolved.target
+        }
+
+        val result = try {
+            DynamicFilterRuleRepository.addContentRule(target.subscription.id, matcher, pattern)
+        } catch (e: IllegalArgumentException) {
+            return failed("filter rule rejected: ${e.message}")
+        }
+        val state = if (result.created) "created" else "existing"
+        return success("filter rule $state: ${formatFilterRule(result.value, target.publisher)}")
+    }
+}
+
+private class FilterListCommandHandler(
+    private val commandPrefix: String,
+) : CommandHandler {
+    override val spec: CommandSpec = CommandSpec(
+        path = listOf("filter", "list"),
+        description = "list subscription filters for the current target",
+        usage = "filter list [platform] [publisherUserId]",
+        requiredRole = CommandRole.USER,
+    )
+
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        return when (invocation.args.size) {
+            0 -> listAll(invocation)
+            2 -> listOne(invocation, invocation.args[0], invocation.args[1])
+            else -> failed("usage: $commandPrefix ${spec.usage}")
+        }
+    }
+
+    private fun listAll(invocation: CommandInvocation): CommandExecutionResult {
+        val subscriber = invocation.currentSubscriber() ?: return success("filters: (none)")
+        val targets = SubscriptionRepository
+            .findPublisherIdsBySubscriberId(subscriber.id)
+            .mapNotNull { publisherId ->
+                val publisher = PublisherRepository.findById(publisherId) ?: return@mapNotNull null
+                val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)
+                    ?: return@mapNotNull null
+                ResolvedFilterTarget(publisher, subscriber, subscription)
+            }
+            .sortedWith(compareBy<ResolvedFilterTarget> { it.publisher.platformId }.thenBy { it.publisher.externalId })
+
+        if (targets.isEmpty()) return success("filters: (none)")
+
+        val rulesBySubscriptionId = DynamicFilterRuleRepository.findBySubscriptionIds(targets.map { it.subscription.id })
+        val lines = targets.flatMap { target ->
+            rulesBySubscriptionId[target.subscription.id]
+                .orEmpty()
+                .sortedBy { it.id }
+                .map { rule -> formatFilterRule(rule, target.publisher) }
+        }
+
+        return success(lines.ifEmpty { listOf("filters: (none)") }.joinToString("\n"))
+    }
+
+    private fun listOne(
+        invocation: CommandInvocation,
+        platform: String,
+        publisherUserId: String,
+    ): CommandExecutionResult {
+        val target = when (val resolved = resolveFilterTarget(invocation, platform, publisherUserId)) {
+            is FilterTargetResolveResult.Failed -> return resolved.result
+            is FilterTargetResolveResult.Found -> resolved.target
+        }
+        val lines = DynamicFilterRuleRepository
+            .findBySubscriptionId(target.subscription.id)
+            .sortedBy { it.id }
+            .map { rule -> formatFilterRule(rule, target.publisher) }
+
+        return success(lines.ifEmpty { listOf("filters: (none)") }.joinToString("\n"))
+    }
+}
+
+private class FilterRemoveCommandHandler(
+    private val commandPrefix: String,
+) : CommandHandler {
+    override val spec: CommandSpec = CommandSpec(
+        path = listOf("filter", "remove"),
+        description = "remove a subscription filter",
+        usage = "filter remove <ruleId>",
+        requiredRole = CommandRole.USER,
+    )
+
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.size != 1) {
+            return failed("usage: $commandPrefix ${spec.usage}")
+        }
+        val ruleId = invocation.args.single().toIntOrNull()
+            ?: return failed("invalid filter rule id: ${invocation.args.single()}")
+        val rule = DynamicFilterRuleRepository.findById(ruleId)
+            ?: return failed("filter rule not found: #$ruleId")
+        if (!rule.belongsToCurrentSubscriber(invocation)) {
+            return failed("filter rule not found: #$ruleId")
+        }
+
+        val removed = DynamicFilterRuleRepository.removeById(ruleId)
+        return if (removed) {
+            success("filter rule removed: #$ruleId")
+        } else {
+            failed("filter rule not found: #$ruleId")
+        }
+    }
+}
+
+private class FilterClearCommandHandler(
+    private val commandPrefix: String,
+) : CommandHandler {
+    override val spec: CommandSpec = CommandSpec(
+        path = listOf("filter", "clear"),
+        description = "clear subscription filters",
+        usage = "filter clear <platform> <publisherUserId>",
+        requiredRole = CommandRole.USER,
+    )
+
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.size != 2) {
+            return failed("usage: $commandPrefix ${spec.usage}")
+        }
+        val target = when (val resolved = resolveFilterTarget(invocation, invocation.args[0], invocation.args[1])) {
+            is FilterTargetResolveResult.Failed -> return resolved.result
+            is FilterTargetResolveResult.Found -> resolved.target
+        }
+        val removed = DynamicFilterRuleRepository.clearBySubscriptionId(target.subscription.id)
+        return success("filter rules cleared: count=$removed")
+    }
+}
+
+private fun DynamicFilterRule.belongsToCurrentSubscriber(invocation: CommandInvocation): Boolean {
+    val subscriber = invocation.currentSubscriber() ?: return false
+    val subscription = SubscriptionRepository.findById(subscriptionId) ?: return false
+    return subscription.subscriberId == subscriber.id
 }
