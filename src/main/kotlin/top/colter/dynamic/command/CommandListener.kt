@@ -53,6 +53,8 @@ import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
+import top.colter.dynamic.link.DynamicLinkForwarder
+import top.colter.dynamic.link.ParseDynamicLinkCommandHandler
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.nio.file.Files
@@ -62,6 +64,7 @@ import javax.imageio.ImageIO
 
 public class CommandListener(
     private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
+    private val dynamicLinkForwarder: DynamicLinkForwarder = DynamicLinkForwarder { emptyList() },
     config: MainDynamicConfig? = null,
     private val configService: ConfigService = DefaultConfigService,
 ) : Listener<CommandEvent> {
@@ -149,6 +152,7 @@ public class CommandListener(
         CommandRegistry.unregisterByOwner(MAIN_OWNER)
         CommandRegistry.register(HelpCommandHandler(commandPrefix), MAIN_OWNER)
         CommandRegistry.register(StatusCommandHandler(), MAIN_OWNER)
+        CommandRegistry.register(ParseDynamicLinkCommandHandler(dynamicLinkForwarder, commandPrefix), MAIN_OWNER)
         CommandRegistry.register(SubscribeCommandHandler(platformPluginResolver, commandPrefix), MAIN_OWNER)
         CommandRegistry.register(LoginCommandHandler(platformPluginResolver, commandPrefix), MAIN_OWNER)
         CommandRegistry.register(UnsubscribeCommandHandler(platformPluginResolver, { runtimeConfig }, commandPrefix), MAIN_OWNER)

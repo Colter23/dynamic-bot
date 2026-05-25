@@ -23,6 +23,8 @@ import top.colter.dynamic.core.task.TaskDefinition
 import top.colter.dynamic.core.task.TaskSchedule
 import top.colter.dynamic.core.task.TaskScheduler
 import top.colter.dynamic.draw.DynamicImageCache
+import top.colter.dynamic.link.DynamicLinkAutoParseListener
+import top.colter.dynamic.link.DynamicLinkForwarder
 import top.colter.dynamic.listener.DynamicListener
 import top.colter.dynamic.listener.ImageFileCleaner
 
@@ -70,10 +72,19 @@ public object DynamicApplication : CoroutineScope {
         DynamicImageCache.configure(Paths.get(config.imageCache.sourceRoot))
         registerImageCleanupTask(config)
 
+        val dynamicLinkForwarder = DynamicLinkForwarder {
+            pluginManager.getDynamicLinkResolvers()
+        }
+
         listenerTokens += DynamicListener(config = config).register<DynamicEvent>()
         listenerTokens += CommandListener(
             config = config,
+            dynamicLinkForwarder = dynamicLinkForwarder,
             platformPluginResolver = { platformId -> pluginManager.findPlatformPublisherPlugin(platformId) }
+        ).register<CommandEvent>()
+        listenerTokens += DynamicLinkAutoParseListener(
+            configProvider = { config },
+            forwarder = dynamicLinkForwarder,
         ).register<CommandEvent>()
 
         listenerTokens += object : Listener<MessageEvent> {

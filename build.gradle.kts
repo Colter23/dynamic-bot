@@ -19,7 +19,7 @@ dependencies {
     implementation("org.jetbrains.skiko:skiko-awt:$skikoVersion")
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.3")// 临时
 
-    implementation("top.colter.dynamic:dynamic-bot-core:0.0.2")
+    implementation("top.colter.dynamic:dynamic-bot-core:0.0.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("org.slf4j:slf4j-simple:2.0.16")
     implementation("com.google.zxing:core:3.5.3")

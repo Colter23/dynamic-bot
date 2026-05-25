@@ -22,6 +22,7 @@ import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
+import top.colter.dynamic.link.LINK_PARSE_EVENT_LABEL
 
 public class DynamicListener(
     config: MainDynamicConfig? = null,
@@ -48,7 +49,11 @@ public class DynamicListener(
             return
         }
 
-        val deliverableTargets = applyFilters(dynamic, targets)
+        val deliverableTargets = if (event.label == LINK_PARSE_EVENT_LABEL) {
+            targets
+        } else {
+            applyFilters(dynamic, targets)
+        }
         if (deliverableTargets.isEmpty()) {
             println("dynamic event skipped: ${dynamic.dynamicId}, reason=filtered")
             return

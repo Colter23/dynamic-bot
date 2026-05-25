@@ -7,6 +7,7 @@ public data class MainDynamicConfig(
     val templates: Map<String, String> = mapOf(DEFAULT_TEMPLATE_NAME to DEFAULT_TEMPLATE),
     val command: CommandConfig = CommandConfig(),
     val subscription: SubscriptionConfig = SubscriptionConfig(),
+    val linkParsing: LinkParsingConfig = LinkParsingConfig(),
     val imageCache: ImageCacheConfig = ImageCacheConfig(),
 ) {
     public companion object {
@@ -18,6 +19,13 @@ public data class MainDynamicConfig(
 
 public data class SubscriptionConfig(
     val unfollowWhenNoSubscribers: Boolean = false,
+)
+
+public data class LinkParsingConfig(
+    val autoParseEnabled: Boolean = true,
+    val maxLinksPerMessage: Int = 1,
+    val autoReplyOnFailure: Boolean = false,
+    val autoDedupeTtlMs: Long = 60_000,
 )
 
 public data class ImageCacheConfig(
