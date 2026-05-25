@@ -14,7 +14,7 @@ repositories {
 dependencies {
     val skikoVersion = "0.8.23"
 
-    implementation("top.colter.skiko:skiko-layout:0.0.3")
+    implementation("top.colter.skiko:skiko-layout:0.0.4")
     implementation("org.jetbrains.skiko:skiko-awt:$skikoVersion")
 
     implementation("top.colter.dynamic:dynamic-bot-core:0.0.2")

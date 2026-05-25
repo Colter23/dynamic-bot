@@ -43,20 +43,19 @@ fun Layout.Author(
         .border(0.dp, 15.dp)
         .shadows(Shadow.ELEVATION_3)
 ) {
-    require(modifier.height.isNotNull()) { "必须指定高度" }
+    //require(modifier.height.isNotNull()) { "必须指定高度" }
 
     Row(
         modifier = Modifier()
             .fillMaxWidth()
             .fillMaxHeight()
     ) {
-
         Avatar(
             face = face,
             pendant = pendant,
             badge = badge,
             modifier = Modifier()
-                .height(this.modifier.height)
+                .fillMaxHeight()
                 .padding(horizontal = 5.dp, vertical = 20.dp)
         )
 
@@ -82,7 +81,7 @@ fun Layout.Author(
         Decorate(
             image = ornament,
             qrCode = qrCode,
-            modifier = Modifier().height(this.modifier.height)
+            modifier = Modifier().fillMaxHeight()
         )
 
     }

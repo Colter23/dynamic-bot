@@ -36,7 +36,7 @@ fun Layout.MediaSmall(
         Image(
             image = cover,
             ratio = coverRatio,
-            modifier = Modifier().border(3.dp, 10.dp).shadows(Shadow.ELEVATION_2)
+            modifier = Modifier().fillMaxHeight().border(3.dp, 10.dp).shadows(Shadow.ELEVATION_2)
         )
 
         // TAG
@@ -80,24 +80,21 @@ fun Layout.MediaSmall(
 
     // 标题简介
     Column(modifier = Modifier().fillWidth().fillMaxHeight().margin(15.dp)) {
-        Box(modifier = Modifier().fillMaxWidth().fillRatioHeight(0.4f)) {
-            Text(
-                text = title,
-                fontSize = 23.dp,
-                maxLinesCount = 2,
-                alignment = LayoutAlignment.LEFT,
-                modifier = Modifier().fillMaxWidth()
-            )
-        }
-        Box(modifier = Modifier().fillMaxWidth().fillRatioHeight(0.6f)) {
-            Text(
-                text = desc,
-                color = Color.BLACK.withAlpha(0.7f),
-                maxLinesCount = 4,
-                alignment = LayoutAlignment.LEFT,
-                modifier = Modifier().fillMaxWidth()
-            )
-        }
+        Text(
+            text = title,
+            fontSize = 23.dp,
+            maxLinesCount = 2,
+            alignment = LayoutAlignment.LEFT,
+            modifier = Modifier().fillRatioHeight(0.4f)
+        )
+
+        Text(
+            text = desc,
+            color = Color.BLACK.withAlpha(0.7f),
+            maxLinesCount = 4,
+            alignment = LayoutAlignment.LEFT,
+            modifier = Modifier().fillRatioHeight(0.6f)
+        )
     }
 
 }

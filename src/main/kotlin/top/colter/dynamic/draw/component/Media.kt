@@ -38,7 +38,7 @@ fun Layout.Media(
         .border(3.dp, 15.dp, Color.WHITE)
         .shadows(Shadow.ELEVATION_3)
 ) {
-    require(modifier.width.isNotNull()) { "必须指定宽度" }
+    //require(modifier.width.isNotNull()) { "必须指定宽度" }
 
     Box(
         modifier = Modifier().fillMaxWidth()

@@ -22,7 +22,6 @@ fun Layout.Decorate(
     alignment = alignment,
     modifier = modifier
 ) {
-    require(modifier.height.isNotNull()) { "必须指定高度" }
 
     if (image != null) {
         Image(
@@ -36,7 +35,8 @@ fun Layout.Decorate(
             alignment = LayoutAlignment.RIGHT,
             modifier = Modifier()
                 .fillMaxHeight()
-                .width(modifier.height * 1.5f)
+                //.overflowRatioWidth(1.5f)
+                //.width(modifier.height * 1.5f)
                 .border(0.dp, listOf(0.dp, 15.dp, 15.dp, 0.dp))
                 .background(gradient =
                     Gradient(

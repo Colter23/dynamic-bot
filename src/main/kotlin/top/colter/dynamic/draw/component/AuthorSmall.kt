@@ -25,12 +25,11 @@ fun Layout.AuthorSmall(
     alignment = alignment,
     modifier = modifier
 ) {
-    require(modifier.height.isNotNull()) { "必须指定高度" }
 
     Avatar(
         face = face,
         badge = badge,
-        modifier = Modifier().height(modifier.height).margin(15.dp)
+        modifier = Modifier().fillMaxHeight().margin(15.dp)
     )
     Row(
         modifier = Modifier().fillMaxWidth().fillHeight(), // .background(Color.GREEN),
