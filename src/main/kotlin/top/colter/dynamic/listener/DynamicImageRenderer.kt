@@ -28,7 +28,7 @@ public class FileDynamicImageRenderer(
     private fun fileName(dynamic: Dynamic): String {
         val rawName = listOf(
             dynamic.platform.id,
-            dynamic.publisher.userId.orEmpty().ifBlank { dynamic.publisher.id.toString() },
+            dynamic.publisher.externalId.ifBlank { dynamic.publisher.id.toString() },
             dynamic.dynamicId,
         ).joinToString("-")
         return safeFileName(rawName) + ".png"

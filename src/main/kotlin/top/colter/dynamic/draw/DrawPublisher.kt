@@ -15,8 +15,8 @@ fun Layout.drawPublisher(publisher: Publisher, time: String, link: String, confi
 
     if (containsEnv("FORWARD")) {
         AuthorSmall(
-            face = publisher.face?.image?.makeImage()!!,
-            name = publisher.name!!,
+            face = DynamicImageCache.bytes(publisher.face).makeImage(),
+            name = publisher.name,
             time = time,
             badge = officialImage,
             modifier = Modifier().fillMaxWidth().height(50.dp)//.margin(horizontal = 5.dp, vertical = 10.dp) // .background(Color.RED)
@@ -30,12 +30,12 @@ fun Layout.drawPublisher(publisher: Publisher, time: String, link: String, confi
         }
 
         Author(
-            face = publisher.face?.image?.makeImage()!!,
-            pendant = publisher.pendant?.image?.makeImage(),
-            head = publisher.header?.image?.makeImage(),
+            face = DynamicImageCache.bytes(publisher.face).makeImage(),
+            pendant = publisher.pendant?.let { DynamicImageCache.bytes(it).makeImage() },
+            head = publisher.header?.let { DynamicImageCache.bytes(it).makeImage() },
             ornament = ornamentImage,
             badge = officialImage,
-            name = publisher.name!!,
+            name = publisher.name,
             time = time,
             modifier = Modifier().fillMaxWidth().height(100.dp)// .background(Color.RED)
 //                modifier = Modifier().fillMaxWidth().height(100.dp).margin(top = 10.dp, right = (-15).dp, bottom = 30.dp, left = (-15).dp) // .background(Color.RED)

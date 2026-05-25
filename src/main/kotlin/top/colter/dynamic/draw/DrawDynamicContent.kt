@@ -23,7 +23,11 @@ fun Layout.drawDynamicContent(content: DynamicContent) {
         when (it) {
             is DynamicContentNodeText -> paragraph.addText(it.text, it.style?.toTextStyle(style))
             is DynamicContentNodeLink -> paragraph.addText(it.text, it.style?.toTextStyle(linkStyle) ?: linkStyle)
-            is DynamicContentNodeEmoji -> paragraph.addEmoji(it.text, it.image.image?.makeImage()!!, it.style?.toTextStyle(linkStyle) ?: linkStyle)
+            is DynamicContentNodeEmoji -> paragraph.addEmoji(
+                it.text,
+                DynamicImageCache.bytes(it.image).makeImage(),
+                it.style?.toTextStyle(linkStyle) ?: linkStyle,
+            )
         }
     }
 

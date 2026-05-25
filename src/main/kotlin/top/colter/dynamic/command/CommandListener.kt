@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.command.CommandExecutionResult
 import top.colter.dynamic.core.command.CommandExecutionStatus
 import top.colter.dynamic.core.command.CommandHandler
@@ -24,9 +25,11 @@ import top.colter.dynamic.core.config.loadOrCreate
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
+import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.MessageChain
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.SubscriberType
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
 import top.colter.dynamic.core.event.Listener
@@ -38,10 +41,11 @@ import top.colter.dynamic.core.plugin.PublisherLoginMethod
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
+import top.colter.dynamic.core.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
-import top.colter.dynamic.core.repository.SubscribeRepository
+import top.colter.dynamic.core.repository.SubscriptionRepository
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.nio.file.Files
@@ -140,11 +144,19 @@ public class CommandListener(
         CommandRegistry.register(StatusCommandHandler(), MAIN_OWNER)
         CommandRegistry.register(SubscribeCommandHandler(platformPluginResolver, commandPrefix), MAIN_OWNER)
         CommandRegistry.register(LoginCommandHandler(platformPluginResolver, commandPrefix), MAIN_OWNER)
-        CommandRegistry.register(UnsubscribeCommandHandler(commandPrefix), MAIN_OWNER)
+        CommandRegistry.register(UnsubscribeCommandHandler(platformPluginResolver, { runtimeConfig }, commandPrefix), MAIN_OWNER)
         CommandRegistry.register(ListCommandHandler(), MAIN_OWNER)
         CommandRegistry.register(TemplateListCommandHandler { runtimeConfig }, MAIN_OWNER)
         CommandRegistry.register(TemplateSetCommandHandler({ runtimeConfig }, commandPrefix), MAIN_OWNER)
         CommandRegistry.register(TemplateRemoveCommandHandler(commandPrefix), MAIN_OWNER)
+    }
+}
+
+private fun ChatType.toSubscriberType(): SubscriberType {
+    return when (this) {
+        ChatType.GROUP -> SubscriberType.GROUP
+        ChatType.PRIVATE -> SubscriberType.USER
+        ChatType.CHANNEL -> SubscriberType.CHANNEL
     }
 }
 
@@ -320,7 +332,7 @@ private class LoginCommandHandler(
 
         val contents = buildList {
             imagePath?.let { path ->
-                add(MessageContent.Image(text = "", image = LazyImage(path)))
+                add(MessageContent.Image(fallbackText = "", image = LazyImage(path)))
             }
             add(MessageContent.Text(message))
         }
@@ -409,14 +421,20 @@ private class LoginQrCodeRenderer(
 private class StatusCommandHandler : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("status"),
-        description = "show command registry status",
+        description = "show runtime status",
         usage = "status",
         requiredRole = CommandRole.ADMIN,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
         val commandCount = CommandRegistry.listCommands().size
-        return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "ok, commands=$commandCount")
+        val subscriptionCount = SubscriptionRepository.countAll()
+        val pendingDeliveries = MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING)
+        val failedDeliveries = MessageDeliveryRepository.countByStatus(DeliveryStatus.FAILED)
+        return CommandExecutionResult(
+            CommandExecutionStatus.SUCCESS,
+            "ok, commands=$commandCount, subscriptions=$subscriptionCount, deliveryPending=$pendingDeliveries, deliveryFailed=$failedDeliveries",
+        )
     }
 }
 
@@ -477,26 +495,30 @@ private class SubscribeCommandHandler(
             }
         }
 
-        val publisherUpsert = PublisherRepository.upsert(profile)
+        val publisherUpsert = PublisherRepository.upsertProfile(profile)
+        val subscriberType = invocation.context.chatType.toSubscriberType()
         val subscriber = SubscriberRepository.ensure(
-            platform = invocation.context.platform,
-            userId = invocation.context.senderId,
-            name = invocation.context.senderId,
+            platformId = invocation.context.platform,
+            targetId = invocation.context.chatId,
+            name = invocation.context.chatId,
+            type = subscriberType,
         )
-        val created = SubscribeRepository.subscribe(subscriber.id.toString(), publisherUpsert.value.id.toString())
+        val created = SubscriptionRepository.subscribe(subscriber.id, publisherUpsert.value.id)
 
         val publisherState = if (publisherUpsert.created) "new" else "existing"
         val subscriptionState = if (created) "new" else "existing"
         val followStateText = if (autoFollowed) "yes" else "no"
         return CommandExecutionResult(
             CommandExecutionStatus.SUCCESS,
-            "subscribed: ${publisherUpsert.value.name ?: publisherUpsert.value.userId} " +
+            "subscribed: ${publisherUpsert.value.name} " +
                 "(auto-followed=$followStateText, publisher=$publisherState, subscription=$subscriptionState)",
         )
     }
 }
 
 private class UnsubscribeCommandHandler(
+    private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
+    private val configProvider: () -> MainDynamicConfig,
     private val commandPrefix: String,
 ) : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
@@ -512,16 +534,23 @@ private class UnsubscribeCommandHandler(
         }
         val platform = invocation.args[0].lowercase()
         val publisherUserId = invocation.args[1]
-        val publisher = PublisherRepository.findByPlatformAndUserId(platform, publisherUserId)
+        val publisher = PublisherRepository.findByPlatformAndExternalId(platform, publisherUserId)
             ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "publisher not found: $platform:$publisherUserId")
 
-        val subscriber = SubscriberRepository.findByPlatformAndUserId(invocation.context.platform, invocation.context.senderId)
+        val subscriber = SubscriberRepository.findByPlatformAndTarget(
+            platformId = invocation.context.platform,
+            type = invocation.context.chatType.toSubscriberType(),
+            targetId = invocation.context.chatId,
+        )
             ?: return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
-        val removed = SubscribeRepository.unsubscribe(subscriber.id.toString(), publisher.id.toString())
+        val removed = SubscriptionRepository.unsubscribe(subscriber.id, publisher.id)
+        if (removed && configProvider().subscription.unfollowWhenNoSubscribers && SubscriptionRepository.countByPublisherId(publisher.id) == 0L) {
+            platformPluginResolver(platform)?.unfollowPublisher(publisher.externalId)
+        }
         return if (removed) {
-            CommandExecutionResult(CommandExecutionStatus.SUCCESS, "unsubscribed: ${publisher.name ?: publisher.userId}")
+            CommandExecutionResult(CommandExecutionStatus.SUCCESS, "unsubscribed: ${publisher.name}")
         } else {
-            CommandExecutionResult(CommandExecutionStatus.SUCCESS, "not subscribed: ${publisher.name ?: publisher.userId}")
+            CommandExecutionResult(CommandExecutionStatus.SUCCESS, "not subscribed: ${publisher.name}")
         }
     }
 }
@@ -535,14 +564,18 @@ private class ListCommandHandler : CommandHandler {
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
-        val subscriber = SubscriberRepository.findByPlatformAndUserId(invocation.context.platform, invocation.context.senderId)
+        val subscriber = SubscriberRepository.findByPlatformAndTarget(
+            platformId = invocation.context.platform,
+            type = invocation.context.chatType.toSubscriberType(),
+            targetId = invocation.context.chatId,
+        )
             ?: return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
-        val publisherIds = SubscribeRepository.findPublisherIdsBySubscriberId(subscriber.id.toString())
+        val publisherIds = SubscriptionRepository.findPublisherIdsBySubscriberId(subscriber.id)
         if (publisherIds.isEmpty()) return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
 
-        val lines = publisherIds.mapNotNull { id -> id.toIntOrNull() }
+        val lines = publisherIds
             .mapNotNull { PublisherRepository.findById(it) }
-            .map { "${it.platform}:${it.userId} (${it.name ?: "unknown"})" }
+            .map { "${it.platformId}:${it.externalId} (${it.name})" }
 
         if (lines.isEmpty()) return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
         return CommandExecutionResult(CommandExecutionStatus.SUCCESS, lines.joinToString("\n"))
@@ -561,12 +594,12 @@ private class TemplateListCommandHandler(
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
         val templateNames = configProvider().templates.keys.sorted()
-        val bindings = PublisherTemplateRepository.findAll()
-            .sortedWith(compareBy({ it.publisherId.toIntOrNull() ?: Int.MAX_VALUE }, { it.publisherId }))
+        val bindings = PublisherTemplateRepository.findPublisherBindings()
+            .sortedBy { it.publisherId }
             .map { binding ->
-                val publisher = binding.publisherId.toIntOrNull()?.let { PublisherRepository.findById(it) }
+                val publisher = PublisherRepository.findById(binding.publisherId)
                 val publisherName = if (publisher != null) {
-                    "${publisher.platform}:${publisher.userId} (${publisher.name ?: "unknown"})"
+                    "${publisher.platformId}:${publisher.externalId} (${publisher.name})"
                 } else {
                     "publisherId=${binding.publisherId}"
                 }
@@ -606,17 +639,17 @@ private class TemplateSetCommandHandler(
                 "template not found: $templateName",
             )
         }
-        val publisher = PublisherRepository.findByPlatformAndUserId(platform, publisherUserId)
+        val publisher = PublisherRepository.findByPlatformAndExternalId(platform, publisherUserId)
             ?: return CommandExecutionResult(
                 CommandExecutionStatus.FAILED,
                 "publisher not found: $platform:$publisherUserId",
             )
 
-        val changed = PublisherTemplateRepository.setTemplate(publisher.id.toString(), templateName)
+        val changed = PublisherTemplateRepository.setPublisherTemplate(publisher.id, templateName)
         val state = if (changed) "updated" else "unchanged"
         return CommandExecutionResult(
             CommandExecutionStatus.SUCCESS,
-            "template binding $state: ${publisher.platform}:${publisher.userId} -> $templateName",
+            "template binding $state: ${publisher.platformId}:${publisher.externalId} -> $templateName",
         )
     }
 }
@@ -637,22 +670,22 @@ private class TemplateRemoveCommandHandler(
         }
         val platform = invocation.args[0].lowercase()
         val publisherUserId = invocation.args[1]
-        val publisher = PublisherRepository.findByPlatformAndUserId(platform, publisherUserId)
+        val publisher = PublisherRepository.findByPlatformAndExternalId(platform, publisherUserId)
             ?: return CommandExecutionResult(
                 CommandExecutionStatus.FAILED,
                 "publisher not found: $platform:$publisherUserId",
             )
 
-        val removed = PublisherTemplateRepository.removeTemplate(publisher.id.toString())
+        val removed = PublisherTemplateRepository.removePublisherTemplate(publisher.id)
         return if (removed) {
             CommandExecutionResult(
                 CommandExecutionStatus.SUCCESS,
-                "template binding removed: ${publisher.platform}:${publisher.userId}",
+                "template binding removed: ${publisher.platformId}:${publisher.externalId}",
             )
         } else {
             CommandExecutionResult(
                 CommandExecutionStatus.SUCCESS,
-                "template binding not found: ${publisher.platform}:${publisher.userId}",
+                "template binding not found: ${publisher.platformId}:${publisher.externalId}",
             )
         }
     }

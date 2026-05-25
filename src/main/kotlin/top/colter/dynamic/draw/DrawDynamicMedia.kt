@@ -28,7 +28,7 @@ fun Layout.drawDynamicMedia(media: DynamicMedia) {
 
 
 fun Layout.drawDynamicMediaPic(pics: List<DynamicMediaPic>) {
-    val imgList = pics.map { it to it.pic.image?.makeImage()!! }
+    val imgList = pics.map { it to DynamicImageCache.bytes(it.pic).makeImage() }
     val imgModifier = Modifier().background(Color.WHITE.withAlpha(0.6f)).border(2.dp, 10.dp).shadows(Shadow.ELEVATION_1)
     if (imgList.size == 1) imgModifier.fillMaxWidth()
     val lineCount = if (imgList.size == 1) 1 else if (imgList.size == 2 || imgList.size == 4) 2 else 3
@@ -89,7 +89,7 @@ fun Layout.DynamicMediaPicItem(
 fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo) {
     if (containsEnv("FORWARD")) {
         MediaSmall(
-            cover = video.cover.image?.makeImage()!!,
+            cover = DynamicImageCache.bytes(video.cover).makeImage(),
             title = video.title,
             desc = video.description,
             duration = video.duration,
@@ -97,7 +97,7 @@ fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo) {
         )
     } else {
         Media(
-            cover = video.cover.image?.makeImage()!!,
+            cover = DynamicImageCache.bytes(video.cover).makeImage(),
             title = video.title,
             desc = video.description,
             duration = video.duration,
@@ -110,7 +110,7 @@ fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo) {
 
 fun Layout.drawDynamicMediaCard(card: DynamicMediaCard) {
     Media(
-        cover = card.cover.image?.makeImage()!!,
+        cover = DynamicImageCache.bytes(card.cover).makeImage(),
         title = card.title,
         desc = card.description,
         badge = card.badge,
@@ -120,7 +120,7 @@ fun Layout.drawDynamicMediaCard(card: DynamicMediaCard) {
 
 fun Layout.drawDynamicMediaSmallCard(card: DynamicMediaCard) {
     MediaSmall(
-        cover = card.cover.image?.makeImage()!!,
+        cover = DynamicImageCache.bytes(card.cover).makeImage(),
         title = card.title,
         desc = card.description,
         badge = card.badge,
@@ -130,7 +130,7 @@ fun Layout.drawDynamicMediaSmallCard(card: DynamicMediaCard) {
 
 fun Layout.drawDynamicMediaMiniCard(card: DynamicMediaCard) {
     MediaMini(
-        cover = card.cover.image?.makeImage()!!,
+        cover = DynamicImageCache.bytes(card.cover).makeImage(),
         title = card.title,
         desc = card.description,
         badge = card.badge,

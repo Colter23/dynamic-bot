@@ -5,6 +5,7 @@ import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.config.DefaultConfigService
 import top.colter.dynamic.core.config.loadOrCreate
 import top.colter.dynamic.core.data.Dynamic
+import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageChain
@@ -14,8 +15,9 @@ import top.colter.dynamic.core.event.DynamicEvent
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.broadcast
+import top.colter.dynamic.core.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
-import top.colter.dynamic.core.repository.SubscribeRepository
+import top.colter.dynamic.core.repository.SubscriptionRepository
 
 public class DynamicListener(
     config: MainDynamicConfig? = null,
@@ -38,29 +40,32 @@ public class DynamicListener(
 
         println("dynamic event received: ${dynamic.dynamicId}")
 
+        val message = Message(
+            id = messageId(dynamic),
+            time = System.currentTimeMillis() / 1000,
+            targets = subscribers.map { it.toMessageTarget() },
+            chain = listOf(buildMessageChain(dynamic)),
+        )
+        MessageDeliveryRepository.createPending(message)
+
         MessageEvent(
             source = "main",
-            message = Message(
-                id = messageId(dynamic),
-                time = System.currentTimeMillis() / 1000,
-                subscriber = subscribers,
-                chain = listOf(buildMessageChain(dynamic)),
-            ),
+            message = message,
         ).broadcast()
     }
 
     private fun resolveSubscribers(event: DynamicEvent): List<Subscriber> {
-        event.target?.let { return listOf(it).filter { subscriber -> subscriber.state == 1 } }
-        return SubscribeRepository
-            .findSubscribersByPublisherId(event.dynamic.publisher.id.toString())
-            .filter { it.state == 1 }
+        event.target?.let { return listOf(it).filter { subscriber -> subscriber.state == EntityState.ACTIVE } }
+        return SubscriptionRepository
+            .findSubscribersByPublisherId(event.dynamic.publisher.id)
+            .filter { it.state == EntityState.ACTIVE }
     }
 
     private fun buildMessageChain(dynamic: Dynamic): MessageChain {
         val contents = mutableListOf<MessageContent>()
         renderImage(dynamic)?.let { imagePath ->
             contents += MessageContent.Image(
-                text = "",
+                fallbackText = "",
                 image = LazyImage(imagePath),
             )
         }
@@ -81,11 +86,25 @@ public class DynamicListener(
     }
 
     private fun resolveTemplate(dynamic: Dynamic): String {
-        val templateName = PublisherTemplateRepository.findTemplateNameByPublisherId(dynamic.publisher.id.toString())
+        val templateName = PublisherTemplateRepository.findTemplateName(
+            publisherId = dynamic.publisher.id,
+            platformId = dynamic.platform.id,
+            dynamicType = dynamicType(dynamic),
+        )
         return templateName
             ?.let { config.templates[it] }
             ?: config.templates[MainDynamicConfig.DEFAULT_TEMPLATE_NAME]
             ?: MainDynamicConfig.DEFAULT_TEMPLATE
+    }
+
+    private fun dynamicType(dynamic: Dynamic): String {
+        val media = dynamic.media
+        return when {
+            media?.video != null -> "video"
+            !media?.pics.isNullOrEmpty() -> "image"
+            media?.card != null || media?.smallCard != null || media?.miniCard != null -> "card"
+            else -> "text"
+        }
     }
 
     private fun messageId(dynamic: Dynamic): Long {
