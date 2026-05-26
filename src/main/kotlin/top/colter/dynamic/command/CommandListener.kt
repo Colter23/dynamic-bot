@@ -67,6 +67,7 @@ public class CommandListener(
     private val dynamicLinkForwarder: DynamicLinkForwarder = DynamicLinkForwarder { emptyList() },
     config: MainDynamicConfig? = null,
     configProvider: (() -> MainDynamicConfig)? = null,
+    private val stopRequester: ((String) -> Unit)? = null,
     private val configService: ConfigService = DefaultConfigService,
 ) : Listener<CommandEvent> {
     private companion object {
@@ -153,6 +154,7 @@ public class CommandListener(
         CommandRegistry.unregisterByOwner(MAIN_OWNER)
         CommandRegistry.register(HelpCommandHandler(commandPrefixProvider), MAIN_OWNER)
         CommandRegistry.register(StatusCommandHandler(), MAIN_OWNER)
+        stopRequester?.let { CommandRegistry.register(StopApplicationCommandHandler(it), MAIN_OWNER) }
         CommandRegistry.register(ParseDynamicLinkCommandHandler(dynamicLinkForwarder, commandPrefixProvider), MAIN_OWNER)
         CommandRegistry.register(SubscribeCommandHandler(platformPluginResolver, commandPrefixProvider), MAIN_OWNER)
         CommandRegistry.register(LoginCommandHandler(platformPluginResolver, commandPrefixProvider), MAIN_OWNER)
@@ -529,6 +531,31 @@ private class StatusCommandHandler : CommandHandler {
         return CommandExecutionResult(
             CommandExecutionStatus.SUCCESS,
             "ok, commands=$commandCount, subscriptions=$subscriptionCount, deliveryPending=$pendingDeliveries, deliveryFailed=$failedDeliveries",
+        )
+    }
+}
+
+private class StopApplicationCommandHandler(
+    private val stopRequester: (String) -> Unit,
+) : CommandHandler {
+    override val spec: CommandSpec = CommandSpec(
+        path = listOf("stop"),
+        aliases = listOf(listOf("shutdown")),
+        description = "stop the main application",
+        usage = "stop",
+        requiredRole = CommandRole.ADMIN,
+    )
+
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.isNotEmpty()) {
+            return failed("usage: ${invocation.matchedPath.joinToString(" ")}")
+        }
+        return CommandExecutionResult(
+            status = CommandExecutionStatus.SUCCESS,
+            message = "stop requested; application is shutting down",
+            afterReply = {
+                stopRequester("command:${invocation.context.platform}:${invocation.context.chatId}")
+            },
         )
     }
 }

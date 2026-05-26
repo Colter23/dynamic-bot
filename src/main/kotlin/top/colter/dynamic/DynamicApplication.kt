@@ -3,6 +3,7 @@ package top.colter.dynamic
 import java.nio.file.Paths
 import java.security.SecureRandom
 import java.util.Base64
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -37,7 +38,14 @@ public object DynamicApplication : CoroutineScope {
     private val listenerTokens: MutableList<ListenerToken> = mutableListOf()
     private val taskScheduler: TaskScheduler = TaskScheduler(scope = this)
     private val configStore: MainConfigStore = MainConfigStore()
+    private val shutdownStarted: AtomicBoolean = AtomicBoolean(false)
+    @Volatile
+    private var shutdownCallback: (() -> Unit)? = null
     private var adminServer: AdminServer? = null
+
+    public fun onShutdown(callback: () -> Unit) {
+        shutdownCallback = callback
+    }
 
     public fun run() {
         val dbPath = "data/dynamic.db"
@@ -85,7 +93,8 @@ public object DynamicApplication : CoroutineScope {
         listenerTokens += CommandListener(
             configProvider = configStore::current,
             dynamicLinkForwarder = dynamicLinkForwarder,
-            platformPluginResolver = { platformId -> pluginManager.findPlatformPublisherPlugin(platformId) }
+            platformPluginResolver = { platformId -> pluginManager.findPlatformPublisherPlugin(platformId) },
+            stopRequester = { reason -> requestStop(reason) },
         ).register<CommandEvent>()
         listenerTokens += DynamicLinkAutoParseListener(
             configProvider = configStore::current,
@@ -113,6 +122,7 @@ public object DynamicApplication : CoroutineScope {
             pluginManager = pluginManager,
             configProvider = configStore::current,
             mainConfigUpdater = configStore::save,
+            stopRequester = { reason -> requestStop(reason) },
         )
         server.start()
         adminServer = server
@@ -157,16 +167,32 @@ public object DynamicApplication : CoroutineScope {
         )
     }
 
+    public fun requestStop(reason: String) {
+        Thread(
+            {
+                println("Stop requested: $reason")
+                runCatching { Thread.sleep(500) }
+                shutdown()
+            },
+            "dynamic-application-stop",
+        ).start()
+    }
+
     public fun shutdown() {
-        adminServer?.stop()
-        adminServer = null
-        listenerTokens.forEach { EventManger.removeListener(it) }
-        listenerTokens.clear()
-        runBlocking {
-            taskScheduler.stopAll()
+        if (!shutdownStarted.compareAndSet(false, true)) return
+        try {
+            adminServer?.stop()
+            adminServer = null
+            listenerTokens.forEach { EventManger.removeListener(it) }
+            listenerTokens.clear()
+            runBlocking {
+                taskScheduler.stopAll()
+            }
+            pluginManager.shutdown()
+            EventManger.shutdown()
+            job.cancel()
+        } finally {
+            shutdownCallback?.invoke()
         }
-        pluginManager.shutdown()
-        EventManger.shutdown()
-        job.cancel()
     }
 }

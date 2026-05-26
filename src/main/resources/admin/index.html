@@ -704,6 +704,7 @@
         </div>
         <div class="top-actions">
           <span class="pill" id="connectionState">本机</span>
+          <button class="danger" id="stopApplication">停止主项目</button>
         </div>
       </header>
 
@@ -839,6 +840,9 @@
               </div>
               <div id="configRestartHint" class="restart-note" hidden>带 <span class="restart-mark">⚠️</span> 标记的配置保存后需要重启对应组件。</div>
               <div id="configMessage" class="config-message"></div>
+              <div id="configReloadActions" class="form-actions" hidden>
+                <button type="button" id="reloadConfigPlugin">热重启插件</button>
+              </div>
               <form id="configForm" class="config-form"></form>
             </section>
           </div>
@@ -919,6 +923,7 @@
       actionModal: null,
       configItemModal: null,
       selectedConfigId: "main",
+      pendingConfigReloadPluginId: null,
       cache: {
         overview: null,
         platformLogins: null,
@@ -1146,7 +1151,8 @@
         { label: "版本", key: "version" },
         { label: "状态", render: r => badge(r.state) },
         { label: "能力", render: r => esc(r.capabilities.join(", ")) },
-        { label: "错误", key: "error" }
+        { label: "错误", key: "error" },
+        { label: "操作", render: r => "<div class='table-actions'><button type='button' class='secondary' data-action='reload-plugin' data-plugin-id='" + esc(r.id) + "'>热重启</button></div>" }
       ], overview.plugins);
       els("connectionState").innerHTML = "本机";
       refreshPlatformLoginNav(force).catch(error => handleError(error));
@@ -1394,6 +1400,18 @@
       setMessage("configMessage", text || "", isError);
     }
 
+    function hideConfigReloadAction() {
+      state.pendingConfigReloadPluginId = null;
+      const actions = els("configReloadActions");
+      if (actions) actions.hidden = true;
+    }
+
+    function showConfigReloadAction(pluginId) {
+      state.pendingConfigReloadPluginId = pluginId || null;
+      const actions = els("configReloadActions");
+      if (actions) actions.hidden = !state.pendingConfigReloadPluginId;
+    }
+
     function configInputId(path) {
       return "config-" + String(path).replace(/[^A-Za-z0-9_-]/g, "-");
     }
@@ -1406,6 +1424,7 @@
       els("configTitle").textContent = detail.name || detail.id;
       els("configSubtitle").textContent = (detail.description || detail.sourcePath || "").trim();
       setConfigMessage("", false);
+      hideConfigReloadAction();
       const fields = detail.schema.fields || [];
       const hasRestartFields = fields.some(field => field.restartRequired);
       els("configRestartHint").hidden = !hasRestartFields;
@@ -1713,9 +1732,46 @@
         invalidate("overview", "templates");
       }
       renderConfigForm(state.cache.configDetails[id]);
+      if (result.restartRequired && result.pluginId) {
+        showConfigReloadAction(result.pluginId);
+      }
       const suffix = result.restartRequired ? "；需要重启 " + result.restartTargets.join(", ") : "";
       setConfigMessage(result.message + suffix, false);
       notify(result.message + suffix, false);
+    }
+
+    async function reloadPlugin(pluginId, source) {
+      if (!pluginId) return;
+      const result = await api("/plugins/" + encodeURIComponent(pluginId) + "/reload", { method: "POST" });
+      invalidate("overview", "platformLogins", "configs");
+      if (state.page === "overview") {
+        await loadOverview(true);
+      } else if (state.page === "login") {
+        await loadPlatformLogins(true);
+      } else if (state.page === "configs") {
+        await loadConfigs(true);
+      }
+      const message = source === "config" ? "插件已重启，配置已生效" : (result.message || "插件已重启");
+      notify(message, false);
+      if (source === "config") {
+        setConfigMessage(message, false);
+        hideConfigReloadAction();
+      }
+      return result;
+    }
+
+    async function stopApplication() {
+      if (!confirm("确定要停止主项目吗？停止后 Web 后台会断开，需要手动重新启动进程。")) return;
+      const button = els("stopApplication");
+      button.disabled = true;
+      try {
+        await api("/system/stop", { method: "POST" });
+        els("connectionState").textContent = "停止中";
+        notify("主项目正在停止", false);
+      } catch (error) {
+        button.disabled = false;
+        throw error;
+      }
     }
 
     function invalidate(...keys) {
@@ -2165,10 +2221,13 @@
       const platform = button.dataset.platform;
       const publisherId = Number(button.dataset.publisherId);
       const configId = button.dataset.configId;
+      const pluginId = button.dataset.pluginId;
       try {
         if (action === "select-config") {
           state.selectedConfigId = configId;
           await loadConfigs();
+        } else if (action === "reload-plugin") {
+          await reloadPlugin(pluginId);
         } else if (action === "open-template-modal") {
           openConfigItemModal("template");
         } else if (action === "edit-template-row") {
@@ -2293,6 +2352,12 @@
       setConfigMessage(error.message, true);
       handleError(error);
     });
+    els("reloadConfigPlugin").onclick = () => reloadPlugin(state.pendingConfigReloadPluginId, "config").catch(error => {
+      const message = "配置已保存，但插件重启失败：" + error.message;
+      setConfigMessage(message, true);
+      notify(message, true);
+    });
+    els("stopApplication").onclick = () => stopApplication().catch(handleError);
 
     els("loadFilters").onclick = () => loadFilters(true).catch(handleError);
     els("filterScopeSubscriptionId").onchange = () => loadFilters().catch(handleError);

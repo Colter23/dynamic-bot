@@ -44,6 +44,7 @@ import top.colter.dynamic.core.plugin.PlatformPublisherPlugin
 import top.colter.dynamic.core.plugin.PluginCapability
 import top.colter.dynamic.core.plugin.PluginDescriptor
 import top.colter.dynamic.core.plugin.PluginInfo
+import top.colter.dynamic.core.plugin.PluginReloadResult
 import top.colter.dynamic.core.plugin.PluginState
 import top.colter.dynamic.core.plugin.PublisherLoginAccount
 import top.colter.dynamic.core.plugin.PublisherLoginMethod
@@ -128,10 +129,41 @@ class AdminServerTest {
         assertTrue(html.contains("data-action='open-permission-modal'"))
         assertTrue(html.contains("data-action='edit-template-row'"))
         assertTrue(html.contains("data-action='edit-permission-row'"))
+        assertTrue(html.contains("data-action='reload-plugin'"))
+        assertTrue(html.contains("id=\"configReloadActions\""))
+        assertTrue(html.contains("id=\"reloadConfigPlugin\""))
+        assertTrue(html.contains("id=\"stopApplication\""))
+        assertTrue(html.contains("/plugins/"))
+        assertTrue(html.contains("/reload"))
+        assertTrue(html.contains("/system/stop"))
         assertTrue(html.contains("/configs/"))
         assertTrue(!html.contains("id=\"createSubscription\""))
         assertTrue(html.contains("hashchange"))
         assertTrue(html.contains("localStorage.getItem(\"dynamicBotAdminToken\")"))
+    }
+
+    @Test
+    fun `system stop endpoint should require token and invoke stop requester`() = testApplication {
+        initDb("admin-system-stop")
+        var stopReason: String? = null
+        application {
+            adminModule(
+                testContext(FakePlatformPublisherPlugin()).copy(
+                    stopRequester = { reason -> stopReason = reason },
+                )
+            )
+        }
+        val client = jsonClient()
+
+        assertEquals(HttpStatusCode.Unauthorized, client.post("/api/system/stop").status)
+
+        val response = client.post("/api/system/stop") { auth() }
+        val body = response.body<ActionResultResponse>()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(body.changed)
+        assertEquals("application stop requested", body.message)
+        assertEquals("web-admin", stopReason)
     }
 
     @Test
@@ -146,6 +178,80 @@ class AdminServerTest {
         assertEquals(1, plugins.size)
         assertEquals("ACTIVE", plugins.single().state)
         assertTrue(plugins.single().capabilities.contains("DYNAMIC_SOURCE"))
+    }
+
+    @Test
+    fun `plugin reload endpoint should require token and return success`() = testApplication {
+        initDb("admin-plugin-reload")
+        val fakePlugin = FakeConfigurablePlugin()
+        val current = MainDynamicConfig(webAdmin = WebAdminConfig(token = "secret-token"))
+        application {
+            adminModule(
+                configTestContext(
+                    currentConfig = { current },
+                    plugins = listOf(fakePlugin.info()),
+                    pluginReloader = { pluginId ->
+                        assertEquals("fake-plugin", pluginId)
+                        PluginReloadResult(
+                            pluginId = pluginId,
+                            success = true,
+                            changed = true,
+                            pluginState = PluginState.ACTIVE,
+                            message = "plugin reloaded",
+                        )
+                    },
+                )
+            )
+        }
+        val client = jsonClient()
+
+        assertEquals(HttpStatusCode.Unauthorized, client.post("/api/plugins/fake-plugin/reload").status)
+
+        val response = client.post("/api/plugins/fake-plugin/reload") { auth() }
+        val body = response.body<PluginReloadResponse>()
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertEquals(true, body.success)
+        assertEquals(true, body.changed)
+        assertEquals("fake-plugin", body.pluginId)
+        assertEquals("ACTIVE", body.pluginState)
+    }
+
+    @Test
+    fun `plugin reload endpoint should return not found and conflict failures`() = testApplication {
+        initDb("admin-plugin-reload-failures")
+        val fakePlugin = FakeConfigurablePlugin()
+        val current = MainDynamicConfig(webAdmin = WebAdminConfig(token = "secret-token"))
+        application {
+            adminModule(
+                configTestContext(
+                    currentConfig = { current },
+                    plugins = listOf(fakePlugin.info()),
+                    pluginReloader = { pluginId ->
+                        PluginReloadResult(
+                            pluginId = pluginId,
+                            success = false,
+                            changed = true,
+                            pluginState = PluginState.FAILED,
+                            message = "plugin reload failed",
+                            error = "boom",
+                        )
+                    },
+                )
+            )
+        }
+        val client = jsonClient()
+
+        assertEquals(HttpStatusCode.NotFound, client.post("/api/plugins/missing/reload") { auth() }.status)
+
+        val response = client.post("/api/plugins/fake-plugin/reload") { auth() }
+        val body = response.body<PluginReloadResponse>()
+
+        assertEquals(HttpStatusCode.Conflict, response.status)
+        assertEquals(false, body.success)
+        assertEquals("fake-plugin", body.pluginId)
+        assertEquals("FAILED", body.pluginState)
+        assertEquals("boom", body.error)
     }
 
     @Test
@@ -512,6 +618,15 @@ class AdminServerTest {
         currentConfig: () -> MainDynamicConfig,
         updateMainConfig: (MainDynamicConfig) -> ConfigApplyResult = { ConfigApplyResult(false) },
         plugins: List<PluginInfo> = emptyList(),
+        pluginReloader: (String) -> PluginReloadResult = { pluginId ->
+            PluginReloadResult(
+                pluginId = pluginId,
+                success = false,
+                changed = false,
+                message = "plugin reload is not configured",
+                error = "plugin reload is not configured",
+            )
+        },
     ): AdminServerContext {
         val configService = MemoryConfigService(createTempDirectory("dynamic-bot-config-api"))
         return AdminServerContext(
@@ -523,6 +638,7 @@ class AdminServerTest {
                 configProvider = currentConfig,
                 mainConfigUpdater = updateMainConfig,
                 configService = configService,
+                pluginReloader = pluginReloader,
             ),
             loginService = AdminLoginService(
                 platformPluginResolver = { null },

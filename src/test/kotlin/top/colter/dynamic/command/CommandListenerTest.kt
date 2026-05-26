@@ -74,6 +74,45 @@ class CommandListenerTest {
     }
 
     @Test
+    fun `stop command should require admin and request application stop after reply`() = runBlocking {
+        initDb("stop-command")
+        CommandRegistry.clear()
+        var stopReason: String? = null
+        val userListener = CommandListener(
+            platformPluginResolver = { null },
+            stopRequester = { reason -> stopReason = reason },
+        )
+
+        val rejected = dispatch(
+            listener = userListener,
+            event = commandEvent(
+                commandTokens = listOf("stop"),
+            ),
+        )
+
+        assertEquals(CommandStatus.REJECTED, rejected.status)
+        assertNull(stopReason)
+
+        CommandRegistry.clear()
+        val listener = CommandListener(
+            platformPluginResolver = { null },
+            config = adminConfig(),
+            stopRequester = { reason -> stopReason = reason },
+        )
+
+        val result = dispatch(
+            listener = listener,
+            event = commandEvent(
+                commandTokens = listOf("stop"),
+            ),
+        )
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        assertTrue(renderMessage(result).contains("stop requested"))
+        assertEquals("command:onebot:100", stopReason)
+    }
+
+    @Test
     fun `subscribe should create publisher and subscription when already following`() = runBlocking {
         initDb("subscribe-following")
         CommandRegistry.clear()

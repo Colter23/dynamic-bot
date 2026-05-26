@@ -23,6 +23,7 @@ import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.PlatformPublisherPlugin
 import top.colter.dynamic.core.plugin.PluginInfo
 import top.colter.dynamic.core.plugin.PluginManager
+import top.colter.dynamic.core.plugin.PluginReloadResult
 import top.colter.dynamic.core.plugin.PluginState
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
@@ -41,6 +42,9 @@ public class AdminService(
         throw IllegalStateException("main config editing is not configured")
     },
     private val configService: ConfigService = DefaultConfigService,
+    private val pluginReloader: (String) -> PluginReloadResult = {
+        throw IllegalStateException("plugin reload is not configured")
+    },
 ) {
     public constructor(
         pluginManager: PluginManager,
@@ -55,6 +59,7 @@ public class AdminService(
         configProvider = configProvider,
         mainConfigUpdater = mainConfigUpdater,
         configService = configService,
+        pluginReloader = pluginManager::reloadPlugin,
     )
 
     public fun overview(): OverviewResponse {
@@ -71,6 +76,18 @@ public class AdminService(
         return pluginProvider()
             .sortedBy { it.descriptor.id }
             .map { it.toDto() }
+    }
+
+    public fun reloadPlugin(id: String): PluginReloadResponse {
+        val pluginId = id.trim()
+        require(pluginId.isNotBlank()) { "plugin id must not be blank" }
+        pluginProvider().firstOrNull { it.descriptor.id == pluginId }
+            ?: throw NoSuchElementException("plugin not found: $pluginId")
+
+        val result = pluginReloader(pluginId)
+        val response = result.toResponse()
+        if (!result.success) throw PluginReloadFailedException(response)
+        return response
     }
 
     public suspend fun platformLogins(): List<PlatformLoginDto> {
@@ -313,9 +330,9 @@ public class AdminService(
 
     public fun updateConfig(id: String, request: UpdateConfigRequest): UpdateConfigResponse {
         if (id == MainDynamicConfig.CONFIG_ID) return updateMainConfig(request)
-        val (_, plugin) = configurablePlugins().firstOrNull { (_, plugin) -> plugin.configId == id }
+        val (info, plugin) = configurablePlugins().firstOrNull { (_, plugin) -> plugin.configId == id }
             ?: throw NoSuchElementException("config not found: $id")
-        return updatePluginConfig(plugin, request)
+        return updatePluginConfig(info, plugin, request)
     }
 
     public fun setPublisherTemplate(publisherId: Int, request: TemplateBindingRequest): ActionResultResponse {
@@ -359,6 +376,7 @@ public class AdminService(
             restartRequired = result.restartRequired,
             restartTargets = result.restartTargets,
             message = result.message,
+            pluginId = null,
             values = AdminConfigJson.valuesFor(saved, MainConfigForms.formSpec),
             secretStates = AdminConfigJson.secretStates(saved, MainConfigForms.formSpec),
         )
@@ -366,13 +384,15 @@ public class AdminService(
 
     @Suppress("UNCHECKED_CAST")
     private fun updatePluginConfig(
+        info: PluginInfo,
         plugin: ConfigurablePlugin<*>,
         request: UpdateConfigRequest,
     ): UpdateConfigResponse {
-        return updatePluginConfigTyped(plugin as ConfigurablePlugin<Any>, request)
+        return updatePluginConfigTyped(info, plugin as ConfigurablePlugin<Any>, request)
     }
 
     private fun <T : Any> updatePluginConfigTyped(
+        info: PluginInfo,
         plugin: ConfigurablePlugin<T>,
         request: UpdateConfigRequest,
     ): UpdateConfigResponse {
@@ -397,6 +417,7 @@ public class AdminService(
             restartRequired = result.restartRequired,
             restartTargets = result.restartTargets,
             message = result.message,
+            pluginId = info.descriptor.id,
             values = AdminConfigJson.valuesFor(saved, plugin.configFormSpec),
             secretStates = AdminConfigJson.secretStates(saved, plugin.configFormSpec),
         )
@@ -434,6 +455,10 @@ public class AdminService(
     }
 }
 
+public class PluginReloadFailedException(
+    public val response: PluginReloadResponse,
+) : IllegalStateException(response.error ?: response.message)
+
 private fun PluginInfo.toDto(): PluginDto = PluginDto(
     id = descriptor.id,
     name = descriptor.name,
@@ -443,6 +468,15 @@ private fun PluginInfo.toDto(): PluginDto = PluginDto(
     error = error?.message ?: error?.javaClass?.name,
     sourceJarPath = sourceJarPath,
     loadTime = loadTime,
+)
+
+private fun PluginReloadResult.toResponse(): PluginReloadResponse = PluginReloadResponse(
+    changed = changed,
+    success = success,
+    pluginId = pluginId,
+    pluginState = pluginState?.name,
+    message = message,
+    error = error,
 )
 
 private fun top.colter.dynamic.core.plugin.PublisherLoginAccount.toDto(): LoginAccountDto = LoginAccountDto(

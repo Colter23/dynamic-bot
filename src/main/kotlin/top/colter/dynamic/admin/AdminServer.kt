@@ -37,6 +37,7 @@ public class AdminServer(
     private val pluginManager: PluginManager,
     private val configProvider: () -> MainDynamicConfig,
     private val mainConfigUpdater: (MainDynamicConfig) -> ConfigApplyResult,
+    private val stopRequester: ((String) -> Unit)? = null,
 ) {
     private var engine: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
 
@@ -49,6 +50,7 @@ public class AdminServer(
             loginService = AdminLoginService(
                 platformPluginResolver = { platformId -> pluginManager.findPlatformPublisherPlugin(platformId) },
             ),
+            stopRequester = stopRequester,
         )
         engine = embeddedServer(Netty, host = config.host, port = config.port) {
             adminModule(context)
@@ -66,6 +68,7 @@ public data class AdminServerContext(
     val tokenProvider: () -> String = { token },
     val service: AdminService,
     val loginService: AdminLoginService,
+    val stopRequester: ((String) -> Unit)? = null,
 )
 
 public fun Application.adminModule(context: AdminServerContext) {
@@ -97,6 +100,21 @@ public fun Application.adminModule(context: AdminServerContext) {
             get("/plugins") {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.plugins() }
+            }
+            post("/plugins/{id}/reload") {
+                if (!call.ensureAuthorized(context)) return@post
+                val id = call.pathString("id")
+                call.respondApi { context.service.reloadPlugin(id) }
+            }
+            post("/system/stop") {
+                if (!call.ensureAuthorized(context)) return@post
+                val requester = context.stopRequester
+                if (requester == null) {
+                    call.respond(HttpStatusCode.Conflict, ErrorResponse("application stop is not configured"))
+                    return@post
+                }
+                call.respond(ActionResultResponse(changed = true, message = "application stop requested"))
+                requester("web-admin")
             }
             get("/platform-logins") {
                 if (!call.ensureAuthorized(context)) return@get
@@ -242,6 +260,8 @@ private suspend inline fun <reified T : Any> ApplicationCall.respondApi(crossinl
         respond(HttpStatusCode.BadRequest, ErrorResponse(e.message ?: "invalid request body"))
     } catch (e: NoSuchElementException) {
         respond(HttpStatusCode.NotFound, ErrorResponse(e.message ?: "not found"))
+    } catch (e: PluginReloadFailedException) {
+        respond(HttpStatusCode.Conflict, e.response)
     } catch (e: IllegalStateException) {
         respond(HttpStatusCode.Conflict, ErrorResponse(e.message ?: "conflict"))
     }

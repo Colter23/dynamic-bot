@@ -9,10 +9,12 @@ public fun main() {
         Thread {
             println("Shutdown signal received, stopping application...")
             DynamicApplication.shutdown()
-            shutdownLatch.countDown()
         }
     )
 
+    DynamicApplication.onShutdown {
+        shutdownLatch.countDown()
+    }
     DynamicApplication.run()
     println("Application is running. Press Ctrl+C to exit.")
     shutdownLatch.await()

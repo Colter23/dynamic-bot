@@ -37,6 +37,16 @@ public data class PluginDto(
 )
 
 @Serializable
+public data class PluginReloadResponse(
+    val changed: Boolean,
+    val success: Boolean,
+    val pluginId: String,
+    val pluginState: String? = null,
+    val message: String,
+    val error: String? = null,
+)
+
+@Serializable
 public data class PlatformLoginDto(
     val platformId: String,
     val pluginId: String,
@@ -156,6 +166,7 @@ public data class UpdateConfigResponse(
     val restartRequired: Boolean,
     val restartTargets: List<String> = emptyList(),
     val message: String,
+    val pluginId: String? = null,
     val values: JsonObject,
     val secretStates: Map<String, Boolean> = emptyMap(),
 )
