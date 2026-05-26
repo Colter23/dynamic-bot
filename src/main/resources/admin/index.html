@@ -289,6 +289,28 @@
       flex-wrap: wrap;
       align-self: end;
     }
+    .toolbar {
+      display: flex;
+      align-items: end;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .toolbar .form-field {
+      min-width: min(360px, 100%);
+      flex: 1 1 320px;
+    }
+    .toolbar-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .field-hint {
+      color: var(--muted);
+      font-size: 12px;
+    }
     .table-wrap {
       overflow: auto;
       border: 1px solid var(--line);
@@ -437,11 +459,50 @@
     .modal.login-modal {
       width: min(460px, 100%);
     }
+    .modal.action-modal {
+      width: min(560px, 100%);
+    }
     .modal-actions {
       display: flex;
       justify-content: flex-end;
       gap: 8px;
       margin-top: 14px;
+    }
+    .toast-stack {
+      position: fixed;
+      right: 18px;
+      top: 18px;
+      width: min(360px, calc(100vw - 36px));
+      display: grid;
+      gap: 10px;
+      z-index: 30;
+      pointer-events: none;
+    }
+    .toast {
+      display: grid;
+      gap: 4px;
+      padding: 12px 13px;
+      border: 1px solid #b7d9d4;
+      border-radius: 9px;
+      background: rgba(255, 255, 255, 0.96);
+      color: var(--text);
+      box-shadow: var(--shadow);
+      pointer-events: auto;
+      cursor: pointer;
+    }
+    .toast strong {
+      color: var(--accent);
+      font-size: 13px;
+    }
+    .toast span {
+      color: var(--muted);
+      overflow-wrap: anywhere;
+    }
+    .toast.error {
+      border-color: #f1b8b2;
+    }
+    .toast.error strong {
+      color: var(--danger);
     }
     @media (max-width: 1080px) {
       .app-shell { grid-template-columns: 1fr; }
@@ -514,8 +575,6 @@
       </header>
 
       <main>
-        <div id="message" class="message"></div>
-
         <section class="page" data-page="overview">
           <div class="stats" id="stats"></div>
           <div class="page-grid">
@@ -551,51 +610,10 @@
             <section class="panel full">
               <div class="panel-head">
                 <div>
-                  <h2>创建订阅</h2>
-                  <p>把消息接收目标绑定到动态发布者。</p>
-                </div>
-              </div>
-              <div class="forms">
-                <div class="form-field">
-                  <label for="subscriberPlatform">目标平台</label>
-                  <input id="subscriberPlatform" value="onebot">
-                </div>
-                <div class="form-field">
-                  <label for="subscriberType">目标类型</label>
-                  <select id="subscriberType">
-                    <option value="GROUP">群</option>
-                    <option value="USER">用户</option>
-                    <option value="CHANNEL">频道</option>
-                    <option value="OTHER">其他</option>
-                  </select>
-                </div>
-                <div class="form-field">
-                  <label for="subscriberTargetId">目标 ID</label>
-                  <input id="subscriberTargetId" placeholder="群、用户或频道 ID">
-                </div>
-                <div class="form-field">
-                  <label for="subscriberName">目标名称</label>
-                  <input id="subscriberName" placeholder="可选显示名">
-                </div>
-                <div class="form-field">
-                  <label for="publisherPlatform">发布者平台</label>
-                  <input id="publisherPlatform" value="bilibili">
-                </div>
-                <div class="form-field">
-                  <label for="publisherExternalId">发布者外部 ID</label>
-                  <input id="publisherExternalId" placeholder="Bilibili UID">
-                </div>
-                <div class="form-actions">
-                  <button id="createSubscription">创建</button>
-                </div>
-              </div>
-            </section>
-            <section class="panel full">
-              <div class="panel-head">
-                <div>
                   <h2>订阅关系</h2>
                   <p>当前发布者到消息目标的转发关系。</p>
                 </div>
+                <button id="openCreateSubscription">创建订阅</button>
               </div>
               <div class="table-wrap"><table id="subscriptions"></table></div>
             </section>
@@ -630,46 +648,21 @@
             <section class="panel full">
               <div class="panel-head">
                 <div>
-                  <h2>添加过滤规则</h2>
-                  <p>按媒体元素、关键词或正则表达式屏蔽动态。</p>
+                  <h2>过滤规则</h2>
+                  <p>选择订阅查看规则，或查看全部规则。</p>
                 </div>
+                <button id="openAddFilter">添加过滤规则</button>
               </div>
-              <div class="forms">
+              <div class="toolbar">
                 <div class="form-field">
-                  <label for="filterSubscriptionId">订阅 ID</label>
-                  <input id="filterSubscriptionId" placeholder="创建或按订阅加载时必填">
-                </div>
-                <div class="form-field">
-                  <label for="filterRuleType">规则类型</label>
-                  <select id="filterRuleType">
-                    <option value="ELEMENT">元素</option>
-                    <option value="CONTENT">内容</option>
+                  <label for="filterScopeSubscriptionId">订阅范围</label>
+                  <select id="filterScopeSubscriptionId">
+                    <option value="">全部订阅</option>
                   </select>
                 </div>
-                <div class="form-field">
-                  <label for="filterMatcher">匹配方式</label>
-                  <select id="filterMatcher">
-                    <option value="HAS_ELEMENT">包含元素</option>
-                    <option value="KEYWORD">关键词</option>
-                    <option value="REGEX">正则表达式</option>
-                  </select>
-                </div>
-                <div class="form-field">
-                  <label for="filterValue">值</label>
-                  <input id="filterValue" placeholder="IMAGE、关键词或正则表达式">
-                </div>
-                <div class="form-actions">
-                  <button id="addFilter">添加</button>
+                <div class="toolbar-actions">
                   <button class="secondary" id="loadFilters">加载</button>
                   <button class="danger" id="clearFilters">清空当前订阅</button>
-                </div>
-              </div>
-            </section>
-            <section class="panel full">
-              <div class="panel-head">
-                <div>
-                  <h2>过滤规则</h2>
-                  <p>订阅 ID 留空并点击加载，可查看全部规则。</p>
                 </div>
               </div>
               <div class="table-wrap"><table id="filters"></table></div>
@@ -682,31 +675,10 @@
             <section class="panel full">
               <div class="panel-head">
                 <div>
-                  <h2>发布者模板绑定</h2>
-                  <p>选择已配置模板，并绑定到发布者 ID。</p>
-                </div>
-              </div>
-              <div class="forms">
-                <div class="form-field">
-                  <label for="templatePublisherId">发布者 ID</label>
-                  <input id="templatePublisherId" placeholder="内部发布者 ID">
-                </div>
-                <div class="form-field">
-                  <label for="templateName">模板名称</label>
-                  <select id="templateName"></select>
-                </div>
-                <div class="form-actions">
-                  <button id="setTemplate">绑定</button>
-                  <button class="secondary" id="removeTemplate">移除</button>
-                </div>
-              </div>
-            </section>
-            <section class="panel full">
-              <div class="panel-head">
-                <div>
                   <h2>模板与绑定</h2>
                   <p>模板来自配置文件，绑定关系存储在数据库中。</p>
                 </div>
+                <button id="openTemplateBinding">绑定模板</button>
               </div>
               <div class="table-wrap"><table id="templates"></table></div>
             </section>
@@ -751,6 +723,20 @@
     </div>
   </div>
 
+  <div id="actionModal" class="modal-backdrop" hidden>
+    <div class="modal action-modal" role="dialog" aria-modal="true" aria-labelledby="actionTitle">
+      <h2 id="actionTitle">操作</h2>
+      <div id="actionBody"></div>
+      <div id="actionMessage" class="message"></div>
+      <div class="modal-actions">
+        <button class="secondary" id="cancelAction">取消</button>
+        <button id="confirmAction">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+
   <script>
     const state = {
       token: localStorage.getItem("dynamicBotAdminToken") || "",
@@ -759,6 +745,7 @@
       qrSessions: {},
       edit: null,
       platformLoginModal: null,
+      actionModal: null,
       cache: {
         overview: null,
         platformLogins: null,
@@ -791,6 +778,11 @@
       UNSUPPORTED: "不支持",
       COOKIE: "Cookie",
       QR_CODE: "二维码",
+      TEXT: "文本",
+      IMAGE: "图片",
+      VIDEO: "视频",
+      CARD: "卡片",
+      ORIGIN: "转发源动态",
       template: "模板",
       binding: "绑定"
     };
@@ -822,8 +814,24 @@
 
     function setMessage(target, text, isError) {
       const node = els(target);
+      if (!node) return;
       node.textContent = text || "";
       node.classList.toggle("error", Boolean(isError));
+    }
+
+    function notify(text, isError) {
+      if (!text) return;
+      const stack = els("toastStack");
+      if (!stack) return;
+      const node = document.createElement("div");
+      node.className = "toast" + (isError ? " error" : "");
+      node.innerHTML = "<strong>" + (isError ? "操作失败" : "操作完成") + "</strong><span>" + esc(text) + "</span>";
+      const remove = () => {
+        if (node.parentNode) node.parentNode.removeChild(node);
+      };
+      node.addEventListener("click", remove);
+      stack.appendChild(node);
+      setTimeout(remove, isError ? 5200 : 3600);
     }
 
     function showLogin(text, isError) {
@@ -837,7 +845,6 @@
     function showApp() {
       els("loginView").hidden = true;
       els("appView").hidden = false;
-      setMessage("message", "", false);
     }
 
     async function api(path, options) {
@@ -876,6 +883,30 @@
       return String(platformId || "").replace(/[^A-Za-z0-9_-]/g, "_");
     }
 
+    function optionHtml(value, text, selected) {
+      return "<option value='" + esc(value) + "'" + (selected ? " selected" : "") + ">" + esc(text) + "</option>";
+    }
+
+    function subscriberLabel(subscriber) {
+      if (!subscriber) return "未知目标";
+      return "#" + subscriber.id + " · " + subscriber.platformId + " · " + label(subscriber.type) + " · " + subscriber.targetId + (subscriber.name ? " · " + subscriber.name : "");
+    }
+
+    function publisherLabel(publisher) {
+      if (!publisher) return "未知发布者";
+      return "#" + publisher.id + " · " + publisher.platformId + " · " + publisher.externalId + (publisher.name ? " · " + publisher.name : "");
+    }
+
+    function subscriptionLabel(subscription) {
+      const subscriber = subscription.subscriber ? subscriberLabel(subscription.subscriber) : "目标 #" + subscription.subscriberId;
+      const publisher = subscription.publisher ? publisherLabel(subscription.publisher) : "发布者 #" + subscription.publisherId;
+      return "#" + subscription.id + " · " + subscriber + " -> " + publisher;
+    }
+
+    function uniqueValues(values) {
+      return Array.from(new Set(values.filter(value => value !== null && value !== undefined && String(value).trim() !== "").map(value => String(value))));
+    }
+
     function renderTable(id, columns, rows) {
       const colCount = columns.length;
       const head = "<tr>" + columns.map(c => "<th>" + esc(c.label) + "</th>").join("") + "</tr>";
@@ -889,6 +920,7 @@
       const nextPage = pageMeta[page] ? page : "overview";
       if (state.page !== nextPage) {
         closePlatformLoginModal();
+        closeActionModal();
       }
       state.page = nextPage;
       const meta = pageMeta[nextPage] || pageMeta.overview;
@@ -915,7 +947,7 @@
       if (page === "login") return loadPlatformLogins(force);
       if (page === "subscriptions") return loadSubscriptions(force);
       if (page === "entities") return loadEntities(force);
-      if (page === "filters") return loadFilters();
+      if (page === "filters") return loadFilters(force);
       if (page === "templates") return loadTemplates(force);
     }
 
@@ -940,7 +972,6 @@
       ], overview.plugins);
       els("connectionState").innerHTML = "本机";
       refreshPlatformLoginNav(force).catch(error => handleError(error));
-      setMessage("message", "已加载", false);
     }
 
     async function refreshPlatformLoginNav(force) {
@@ -959,7 +990,7 @@
       }
       updatePlatformLoginNav(state.cache.platformLogins);
       renderPlatformLogins(state.cache.platformLogins);
-      setMessage("message", "已加载平台登录状态", false);
+      if (force) notify("已刷新平台登录状态", false);
     }
 
     function renderPlatformLogins(platforms) {
@@ -1010,13 +1041,59 @@
       return text;
     }
 
-    async function loadEntities(force) {
+    function localizeActionMessage(message, fallback) {
+      const text = String(message || "");
+      const lower = text.toLowerCase();
+      if (lower.includes("subscription removed")) return "订阅已删除";
+      if (lower.includes("filter rule removed")) return "过滤规则已删除";
+      if (lower.includes("filter rules removed")) {
+        const match = text.match(/count=(\d+)/i);
+        return match ? "过滤规则已清空：" + match[1] + " 条" : "过滤规则已清空";
+      }
+      if (lower.includes("template binding updated")) return "模板绑定已保存";
+      if (lower.includes("template binding unchanged")) return "模板绑定未变化";
+      if (lower.includes("template binding removed")) return "模板绑定已移除";
+      if (lower.includes("template binding not found")) return "未找到模板绑定";
+      return fallback || text;
+    }
+
+    async function ensurePlatformLogins(force) {
+      if (force || state.cache.platformLogins === null) {
+        state.cache.platformLogins = await api("/platform-logins");
+      }
+      return state.cache.platformLogins;
+    }
+
+    async function ensurePublishers(force) {
       if (force || state.cache.publishers.length === 0) {
         state.cache.publishers = await api("/publishers");
       }
+      return state.cache.publishers;
+    }
+
+    async function ensureSubscribers(force) {
       if (force || state.cache.subscribers.length === 0) {
         state.cache.subscribers = await api("/subscribers");
       }
+      return state.cache.subscribers;
+    }
+
+    async function ensureSubscriptions(force) {
+      if (force || state.cache.subscriptions.length === 0) {
+        state.cache.subscriptions = await api("/subscriptions");
+      }
+      return state.cache.subscriptions;
+    }
+
+    async function ensureTemplates(force) {
+      if (force || !state.cache.templates) {
+        state.cache.templates = await api("/templates");
+      }
+      return state.cache.templates;
+    }
+
+    async function loadEntities(force) {
+      await Promise.all([ensurePublishers(force), ensureSubscribers(force)]);
       renderTable("publishers", [
         { label: "ID", key: "id" },
         { label: "平台", key: "platformId" },
@@ -1037,9 +1114,7 @@
     }
 
     async function loadSubscriptions(force) {
-      if (force || state.cache.subscriptions.length === 0) {
-        state.cache.subscriptions = await api("/subscriptions");
-      }
+      await ensureSubscriptions(force);
       renderTable("subscriptions", [
         { label: "ID", key: "id" },
         { label: "目标", render: r => esc((r.subscriber && r.subscriber.platformId + ":" + label(r.subscriber.type) + ":" + r.subscriber.targetId) || r.subscriberId) },
@@ -1049,8 +1124,10 @@
       ], state.cache.subscriptions);
     }
 
-    async function loadFilters() {
-      const id = els("filterSubscriptionId").value.trim();
+    async function loadFilters(force) {
+      await ensureSubscriptions(force);
+      updateFilterScopeOptions();
+      const id = els("filterScopeSubscriptionId").value.trim();
       state.cache.filters = await api("/filter-rules" + (id ? "?subscriptionId=" + encodeURIComponent(id) : ""));
       renderTable("filters", [
         { label: "ID", key: "id" },
@@ -1063,20 +1140,36 @@
       ], state.cache.filters);
     }
 
+    function updateFilterScopeOptions(selectedValue) {
+      const select = els("filterScopeSubscriptionId");
+      if (!select) return;
+      const current = selectedValue !== undefined ? selectedValue : select.value;
+      select.innerHTML = optionHtml("", "全部订阅", current === "") + state.cache.subscriptions
+        .map(subscription => optionHtml(subscription.id, subscriptionLabel(subscription), String(subscription.id) === String(current)))
+        .join("");
+      els("clearFilters").disabled = !select.value;
+    }
+
     async function loadTemplates(force) {
-      if (force || !state.cache.templates) {
-        state.cache.templates = await api("/templates");
-      }
-      const data = state.cache.templates;
-      const select = els("templateName");
-      select.innerHTML = data.templates.map(t => "<option value='" + esc(t.name) + "'>" + esc(t.name) + "</option>").join("");
+      const data = await ensureTemplates(force);
+      await ensurePublishers(force);
+      const publishersById = Object.fromEntries(state.cache.publishers.map(publisher => [String(publisher.id), publisher]));
       const rows = data.templates.map(t => ({ kind: "template", id: "", name: t.name, value: t.body }))
-        .concat(data.bindings.map(b => ({ kind: "binding", id: b.id, name: b.publisherId || b.platformId || "", value: b.templateName })));
+        .concat(data.bindings.map(b => ({
+          kind: "binding",
+          id: b.id,
+          publisherId: b.publisherId,
+          name: b.publisherId ? publisherLabel(publishersById[String(b.publisherId)]) : (b.platformId || ""),
+          value: b.templateName
+        })));
       renderTable("templates", [
         { label: "类型", render: r => esc(label(r.kind)) },
         { label: "ID", key: "id" },
         { label: "名称", key: "name" },
-        { label: "内容", key: "value" }
+        { label: "内容", key: "value" },
+        { label: "操作", render: r => r.kind === "binding" && r.publisherId
+          ? "<div class='table-actions'><button class='danger' data-action='delete-template-binding' data-publisher-id='" + esc(r.publisherId) + "'>移除</button></div>"
+          : "<span class='muted'>-</span>" }
       ], rows);
     }
 
@@ -1097,15 +1190,17 @@
         localStorage.removeItem("dynamicBotAdminToken");
         showLogin("Token 无效或已过期", true);
       } else {
-        setMessage("message", error.message, true);
+        notify(error.message, true);
       }
     }
 
     function setPlatformMessage(platformId, text, isError) {
       const node = els("platform-message-" + platformKey(platformId));
-      if (!node) return;
-      node.textContent = text || "";
-      node.classList.toggle("error", Boolean(isError));
+      if (node) {
+        node.textContent = "";
+        node.classList.toggle("error", false);
+      }
+      if (text) notify(platformId + "：" + text, isError);
     }
 
     function setLoginModalMessage(text, isError) {
@@ -1297,7 +1392,218 @@
       closeEdit();
       invalidate("publishers", "subscribers", "subscriptions");
       await loadEntities(true);
-      setMessage("message", "已保存", false);
+      notify("已保存", false);
+    }
+
+    function setActionMessage(text, isError) {
+      setMessage("actionMessage", text || "", isError);
+    }
+
+    async function openActionModal(kind) {
+      closePlatformLoginModal();
+      state.actionModal = { kind };
+      const titles = {
+        subscription: "创建订阅",
+        filter: "添加过滤规则",
+        template: "绑定发布者模板"
+      };
+      const confirmTexts = {
+        subscription: "创建",
+        filter: "添加",
+        template: "绑定"
+      };
+      els("actionTitle").textContent = titles[kind] || "操作";
+      els("confirmAction").textContent = confirmTexts[kind] || "保存";
+      els("confirmAction").disabled = true;
+      els("actionBody").innerHTML = "<div class='empty'>正在加载可选项...</div>";
+      setActionMessage("", false);
+      els("actionModal").hidden = false;
+      try {
+        let canSubmit = true;
+        if (kind === "subscription") canSubmit = await renderSubscriptionAction();
+        if (kind === "filter") canSubmit = await renderFilterAction();
+        if (kind === "template") canSubmit = await renderTemplateAction();
+        els("confirmAction").disabled = canSubmit === false;
+      } catch (error) {
+        setActionMessage(error.message, true);
+      }
+    }
+
+    function closeActionModal() {
+      state.actionModal = null;
+      if (!els("actionModal")) return;
+      els("actionModal").hidden = true;
+      els("actionBody").innerHTML = "";
+      setActionMessage("", false);
+      els("confirmAction").disabled = false;
+    }
+
+    async function renderSubscriptionAction() {
+      await Promise.all([ensureSubscribers(), ensurePublishers(), ensurePlatformLogins()]);
+      const subscribers = state.cache.subscribers;
+      const selectedSubscriber = subscribers[0] ? String(subscribers[0].id) : "new";
+      const subscriberOptions = optionHtml("new", "新建消息目标", selectedSubscriber === "new")
+        + subscribers.map(subscriber => optionHtml(subscriber.id, subscriberLabel(subscriber), String(subscriber.id) === selectedSubscriber)).join("");
+      const targetPlatforms = uniqueValues(subscribers.map(item => item.platformId).concat(["onebot"]));
+      const targetPlatformOptions = targetPlatforms.map((platform, index) => optionHtml(platform, platform, index === 0)).join("");
+      const publisherPlatforms = uniqueValues((state.cache.platformLogins || []).map(item => item.platformId).concat(state.cache.publishers.map(item => item.platformId)));
+      const publisherPlatformControl = publisherPlatforms.length
+        ? "<select id='actionPublisherPlatform'>" + publisherPlatforms.map((platform, index) => optionHtml(platform, platform, index === 0)).join("") + "</select>"
+        : "<input id='actionPublisherPlatform' placeholder='未检测到消息源平台'>";
+      els("actionBody").innerHTML = "<div class='forms'>"
+        + "<div class='form-field full-width'><label for='actionSubscriberSelect'>消息目标</label><select id='actionSubscriberSelect'>" + subscriberOptions + "</select><span class='field-hint'>选择已有目标会自动使用平台、类型和目标 ID。</span></div>"
+        + "<div id='actionSubscriberFields' class='forms full-width'>"
+        + "<div class='form-field'><label for='actionSubscriberPlatform'>目标平台</label><select id='actionSubscriberPlatform'>" + targetPlatformOptions + "</select></div>"
+        + "<div class='form-field'><label for='actionSubscriberType'>目标类型</label><select id='actionSubscriberType'>"
+        + optionHtml("GROUP", "群", true) + optionHtml("USER", "用户", false) + optionHtml("CHANNEL", "频道", false) + optionHtml("OTHER", "其他", false)
+        + "</select></div>"
+        + "<div class='form-field'><label for='actionSubscriberTargetId'>目标 ID</label><input id='actionSubscriberTargetId' placeholder='群、用户或频道 ID'></div>"
+        + "<div class='form-field'><label for='actionSubscriberName'>目标名称</label><input id='actionSubscriberName' placeholder='可选显示名'></div>"
+        + "</div>"
+        + "<div class='form-field'><label for='actionPublisherPlatform'>发布者平台</label>" + publisherPlatformControl + "</div>"
+        + "<div class='form-field'><label for='actionPublisherExternalId'>发布者外部 ID</label><input id='actionPublisherExternalId' placeholder='例如 Bilibili UID'></div>"
+        + "</div>";
+      els("actionSubscriberSelect").onchange = updateSubscriptionTargetFields;
+      updateSubscriptionTargetFields();
+      return true;
+    }
+
+    function updateSubscriptionTargetFields() {
+      const select = els("actionSubscriberSelect");
+      const fields = els("actionSubscriberFields");
+      if (!select || !fields) return;
+      fields.hidden = select.value !== "new";
+    }
+
+    async function renderFilterAction() {
+      await ensureSubscriptions();
+      if (state.cache.subscriptions.length === 0) {
+        els("actionBody").innerHTML = "<div class='empty'>暂无订阅，请先创建订阅关系。</div>";
+        return false;
+      }
+      const subscriptionOptions = state.cache.subscriptions
+        .map((subscription, index) => optionHtml(subscription.id, subscriptionLabel(subscription), index === 0))
+        .join("");
+      els("actionBody").innerHTML = "<div class='forms'>"
+        + "<div class='form-field full-width'><label for='actionFilterSubscriptionId'>订阅</label><select id='actionFilterSubscriptionId'>" + subscriptionOptions + "</select></div>"
+        + "<div class='form-field'><label for='actionFilterRuleType'>规则类型</label><select id='actionFilterRuleType'>"
+        + optionHtml("ELEMENT", "元素", true) + optionHtml("CONTENT", "内容", false)
+        + "</select></div>"
+        + "<div class='form-field' id='actionFilterMatcherWrap'><label for='actionFilterMatcher'>匹配方式</label><select id='actionFilterMatcher'>"
+        + optionHtml("KEYWORD", "关键词", true) + optionHtml("REGEX", "正则表达式", false)
+        + "</select></div>"
+        + "<div class='form-field' id='actionFilterElementWrap'><label for='actionFilterElement'>元素</label><select id='actionFilterElement'>"
+        + ["TEXT", "IMAGE", "VIDEO", "CARD", "ORIGIN"].map((item, index) => optionHtml(item, label(item), index === 1)).join("")
+        + "</select></div>"
+        + "<div class='form-field full-width' id='actionFilterValueWrap'><label for='actionFilterValue'>匹配内容</label><input id='actionFilterValue' placeholder='关键词或正则表达式'></div>"
+        + "</div>";
+      els("actionFilterRuleType").onchange = updateFilterActionFields;
+      updateFilterActionFields();
+      return true;
+    }
+
+    function updateFilterActionFields() {
+      const isElement = els("actionFilterRuleType") && els("actionFilterRuleType").value === "ELEMENT";
+      if (els("actionFilterMatcherWrap")) els("actionFilterMatcherWrap").hidden = isElement;
+      if (els("actionFilterValueWrap")) els("actionFilterValueWrap").hidden = isElement;
+      if (els("actionFilterElementWrap")) els("actionFilterElementWrap").hidden = !isElement;
+    }
+
+    async function renderTemplateAction() {
+      await Promise.all([ensureTemplates(), ensurePublishers()]);
+      const templates = state.cache.templates.templates || [];
+      const publishers = state.cache.publishers;
+      if (templates.length === 0) {
+        els("actionBody").innerHTML = "<div class='empty'>main.yml 中还没有可绑定模板。</div>";
+        return false;
+      }
+      if (publishers.length === 0) {
+        els("actionBody").innerHTML = "<div class='empty'>暂无发布者，请先创建订阅或同步发布者。</div>";
+        return false;
+      }
+      els("actionBody").innerHTML = "<div class='forms'>"
+        + "<div class='form-field full-width'><label for='actionTemplatePublisherId'>发布者</label><select id='actionTemplatePublisherId'>"
+        + publishers.map((publisher, index) => optionHtml(publisher.id, publisherLabel(publisher), index === 0)).join("")
+        + "</select></div>"
+        + "<div class='form-field full-width'><label for='actionTemplateName'>模板</label><select id='actionTemplateName'>"
+        + templates.map((template, index) => optionHtml(template.name, template.name, index === 0)).join("")
+        + "</select></div>"
+        + "</div>";
+      return true;
+    }
+
+    async function submitActionModal() {
+      if (!state.actionModal) return;
+      els("confirmAction").disabled = true;
+      try {
+        if (state.actionModal.kind === "subscription") {
+          await submitSubscriptionAction();
+        } else if (state.actionModal.kind === "filter") {
+          await submitFilterAction();
+        } else if (state.actionModal.kind === "template") {
+          await submitTemplateAction();
+        }
+      } finally {
+        if (state.actionModal) els("confirmAction").disabled = false;
+      }
+    }
+
+    async function submitSubscriptionAction() {
+      const selectedValue = els("actionSubscriberSelect").value;
+      const selectedSubscriber = state.cache.subscribers.find(item => String(item.id) === selectedValue);
+      const payload = selectedSubscriber ? {
+        subscriberPlatform: selectedSubscriber.platformId,
+        subscriberType: selectedSubscriber.type,
+        subscriberTargetId: selectedSubscriber.targetId,
+        subscriberName: selectedSubscriber.name
+      } : {
+        subscriberPlatform: els("actionSubscriberPlatform").value,
+        subscriberType: els("actionSubscriberType").value,
+        subscriberTargetId: els("actionSubscriberTargetId").value,
+        subscriberName: els("actionSubscriberName").value
+      };
+      payload.publisherPlatform = els("actionPublisherPlatform").value;
+      payload.publisherExternalId = els("actionPublisherExternalId").value;
+      payload.autoFollow = true;
+      if (!payload.publisherPlatform.trim()) return setActionMessage("请选择发布者平台", true);
+      if (!payload.publisherExternalId.trim()) return setActionMessage("请填写发布者外部 ID", true);
+      if (!selectedSubscriber && !payload.subscriberTargetId.trim()) return setActionMessage("请填写目标 ID", true);
+      await api("/subscriptions", { method: "POST", body: JSON.stringify(payload) });
+      closeActionModal();
+      invalidate("overview", "publishers", "subscribers", "subscriptions", "filters", "templates");
+      await loadSubscriptions(true);
+      notify("订阅已创建", false);
+    }
+
+    async function submitFilterAction() {
+      const ruleType = els("actionFilterRuleType").value;
+      const payload = {
+        subscriptionId: Number(els("actionFilterSubscriptionId").value),
+        ruleType: ruleType,
+        matcher: ruleType === "ELEMENT" ? "HAS_ELEMENT" : els("actionFilterMatcher").value,
+        value: ruleType === "ELEMENT" ? els("actionFilterElement").value : els("actionFilterValue").value
+      };
+      if (!payload.subscriptionId) return setActionMessage("请选择订阅", true);
+      if (!payload.value.trim()) return setActionMessage("请填写匹配内容", true);
+      await api("/filter-rules", { method: "POST", body: JSON.stringify(payload) });
+      closeActionModal();
+      await loadFilters(true);
+      notify("过滤规则已添加", false);
+    }
+
+    async function submitTemplateAction() {
+      const publisherId = els("actionTemplatePublisherId").value;
+      const templateName = els("actionTemplateName").value;
+      if (!publisherId) return setActionMessage("请选择发布者", true);
+      if (!templateName) return setActionMessage("请选择模板", true);
+      const result = await api("/template-bindings/publisher/" + encodeURIComponent(publisherId), {
+        method: "PUT",
+        body: JSON.stringify({ templateName: templateName })
+      });
+      closeActionModal();
+      invalidate("templates");
+      await loadTemplates(true);
+      notify(localizeActionMessage(result.message, "模板绑定已保存"), false);
     }
 
     document.querySelectorAll("[data-nav]").forEach(button => {
@@ -1312,6 +1618,7 @@
       const action = button.dataset.action;
       const id = Number(button.dataset.id);
       const platform = button.dataset.platform;
+      const publisherId = Number(button.dataset.publisherId);
       try {
         if (action === "open-cookie-login") {
           openPlatformLoginModal(platform, "cookie");
@@ -1326,13 +1633,21 @@
           }
         } else if (action === "delete-subscription") {
           if (!confirm("确定删除这个订阅关系吗？")) return;
-          await api("/subscriptions/" + id, { method: "DELETE" });
+          const result = await api("/subscriptions/" + id, { method: "DELETE" });
           invalidate("overview", "subscriptions", "filters");
           await loadSubscriptions(true);
+          notify(localizeActionMessage(result.message, "订阅已删除"), false);
         } else if (action === "delete-filter") {
           if (!confirm("确定删除这条过滤规则吗？")) return;
-          await api("/filter-rules/" + id, { method: "DELETE" });
-          await loadFilters();
+          const result = await api("/filter-rules/" + id, { method: "DELETE" });
+          await loadFilters(true);
+          notify(localizeActionMessage(result.message, "过滤规则已删除"), false);
+        } else if (action === "delete-template-binding") {
+          if (!confirm("确定移除这个模板绑定吗？")) return;
+          const result = await api("/template-bindings/publisher/" + encodeURIComponent(publisherId), { method: "DELETE" });
+          invalidate("templates");
+          await loadTemplates(true);
+          notify(localizeActionMessage(result.message, "模板绑定已移除"), false);
         } else if (action === "edit-publisher") {
           openEdit("publisher", state.cache.publishers.find(row => row.id === id));
         } else if (action === "edit-subscriber") {
@@ -1362,14 +1677,20 @@
 
     els("logout").onclick = () => {
       closePlatformLoginModal();
+      closeActionModal();
       clearAllQrSessions(true);
       state.token = "";
       localStorage.removeItem("dynamicBotAdminToken");
       showLogin("", false);
     };
-    els("refresh").onclick = () => {
-      invalidate("overview", "platformLogins", "publishers", "subscribers", "subscriptions", "templates");
-      loadPage(state.page, true).catch(handleError);
+    els("refresh").onclick = async () => {
+      try {
+        invalidate("overview", "platformLogins", "publishers", "subscribers", "subscriptions", "filters", "templates");
+        await loadPage(state.page, true);
+        notify("已刷新当前页面", false);
+      } catch (error) {
+        handleError(error);
+      }
     };
     els("refreshPlatformLogins").onclick = () => loadPlatformLogins(true).catch(handleError);
     els("mobileMenu").onclick = () => document.body.classList.toggle("sidebar-open");
@@ -1384,69 +1705,28 @@
       if (event.target === els("platformLoginModal")) closePlatformLoginModal();
     });
 
-    els("createSubscription").onclick = async () => {
-      try {
-        await api("/subscriptions", { method: "POST", body: JSON.stringify({
-          subscriberPlatform: els("subscriberPlatform").value,
-          subscriberType: els("subscriberType").value,
-          subscriberTargetId: els("subscriberTargetId").value,
-          subscriberName: els("subscriberName").value,
-          publisherPlatform: els("publisherPlatform").value,
-          publisherExternalId: els("publisherExternalId").value,
-          autoFollow: true
-        })});
-        invalidate("overview", "publishers", "subscribers", "subscriptions");
-        await loadSubscriptions(true);
-        setMessage("message", "订阅已创建", false);
-      } catch (error) { handleError(error); }
-    };
+    els("cancelAction").onclick = closeActionModal;
+    els("confirmAction").onclick = () => submitActionModal().catch(error => {
+      setActionMessage(error.message, true);
+      notify(error.message, true);
+    });
+    els("actionModal").addEventListener("click", event => {
+      if (event.target === els("actionModal")) closeActionModal();
+    });
+    els("openCreateSubscription").onclick = () => openActionModal("subscription").catch(handleError);
+    els("openAddFilter").onclick = () => openActionModal("filter").catch(handleError);
+    els("openTemplateBinding").onclick = () => openActionModal("template").catch(handleError);
 
-    els("loadFilters").onclick = () => loadFilters().catch(handleError);
+    els("loadFilters").onclick = () => loadFilters(true).catch(handleError);
+    els("filterScopeSubscriptionId").onchange = () => loadFilters().catch(handleError);
     els("clearFilters").onclick = async () => {
-      const id = els("filterSubscriptionId").value.trim();
-      if (!id) return setMessage("message", "清空过滤规则需要填写订阅 ID", true);
+      const id = els("filterScopeSubscriptionId").value.trim();
+      if (!id) return notify("请先选择一个订阅", true);
       if (!confirm("确定清空订阅 #" + id + " 的所有过滤规则吗？")) return;
       try {
-        await api("/subscriptions/" + encodeURIComponent(id) + "/filter-rules", { method: "DELETE" });
-        await loadFilters();
-      } catch (error) { handleError(error); }
-    };
-    els("addFilter").onclick = async () => {
-      try {
-        await api("/filter-rules", { method: "POST", body: JSON.stringify({
-          subscriptionId: Number(els("filterSubscriptionId").value),
-          ruleType: els("filterRuleType").value,
-          matcher: els("filterMatcher").value,
-          value: els("filterValue").value
-        })});
-        await loadFilters();
-        setMessage("message", "过滤规则已添加", false);
-      } catch (error) { handleError(error); }
-    };
-
-    els("filterRuleType").onchange = () => {
-      const isElement = els("filterRuleType").value === "ELEMENT";
-      els("filterMatcher").value = isElement ? "HAS_ELEMENT" : "KEYWORD";
-    };
-
-    els("setTemplate").onclick = async () => {
-      try {
-        await api("/template-bindings/publisher/" + encodeURIComponent(els("templatePublisherId").value), {
-          method: "PUT",
-          body: JSON.stringify({ templateName: els("templateName").value })
-        });
-        invalidate("templates");
-        await loadTemplates(true);
-        setMessage("message", "模板绑定已保存", false);
-      } catch (error) { handleError(error); }
-    };
-    els("removeTemplate").onclick = async () => {
-      if (!confirm("确定移除这个模板绑定吗？")) return;
-      try {
-        await api("/template-bindings/publisher/" + encodeURIComponent(els("templatePublisherId").value), { method: "DELETE" });
-        invalidate("templates");
-        await loadTemplates(true);
-        setMessage("message", "模板绑定已移除", false);
+        const result = await api("/subscriptions/" + encodeURIComponent(id) + "/filter-rules", { method: "DELETE" });
+        await loadFilters(true);
+        notify(localizeActionMessage(result.message, "过滤规则已清空"), false);
       } catch (error) { handleError(error); }
     };
 

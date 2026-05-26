@@ -96,6 +96,13 @@ class AdminServerTest {
         assertTrue(html.contains("data-page=\"subscriptions\""))
         assertTrue(html.contains("id=\"platformLoginList\""))
         assertTrue(html.contains("id=\"platformLoginModal\""))
+        assertTrue(html.contains("id=\"actionModal\""))
+        assertTrue(html.contains("id=\"toastStack\""))
+        assertTrue(html.contains("id=\"openCreateSubscription\""))
+        assertTrue(html.contains("id=\"openAddFilter\""))
+        assertTrue(html.contains("id=\"openTemplateBinding\""))
+        assertTrue(html.contains("id=\"filterScopeSubscriptionId\""))
+        assertTrue(!html.contains("id=\"createSubscription\""))
         assertTrue(html.contains("hashchange"))
         assertTrue(html.contains("localStorage.getItem(\"dynamicBotAdminToken\")"))
     }
