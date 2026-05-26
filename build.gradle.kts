@@ -14,9 +14,13 @@ repositories {
 
 dependencies {
     val skikoVersion = "0.8.23"
+    val ktorVersion = "3.0.3"
 
     implementation("top.colter.skiko:skiko-layout:0.0.4")
     implementation("org.jetbrains.skiko:skiko-awt:$skikoVersion")
+    implementation("io.ktor:ktor-server-core:$ktorVersion")
+    implementation("io.ktor:ktor-server-netty:$ktorVersion")
+    implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.3")// 临时
 
     implementation("top.colter.dynamic:dynamic-bot-core:0.0.3")
@@ -40,6 +44,8 @@ dependencies {
     }
     val target = "${targetOs}-${targetArch}"
     testImplementation("org.jetbrains.skiko:skiko-awt-runtime-$target:$skikoVersion")
+    testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
+    testImplementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")
     testImplementation(kotlin("test"))
 }
 

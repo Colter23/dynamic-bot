@@ -9,6 +9,7 @@ public data class MainDynamicConfig(
     val subscription: SubscriptionConfig = SubscriptionConfig(),
     val linkParsing: LinkParsingConfig = LinkParsingConfig(),
     val imageCache: ImageCacheConfig = ImageCacheConfig(),
+    val webAdmin: WebAdminConfig = WebAdminConfig(),
 ) {
     public companion object {
         public const val CONFIG_ID: String = "main"
@@ -16,6 +17,13 @@ public data class MainDynamicConfig(
         public const val DEFAULT_TEMPLATE: String = "{publisher.name} 发布了新动态\n{dynamic.text}\n{dynamic.link}"
     }
 }
+
+public data class WebAdminConfig(
+    val enabled: Boolean = true,
+    val host: String = "127.0.0.1",
+    val port: Int = 8080,
+    val token: String = "",
+)
 
 public data class SubscriptionConfig(
     val unfollowWhenNoSubscribers: Boolean = false,

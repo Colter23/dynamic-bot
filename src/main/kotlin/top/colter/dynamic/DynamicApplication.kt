@@ -1,13 +1,17 @@
 package top.colter.dynamic
 
 import java.nio.file.Paths
+import java.security.SecureRandom
+import java.util.Base64
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
+import top.colter.dynamic.admin.AdminServer
 import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.core.config.DefaultConfigService
 import top.colter.dynamic.core.config.loadOrCreate
+import top.colter.dynamic.core.config.save
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
 import top.colter.dynamic.core.event.DynamicEvent
@@ -35,6 +39,8 @@ public object DynamicApplication : CoroutineScope {
     private val pluginManager: PluginManager = PluginManager(pluginDirPath = "plugins")
     private val listenerTokens: MutableList<ListenerToken> = mutableListOf()
     private val taskScheduler: TaskScheduler = TaskScheduler(scope = this)
+    private var adminServer: AdminServer? = null
+    private var runtimeConfig: MainDynamicConfig? = null
 
     public fun run() {
         val dbPath = "data/dynamic.db"
@@ -47,7 +53,9 @@ public object DynamicApplication : CoroutineScope {
         }
 
         EventManger.configureScope(this)
-        registerCoreListeners()
+        val config = loadMainConfig()
+        runtimeConfig = config
+        registerCoreListeners(config)
 
         val loadResult = pluginManager.loadAllPlugins()
         if (loadResult.failedPlugins.isNotEmpty()) {
@@ -64,11 +72,21 @@ public object DynamicApplication : CoroutineScope {
                 println("Plugin start failed: ${info.descriptor.id} -> $error")
             }
 
+        startAdminServer(config)
+
         println("DynamicApplication started. Loaded plugins: ${loadResult.loadedPlugins}")
     }
 
-    private fun registerCoreListeners() {
-        val config = DefaultConfigService.loadOrCreate(MainDynamicConfig.CONFIG_ID) { MainDynamicConfig() }
+    private fun loadMainConfig(): MainDynamicConfig {
+        val loaded = DefaultConfigService.loadOrCreate(MainDynamicConfig.CONFIG_ID) { MainDynamicConfig() }
+        if (!loaded.webAdmin.enabled || loaded.webAdmin.token.isNotBlank()) return loaded
+
+        val updated = loaded.copy(webAdmin = loaded.webAdmin.copy(token = generateAdminToken()))
+        DefaultConfigService.save(MainDynamicConfig.CONFIG_ID, updated)
+        return updated
+    }
+
+    private fun registerCoreListeners(config: MainDynamicConfig) {
         DynamicImageCache.configure(Paths.get(config.imageCache.sourceRoot))
         registerImageCleanupTask(config)
 
@@ -101,6 +119,27 @@ public object DynamicApplication : CoroutineScope {
         }.register<CommandResultEvent>()
     }
 
+    private fun startAdminServer(config: MainDynamicConfig) {
+        if (!config.webAdmin.enabled) return
+        val server = AdminServer(
+            config = config.webAdmin,
+            pluginManager = pluginManager,
+            configProvider = { runtimeConfig ?: config },
+        )
+        server.start()
+        adminServer = server
+        println(
+            "Web admin started: http://${config.webAdmin.host}:${config.webAdmin.port}/admin " +
+                "(token=${config.webAdmin.token})",
+        )
+    }
+
+    private fun generateAdminToken(): String {
+        val bytes = ByteArray(32)
+        SecureRandom().nextBytes(bytes)
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+    }
+
     private fun registerImageCleanupTask(config: MainDynamicConfig) {
         val imageCacheConfig = config.imageCache
         if (!imageCacheConfig.sourceCleanup.enabled && !imageCacheConfig.renderedCleanup.enabled) return
@@ -131,6 +170,8 @@ public object DynamicApplication : CoroutineScope {
     }
 
     public fun shutdown() {
+        adminServer?.stop()
+        adminServer = null
         listenerTokens.forEach { EventManger.removeListener(it) }
         listenerTokens.clear()
         runBlocking {

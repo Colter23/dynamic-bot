@@ -1,0 +1,1130 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>动态转发后台</title>
+  <style>
+    :root {
+      --bg: #f4f6f8;
+      --surface: #ffffff;
+      --surface-2: #f9fbfc;
+      --text: #18212d;
+      --muted: #677489;
+      --line: #dde4ea;
+      --line-strong: #c8d2db;
+      --accent: #0f766e;
+      --accent-2: #d97706;
+      --danger: #b42318;
+      --success: #147d4f;
+      --focus: #9edbd4;
+      --shadow: 0 18px 45px rgba(24, 33, 45, 0.09);
+    }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body {
+      margin: 0;
+      color: var(--text);
+      background: var(--bg);
+      font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input, select, textarea {
+      font: inherit;
+    }
+    button {
+      min-height: 34px;
+      border: 1px solid transparent;
+      border-radius: 7px;
+      padding: 7px 11px;
+      cursor: pointer;
+      font-weight: 650;
+      background: var(--accent);
+      color: #fff;
+      white-space: nowrap;
+    }
+    button:hover { filter: brightness(0.96); }
+    button:disabled { cursor: progress; opacity: 0.65; }
+    button.secondary {
+      background: var(--surface);
+      border-color: var(--line-strong);
+      color: var(--text);
+    }
+    button.danger {
+      background: var(--danger);
+      color: #fff;
+    }
+    input, select, textarea {
+      width: 100%;
+      min-height: 36px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      padding: 8px 10px;
+      background: #fff;
+      color: var(--text);
+    }
+    textarea { min-height: 92px; resize: vertical; }
+    input:focus, select:focus, textarea:focus, button:focus-visible {
+      outline: 3px solid var(--focus);
+      outline-offset: 1px;
+    }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 22px; line-height: 1.15; }
+    h2 { font-size: 16px; line-height: 1.2; }
+    h3 { font-size: 14px; line-height: 1.25; }
+    .login-shell {
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        linear-gradient(135deg, rgba(15, 118, 110, 0.11), transparent 42%),
+        linear-gradient(315deg, rgba(217, 119, 6, 0.12), transparent 48%),
+        var(--bg);
+    }
+    .login-panel {
+      width: min(430px, 100%);
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 22px;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+    .login-panel p {
+      margin: 8px 0 18px;
+      color: var(--muted);
+    }
+    .login-form { display: grid; gap: 12px; }
+    .app-shell {
+      min-height: 100vh;
+      display: grid;
+      grid-template-columns: 256px minmax(0, 1fr);
+    }
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.94);
+      backdrop-filter: blur(10px);
+      z-index: 4;
+    }
+    .brand {
+      padding: 20px 18px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand-mark {
+      width: 34px;
+      height: 34px;
+      display: inline-grid;
+      place-items: center;
+      margin-bottom: 12px;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+    .brand strong { display: block; font-size: 16px; }
+    .brand span { color: var(--muted); font-size: 12px; }
+    .nav {
+      display: grid;
+      gap: 4px;
+      padding: 14px 10px;
+    }
+    .nav button {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      align-items: center;
+      min-height: 42px;
+      padding: 8px 10px;
+      border-color: transparent;
+      background: transparent;
+      color: var(--muted);
+      text-align: left;
+      font-weight: 650;
+    }
+    .nav button:hover {
+      background: var(--surface-2);
+      color: var(--text);
+      filter: none;
+    }
+    .nav button.active {
+      background: #e8f5f3;
+      color: var(--accent);
+    }
+    .nav-icon {
+      width: 22px;
+      height: 22px;
+      display: inline-grid;
+      place-items: center;
+      border-radius: 6px;
+      border: 1px solid currentColor;
+      font-size: 11px;
+      line-height: 1;
+    }
+    .sidebar-footer {
+      margin-top: auto;
+      padding: 12px 10px 16px;
+      border-top: 1px solid var(--line);
+      display: grid;
+      gap: 8px;
+    }
+    .workspace {
+      min-width: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+    .topbar {
+      position: sticky;
+      top: 0;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 22px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(244, 246, 248, 0.88);
+      backdrop-filter: blur(10px);
+    }
+    .topbar-title {
+      display: grid;
+      gap: 3px;
+      min-width: 0;
+    }
+    .topbar-title span {
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .menu-button { display: none; }
+    main {
+      min-width: 0;
+      padding: 22px;
+    }
+    .message {
+      min-height: 20px;
+      margin-bottom: 12px;
+      color: var(--muted);
+    }
+    .message.error { color: var(--danger); }
+    .page {
+      display: grid;
+      gap: 16px;
+    }
+    .page[hidden] { display: none !important; }
+    .page-grid {
+      display: grid;
+      grid-template-columns: repeat(12, minmax(0, 1fr));
+      gap: 16px;
+    }
+    .panel {
+      min-width: 0;
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 16px;
+      box-shadow: 0 8px 28px rgba(24, 33, 45, 0.045);
+    }
+    .panel.full { grid-column: span 12; }
+    .panel.half { grid-column: span 6; }
+    .panel.third { grid-column: span 4; }
+    .panel-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .panel-head p {
+      margin-top: 4px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(120px, 1fr));
+      gap: 12px;
+    }
+    .stat {
+      padding: 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: var(--surface-2);
+    }
+    .stat b {
+      display: block;
+      margin-bottom: 3px;
+      font-size: 26px;
+      line-height: 1.05;
+    }
+    .stat span { color: var(--muted); font-size: 12px; }
+    .forms {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 11px;
+    }
+    .form-field {
+      display: grid;
+      gap: 5px;
+    }
+    .form-field label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .full-width { grid-column: 1 / -1; }
+    .form-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      align-self: end;
+    }
+    .table-wrap {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #fff;
+    }
+    table {
+      width: 100%;
+      min-width: 760px;
+      border-collapse: collapse;
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: middle;
+    }
+    th {
+      background: var(--surface-2);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
+      text-transform: uppercase;
+    }
+    tr:last-child td { border-bottom: 0; }
+    .table-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: #edf1f5;
+      color: #405064;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .pill.ok { background: #e7f7ef; color: var(--success); }
+    .pill.bad { background: #fdeceb; color: var(--danger); }
+    .pill.warn { background: #fff3df; color: var(--accent-2); }
+    .muted { color: var(--muted); }
+    .qr-box {
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .qr-box img {
+      width: 220px;
+      height: 220px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+    }
+    .empty {
+      padding: 18px;
+      color: var(--muted);
+      text-align: center;
+    }
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      padding: 22px;
+      background: rgba(24, 33, 45, 0.36);
+      z-index: 10;
+    }
+    .modal {
+      width: min(420px, 100%);
+      background: var(--surface);
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow);
+      padding: 18px;
+    }
+    .modal h2 { margin-bottom: 12px; }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 14px;
+    }
+    @media (max-width: 1080px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar {
+        position: fixed;
+        width: min(286px, calc(100vw - 34px));
+        transform: translateX(-105%);
+        transition: transform 0.18s ease;
+        box-shadow: var(--shadow);
+      }
+      body.sidebar-open .sidebar { transform: translateX(0); }
+      .menu-button { display: inline-flex; }
+      .topbar { align-items: flex-start; }
+    }
+    @media (max-width: 820px) {
+      main { padding: 14px; }
+      .topbar { padding: 14px; flex-direction: column; }
+      .top-actions { width: 100%; }
+      .panel.half, .panel.third { grid-column: span 12; }
+      .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      table { min-width: 640px; }
+    }
+  </style>
+</head>
+<body>
+  <section id="loginView" class="login-shell">
+    <div class="login-panel">
+      <div class="brand-mark">动</div>
+      <h1>动态转发后台</h1>
+      <p>输入本机管理 token 后进入控制台。</p>
+      <form id="loginForm" class="login-form">
+        <input id="loginToken" type="password" placeholder="管理 token" autocomplete="current-password" autofocus>
+        <button id="loginButton" type="submit">登录</button>
+        <div id="loginMessage" class="message"></div>
+      </form>
+    </div>
+  </section>
+
+  <section id="appView" class="app-shell" hidden>
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <div class="brand-mark">动</div>
+        <strong>动态转发后台</strong>
+        <span>本机管理控制台</span>
+      </div>
+      <nav class="nav" aria-label="后台功能">
+        <button class="active" data-nav="overview"><span class="nav-icon">览</span><span>概览</span></button>
+        <button data-nav="login"><span class="nav-icon">登</span><span>平台登录</span></button>
+        <button data-nav="subscriptions"><span class="nav-icon">订</span><span>订阅管理</span></button>
+        <button data-nav="entities"><span class="nav-icon">源</span><span>发布者与目标</span></button>
+        <button data-nav="filters"><span class="nav-icon">滤</span><span>过滤规则</span></button>
+        <button data-nav="templates"><span class="nav-icon">模</span><span>模板绑定</span></button>
+      </nav>
+      <div class="sidebar-footer">
+        <button class="secondary" id="refresh">刷新</button>
+        <button class="secondary" id="logout">退出登录</button>
+      </div>
+    </aside>
+
+    <div class="workspace">
+      <header class="topbar">
+        <button class="secondary menu-button" id="mobileMenu">菜单</button>
+        <div class="topbar-title">
+          <h1 id="pageTitle">概览</h1>
+          <span id="pageSubtitle">运行状态与插件健康情况。</span>
+        </div>
+        <div class="top-actions">
+          <span class="pill" id="connectionState">本机</span>
+        </div>
+      </header>
+
+      <main>
+        <div id="message" class="message"></div>
+
+        <section class="page" data-page="overview">
+          <div class="stats" id="stats"></div>
+          <div class="page-grid">
+            <section class="panel full">
+              <div class="panel-head">
+                <div>
+                  <h2>插件</h2>
+                  <p>查看已加载插件的状态与能力。</p>
+                </div>
+              </div>
+              <div class="table-wrap"><table id="plugins"></table></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="page" data-page="login" hidden>
+          <div class="page-grid">
+            <section class="panel half">
+              <div class="panel-head">
+                <div>
+                  <h2>Cookie 登录</h2>
+                  <p>提交平台 Cookie。提交完成后会自动清空输入框。</p>
+                </div>
+              </div>
+              <div class="forms">
+                <div class="form-field">
+                  <label for="loginPlatform">平台</label>
+                  <input id="loginPlatform" value="bilibili" placeholder="bilibili">
+                </div>
+                <div class="form-field full-width">
+                  <label for="cookie">Cookie</label>
+                  <textarea id="cookie" placeholder="SESSDATA=..."></textarea>
+                </div>
+                <div class="form-actions full-width">
+                  <button id="cookieLogin">Cookie 登录</button>
+                </div>
+              </div>
+            </section>
+            <section class="panel half">
+              <div class="panel-head">
+                <div>
+                  <h2>二维码登录</h2>
+                  <p>生成二维码，并轮询直到平台返回最终登录状态。</p>
+                </div>
+              </div>
+              <div class="form-actions">
+                <button class="secondary" id="qrLogin">开始二维码登录</button>
+              </div>
+              <div id="qr" class="qr-box"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="page" data-page="subscriptions" hidden>
+          <div class="page-grid">
+            <section class="panel full">
+              <div class="panel-head">
+                <div>
+                  <h2>创建订阅</h2>
+                  <p>把消息接收目标绑定到动态发布者。</p>
+                </div>
+              </div>
+              <div class="forms">
+                <div class="form-field">
+                  <label for="subscriberPlatform">目标平台</label>
+                  <input id="subscriberPlatform" value="onebot">
+                </div>
+                <div class="form-field">
+                  <label for="subscriberType">目标类型</label>
+                  <select id="subscriberType">
+                    <option value="GROUP">群</option>
+                    <option value="USER">用户</option>
+                    <option value="CHANNEL">频道</option>
+                    <option value="OTHER">其他</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="subscriberTargetId">目标 ID</label>
+                  <input id="subscriberTargetId" placeholder="群、用户或频道 ID">
+                </div>
+                <div class="form-field">
+                  <label for="subscriberName">目标名称</label>
+                  <input id="subscriberName" placeholder="可选显示名">
+                </div>
+                <div class="form-field">
+                  <label for="publisherPlatform">发布者平台</label>
+                  <input id="publisherPlatform" value="bilibili">
+                </div>
+                <div class="form-field">
+                  <label for="publisherExternalId">发布者外部 ID</label>
+                  <input id="publisherExternalId" placeholder="Bilibili UID">
+                </div>
+                <div class="form-actions">
+                  <button id="createSubscription">创建</button>
+                </div>
+              </div>
+            </section>
+            <section class="panel full">
+              <div class="panel-head">
+                <div>
+                  <h2>订阅关系</h2>
+                  <p>当前发布者到消息目标的转发关系。</p>
+                </div>
+              </div>
+              <div class="table-wrap"><table id="subscriptions"></table></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="page" data-page="entities" hidden>
+          <div class="page-grid">
+            <section class="panel full">
+              <div class="panel-head">
+                <div>
+                  <h2>发布者</h2>
+                  <p>动态源账号，可编辑名称和状态。</p>
+                </div>
+              </div>
+              <div class="table-wrap"><table id="publishers"></table></div>
+            </section>
+            <section class="panel full">
+              <div class="panel-head">
+                <div>
+                  <h2>消息目标</h2>
+                  <p>接收渲染消息的群、用户和频道。</p>
+                </div>
+              </div>
+              <div class="table-wrap"><table id="subscribers"></table></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="page" data-page="filters" hidden>
+          <div class="page-grid">
+            <section class="panel full">
+              <div class="panel-head">
+                <div>
+                  <h2>添加过滤规则</h2>
+                  <p>按媒体元素、关键词或正则表达式屏蔽动态。</p>
+                </div>
+              </div>
+              <div class="forms">
+                <div class="form-field">
+                  <label for="filterSubscriptionId">订阅 ID</label>
+                  <input id="filterSubscriptionId" placeholder="创建或按订阅加载时必填">
+                </div>
+                <div class="form-field">
+                  <label for="filterRuleType">规则类型</label>
+                  <select id="filterRuleType">
+                    <option value="ELEMENT">元素</option>
+                    <option value="CONTENT">内容</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="filterMatcher">匹配方式</label>
+                  <select id="filterMatcher">
+                    <option value="HAS_ELEMENT">包含元素</option>
+                    <option value="KEYWORD">关键词</option>
+                    <option value="REGEX">正则表达式</option>
+                  </select>
+                </div>
+                <div class="form-field">
+                  <label for="filterValue">值</label>
+                  <input id="filterValue" placeholder="IMAGE、关键词或正则表达式">
+                </div>
+                <div class="form-actions">
+                  <button id="addFilter">添加</button>
+                  <button class="secondary" id="loadFilters">加载</button>
+                  <button class="danger" id="clearFilters">清空当前订阅</button>
+                </div>
+              </div>
+            </section>
+            <section class="panel full">
+              <div class="panel-head">
+                <div>
+                  <h2>过滤规则</h2>
+                  <p>订阅 ID 留空并点击加载，可查看全部规则。</p>
+                </div>
+              </div>
+              <div class="table-wrap"><table id="filters"></table></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="page" data-page="templates" hidden>
+          <div class="page-grid">
+            <section class="panel full">
+              <div class="panel-head">
+                <div>
+                  <h2>发布者模板绑定</h2>
+                  <p>选择已配置模板，并绑定到发布者 ID。</p>
+                </div>
+              </div>
+              <div class="forms">
+                <div class="form-field">
+                  <label for="templatePublisherId">发布者 ID</label>
+                  <input id="templatePublisherId" placeholder="内部发布者 ID">
+                </div>
+                <div class="form-field">
+                  <label for="templateName">模板名称</label>
+                  <select id="templateName"></select>
+                </div>
+                <div class="form-actions">
+                  <button id="setTemplate">绑定</button>
+                  <button class="secondary" id="removeTemplate">移除</button>
+                </div>
+              </div>
+            </section>
+            <section class="panel full">
+              <div class="panel-head">
+                <div>
+                  <h2>模板与绑定</h2>
+                  <p>模板来自配置文件，绑定关系存储在数据库中。</p>
+                </div>
+              </div>
+              <div class="table-wrap"><table id="templates"></table></div>
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+  </section>
+
+  <div id="editModal" class="modal-backdrop" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="editTitle">
+      <h2 id="editTitle">编辑</h2>
+      <div class="forms">
+        <div class="form-field full-width">
+          <label for="editName">名称</label>
+          <input id="editName">
+        </div>
+        <div class="form-field full-width">
+          <label for="editState">状态</label>
+          <select id="editState">
+            <option value="ACTIVE">启用</option>
+            <option value="DISABLED">禁用</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="secondary" id="cancelEdit">取消</button>
+        <button id="saveEdit">保存</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const state = {
+      token: localStorage.getItem("dynamicBotAdminToken") || "",
+      page: "overview",
+      qrTimer: null,
+      edit: null,
+      cache: {
+        overview: null,
+        publishers: [],
+        subscribers: [],
+        subscriptions: [],
+        filters: [],
+        templates: null
+      }
+    };
+    const els = id => document.getElementById(id);
+    const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
+    const labels = {
+      ACTIVE: "启用",
+      DISABLED: "禁用",
+      SUCCESS: "成功",
+      FAILED: "失败",
+      PENDING: "等待中",
+      GROUP: "群",
+      USER: "用户",
+      CHANNEL: "频道",
+      OTHER: "其他",
+      ELEMENT: "元素",
+      CONTENT: "内容",
+      HAS_ELEMENT: "包含元素",
+      KEYWORD: "关键词",
+      REGEX: "正则表达式",
+      template: "模板",
+      binding: "绑定"
+    };
+    const label = value => labels[value] || value;
+    const pageMeta = {
+      overview: ["概览", "运行状态与插件健康情况。"],
+      login: ["平台登录", "动态源账号认证。"],
+      subscriptions: ["订阅管理", "创建和管理发布者转发关系。"],
+      entities: ["发布者与目标", "管理动态发布者和消息接收目标。"],
+      filters: ["过滤规则", "管理每个订阅的动态屏蔽规则。"],
+      templates: ["模板绑定", "查看模板并管理发布者绑定。"]
+    };
+
+    function setMessage(target, text, isError) {
+      const node = els(target);
+      node.textContent = text || "";
+      node.classList.toggle("error", Boolean(isError));
+    }
+
+    function showLogin(text, isError) {
+      els("appView").hidden = true;
+      els("loginView").hidden = false;
+      els("loginToken").value = state.token;
+      setMessage("loginMessage", text || "", isError);
+      setTimeout(() => els("loginToken").focus(), 0);
+    }
+
+    function showApp() {
+      els("loginView").hidden = true;
+      els("appView").hidden = false;
+      setMessage("message", "", false);
+    }
+
+    async function api(path, options) {
+      const init = options || {};
+      init.headers = Object.assign({}, init.headers || {}, { "Authorization": "Bearer " + state.token });
+      if (init.body && !(init.body instanceof FormData)) init.headers["Content-Type"] = "application/json";
+      const res = await fetch("/api" + path, init);
+      if (!res.ok) {
+        let detail = res.statusText;
+        try { detail = (await res.json()).message || detail; } catch (_) {}
+        throw new Error(detail);
+      }
+      return res.json();
+    }
+
+    async function apiBlob(path) {
+      const res = await fetch("/api" + path, { headers: { "Authorization": "Bearer " + state.token } });
+      if (!res.ok) throw new Error(res.statusText);
+      return res.blob();
+    }
+
+    async function verifyToken(token) {
+      state.token = token.trim();
+      if (!state.token) throw new Error("请输入管理 token");
+      return api("/overview");
+    }
+
+    function badge(value) {
+      const text = esc(label(value));
+      const cls = value === "ACTIVE" || value === "SUCCESS" ? "ok" : value === "FAILED" || value === "DISABLED" ? "bad" : value === "PENDING" ? "warn" : "";
+      return "<span class='pill " + cls + "'>" + text + "</span>";
+    }
+
+    function renderTable(id, columns, rows) {
+      const colCount = columns.length;
+      const head = "<tr>" + columns.map(c => "<th>" + esc(c.label) + "</th>").join("") + "</tr>";
+      const body = rows.length
+        ? rows.map(row => "<tr>" + columns.map(c => "<td>" + (c.render ? c.render(row) : esc(row[c.key])) + "</td>").join("") + "</tr>").join("")
+        : "<tr><td colspan='" + colCount + "'><div class='empty'>暂无数据</div></td></tr>";
+      els(id).innerHTML = head + body;
+    }
+
+    function setPage(page) {
+      state.page = page;
+      const meta = pageMeta[page] || pageMeta.overview;
+      els("pageTitle").textContent = meta[0];
+      els("pageSubtitle").textContent = meta[1];
+      document.querySelectorAll("[data-page]").forEach(node => node.hidden = node.dataset.page !== page);
+      document.querySelectorAll("[data-nav]").forEach(node => node.classList.toggle("active", node.dataset.nav === page));
+      document.body.classList.remove("sidebar-open");
+      loadPage(page).catch(error => handleError(error));
+    }
+
+    async function loadPage(page, force) {
+      if (page === "overview") return loadOverview(force);
+      if (page === "login") return;
+      if (page === "subscriptions") return loadSubscriptions(force);
+      if (page === "entities") return loadEntities(force);
+      if (page === "filters") return loadFilters();
+      if (page === "templates") return loadTemplates(force);
+    }
+
+    async function loadOverview(force) {
+      if (force || !state.cache.overview) {
+        state.cache.overview = await api("/overview");
+      }
+      const overview = state.cache.overview;
+      els("stats").innerHTML = [
+        ["命令数", overview.commandCount],
+        ["订阅数", overview.subscriptionCount],
+        ["待投递", overview.deliveryPending],
+        ["失败", overview.deliveryFailed]
+      ].map(item => "<div class='stat'><b>" + esc(item[1]) + "</b><span>" + esc(item[0]) + "</span></div>").join("");
+      renderTable("plugins", [
+        { label: "ID", key: "id" },
+        { label: "名称", key: "name" },
+        { label: "版本", key: "version" },
+        { label: "状态", render: r => badge(r.state) },
+        { label: "能力", render: r => esc(r.capabilities.join(", ")) },
+        { label: "错误", key: "error" }
+      ], overview.plugins);
+      els("connectionState").innerHTML = "本机";
+      setMessage("message", "已加载", false);
+    }
+
+    async function loadEntities(force) {
+      if (force || state.cache.publishers.length === 0) {
+        state.cache.publishers = await api("/publishers");
+      }
+      if (force || state.cache.subscribers.length === 0) {
+        state.cache.subscribers = await api("/subscribers");
+      }
+      renderTable("publishers", [
+        { label: "ID", key: "id" },
+        { label: "平台", key: "platformId" },
+        { label: "外部 ID", key: "externalId" },
+        { label: "名称", key: "name" },
+        { label: "状态", render: r => badge(r.state) },
+        { label: "操作", render: r => "<div class='table-actions'><button class='secondary' data-action='edit-publisher' data-id='" + r.id + "'>编辑</button></div>" }
+      ], state.cache.publishers);
+      renderTable("subscribers", [
+        { label: "ID", key: "id" },
+        { label: "平台", key: "platformId" },
+        { label: "类型", render: r => esc(label(r.type)) },
+        { label: "目标", key: "targetId" },
+        { label: "名称", key: "name" },
+        { label: "状态", render: r => badge(r.state) },
+        { label: "操作", render: r => "<div class='table-actions'><button class='secondary' data-action='edit-subscriber' data-id='" + r.id + "'>编辑</button></div>" }
+      ], state.cache.subscribers);
+    }
+
+    async function loadSubscriptions(force) {
+      if (force || state.cache.subscriptions.length === 0) {
+        state.cache.subscriptions = await api("/subscriptions");
+      }
+      renderTable("subscriptions", [
+        { label: "ID", key: "id" },
+        { label: "目标", render: r => esc((r.subscriber && r.subscriber.platformId + ":" + label(r.subscriber.type) + ":" + r.subscriber.targetId) || r.subscriberId) },
+        { label: "发布者", render: r => esc((r.publisher && r.publisher.platformId + ":" + r.publisher.externalId + " " + r.publisher.name) || r.publisherId) },
+        { label: "创建时间", render: r => esc(formatTime(r.createdAtEpochSeconds)) },
+        { label: "操作", render: r => "<div class='table-actions'><button class='danger' data-action='delete-subscription' data-id='" + r.id + "'>删除</button></div>" }
+      ], state.cache.subscriptions);
+    }
+
+    async function loadFilters() {
+      const id = els("filterSubscriptionId").value.trim();
+      state.cache.filters = await api("/filter-rules" + (id ? "?subscriptionId=" + encodeURIComponent(id) : ""));
+      renderTable("filters", [
+        { label: "ID", key: "id" },
+        { label: "订阅", key: "subscriptionId" },
+        { label: "类型", render: r => esc(label(r.ruleType)) },
+        { label: "匹配方式", render: r => esc(label(r.matcher)) },
+        { label: "值", key: "value" },
+        { label: "启用", render: r => badge(r.enabled ? "ACTIVE" : "DISABLED") },
+        { label: "操作", render: r => "<div class='table-actions'><button class='danger' data-action='delete-filter' data-id='" + r.id + "'>删除</button></div>" }
+      ], state.cache.filters);
+    }
+
+    async function loadTemplates(force) {
+      if (force || !state.cache.templates) {
+        state.cache.templates = await api("/templates");
+      }
+      const data = state.cache.templates;
+      const select = els("templateName");
+      select.innerHTML = data.templates.map(t => "<option value='" + esc(t.name) + "'>" + esc(t.name) + "</option>").join("");
+      const rows = data.templates.map(t => ({ kind: "template", id: "", name: t.name, value: t.body }))
+        .concat(data.bindings.map(b => ({ kind: "binding", id: b.id, name: b.publisherId || b.platformId || "", value: b.templateName })));
+      renderTable("templates", [
+        { label: "类型", render: r => esc(label(r.kind)) },
+        { label: "ID", key: "id" },
+        { label: "名称", key: "name" },
+        { label: "内容", key: "value" }
+      ], rows);
+    }
+
+    function invalidate(...keys) {
+      keys.forEach(key => {
+        if (Array.isArray(state.cache[key])) state.cache[key] = [];
+        else state.cache[key] = null;
+      });
+    }
+
+    function formatTime(epochSeconds) {
+      if (!epochSeconds) return "";
+      return new Date(epochSeconds * 1000).toLocaleString();
+    }
+
+    function handleError(error) {
+      if (String(error.message).toLowerCase().includes("unauthorized")) {
+        localStorage.removeItem("dynamicBotAdminToken");
+        showLogin("Token 无效或已过期", true);
+      } else {
+        setMessage("message", error.message, true);
+      }
+    }
+
+    function openEdit(type, row) {
+      state.edit = { type, id: row.id };
+      els("editTitle").textContent = type === "publisher" ? "编辑发布者" : "编辑消息目标";
+      els("editName").value = row.name || "";
+      els("editState").value = row.state || "ACTIVE";
+      els("editModal").hidden = false;
+      setTimeout(() => els("editName").focus(), 0);
+    }
+
+    function closeEdit() {
+      state.edit = null;
+      els("editModal").hidden = true;
+    }
+
+    async function saveEdit() {
+      if (!state.edit) return;
+      const path = state.edit.type === "publisher" ? "/publishers/" : "/subscribers/";
+      await api(path + state.edit.id, {
+        method: "PATCH",
+        body: JSON.stringify({ name: els("editName").value, state: els("editState").value })
+      });
+      closeEdit();
+      invalidate("publishers", "subscribers", "subscriptions");
+      await loadEntities(true);
+      setMessage("message", "已保存", false);
+    }
+
+    document.querySelectorAll("[data-nav]").forEach(button => {
+      button.addEventListener("click", () => setPage(button.dataset.nav));
+    });
+
+    document.addEventListener("click", async event => {
+      const button = event.target.closest("[data-action]");
+      if (!button) return;
+      const action = button.dataset.action;
+      const id = Number(button.dataset.id);
+      try {
+        if (action === "delete-subscription") {
+          if (!confirm("确定删除这个订阅关系吗？")) return;
+          await api("/subscriptions/" + id, { method: "DELETE" });
+          invalidate("overview", "subscriptions", "filters");
+          await loadSubscriptions(true);
+        } else if (action === "delete-filter") {
+          if (!confirm("确定删除这条过滤规则吗？")) return;
+          await api("/filter-rules/" + id, { method: "DELETE" });
+          await loadFilters();
+        } else if (action === "edit-publisher") {
+          openEdit("publisher", state.cache.publishers.find(row => row.id === id));
+        } else if (action === "edit-subscriber") {
+          openEdit("subscriber", state.cache.subscribers.find(row => row.id === id));
+        }
+      } catch (error) {
+        handleError(error);
+      }
+    });
+
+    els("loginForm").onsubmit = async event => {
+      event.preventDefault();
+      els("loginButton").disabled = true;
+      try {
+        const overview = await verifyToken(els("loginToken").value);
+        localStorage.setItem("dynamicBotAdminToken", state.token);
+        state.cache.overview = overview;
+        showApp();
+        setPage("overview");
+      } catch (error) {
+        showLogin(error.message, true);
+      } finally {
+        els("loginButton").disabled = false;
+      }
+    };
+
+    els("logout").onclick = () => {
+      state.token = "";
+      localStorage.removeItem("dynamicBotAdminToken");
+      if (state.qrTimer) clearInterval(state.qrTimer);
+      showLogin("", false);
+    };
+    els("refresh").onclick = () => {
+      invalidate("overview", "publishers", "subscribers", "subscriptions", "templates");
+      loadPage(state.page, true).catch(handleError);
+    };
+    els("mobileMenu").onclick = () => document.body.classList.toggle("sidebar-open");
+    els("cancelEdit").onclick = closeEdit;
+    els("saveEdit").onclick = () => saveEdit().catch(handleError);
+    els("editModal").addEventListener("click", event => {
+      if (event.target === els("editModal")) closeEdit();
+    });
+
+    els("createSubscription").onclick = async () => {
+      try {
+        await api("/subscriptions", { method: "POST", body: JSON.stringify({
+          subscriberPlatform: els("subscriberPlatform").value,
+          subscriberType: els("subscriberType").value,
+          subscriberTargetId: els("subscriberTargetId").value,
+          subscriberName: els("subscriberName").value,
+          publisherPlatform: els("publisherPlatform").value,
+          publisherExternalId: els("publisherExternalId").value,
+          autoFollow: true
+        })});
+        invalidate("overview", "publishers", "subscribers", "subscriptions");
+        await loadSubscriptions(true);
+        setMessage("message", "订阅已创建", false);
+      } catch (error) { handleError(error); }
+    };
+
+    els("loadFilters").onclick = () => loadFilters().catch(handleError);
+    els("clearFilters").onclick = async () => {
+      const id = els("filterSubscriptionId").value.trim();
+      if (!id) return setMessage("message", "清空过滤规则需要填写订阅 ID", true);
+      if (!confirm("确定清空订阅 #" + id + " 的所有过滤规则吗？")) return;
+      try {
+        await api("/subscriptions/" + encodeURIComponent(id) + "/filter-rules", { method: "DELETE" });
+        await loadFilters();
+      } catch (error) { handleError(error); }
+    };
+    els("addFilter").onclick = async () => {
+      try {
+        await api("/filter-rules", { method: "POST", body: JSON.stringify({
+          subscriptionId: Number(els("filterSubscriptionId").value),
+          ruleType: els("filterRuleType").value,
+          matcher: els("filterMatcher").value,
+          value: els("filterValue").value
+        })});
+        await loadFilters();
+        setMessage("message", "过滤规则已添加", false);
+      } catch (error) { handleError(error); }
+    };
+
+    els("filterRuleType").onchange = () => {
+      const isElement = els("filterRuleType").value === "ELEMENT";
+      els("filterMatcher").value = isElement ? "HAS_ELEMENT" : "KEYWORD";
+    };
+
+    els("setTemplate").onclick = async () => {
+      try {
+        await api("/template-bindings/publisher/" + encodeURIComponent(els("templatePublisherId").value), {
+          method: "PUT",
+          body: JSON.stringify({ templateName: els("templateName").value })
+        });
+        invalidate("templates");
+        await loadTemplates(true);
+        setMessage("message", "模板绑定已保存", false);
+      } catch (error) { handleError(error); }
+    };
+    els("removeTemplate").onclick = async () => {
+      if (!confirm("确定移除这个模板绑定吗？")) return;
+      try {
+        await api("/template-bindings/publisher/" + encodeURIComponent(els("templatePublisherId").value), { method: "DELETE" });
+        invalidate("templates");
+        await loadTemplates(true);
+        setMessage("message", "模板绑定已移除", false);
+      } catch (error) { handleError(error); }
+    };
+
+    els("cookieLogin").onclick = async () => {
+      try {
+        const result = await api("/platforms/" + encodeURIComponent(els("loginPlatform").value) + "/login/cookie", {
+          method: "POST",
+          body: JSON.stringify({ cookie: els("cookie").value })
+        });
+        els("cookie").value = "";
+        setMessage("message", "Cookie 登录：" + label(result.status) + " " + result.message, result.status === "FAILED");
+      } catch (error) { handleError(error); }
+    };
+    els("qrLogin").onclick = async () => {
+      try {
+        const started = await api("/platforms/" + encodeURIComponent(els("loginPlatform").value) + "/login/qr", { method: "POST" });
+        const blob = await apiBlob("/login/qr/" + started.loginId + "/image");
+        const url = URL.createObjectURL(blob);
+        els("qr").innerHTML = "<img alt='二维码' src='" + url + "'><span id='qrStatus'>" + esc(started.message || "等待扫码") + "</span>";
+        if (state.qrTimer) clearInterval(state.qrTimer);
+        state.qrTimer = setInterval(async () => {
+          const status = await api("/login/qr/" + started.loginId);
+          els("qrStatus").textContent = label(status.status) + " " + status.message;
+          if (status.status !== "PENDING") clearInterval(state.qrTimer);
+        }, 1500);
+      } catch (error) { handleError(error); }
+    };
+
+    if (state.token) {
+      verifyToken(state.token).then(overview => {
+        state.cache.overview = overview;
+        showApp();
+        setPage("overview");
+      }).catch(() => showLogin("已保存的 token 无效", true));
+    } else {
+      showLogin("", false);
+    }
+  </script>
+</body>
+</html>
