@@ -224,6 +224,32 @@ class DynamicListenerTest {
         assertEquals(listOf(directSubscriber.toMessageTarget()), event.message.targets)
     }
 
+    @Test
+    fun shouldSkipOrdinaryDynamicBeforeSubscriptionCreatedAt() = runBlocking {
+        initDb("dynamic-listener-subscription-created-at")
+        val publisher = createPublisher()
+        val subscriber = createSubscriber()
+        SubscriptionRepository.subscribe(subscriber.id, publisher.id)
+        val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!
+
+        val listener = DynamicListener(
+            config = MainDynamicConfig(templates = mapOf("default" to "old {name}")),
+            imageLoader = DynamicImageLoader { },
+            imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/old.png") },
+        )
+
+        val received = captureMessageEvent()
+        listener.onMessage(
+            DynamicEvent(
+                source = "test",
+                dynamic = demoDynamic(publisher, time = subscription.createdAtEpochSeconds - 1),
+            )
+        )
+
+        assertNull(withTimeoutOrNull(300) { received.await() })
+        assertEquals(0, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
+    }
+
     private fun captureMessageEvent(): CompletableDeferred<MessageEvent> {
         val received = CompletableDeferred<MessageEvent>()
         object : Listener<MessageEvent> {
@@ -272,7 +298,10 @@ class DynamicListenerTest {
         return assertNotNull(SubscriberRepository.findByPlatformAndTarget("onebot", SubscriberType.GROUP, targetId))
     }
 
-    private fun demoDynamic(publisher: Publisher): Dynamic {
+    private fun demoDynamic(
+        publisher: Publisher,
+        time: Long = System.currentTimeMillis() / 1000 + 60,
+    ): Dynamic {
         return Dynamic(
             platform = PlatformDescriptor(
                 id = "bilibili",
@@ -283,7 +312,7 @@ class DynamicListenerTest {
             ),
             dynamicId = "dynamic-1",
             publisher = publisher,
-            time = 1_710_000_000,
+            time = time,
             link = "https://t.bilibili.com/dynamic-1",
             content = DynamicContent("Demo content", listOf(DynamicContentNodeText("Demo content"))),
         )

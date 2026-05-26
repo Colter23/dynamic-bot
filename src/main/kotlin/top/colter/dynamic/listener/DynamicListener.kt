@@ -51,7 +51,7 @@ public class DynamicListener(
         val deliverableTargets = if (event.label == LINK_PARSE_EVENT_LABEL) {
             targets
         } else {
-            applyFilters(dynamic, targets)
+            applyFilters(dynamic, targets.filterSubscribedBeforeDynamic(dynamic))
         }
         if (deliverableTargets.isEmpty()) {
             println("dynamic event skipped: ${dynamic.dynamicId}, reason=filtered")
@@ -117,6 +117,13 @@ public class DynamicListener(
                 )
             }
             !blocked
+        }
+    }
+
+    private fun List<DeliveryTarget>.filterSubscribedBeforeDynamic(dynamic: Dynamic): List<DeliveryTarget> {
+        return filter { target ->
+            val subscription = target.subscription ?: return@filter true
+            dynamic.time >= subscription.createdAtEpochSeconds
         }
     }
 
