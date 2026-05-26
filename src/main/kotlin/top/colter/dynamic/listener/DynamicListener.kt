@@ -10,7 +10,6 @@ import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageChain
-import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.Subscription
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.event.DynamicEvent
@@ -27,7 +26,7 @@ import top.colter.dynamic.link.LINK_PARSE_EVENT_LABEL
 public class DynamicListener(
     config: MainDynamicConfig? = null,
     private val configService: ConfigService = DefaultConfigService,
-    private val templateRenderer: DynamicTemplateRenderer = DynamicTemplateRenderer(),
+    private val templateRenderer: DynamicMessageTemplateRenderer = DynamicMessageTemplateRenderer(),
     imageLoader: DynamicImageLoader? = null,
     imageRenderer: DynamicImageRenderer? = null,
 ) : Listener<DynamicEvent> {
@@ -61,11 +60,18 @@ public class DynamicListener(
 
         println("dynamic event received: ${dynamic.dynamicId}")
 
+        val template = resolveTemplate(dynamic)
+        val chain = buildMessageChain(template, dynamic)
+        if (chain.isEmpty()) {
+            println("dynamic event skipped: ${dynamic.dynamicId}, reason=empty_message")
+            return
+        }
+
         val message = Message(
             id = messageId(dynamic),
             time = System.currentTimeMillis() / 1000,
             targets = deliverableTargets.map { it.subscriber.toMessageTarget() },
-            chain = listOf(buildMessageChain(dynamic)),
+            chain = chain,
         )
         MessageDeliveryRepository.createPending(message)
 
@@ -114,25 +120,15 @@ public class DynamicListener(
         }
     }
 
-    private suspend fun buildMessageChain(dynamic: Dynamic): MessageChain {
-        val contents = mutableListOf<MessageContent>()
-        renderImage(dynamic)?.let { imagePath ->
-            contents += MessageContent.Image(
-                fallbackText = "",
-                image = LazyImage(imagePath),
-            )
-        }
-        val text = templateRenderer.render(resolveTemplate(dynamic), dynamic)
-        if (text.isNotBlank()) {
-            contents += MessageContent.Text(text)
-        }
-        return MessageChain(contents)
+    private suspend fun buildMessageChain(template: String, dynamic: Dynamic): List<MessageChain> {
+        val drawImage = if (templateRenderer.requiresDraw(template)) renderImage(dynamic) else null
+        return templateRenderer.render(template, dynamic, drawImage)
     }
 
-    private suspend fun renderImage(dynamic: Dynamic): String? {
+    private suspend fun renderImage(dynamic: Dynamic): LazyImage? {
         return runCatching {
             runtimeImageLoader.load(dynamic)
-            runtimeImageRenderer.render(dynamic).toString()
+            LazyImage(runtimeImageRenderer.render(dynamic).toString())
         }.onFailure {
             println("dynamic draw failed: ${dynamic.dynamicId}, error=${it.message}")
         }.getOrNull()

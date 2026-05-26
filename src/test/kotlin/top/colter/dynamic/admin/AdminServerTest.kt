@@ -256,8 +256,8 @@ class AdminServerTest {
                 configProvider = {
                     MainDynamicConfig(
                         templates = mapOf(
-                            "default" to "{dynamic.text}",
-                            "rich" to "{publisher.name}: {dynamic.text}",
+                            "default" to "{content}",
+                            "rich" to "{name}: {content}",
                         )
                     )
                 },

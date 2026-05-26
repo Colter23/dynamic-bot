@@ -14,7 +14,7 @@ public data class MainDynamicConfig(
     public companion object {
         public const val CONFIG_ID: String = "main"
         public const val DEFAULT_TEMPLATE_NAME: String = "default"
-        public const val DEFAULT_TEMPLATE: String = "{publisher.name} 发布了新动态\n{dynamic.text}\n{dynamic.link}"
+        public const val DEFAULT_TEMPLATE: String = "{draw}\n{name} 发布了新动态\n{content}\n{link}"
     }
 }
 

@@ -58,8 +58,8 @@ class DynamicListenerTest {
         val listener = DynamicListener(
             config = MainDynamicConfig(
                 templates = mapOf(
-                    "default" to "default {publisher.name}",
-                    "bili-video" to "video {publisher.name} {dynamic.text}",
+                    "default" to "default {name}",
+                    "bili-video" to "{draw}\nvideo {name} {content}",
                 ),
             ),
             imageLoader = DynamicImageLoader { },
@@ -74,7 +74,7 @@ class DynamicListenerTest {
         val contents = event.message.chain.single().content
         assertTrue(contents.first() is MessageContent.Image)
         assertEquals("D:\\tmp\\dynamic.png", (contents.first() as MessageContent.Image).image.uri)
-        assertEquals("video Demo UP Demo content", contents.filterIsInstance<MessageContent.Text>().single().fallbackText)
+        assertEquals("\nvideo Demo UP Demo content", contents.filterIsInstance<MessageContent.Text>().single().fallbackText)
     }
 
     @Test
@@ -84,7 +84,7 @@ class DynamicListenerTest {
         val subscriber = createSubscriber()
 
         val listener = DynamicListener(
-            config = MainDynamicConfig(templates = mapOf("default" to "fallback {publisher.name}")),
+            config = MainDynamicConfig(templates = mapOf("default" to "{draw}\nfallback {name}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { error("draw failed") },
         )
@@ -99,6 +99,51 @@ class DynamicListenerTest {
     }
 
     @Test
+    fun shouldNotRenderDrawWhenTemplateDoesNotContainDrawPlaceholder() = runBlocking {
+        initDb("dynamic-listener-no-draw")
+        val publisher = createPublisher()
+        val subscriber = createSubscriber()
+        var renderCalls = 0
+
+        val listener = DynamicListener(
+            config = MainDynamicConfig(templates = mapOf("default" to "text only {name}")),
+            imageLoader = DynamicImageLoader { },
+            imageRenderer = DynamicImageRenderer {
+                renderCalls += 1
+                Paths.get("D:/tmp/not-used.png")
+            },
+        )
+
+        val received = captureMessageEvent()
+        listener.onMessage(DynamicEvent(source = "test", target = subscriber, dynamic = demoDynamic(publisher)))
+        val event = withTimeout(3_000) { received.await() }
+
+        assertEquals(0, renderCalls)
+        assertEquals("text only Demo UP", event.message.chain.single().content.single().fallbackText)
+    }
+
+    @Test
+    fun shouldSplitTemplateIntoMultipleMessageChains() = runBlocking {
+        initDb("dynamic-listener-split-chain")
+        val publisher = createPublisher()
+        val subscriber = createSubscriber()
+
+        val listener = DynamicListener(
+            config = MainDynamicConfig(templates = mapOf("default" to "first {name}\\rsecond {link}")),
+            imageLoader = DynamicImageLoader { },
+            imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/not-used.png") },
+        )
+
+        val received = captureMessageEvent()
+        listener.onMessage(DynamicEvent(source = "test", target = subscriber, dynamic = demoDynamic(publisher)))
+        val event = withTimeout(3_000) { received.await() }
+
+        assertEquals(2, event.message.chain.size)
+        assertEquals("first Demo UP", event.message.chain[0].content.single().fallbackText)
+        assertEquals("second https://t.bilibili.com/dynamic-1", event.message.chain[1].content.single().fallbackText)
+    }
+
+    @Test
     fun shouldSkipRenderingAndDeliveryWhenAllTargetsAreFiltered() = runBlocking {
         initDb("dynamic-listener-filter-all")
         val publisher = createPublisher()
@@ -110,7 +155,7 @@ class DynamicListenerTest {
         var loadCalls = 0
         var renderCalls = 0
         val listener = DynamicListener(
-            config = MainDynamicConfig(templates = mapOf("default" to "filtered {publisher.name}")),
+            config = MainDynamicConfig(templates = mapOf("default" to "filtered {name}")),
             imageLoader = DynamicImageLoader { loadCalls += 1 },
             imageRenderer = DynamicImageRenderer {
                 renderCalls += 1
@@ -140,7 +185,7 @@ class DynamicListenerTest {
         DynamicFilterRuleRepository.addElementRule(filteredSubscription.id, DynamicElementType.TEXT)
 
         val listener = DynamicListener(
-            config = MainDynamicConfig(templates = mapOf("default" to "allowed {publisher.name}")),
+            config = MainDynamicConfig(templates = mapOf("default" to "allowed {name}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/allowed.png") },
         )
@@ -164,7 +209,7 @@ class DynamicListenerTest {
         DynamicFilterRuleRepository.addElementRule(filteredSubscription.id, DynamicElementType.TEXT)
 
         val listener = DynamicListener(
-            config = MainDynamicConfig(templates = mapOf("default" to "direct {publisher.name}")),
+            config = MainDynamicConfig(templates = mapOf("default" to "direct {name}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/direct.png") },
         )
