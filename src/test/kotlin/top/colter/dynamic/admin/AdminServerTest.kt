@@ -16,6 +16,8 @@ import io.ktor.http.contentType
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.serialization.json.Json
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.command.CommandRegistry
@@ -89,7 +91,12 @@ class AdminServerTest {
         assertTrue(html.contains("id=\"loginView\""))
         assertTrue(html.contains("id=\"appView\""))
         assertTrue(html.contains("data-nav=\"overview\""))
+        assertTrue(html.contains("data-nav=\"login\""))
+        assertTrue(!html.contains("data-nav=\"login\" hidden"))
         assertTrue(html.contains("data-page=\"subscriptions\""))
+        assertTrue(html.contains("id=\"platformLoginList\""))
+        assertTrue(html.contains("id=\"platformLoginModal\""))
+        assertTrue(html.contains("hashchange"))
         assertTrue(html.contains("localStorage.getItem(\"dynamicBotAdminToken\")"))
     }
 
@@ -105,6 +112,59 @@ class AdminServerTest {
         assertEquals(1, plugins.size)
         assertEquals("ACTIVE", plugins.single().state)
         assertTrue(plugins.single().capabilities.contains("DYNAMIC_SOURCE"))
+    }
+
+    @Test
+    fun `platform login endpoint should require token and expose active platform login state`() = testApplication {
+        initDb("admin-platform-logins")
+        val plugin = FakePlatformPublisherPlugin(
+            loginStateResult = PublisherLoginResult(
+                PublisherLoginStatus.SUCCESS,
+                "logged in",
+                PublisherLoginAccount(userId = "123", name = "demo-up"),
+            ),
+        )
+        application { adminModule(testContext(plugin)) }
+        val client = jsonClient()
+
+        assertEquals(HttpStatusCode.Unauthorized, client.get("/api/platform-logins").status)
+
+        val logins = client.get("/api/platform-logins") { auth() }.body<List<PlatformLoginDto>>()
+
+        assertEquals(1, logins.size)
+        assertEquals("bilibili", logins.single().platformId)
+        assertEquals("bilibili-publisher", logins.single().pluginId)
+        assertEquals(listOf("COOKIE", "QR_CODE"), logins.single().supportedLoginMethods)
+        assertEquals("SUCCESS", logins.single().status)
+        assertEquals("demo-up", logins.single().account?.name)
+    }
+
+    @Test
+    fun `platform login endpoint should return empty list without platform publisher plugins`() = testApplication {
+        initDb("admin-platform-logins-empty")
+        application { adminModule(testContext(emptyList())) }
+        val client = jsonClient()
+
+        val logins = client.get("/api/platform-logins") { auth() }.body<List<PlatformLoginDto>>()
+
+        assertTrue(logins.isEmpty())
+    }
+
+    @Test
+    fun `platform login endpoint should include unsupported login platforms as readonly entries`() = testApplication {
+        initDb("admin-platform-logins-unsupported")
+        val plugin = ReadOnlyPlatformPublisherPlugin()
+        application { adminModule(testContext(listOf(plugin.info()), platformPluginResolver = { platform ->
+            if (platform == plugin.platformId) plugin else null
+        })) }
+        val client = jsonClient()
+
+        val logins = client.get("/api/platform-logins") { auth() }.body<List<PlatformLoginDto>>()
+
+        assertEquals(1, logins.size)
+        assertEquals("readonly", logins.single().platformId)
+        assertTrue(logins.single().supportedLoginMethods.isEmpty())
+        assertEquals("UNSUPPORTED", logins.single().status)
     }
 
     @Test
@@ -237,6 +297,26 @@ class AdminServerTest {
         assertEquals("demo-up", status.account?.name)
     }
 
+    @Test
+    fun `qr login cancel endpoint should cancel pending session`() = testApplication {
+        initDb("admin-login-cancel")
+        val qrWait = CompletableDeferred<Unit>()
+        val plugin = FakePlatformPublisherPlugin(qrLoginWait = qrWait)
+        application { adminModule(testContext(plugin)) }
+        val client = jsonClient()
+
+        val started = client.post("/api/platforms/bilibili/login/qr") { auth() }
+            .body<QrLoginStartResponse>()
+        val canceled = client.delete("/api/login/qr/${started.loginId}") { auth() }
+            .body<ActionResultResponse>()
+        val status = client.get("/api/login/qr/${started.loginId}") { auth() }
+            .body<QrLoginStatusResponse>()
+
+        assertTrue(canceled.changed)
+        assertEquals("CANCELED", status.status)
+        assertTrue(plugin.qrLoginCancelled)
+    }
+
     private fun ApplicationTestBuilder.jsonClient() = createClient {
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true })
@@ -248,11 +328,21 @@ class AdminServerTest {
     }
 
     private fun testContext(plugin: FakePlatformPublisherPlugin): AdminServerContext {
+        return testContext(
+            pluginInfos = listOf(plugin.info()),
+            platformPluginResolver = { platform -> if (platform == plugin.platformId) plugin else null },
+        )
+    }
+
+    private fun testContext(
+        pluginInfos: List<PluginInfo>,
+        platformPluginResolver: (String) -> PlatformPublisherPlugin? = { null },
+    ): AdminServerContext {
         return AdminServerContext(
             token = "secret-token",
             service = AdminService(
-                pluginProvider = { listOf(plugin.info()) },
-                platformPluginResolver = { platform -> if (platform == "bilibili") plugin else null },
+                pluginProvider = { pluginInfos },
+                platformPluginResolver = platformPluginResolver,
                 configProvider = {
                     MainDynamicConfig(
                         templates = mapOf(
@@ -263,7 +353,7 @@ class AdminServerTest {
                 },
             ),
             loginService = AdminLoginService(
-                platformPluginResolver = { platform -> if (platform == "bilibili") plugin else null },
+                platformPluginResolver = platformPluginResolver,
             ),
         )
     }
@@ -304,6 +394,15 @@ class AdminServerTest {
 
     private class FakePlatformPublisherPlugin(
         private val followState: FollowState = FollowState.FOLLOWING,
+        private val loginStateResult: PublisherLoginResult = PublisherLoginResult(
+            PublisherLoginStatus.SUCCESS,
+            "logged in",
+            PublisherLoginAccount(userId = "123", name = "demo-up"),
+        ),
+        private val loginMethods: Set<PublisherLoginMethod> = setOf(
+            PublisherLoginMethod.COOKIE,
+            PublisherLoginMethod.QR_CODE,
+        ),
         private val cookieLoginResult: PublisherLoginResult = PublisherLoginResult(
             PublisherLoginStatus.SUCCESS,
             "cookie ok",
@@ -312,14 +411,14 @@ class AdminServerTest {
             PublisherLoginStatus.SUCCESS,
             "qr ok",
         ),
+        private val qrLoginWait: CompletableDeferred<Unit>? = null,
     ) : PlatformPublisherPlugin {
         override val platformId: String = "bilibili"
-        override val supportedLoginMethods: Set<PublisherLoginMethod> = setOf(
-            PublisherLoginMethod.COOKIE,
-            PublisherLoginMethod.QR_CODE,
-        )
+        override val supportedLoginMethods: Set<PublisherLoginMethod> = loginMethods
 
         var followCalls: Int = 0
+        var qrLoginCancelled: Boolean = false
+            private set
 
         override suspend fun fetchPublisherProfile(userId: String): PublisherProfile? {
             if (userId != "123") return null
@@ -340,6 +439,8 @@ class AdminServerTest {
             return FollowActionResult(FollowActionStatus.FOLLOWED)
         }
 
+        override suspend fun checkLoginState(): PublisherLoginResult = loginStateResult
+
         override suspend fun loginByCookie(cookie: String): PublisherLoginResult = cookieLoginResult
 
         override suspend fun loginByQrCode(
@@ -354,6 +455,14 @@ class AdminServerTest {
                 )
             )
             onStatusChanged(PublisherLoginResult(PublisherLoginStatus.PENDING, "waiting"))
+            if (qrLoginWait != null) {
+                try {
+                    qrLoginWait.await()
+                } catch (e: CancellationException) {
+                    qrLoginCancelled = true
+                    throw e
+                }
+            }
             return qrLoginResult
         }
 
@@ -382,6 +491,46 @@ class AdminServerTest {
             instance = this,
             classLoader = null,
             sourceJarPath = "fake.jar",
+            loadTime = 1L,
+        )
+    }
+
+    private class ReadOnlyPlatformPublisherPlugin : PlatformPublisherPlugin {
+        override val platformId: String = "readonly"
+
+        override suspend fun fetchPublisherProfile(userId: String): PublisherProfile? = null
+
+        override suspend fun queryFollowState(userId: String): FollowState = FollowState.UNSUPPORTED
+
+        override suspend fun followPublisher(userId: String): FollowActionResult {
+            return FollowActionResult(FollowActionStatus.UNSUPPORTED)
+        }
+
+        override fun init() {
+        }
+
+        override fun start() {
+        }
+
+        override fun stop() {
+        }
+
+        override fun cleanup() {
+        }
+
+        fun info(): PluginInfo = PluginInfo(
+            descriptor = PluginDescriptor(
+                id = "readonly-publisher",
+                name = "Readonly",
+                version = "0.0.1",
+                mainClass = "ReadOnlyPlatformPublisherPlugin",
+                capabilities = setOf(PluginCapability.DYNAMIC_SOURCE),
+                apiVersion = "2.0.0",
+            ),
+            state = PluginState.ACTIVE,
+            instance = this,
+            classLoader = null,
+            sourceJarPath = "readonly.jar",
             loadTime = 1L,
         )
     }

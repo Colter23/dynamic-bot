@@ -93,6 +93,10 @@ public fun Application.adminModule(context: AdminServerContext) {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.plugins() }
             }
+            get("/platform-logins") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi { context.service.platformLogins() }
+            }
             get("/publishers") {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.publishers() }
@@ -173,6 +177,11 @@ public fun Application.adminModule(context: AdminServerContext) {
                 if (!call.ensureAuthorized(context)) return@get
                 val loginId = call.pathString("loginId")
                 call.respondApi { context.loginService.qrLoginStatus(loginId) }
+            }
+            delete("/login/qr/{loginId}") {
+                if (!call.ensureAuthorized(context)) return@delete
+                val loginId = call.pathString("loginId")
+                call.respondApi { context.loginService.cancelQrLogin(loginId) }
             }
             get("/login/qr/{loginId}/image") {
                 if (!call.ensureAuthorized(context)) return@get

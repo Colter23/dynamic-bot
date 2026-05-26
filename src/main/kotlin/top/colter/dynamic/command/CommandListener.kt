@@ -435,6 +435,7 @@ private class LoginCommandHandler(
         val status = when (result.status) {
             PublisherLoginStatus.SUCCESS,
             PublisherLoginStatus.PENDING -> CommandExecutionStatus.SUCCESS
+            PublisherLoginStatus.CANCELED,
             PublisherLoginStatus.EXPIRED,
             PublisherLoginStatus.FAILED,
             PublisherLoginStatus.UNSUPPORTED -> CommandExecutionStatus.FAILED

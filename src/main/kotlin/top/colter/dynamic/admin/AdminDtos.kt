@@ -35,6 +35,19 @@ public data class PluginDto(
 )
 
 @Serializable
+public data class PlatformLoginDto(
+    val platformId: String,
+    val pluginId: String,
+    val pluginName: String,
+    val pluginVersion: String,
+    val pluginState: String,
+    val supportedLoginMethods: List<String>,
+    val status: String,
+    val message: String,
+    val account: LoginAccountDto? = null,
+)
+
+@Serializable
 public data class PublisherDto(
     val id: Int,
     val platformId: String,

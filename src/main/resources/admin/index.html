@@ -335,6 +335,68 @@
     .pill.bad { background: #fdeceb; color: var(--danger); }
     .pill.warn { background: #fff3df; color: var(--accent-2); }
     .muted { color: var(--muted); }
+    .platform-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 14px;
+      align-items: stretch;
+    }
+    .platform-card {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      padding: 15px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      box-shadow: 0 8px 24px rgba(24, 33, 45, 0.045);
+    }
+    .platform-card-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .platform-title {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+    .platform-title h3 {
+      font-size: 16px;
+      overflow-wrap: anywhere;
+    }
+    .platform-meta {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .platform-account {
+      display: grid;
+      gap: 4px;
+      padding: 10px;
+      border-radius: 8px;
+      background: var(--surface-2);
+    }
+    .platform-account strong {
+      overflow-wrap: anywhere;
+    }
+    .platform-actions {
+      margin-top: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .platform-actions button {
+      flex: 1 1 94px;
+    }
+    .platform-message {
+      min-height: 20px;
+      color: var(--muted);
+    }
+    .platform-message.error { color: var(--danger); }
     .qr-box {
       margin-top: 12px;
       display: flex;
@@ -372,6 +434,9 @@
       padding: 18px;
     }
     .modal h2 { margin-bottom: 12px; }
+    .modal.login-modal {
+      width: min(460px, 100%);
+    }
     .modal-actions {
       display: flex;
       justify-content: flex-end;
@@ -468,38 +533,15 @@
 
         <section class="page" data-page="login" hidden>
           <div class="page-grid">
-            <section class="panel half">
+            <section class="panel full">
               <div class="panel-head">
                 <div>
-                  <h2>Cookie 登录</h2>
-                  <p>提交平台 Cookie。提交完成后会自动清空输入框。</p>
+                  <h2>平台登录</h2>
+                  <p>按动态源平台查看登录状态，并选择对应登录方式。</p>
                 </div>
+                <button class="secondary" id="refreshPlatformLogins">刷新登录状态</button>
               </div>
-              <div class="forms">
-                <div class="form-field">
-                  <label for="loginPlatform">平台</label>
-                  <input id="loginPlatform" value="bilibili" placeholder="bilibili">
-                </div>
-                <div class="form-field full-width">
-                  <label for="cookie">Cookie</label>
-                  <textarea id="cookie" placeholder="SESSDATA=..."></textarea>
-                </div>
-                <div class="form-actions full-width">
-                  <button id="cookieLogin">Cookie 登录</button>
-                </div>
-              </div>
-            </section>
-            <section class="panel half">
-              <div class="panel-head">
-                <div>
-                  <h2>二维码登录</h2>
-                  <p>生成二维码，并轮询直到平台返回最终登录状态。</p>
-                </div>
-              </div>
-              <div class="form-actions">
-                <button class="secondary" id="qrLogin">开始二维码登录</button>
-              </div>
-              <div id="qr" class="qr-box"></div>
+              <div id="platformLoginList" class="platform-list"></div>
             </section>
           </div>
         </section>
@@ -697,14 +739,29 @@
     </div>
   </div>
 
+  <div id="platformLoginModal" class="modal-backdrop" hidden>
+    <div class="modal login-modal" role="dialog" aria-modal="true" aria-labelledby="platformLoginTitle">
+      <h2 id="platformLoginTitle">平台登录</h2>
+      <div id="platformLoginBody"></div>
+      <div id="platformLoginMessage" class="message"></div>
+      <div class="modal-actions">
+        <button class="secondary" id="cancelPlatformLogin">关闭</button>
+        <button id="confirmPlatformLogin">提交</button>
+      </div>
+    </div>
+  </div>
+
   <script>
     const state = {
       token: localStorage.getItem("dynamicBotAdminToken") || "",
       page: "overview",
-      qrTimer: null,
+      initialPage: "overview",
+      qrSessions: {},
       edit: null,
+      platformLoginModal: null,
       cache: {
         overview: null,
+        platformLogins: null,
         publishers: [],
         subscribers: [],
         subscriptions: [],
@@ -720,6 +777,7 @@
       SUCCESS: "成功",
       FAILED: "失败",
       PENDING: "等待中",
+      CANCELED: "已取消",
       GROUP: "群",
       USER: "用户",
       CHANNEL: "频道",
@@ -729,6 +787,10 @@
       HAS_ELEMENT: "包含元素",
       KEYWORD: "关键词",
       REGEX: "正则表达式",
+      EXPIRED: "已过期",
+      UNSUPPORTED: "不支持",
+      COOKIE: "Cookie",
+      QR_CODE: "二维码",
       template: "模板",
       binding: "绑定"
     };
@@ -741,6 +803,22 @@
       filters: ["过滤规则", "管理每个订阅的动态屏蔽规则。"],
       templates: ["模板绑定", "查看模板并管理发布者绑定。"]
     };
+    state.initialPage = pageFromLocation();
+
+    function pageFromLocation() {
+      const hashPage = location.hash.replace("#", "");
+      if (pageMeta[hashPage]) return hashPage;
+      const pathPage = location.pathname.split("/").filter(Boolean).pop() || "";
+      return pageMeta[pathPage] ? pathPage : "overview";
+    }
+
+    function showInitialPage() {
+      const page = pageFromLocation();
+      if (!location.hash) {
+        history.replaceState(null, "", "#" + page);
+      }
+      setPage(page);
+    }
 
     function setMessage(target, text, isError) {
       const node = els(target);
@@ -776,7 +854,8 @@
     }
 
     async function apiBlob(path) {
-      const res = await fetch("/api" + path, { headers: { "Authorization": "Bearer " + state.token } });
+      const resolvedPath = path.startsWith("/api/") ? path : "/api" + path;
+      const res = await fetch(resolvedPath, { headers: { "Authorization": "Bearer " + state.token } });
       if (!res.ok) throw new Error(res.statusText);
       return res.blob();
     }
@@ -793,6 +872,10 @@
       return "<span class='pill " + cls + "'>" + text + "</span>";
     }
 
+    function platformKey(platformId) {
+      return String(platformId || "").replace(/[^A-Za-z0-9_-]/g, "_");
+    }
+
     function renderTable(id, columns, rows) {
       const colCount = columns.length;
       const head = "<tr>" + columns.map(c => "<th>" + esc(c.label) + "</th>").join("") + "</tr>";
@@ -803,19 +886,33 @@
     }
 
     function setPage(page) {
-      state.page = page;
-      const meta = pageMeta[page] || pageMeta.overview;
+      const nextPage = pageMeta[page] ? page : "overview";
+      if (state.page !== nextPage) {
+        closePlatformLoginModal();
+      }
+      state.page = nextPage;
+      const meta = pageMeta[nextPage] || pageMeta.overview;
       els("pageTitle").textContent = meta[0];
       els("pageSubtitle").textContent = meta[1];
-      document.querySelectorAll("[data-page]").forEach(node => node.hidden = node.dataset.page !== page);
-      document.querySelectorAll("[data-nav]").forEach(node => node.classList.toggle("active", node.dataset.nav === page));
+      document.querySelectorAll("[data-page]").forEach(node => node.hidden = node.dataset.page !== nextPage);
+      document.querySelectorAll("[data-nav]").forEach(node => node.classList.toggle("active", node.dataset.nav === nextPage));
       document.body.classList.remove("sidebar-open");
-      loadPage(page).catch(error => handleError(error));
+      loadPage(nextPage).catch(error => handleError(error));
+    }
+
+    function navigateTo(page) {
+      const nextPage = pageMeta[page] ? page : "overview";
+      const nextHash = "#" + nextPage;
+      if (location.hash === nextHash) {
+        setPage(nextPage);
+      } else {
+        location.hash = nextPage;
+      }
     }
 
     async function loadPage(page, force) {
       if (page === "overview") return loadOverview(force);
-      if (page === "login") return;
+      if (page === "login") return loadPlatformLogins(force);
       if (page === "subscriptions") return loadSubscriptions(force);
       if (page === "entities") return loadEntities(force);
       if (page === "filters") return loadFilters();
@@ -842,7 +939,75 @@
         { label: "错误", key: "error" }
       ], overview.plugins);
       els("connectionState").innerHTML = "本机";
+      refreshPlatformLoginNav(force).catch(error => handleError(error));
       setMessage("message", "已加载", false);
+    }
+
+    async function refreshPlatformLoginNav(force) {
+      if (force || state.cache.platformLogins === null) {
+        state.cache.platformLogins = await api("/platform-logins");
+      }
+      updatePlatformLoginNav(state.cache.platformLogins);
+    }
+
+    function updatePlatformLoginNav() {
+    }
+
+    async function loadPlatformLogins(force) {
+      if (force || state.cache.platformLogins === null) {
+        state.cache.platformLogins = await api("/platform-logins");
+      }
+      updatePlatformLoginNav(state.cache.platformLogins);
+      renderPlatformLogins(state.cache.platformLogins);
+      setMessage("message", "已加载平台登录状态", false);
+    }
+
+    function renderPlatformLogins(platforms) {
+      const list = els("platformLoginList");
+      if (!platforms || platforms.length === 0) {
+        list.innerHTML = "<div class='empty'>未安装消息源插件</div>";
+        return;
+      }
+      list.innerHTML = platforms.map(renderPlatformLoginCard).join("");
+    }
+
+    function renderPlatformLoginCard(platform) {
+      const key = platformKey(platform.platformId);
+      const methods = platform.supportedLoginMethods || [];
+      const accountName = platform.account ? esc(platform.account.name || "未命名") : "未登录或未获取";
+      const accountId = platform.account && platform.account.userId ? esc(platform.account.userId) : "暂无账号 ID";
+      const methodLabels = methods.length ? methods.map(method => badge(method)).join("") : "<span class='pill warn'>不支持后台登录</span>";
+      const cookieButton = methods.includes("COOKIE")
+        ? "<button data-action='open-cookie-login' data-platform='" + esc(platform.platformId) + "' data-platform-key='" + key + "'>Cookie 登录</button>"
+        : "";
+      const qrButton = methods.includes("QR_CODE")
+        ? "<button class='secondary' data-action='open-qr-login' data-platform='" + esc(platform.platformId) + "' data-platform-key='" + key + "'>扫码登录</button>"
+        : "";
+      const readonlyText = methods.length ? "" : "<span class='muted'>该平台插件不支持后台登录。</span>";
+      return "<article class='platform-card' data-platform-card='" + key + "'>"
+        + "<div class='platform-card-head'><div class='platform-title'>"
+        + "<h3>" + esc(platform.pluginName || platform.platformId) + "</h3>"
+        + "<div class='muted'>" + esc(platform.platformId) + " · " + esc(platform.pluginId) + " · v" + esc(platform.pluginVersion) + "</div>"
+        + "<div class='platform-meta'>" + badge(platform.pluginState) + badge(platform.status) + methodLabels + "</div>"
+        + "</div></div>"
+        + "<div class='platform-account'><span class='muted'>当前账号</span><strong>" + accountName + "</strong><span class='muted'>" + accountId + "</span></div>"
+        + "<div class='muted'>" + esc(localizeLoginMessage(platform.message)) + "</div>"
+        + "<div id='platform-message-" + key + "' class='platform-message'></div>"
+        + "<div class='platform-actions'>" + cookieButton + qrButton + "<button class='secondary' data-action='refresh-platform-login' data-platform='" + esc(platform.platformId) + "' data-platform-key='" + key + "'>刷新</button>" + readonlyText + "</div>"
+        + "</article>";
+    }
+
+    function localizeLoginMessage(message) {
+      const text = String(message || "");
+      const lower = text.toLowerCase();
+      if (lower.includes("login success") || lower.includes("logged in")) return "已登录";
+      if (lower.includes("not logged in")) return "未登录";
+      if (lower.includes("unsupported")) return "当前平台不支持该登录能力";
+      if (lower.includes("waiting")) return "等待扫码确认";
+      if (lower.includes("canceled")) return "已取消";
+      if (lower.includes("expired")) return "二维码已过期";
+      if (lower.includes("blank")) return "输入不能为空";
+      return text;
     }
 
     async function loadEntities(force) {
@@ -936,6 +1101,178 @@
       }
     }
 
+    function setPlatformMessage(platformId, text, isError) {
+      const node = els("platform-message-" + platformKey(platformId));
+      if (!node) return;
+      node.textContent = text || "";
+      node.classList.toggle("error", Boolean(isError));
+    }
+
+    function setLoginModalMessage(text, isError) {
+      setMessage("platformLoginMessage", text || "", isError);
+    }
+
+    function handlePlatformError(platformId, error) {
+      if (String(error.message).toLowerCase().includes("unauthorized")) {
+        handleError(error);
+        return;
+      }
+      setPlatformMessage(platformId, error.message, true);
+      if (state.platformLoginModal && state.platformLoginModal.platformId === platformId) {
+        setLoginModalMessage(error.message, true);
+      }
+    }
+
+    function clearQrSession(platformId, cancelRemote) {
+      const current = state.qrSessions[platformId];
+      if (!current) return;
+      if (current.timer) clearInterval(current.timer);
+      if (current.url) URL.revokeObjectURL(current.url);
+      delete state.qrSessions[platformId];
+      if (cancelRemote && current.loginId) {
+        api("/login/qr/" + encodeURIComponent(current.loginId), { method: "DELETE" })
+          .catch(error => handlePlatformError(platformId, error));
+      }
+    }
+
+    function clearAllQrSessions(cancelRemote) {
+      Object.keys(state.qrSessions).forEach(platformId => clearQrSession(platformId, cancelRemote));
+    }
+
+    function setPlatformBusy(platformId, busy) {
+      const key = platformKey(platformId);
+      document.querySelectorAll("[data-platform-key='" + key + "']").forEach(node => {
+        if (node.tagName === "BUTTON") node.disabled = busy;
+      });
+      if (state.platformLoginModal && state.platformLoginModal.platformId === platformId) {
+        els("confirmPlatformLogin").disabled = busy;
+      }
+    }
+
+    async function refreshPlatformLogin(platformId) {
+      state.cache.platformLogins = await api("/platform-logins");
+      updatePlatformLoginNav(state.cache.platformLogins);
+      renderPlatformLogins(state.cache.platformLogins);
+      if (platformId) setPlatformMessage(platformId, "已刷新登录状态", false);
+    }
+
+    function findPlatformLogin(platformId) {
+      return (state.cache.platformLogins || []).find(item => item.platformId === platformId);
+    }
+
+    function platformDisplayName(platformId) {
+      const platform = findPlatformLogin(platformId);
+      return platform ? (platform.pluginName || platform.platformId) : platformId;
+    }
+
+    function openPlatformLoginModal(platformId, mode) {
+      clearQrSession(platformId, true);
+      state.platformLoginModal = { platformId, mode };
+      const key = platformKey(platformId);
+      const title = platformDisplayName(platformId) + (mode === "cookie" ? " Cookie 登录" : " 二维码登录");
+      els("platformLoginTitle").textContent = title;
+      els("platformLoginModal").hidden = false;
+      setLoginModalMessage("", false);
+      els("confirmPlatformLogin").hidden = mode !== "cookie";
+      els("confirmPlatformLogin").disabled = false;
+      if (mode === "cookie") {
+        els("platformLoginBody").innerHTML = "<div class='form-field full-width'><label for='platformCookieInput'>Cookie</label><textarea id='platformCookieInput' placeholder='SESSDATA=...'></textarea></div>";
+        setTimeout(() => els("platformCookieInput").focus(), 0);
+      } else {
+        els("platformLoginBody").innerHTML = "<div id='qr-" + key + "' class='qr-box'><span class='muted'>正在生成二维码...</span></div>";
+        startQrLogin(platformId).catch(error => handlePlatformError(platformId, error));
+      }
+    }
+
+    function closePlatformLoginModal() {
+      if (state.platformLoginModal && state.platformLoginModal.mode === "qr") {
+        clearQrSession(state.platformLoginModal.platformId, true);
+      }
+      state.platformLoginModal = null;
+      els("platformLoginModal").hidden = true;
+      els("platformLoginBody").innerHTML = "";
+      setLoginModalMessage("", false);
+      els("confirmPlatformLogin").hidden = false;
+      els("confirmPlatformLogin").disabled = false;
+    }
+
+    async function submitCookieLogin() {
+      const modal = state.platformLoginModal;
+      if (!modal || modal.mode !== "cookie") return;
+      const platformId = modal.platformId;
+      const input = els("platformCookieInput");
+      if (!input || !input.value.trim()) {
+        setLoginModalMessage("请输入 Cookie", true);
+        return;
+      }
+      setPlatformBusy(platformId, true);
+      try {
+        const result = await api("/platforms/" + encodeURIComponent(platformId) + "/login/cookie", {
+          method: "POST",
+          body: JSON.stringify({ cookie: input.value })
+        });
+        input.value = "";
+        await refreshPlatformLogin(platformId);
+        const text = "Cookie 登录：" + label(result.status) + " " + localizeLoginMessage(result.message);
+        const failed = result.status === "FAILED" || result.status === "EXPIRED" || result.status === "UNSUPPORTED";
+        setPlatformMessage(platformId, text, failed);
+        if (result.status === "SUCCESS") {
+          closePlatformLoginModal();
+        } else {
+          setLoginModalMessage(text, failed);
+        }
+      } catch (error) {
+        handlePlatformError(platformId, error);
+      } finally {
+        setPlatformBusy(platformId, false);
+      }
+    }
+
+    async function startQrLogin(platformId) {
+      const key = platformKey(platformId);
+      clearQrSession(platformId, true);
+      setPlatformBusy(platformId, true);
+      try {
+        const started = await api("/platforms/" + encodeURIComponent(platformId) + "/login/qr", { method: "POST" });
+        const blob = await apiBlob(started.imageUrl);
+        const url = URL.createObjectURL(blob);
+        if (!state.platformLoginModal || state.platformLoginModal.platformId !== platformId || state.platformLoginModal.mode !== "qr") {
+          URL.revokeObjectURL(url);
+          return;
+        }
+        const qr = els("qr-" + key);
+        if (qr) {
+          qr.innerHTML = "<img alt='二维码' src='" + url + "'><span id='qrStatus-" + key + "'>" + esc(localizeLoginMessage(started.message || "等待扫码")) + "</span>";
+        }
+        state.qrSessions[platformId] = { timer: null, url: url, loginId: started.loginId };
+        state.qrSessions[platformId].timer = setInterval(async () => {
+          try {
+            const status = await api("/login/qr/" + started.loginId);
+            const statusNode = els("qrStatus-" + key);
+            if (statusNode) statusNode.textContent = label(status.status) + " " + localizeLoginMessage(status.message);
+            if (status.status !== "PENDING") {
+              clearQrSession(platformId);
+              await refreshPlatformLogin(platformId);
+              const text = "二维码登录：" + label(status.status) + " " + localizeLoginMessage(status.message);
+              const failed = status.status === "FAILED" || status.status === "EXPIRED";
+              setPlatformMessage(platformId, text, failed);
+              if (state.platformLoginModal && state.platformLoginModal.platformId === platformId) {
+                setLoginModalMessage(text, failed);
+              }
+            }
+          } catch (error) {
+            clearQrSession(platformId);
+            handlePlatformError(platformId, error);
+          }
+        }, 1500);
+      } catch (error) {
+        clearQrSession(platformId);
+        handlePlatformError(platformId, error);
+      } finally {
+        setPlatformBusy(platformId, false);
+      }
+    }
+
     function openEdit(type, row) {
       state.edit = { type, id: row.id };
       els("editTitle").textContent = type === "publisher" ? "编辑发布者" : "编辑消息目标";
@@ -964,16 +1301,30 @@
     }
 
     document.querySelectorAll("[data-nav]").forEach(button => {
-      button.addEventListener("click", () => setPage(button.dataset.nav));
+      button.addEventListener("click", () => navigateTo(button.dataset.nav));
     });
+
+    window.addEventListener("hashchange", () => setPage(pageFromLocation()));
 
     document.addEventListener("click", async event => {
       const button = event.target.closest("[data-action]");
       if (!button) return;
       const action = button.dataset.action;
       const id = Number(button.dataset.id);
+      const platform = button.dataset.platform;
       try {
-        if (action === "delete-subscription") {
+        if (action === "open-cookie-login") {
+          openPlatformLoginModal(platform, "cookie");
+        } else if (action === "open-qr-login") {
+          openPlatformLoginModal(platform, "qr");
+        } else if (action === "refresh-platform-login") {
+          setPlatformBusy(platform, true);
+          try {
+            await refreshPlatformLogin(platform);
+          } finally {
+            setPlatformBusy(platform, false);
+          }
+        } else if (action === "delete-subscription") {
           if (!confirm("确定删除这个订阅关系吗？")) return;
           await api("/subscriptions/" + id, { method: "DELETE" });
           invalidate("overview", "subscriptions", "filters");
@@ -1000,7 +1351,8 @@
         localStorage.setItem("dynamicBotAdminToken", state.token);
         state.cache.overview = overview;
         showApp();
-        setPage("overview");
+        refreshPlatformLoginNav(true).catch(handleError);
+        showInitialPage();
       } catch (error) {
         showLogin(error.message, true);
       } finally {
@@ -1009,20 +1361,27 @@
     };
 
     els("logout").onclick = () => {
+      closePlatformLoginModal();
+      clearAllQrSessions(true);
       state.token = "";
       localStorage.removeItem("dynamicBotAdminToken");
-      if (state.qrTimer) clearInterval(state.qrTimer);
       showLogin("", false);
     };
     els("refresh").onclick = () => {
-      invalidate("overview", "publishers", "subscribers", "subscriptions", "templates");
+      invalidate("overview", "platformLogins", "publishers", "subscribers", "subscriptions", "templates");
       loadPage(state.page, true).catch(handleError);
     };
+    els("refreshPlatformLogins").onclick = () => loadPlatformLogins(true).catch(handleError);
     els("mobileMenu").onclick = () => document.body.classList.toggle("sidebar-open");
     els("cancelEdit").onclick = closeEdit;
     els("saveEdit").onclick = () => saveEdit().catch(handleError);
     els("editModal").addEventListener("click", event => {
       if (event.target === els("editModal")) closeEdit();
+    });
+    els("cancelPlatformLogin").onclick = closePlatformLoginModal;
+    els("confirmPlatformLogin").onclick = () => submitCookieLogin().catch(handleError);
+    els("platformLoginModal").addEventListener("click", event => {
+      if (event.target === els("platformLoginModal")) closePlatformLoginModal();
     });
 
     els("createSubscription").onclick = async () => {
@@ -1091,36 +1450,12 @@
       } catch (error) { handleError(error); }
     };
 
-    els("cookieLogin").onclick = async () => {
-      try {
-        const result = await api("/platforms/" + encodeURIComponent(els("loginPlatform").value) + "/login/cookie", {
-          method: "POST",
-          body: JSON.stringify({ cookie: els("cookie").value })
-        });
-        els("cookie").value = "";
-        setMessage("message", "Cookie 登录：" + label(result.status) + " " + result.message, result.status === "FAILED");
-      } catch (error) { handleError(error); }
-    };
-    els("qrLogin").onclick = async () => {
-      try {
-        const started = await api("/platforms/" + encodeURIComponent(els("loginPlatform").value) + "/login/qr", { method: "POST" });
-        const blob = await apiBlob("/login/qr/" + started.loginId + "/image");
-        const url = URL.createObjectURL(blob);
-        els("qr").innerHTML = "<img alt='二维码' src='" + url + "'><span id='qrStatus'>" + esc(started.message || "等待扫码") + "</span>";
-        if (state.qrTimer) clearInterval(state.qrTimer);
-        state.qrTimer = setInterval(async () => {
-          const status = await api("/login/qr/" + started.loginId);
-          els("qrStatus").textContent = label(status.status) + " " + status.message;
-          if (status.status !== "PENDING") clearInterval(state.qrTimer);
-        }, 1500);
-      } catch (error) { handleError(error); }
-    };
-
     if (state.token) {
       verifyToken(state.token).then(overview => {
         state.cache.overview = overview;
         showApp();
-        setPage("overview");
+        refreshPlatformLoginNav(true).catch(handleError);
+        showInitialPage();
       }).catch(() => showLogin("已保存的 token 无效", true));
     } else {
       showLogin("", false);

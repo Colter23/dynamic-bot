@@ -18,6 +18,9 @@ import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.PlatformPublisherPlugin
 import top.colter.dynamic.core.plugin.PluginInfo
 import top.colter.dynamic.core.plugin.PluginManager
+import top.colter.dynamic.core.plugin.PluginState
+import top.colter.dynamic.core.plugin.PublisherLoginResult
+import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.repository.PublisherRepository
@@ -53,6 +56,33 @@ public class AdminService(
         return pluginProvider()
             .sortedBy { it.descriptor.id }
             .map { it.toDto() }
+    }
+
+    public suspend fun platformLogins(): List<PlatformLoginDto> {
+        return pluginProvider()
+            .filter { it.state == PluginState.ACTIVE }
+            .mapNotNull { info ->
+                val plugin = info.instance as? PlatformPublisherPlugin ?: return@mapNotNull null
+                val loginState = runCatching { plugin.checkLoginState() }
+                    .getOrElse { error ->
+                        PublisherLoginResult(
+                            status = PublisherLoginStatus.FAILED,
+                            message = error.message ?: "login status check failed",
+                        )
+                    }
+                PlatformLoginDto(
+                    platformId = plugin.platformId,
+                    pluginId = info.descriptor.id,
+                    pluginName = info.descriptor.name,
+                    pluginVersion = info.descriptor.version,
+                    pluginState = info.state.name,
+                    supportedLoginMethods = plugin.supportedLoginMethods.map { it.name }.sorted(),
+                    status = loginState.status.name,
+                    message = loginState.message,
+                    account = loginState.account?.toDto(),
+                )
+            }
+            .sortedBy { it.platformId }
     }
 
     public fun publishers(): List<PublisherDto> {
@@ -264,6 +294,11 @@ private fun PluginInfo.toDto(): PluginDto = PluginDto(
     error = error?.message ?: error?.javaClass?.name,
     sourceJarPath = sourceJarPath,
     loadTime = loadTime,
+)
+
+private fun top.colter.dynamic.core.plugin.PublisherLoginAccount.toDto(): LoginAccountDto = LoginAccountDto(
+    userId = userId,
+    name = name,
 )
 
 private fun Publisher.toDto(): PublisherDto = PublisherDto(

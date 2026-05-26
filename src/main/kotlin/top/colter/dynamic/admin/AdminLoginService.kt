@@ -10,10 +10,13 @@ import java.io.ByteArrayOutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.imageio.ImageIO
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.core.plugin.PlatformPublisherPlugin
@@ -29,6 +32,7 @@ public class AdminLoginService(
     private val qrCodeRenderer: AdminQrCodeRenderer = AdminQrCodeRenderer(),
 ) {
     private val sessions: ConcurrentHashMap<String, QrLoginSession> = ConcurrentHashMap()
+    private val jobs: ConcurrentHashMap<String, Job> = ConcurrentHashMap()
 
     public suspend fun loginByCookie(platformId: String, cookie: String): LoginResultDto {
         val platform = platformId.trim().lowercase()
@@ -64,7 +68,7 @@ public class AdminLoginService(
             message = "QR login starting",
         )
 
-        loginScope.launch {
+        val job = loginScope.launch {
             val result = runCatching {
                 plugin.loginByQrCode(
                     onQrCode = { qrChallenge ->
@@ -93,16 +97,28 @@ public class AdminLoginService(
                     },
                 )
             }.getOrElse { error ->
-                PublisherLoginResult(
-                    status = PublisherLoginStatus.FAILED,
-                    message = error.message ?: "QR code login failed",
-                )
+                if (error is CancellationException) {
+                    PublisherLoginResult(
+                        status = PublisherLoginStatus.CANCELED,
+                        message = "QR login canceled",
+                    )
+                } else {
+                    PublisherLoginResult(
+                        status = PublisherLoginStatus.FAILED,
+                        message = error.message ?: "QR code login failed",
+                    )
+                }
             }
 
             if (!challenge.isCompleted) {
                 challenge.complete(null)
             }
             updateSession(loginId, result)
+            jobs.remove(loginId)
+        }
+        jobs[loginId] = job
+        job.invokeOnCompletion {
+            jobs.remove(loginId, job)
         }
 
         val qrChallenge = withTimeoutOrNull(QR_CHALLENGE_TIMEOUT_MS) { challenge.await() }
@@ -122,6 +138,20 @@ public class AdminLoginService(
 
     public fun qrImageBytes(loginId: String): ByteArray {
         return findSession(loginId).imageBytes ?: throw NoSuchElementException("QR image not found: $loginId")
+    }
+
+    public suspend fun cancelQrLogin(loginId: String): ActionResultResponse {
+        val session = findSession(loginId)
+        val job = jobs.remove(loginId)
+        val changed = job != null && job.isActive
+        if (changed) {
+            job.cancelAndJoin()
+        }
+        sessions[loginId] = session.copy(
+            status = PublisherLoginStatus.CANCELED.name,
+            message = "QR login canceled",
+        )
+        return ActionResultResponse(changed = changed, message = if (changed) "QR login canceled" else "QR login already finished")
     }
 
     private fun updateSession(loginId: String, result: PublisherLoginResult) {
