@@ -27,13 +27,16 @@ import io.ktor.server.routing.routing
 import java.security.MessageDigest
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.WebAdminConfig
+import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.plugin.PluginManager
 
 public class AdminServer(
     private val config: WebAdminConfig,
     private val pluginManager: PluginManager,
-    private val configProvider: () -> top.colter.dynamic.MainDynamicConfig,
+    private val configProvider: () -> MainDynamicConfig,
+    private val mainConfigUpdater: (MainDynamicConfig) -> ConfigApplyResult,
 ) {
     private var engine: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
 
@@ -41,7 +44,8 @@ public class AdminServer(
         if (engine != null) return
         val context = AdminServerContext(
             token = config.token,
-            service = AdminService(pluginManager, configProvider),
+            tokenProvider = { configProvider().webAdmin.token },
+            service = AdminService(pluginManager, configProvider, mainConfigUpdater),
             loginService = AdminLoginService(
                 platformPluginResolver = { platformId -> pluginManager.findPlatformPublisherPlugin(platformId) },
             ),
@@ -59,6 +63,7 @@ public class AdminServer(
 
 public data class AdminServerContext(
     val token: String,
+    val tokenProvider: () -> String = { token },
     val service: AdminService,
     val loginService: AdminLoginService,
 )
@@ -152,6 +157,20 @@ public fun Application.adminModule(context: AdminServerContext) {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.templates() }
             }
+            get("/configs") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi { context.service.configs() }
+            }
+            get("/configs/{id}") {
+                if (!call.ensureAuthorized(context)) return@get
+                val id = call.pathString("id")
+                call.respondApi { context.service.config(id) }
+            }
+            put("/configs/{id}") {
+                if (!call.ensureAuthorized(context)) return@put
+                val id = call.pathString("id")
+                call.respondApi { context.service.updateConfig(id, call.receive()) }
+            }
             put("/template-bindings/publisher/{publisherId}") {
                 if (!call.ensureAuthorized(context)) return@put
                 val publisherId = call.pathInt("publisherId")
@@ -209,7 +228,7 @@ private object AdminAuth {
 }
 
 private suspend fun ApplicationCall.ensureAuthorized(context: AdminServerContext): Boolean {
-    if (AdminAuth.isAuthorized(context.token, this)) return true
+    if (AdminAuth.isAuthorized(context.tokenProvider(), this)) return true
     respond(HttpStatusCode.Unauthorized, ErrorResponse("unauthorized"))
     return false
 }

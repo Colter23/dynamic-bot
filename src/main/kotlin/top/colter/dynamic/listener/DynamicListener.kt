@@ -25,19 +25,22 @@ import top.colter.dynamic.link.LINK_PARSE_EVENT_LABEL
 
 public class DynamicListener(
     config: MainDynamicConfig? = null,
+    configProvider: (() -> MainDynamicConfig)? = null,
     private val configService: ConfigService = DefaultConfigService,
     private val templateRenderer: DynamicMessageTemplateRenderer = DynamicMessageTemplateRenderer(),
     imageLoader: DynamicImageLoader? = null,
     imageRenderer: DynamicImageRenderer? = null,
 ) : Listener<DynamicEvent> {
-    private val runtimeConfig: MainDynamicConfig by lazy {
+    private val fixedConfig: MainDynamicConfig by lazy {
         config ?: configService.loadOrCreate(MainDynamicConfig.CONFIG_ID) { MainDynamicConfig() }
     }
+    private val runtimeConfigProvider: () -> MainDynamicConfig = configProvider ?: { fixedConfig }
+    private val startupConfig: MainDynamicConfig by lazy { runtimeConfigProvider() }
     private val runtimeImageLoader: DynamicImageLoader by lazy {
-        imageLoader ?: CachedDynamicImageLoader(runtimeConfig.imageCache)
+        imageLoader ?: CachedDynamicImageLoader(startupConfig.imageCache)
     }
     private val runtimeImageRenderer: DynamicImageRenderer by lazy {
-        imageRenderer ?: FileDynamicImageRenderer(Paths.get(runtimeConfig.imageCache.renderedRoot))
+        imageRenderer ?: FileDynamicImageRenderer(Paths.get(startupConfig.imageCache.renderedRoot))
     }
 
     override suspend fun onMessage(event: DynamicEvent) {
@@ -142,6 +145,7 @@ public class DynamicListener(
     }
 
     private fun resolveTemplate(dynamic: Dynamic): String {
+        val runtimeConfig = runtimeConfigProvider()
         val templateName = PublisherTemplateRepository.findTemplateName(
             publisherId = dynamic.publisher.id,
             platformId = dynamic.platform.id,

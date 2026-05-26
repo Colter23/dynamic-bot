@@ -1,6 +1,8 @@
 package top.colter.dynamic.admin
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonObject
+import top.colter.dynamic.core.config.ConfigFormSpec
 
 @Serializable
 public data class ErrorResponse(
@@ -116,6 +118,46 @@ public data class TemplateBindingDto(
 public data class TemplatesResponse(
     val templates: List<TemplateDto>,
     val bindings: List<TemplateBindingDto>,
+)
+
+@Serializable
+public data class ConfigSummaryDto(
+    val id: String,
+    val name: String,
+    val description: String = "",
+    val pluginId: String? = null,
+    val pluginName: String? = null,
+    val pluginState: String? = null,
+    val sourcePath: String,
+)
+
+@Serializable
+public data class ConfigDetailDto(
+    val id: String,
+    val name: String,
+    val description: String = "",
+    val pluginId: String? = null,
+    val pluginName: String? = null,
+    val pluginState: String? = null,
+    val sourcePath: String,
+    val schema: ConfigFormSpec,
+    val values: JsonObject,
+    val secretStates: Map<String, Boolean> = emptyMap(),
+)
+
+@Serializable
+public data class UpdateConfigRequest(
+    val values: JsonObject,
+)
+
+@Serializable
+public data class UpdateConfigResponse(
+    val changed: Boolean,
+    val restartRequired: Boolean,
+    val restartTargets: List<String> = emptyList(),
+    val message: String,
+    val values: JsonObject,
+    val secretStates: Map<String, Boolean> = emptyMap(),
 )
 
 @Serializable

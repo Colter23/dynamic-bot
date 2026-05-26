@@ -19,7 +19,17 @@ import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import top.colter.dynamic.MainConfigForms
 import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.WebAdminConfig
+import top.colter.dynamic.core.config.ConfigApplyResult
+import top.colter.dynamic.core.config.ConfigFieldSpec
+import top.colter.dynamic.core.config.ConfigFieldType
+import top.colter.dynamic.core.config.ConfigFormSpec
+import top.colter.dynamic.core.config.ConfigService
+import top.colter.dynamic.core.config.ConfigurablePlugin
 import top.colter.dynamic.core.command.CommandRegistry
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LazyImage
@@ -40,6 +50,7 @@ import top.colter.dynamic.core.plugin.PublisherLoginMethod
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
+import top.colter.dynamic.core.plugin.Plugin
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.repository.PublisherRepository
@@ -47,11 +58,13 @@ import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
 import kotlin.io.path.createTempDirectory
+import java.nio.file.Path
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.reflect.KClass
 
 class AdminServerTest {
     @AfterTest
@@ -102,6 +115,20 @@ class AdminServerTest {
         assertTrue(html.contains("id=\"openAddFilter\""))
         assertTrue(html.contains("id=\"openTemplateBinding\""))
         assertTrue(html.contains("id=\"filterScopeSubscriptionId\""))
+        assertTrue(html.contains("data-nav=\"configs\""))
+        assertTrue(html.contains("data-page=\"configs\""))
+        assertTrue(html.contains("id=\"configForm\""))
+        assertTrue(html.contains("id=\"saveConfig\""))
+        assertTrue(html.contains("id=\"configRestartHint\""))
+        assertTrue(html.contains("class=\"restart-note\""))
+        assertTrue(html.contains("restart-mark"))
+        assertTrue(html.contains("⚠️"))
+        assertTrue(html.contains("id=\"configItemModal\""))
+        assertTrue(html.contains("data-action='open-template-modal'"))
+        assertTrue(html.contains("data-action='open-permission-modal'"))
+        assertTrue(html.contains("data-action='edit-template-row'"))
+        assertTrue(html.contains("data-action='edit-permission-row'"))
+        assertTrue(html.contains("/configs/"))
         assertTrue(!html.contains("id=\"createSubscription\""))
         assertTrue(html.contains("hashchange"))
         assertTrue(html.contains("localStorage.getItem(\"dynamicBotAdminToken\")"))
@@ -273,6 +300,122 @@ class AdminServerTest {
     }
 
     @Test
+    fun `config endpoints should require token and list main plus configurable plugins`() = testApplication {
+        initDb("admin-config-list")
+        val fakePlugin = FakeConfigurablePlugin()
+        val current = MainDynamicConfig(webAdmin = WebAdminConfig(token = "secret-token"))
+        application { adminModule(configTestContext(currentConfig = { current }, plugins = listOf(fakePlugin.info()))) }
+        val client = jsonClient()
+
+        assertEquals(HttpStatusCode.Unauthorized, client.get("/api/configs").status)
+
+        val configs = client.get("/api/configs") { auth() }.body<List<ConfigSummaryDto>>()
+
+        assertTrue(configs.any { it.id == "main" })
+        assertTrue(configs.any { it.id == "fake-config" })
+    }
+
+    @Test
+    fun `main config endpoint should mask token save and use new token immediately`() = testApplication {
+        initDb("admin-config-main")
+        var current = MainDynamicConfig(webAdmin = WebAdminConfig(token = "secret-token"))
+        application {
+            adminModule(
+                configTestContext(
+                    currentConfig = { current },
+                    updateMainConfig = { next ->
+                        MainConfigForms.validate(next)
+                        val previous = current
+                        current = next
+                        val targets = MainConfigForms.restartTargets(previous, next)
+                        ConfigApplyResult(true, targets.isNotEmpty(), targets, "saved")
+                    },
+                )
+            )
+        }
+        val client = jsonClient()
+
+        val detail = client.get("/api/configs/main") { auth() }.body<ConfigDetailDto>()
+        assertEquals("", detail.values["webAdmin.token"].toString().trim('"'))
+        assertEquals(true, detail.secretStates["webAdmin.token"])
+
+        val updated = client.put("/api/configs/main") {
+            auth()
+            contentType(ContentType.Application.Json)
+            setBody(UpdateConfigRequest(buildJsonObject {
+                put("webAdmin.token", "new-token")
+            }))
+        }.body<UpdateConfigResponse>()
+
+        assertTrue(updated.changed)
+        assertEquals("new-token", current.webAdmin.token)
+        assertEquals(HttpStatusCode.Unauthorized, client.get("/api/overview") { auth("secret-token") }.status)
+        assertEquals(HttpStatusCode.OK, client.get("/api/overview") { auth("new-token") }.status)
+    }
+
+    @Test
+    fun `main config endpoint should reject invalid port`() = testApplication {
+        initDb("admin-config-invalid")
+        var current = MainDynamicConfig(webAdmin = WebAdminConfig(token = "secret-token"))
+        application {
+            adminModule(
+                configTestContext(
+                    currentConfig = { current },
+                    updateMainConfig = { next ->
+                        MainConfigForms.validate(next)
+                        current = next
+                        ConfigApplyResult(true)
+                    },
+                )
+            )
+        }
+        val client = jsonClient()
+
+        val response = client.put("/api/configs/main") {
+            auth()
+            contentType(ContentType.Application.Json)
+            setBody(UpdateConfigRequest(buildJsonObject {
+                put("webAdmin.port", 70_000)
+            }))
+        }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+    }
+
+    @Test
+    fun `plugin config endpoint should mask and preserve secret fields`() = testApplication {
+        initDb("admin-config-plugin")
+        val fakePlugin = FakeConfigurablePlugin(FakePluginConfig(enabled = true, token = "old-secret"))
+        val current = MainDynamicConfig(webAdmin = WebAdminConfig(token = "secret-token"))
+        application {
+            adminModule(
+                configTestContext(
+                    currentConfig = { current },
+                    plugins = listOf(fakePlugin.info()),
+                )
+            )
+        }
+        val client = jsonClient()
+
+        val detail = client.get("/api/configs/fake-config") { auth() }.body<ConfigDetailDto>()
+        assertEquals("", detail.values["token"].toString().trim('"'))
+        assertEquals(true, detail.secretStates["token"])
+
+        val updated = client.put("/api/configs/fake-config") {
+            auth()
+            contentType(ContentType.Application.Json)
+            setBody(UpdateConfigRequest(buildJsonObject {
+                put("enabled", false)
+                put("token", "")
+            }))
+        }.body<UpdateConfigResponse>()
+
+        assertTrue(updated.changed)
+        assertEquals(false, fakePlugin.config.enabled)
+        assertEquals("old-secret", fakePlugin.config.token)
+    }
+
+    @Test
     fun `login endpoints should return cookie failure and qr success`() = testApplication {
         initDb("admin-login")
         val plugin = FakePlatformPublisherPlugin(
@@ -365,6 +508,28 @@ class AdminServerTest {
         )
     }
 
+    private fun configTestContext(
+        currentConfig: () -> MainDynamicConfig,
+        updateMainConfig: (MainDynamicConfig) -> ConfigApplyResult = { ConfigApplyResult(false) },
+        plugins: List<PluginInfo> = emptyList(),
+    ): AdminServerContext {
+        val configService = MemoryConfigService(createTempDirectory("dynamic-bot-config-api"))
+        return AdminServerContext(
+            token = currentConfig().webAdmin.token,
+            tokenProvider = { currentConfig().webAdmin.token },
+            service = AdminService(
+                pluginProvider = { plugins },
+                platformPluginResolver = { null },
+                configProvider = currentConfig,
+                mainConfigUpdater = updateMainConfig,
+                configService = configService,
+            ),
+            loginService = AdminLoginService(
+                platformPluginResolver = { null },
+            ),
+        )
+    }
+
     private fun seedSubscription(): Int {
         val publisher = seedPublisher()
         val subscriber = SubscriberRepository.upsert(
@@ -397,6 +562,98 @@ class AdminServerTest {
     private fun initDb(prefix: String) {
         val tempDir = createTempDirectory("dynamic-bot-$prefix").toFile()
         PersistenceManager.init(tempDir.resolve("test.db").path)
+    }
+
+    private class MemoryConfigService(
+        private val root: Path,
+    ) : ConfigService {
+        private val values: MutableMap<String, Any> = mutableMapOf()
+
+        override fun <T : Any> loadOrCreate(pluginId: String, clazz: KClass<T>, defaultProvider: () -> T): T {
+            return reloadOrPut(pluginId, defaultProvider)
+        }
+
+        override fun <T : Any> save(pluginId: String, config: T, clazz: KClass<T>) {
+            values[pluginId] = config
+        }
+
+        override fun <T : Any> reload(pluginId: String, clazz: KClass<T>): T {
+            @Suppress("UNCHECKED_CAST")
+            return values[pluginId] as? T ?: throw NoSuchElementException(pluginId)
+        }
+
+        override fun exists(pluginId: String): Boolean = values.containsKey(pluginId)
+
+        override fun resolvePath(pluginId: String): Path = root.resolve("$pluginId.yml")
+
+        private fun <T : Any> reloadOrPut(pluginId: String, defaultProvider: () -> T): T {
+            @Suppress("UNCHECKED_CAST")
+            val existing = values[pluginId] as? T
+            if (existing != null) return existing
+            val created = defaultProvider()
+            values[pluginId] = created
+            return created
+        }
+    }
+
+    private data class FakePluginConfig(
+        val enabled: Boolean = true,
+        val token: String = "",
+    )
+
+    private class FakeConfigurablePlugin(
+        initialConfig: FakePluginConfig = FakePluginConfig(),
+    ) : Plugin, ConfigurablePlugin<FakePluginConfig> {
+        var config: FakePluginConfig = initialConfig
+            private set
+
+        override val configId: String = "fake-config"
+        override val configName: String = "Fake Config"
+        override val configDescription: String = "Fake configurable plugin"
+        override val configClass: KClass<FakePluginConfig> = FakePluginConfig::class
+        override val configFormSpec: ConfigFormSpec = ConfigFormSpec(
+            title = "Fake Config",
+            fields = listOf(
+                ConfigFieldSpec("enabled", "Enabled", ConfigFieldType.BOOLEAN),
+                ConfigFieldSpec("token", "Token", ConfigFieldType.SECRET, secret = true),
+            ),
+        )
+
+        override fun currentConfig(): FakePluginConfig = config
+
+        override fun applyConfig(next: FakePluginConfig): ConfigApplyResult {
+            val changed = next != config
+            config = next
+            return ConfigApplyResult(changed, message = "fake saved")
+        }
+
+        override fun init() {
+        }
+
+        override fun start() {
+        }
+
+        override fun stop() {
+        }
+
+        override fun cleanup() {
+        }
+
+        fun info(): PluginInfo = PluginInfo(
+            descriptor = PluginDescriptor(
+                id = "fake-plugin",
+                name = "Fake Plugin",
+                version = "0.0.1",
+                mainClass = "FakeConfigurablePlugin",
+                capabilities = emptySet(),
+                apiVersion = "2.0.0",
+            ),
+            state = PluginState.ACTIVE,
+            instance = this,
+            classLoader = null,
+            sourceJarPath = "fake-config.jar",
+            loadTime = 1L,
+        )
     }
 
     private class FakePlatformPublisherPlugin(

@@ -438,6 +438,134 @@
       color: var(--muted);
       text-align: center;
     }
+    .config-shell {
+      display: grid;
+      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+    .config-list {
+      display: grid;
+      gap: 8px;
+    }
+    .config-list button {
+      display: grid;
+      gap: 3px;
+      width: 100%;
+      min-width: 0;
+      min-height: 48px;
+      text-align: left;
+      white-space: normal;
+      background: var(--surface);
+      color: var(--text);
+      border-color: var(--line-strong);
+    }
+    .config-list button.active {
+      border-color: var(--accent);
+      background: #e8f5f3;
+      color: var(--accent);
+    }
+    .config-list small {
+      color: var(--muted);
+      font-weight: 500;
+      overflow-wrap: anywhere;
+    }
+    .config-list strong {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+    .config-section {
+      display: grid;
+      gap: 12px;
+      padding-top: 12px;
+      border-top: 1px solid var(--line);
+    }
+    .config-section:first-child {
+      padding-top: 0;
+      border-top: 0;
+    }
+    .config-section h3 {
+      color: var(--text);
+      font-size: 15px;
+    }
+    .config-form {
+      display: grid;
+      gap: 16px;
+    }
+    .check-control {
+      width: fit-content;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
+      color: var(--text);
+      font-weight: 650;
+    }
+    .check-control input {
+      width: 17px;
+      height: 17px;
+      min-height: 0;
+      padding: 0;
+    }
+    .restart-note {
+      margin-bottom: 12px;
+      padding: 10px 12px;
+      border: 1px solid #f1d29b;
+      border-radius: 8px;
+      background: #fff8eb;
+      color: #7a4b00;
+    }
+    .restart-mark {
+      margin-left: 5px;
+      color: var(--accent-2);
+      font-weight: 900;
+    }
+    .config-table-wrap {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .config-table-wrap table {
+      min-width: 0;
+      table-layout: fixed;
+    }
+    .config-table-wrap td {
+      vertical-align: top;
+    }
+    .config-table-wrap th:last-child,
+    .config-table-wrap td:last-child {
+      width: 136px;
+    }
+    .config-table-text {
+      min-height: 22px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      color: var(--text);
+    }
+    .config-table-wrap .table-actions {
+      justify-content: flex-end;
+    }
+    .config-array {
+      display: grid;
+      gap: 8px;
+    }
+    .config-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) auto;
+      gap: 8px;
+      align-items: end;
+    }
+    .config-row button {
+      min-width: 78px;
+    }
+    .config-message {
+      min-height: 20px;
+      color: var(--muted);
+    }
+    .config-message.error {
+      color: var(--danger);
+    }
     .modal-backdrop {
       position: fixed;
       inset: 0;
@@ -461,6 +589,9 @@
     }
     .modal.action-modal {
       width: min(560px, 100%);
+    }
+    .modal.config-item-modal {
+      width: min(600px, 100%);
     }
     .modal-actions {
       display: flex;
@@ -523,6 +654,7 @@
       .top-actions { width: 100%; }
       .panel.half, .panel.third { grid-column: span 12; }
       .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .config-shell { grid-template-columns: 1fr; }
       table { min-width: 640px; }
     }
   </style>
@@ -555,6 +687,7 @@
         <button data-nav="entities"><span class="nav-icon">源</span><span>发布者与目标</span></button>
         <button data-nav="filters"><span class="nav-icon">滤</span><span>过滤规则</span></button>
         <button data-nav="templates"><span class="nav-icon">模</span><span>模板绑定</span></button>
+        <button data-nav="configs"><span class="nav-icon">Cfg</span><span>配置</span></button>
       </nav>
       <div class="sidebar-footer">
         <button class="secondary" id="refresh">刷新</button>
@@ -684,6 +817,32 @@
             </section>
           </div>
         </section>
+
+        <section class="page" data-page="configs" hidden>
+          <div class="config-shell">
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2>配置文件</h2>
+                  <p>选择主项目或支持表单配置的插件。</p>
+                </div>
+              </div>
+              <div id="configList" class="config-list"></div>
+            </section>
+            <section class="panel">
+              <div class="panel-head">
+                <div>
+                  <h2 id="configTitle">配置</h2>
+                  <p id="configSubtitle">表单保存后会写回 YAML。</p>
+                </div>
+                <button id="saveConfig">保存配置</button>
+              </div>
+              <div id="configRestartHint" class="restart-note" hidden>带 <span class="restart-mark">⚠️</span> 标记的配置保存后需要重启对应组件。</div>
+              <div id="configMessage" class="config-message"></div>
+              <form id="configForm" class="config-form"></form>
+            </section>
+          </div>
+        </section>
       </main>
     </div>
   </section>
@@ -735,6 +894,18 @@
     </div>
   </div>
 
+  <div id="configItemModal" class="modal-backdrop" hidden>
+    <div class="modal config-item-modal" role="dialog" aria-modal="true" aria-labelledby="configItemTitle">
+      <h2 id="configItemTitle">添加配置项</h2>
+      <div id="configItemBody"></div>
+      <div id="configItemMessage" class="message"></div>
+      <div class="modal-actions">
+        <button class="secondary" id="cancelConfigItem">取消</button>
+        <button id="confirmConfigItem">添加</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toastStack" class="toast-stack" aria-live="polite"></div>
 
   <script>
@@ -746,6 +917,8 @@
       edit: null,
       platformLoginModal: null,
       actionModal: null,
+      configItemModal: null,
+      selectedConfigId: "main",
       cache: {
         overview: null,
         platformLogins: null,
@@ -753,7 +926,9 @@
         subscribers: [],
         subscriptions: [],
         filters: [],
-        templates: null
+        templates: null,
+        configs: null,
+        configDetails: {}
       }
     };
     const els = id => document.getElementById(id);
@@ -793,7 +968,8 @@
       subscriptions: ["订阅管理", "创建和管理发布者转发关系。"],
       entities: ["发布者与目标", "管理动态发布者和消息接收目标。"],
       filters: ["过滤规则", "管理每个订阅的动态屏蔽规则。"],
-      templates: ["模板绑定", "查看模板并管理发布者绑定。"]
+      templates: ["模板绑定", "查看模板并管理发布者绑定。"],
+      configs: ["配置", "在线编辑主项目和插件配置。"]
     };
     state.initialPage = pageFromLocation();
 
@@ -921,6 +1097,7 @@
       if (state.page !== nextPage) {
         closePlatformLoginModal();
         closeActionModal();
+        closeConfigItemModal();
       }
       state.page = nextPage;
       const meta = pageMeta[nextPage] || pageMeta.overview;
@@ -949,6 +1126,7 @@
       if (page === "entities") return loadEntities(force);
       if (page === "filters") return loadFilters(force);
       if (page === "templates") return loadTemplates(force);
+      if (page === "configs") return loadConfigs(force);
     }
 
     async function loadOverview(force) {
@@ -1171,6 +1349,373 @@
           ? "<div class='table-actions'><button class='danger' data-action='delete-template-binding' data-publisher-id='" + esc(r.publisherId) + "'>移除</button></div>"
           : "<span class='muted'>-</span>" }
       ], rows);
+    }
+
+    async function ensureConfigs(force) {
+      if (force || !state.cache.configs) {
+        state.cache.configs = await api("/configs");
+        state.cache.configDetails = {};
+      }
+      return state.cache.configs;
+    }
+
+    async function ensureConfigDetail(id, force) {
+      if (force || !state.cache.configDetails[id]) {
+        state.cache.configDetails[id] = await api("/configs/" + encodeURIComponent(id));
+      }
+      return state.cache.configDetails[id];
+    }
+
+    async function loadConfigs(force) {
+      const configs = await ensureConfigs(force);
+      if (!configs.length) {
+        els("configList").innerHTML = "<div class='empty'>暂无可编辑配置</div>";
+        els("configForm").innerHTML = "";
+        return;
+      }
+      if (!configs.some(item => item.id === state.selectedConfigId)) {
+        state.selectedConfigId = configs[0].id;
+      }
+      renderConfigList(configs);
+      const detail = await ensureConfigDetail(state.selectedConfigId, force);
+      renderConfigForm(detail);
+    }
+
+    function renderConfigList(configs) {
+      els("configList").innerHTML = configs.map(item => {
+        const active = item.id === state.selectedConfigId ? " active" : "";
+        const source = item.pluginId ? item.pluginId + " · " + label(item.pluginState) : item.sourcePath;
+        return "<button type='button' class='" + active + "' data-action='select-config' data-config-id='" + esc(item.id) + "'>"
+          + "<strong>" + esc(item.name) + "</strong><small>" + esc(item.id) + " · " + esc(source || "") + "</small></button>";
+      }).join("");
+    }
+
+    function setConfigMessage(text, isError) {
+      setMessage("configMessage", text || "", isError);
+    }
+
+    function configInputId(path) {
+      return "config-" + String(path).replace(/[^A-Za-z0-9_-]/g, "-");
+    }
+
+    function configValue(detail, path) {
+      return detail && detail.values ? detail.values[path] : null;
+    }
+
+    function renderConfigForm(detail) {
+      els("configTitle").textContent = detail.name || detail.id;
+      els("configSubtitle").textContent = (detail.description || detail.sourcePath || "").trim();
+      setConfigMessage("", false);
+      const fields = detail.schema.fields || [];
+      const hasRestartFields = fields.some(field => field.restartRequired);
+      els("configRestartHint").hidden = !hasRestartFields;
+      const groups = [];
+      fields.forEach(field => {
+        const section = field.section || "General";
+        let group = groups.find(item => item.section === section);
+        if (!group) {
+          group = { section: section, fields: [] };
+          groups.push(group);
+        }
+        group.fields.push(field);
+      });
+      els("configForm").innerHTML = groups.map(group => {
+        return "<section class='config-section'><h3>" + esc(group.section) + "</h3><div class='forms'>"
+          + group.fields.map(field => renderConfigField(detail, field)).join("")
+          + "</div></section>";
+      }).join("");
+    }
+
+    function configLabelHtml(field, id) {
+      const mark = field.restartRequired ? "<span class='restart-mark' title='保存后需要重启'>⚠️</span>" : "";
+      return "<label for='" + id + "'>" + esc(field.label) + mark + "</label>";
+    }
+
+    function renderConfigField(detail, field) {
+      const id = configInputId(field.path);
+      const value = configValue(detail, field.path);
+      const hint = field.description ? "<span class='field-hint'>" + esc(field.description) + "</span>" : "";
+      const labelHtml = configLabelHtml(field, id);
+      if (field.type === "TEMPLATE_MAP") {
+        return "<div class='form-field full-width'>" + labelHtml
+          + "<div class='config-table-wrap' data-config-templates='" + esc(field.path) + "'><table><thead><tr><th>模板名</th><th>模板内容</th><th>操作</th></tr></thead><tbody>"
+          + renderTemplateConfigRows(value || {})
+          + "</tbody></table></div><div class='form-actions'><button type='button' class='secondary' data-action='open-template-modal'>添加模板</button></div>"
+          + hint + "</div>";
+      }
+      if (field.type === "COMMAND_PERMISSIONS") {
+        return "<div class='form-field full-width'>" + labelHtml
+          + "<div class='config-table-wrap' data-config-permissions='" + esc(field.path) + "'><table><thead><tr><th>平台</th><th>会话类型</th><th>会话 ID</th><th>发送者 ID</th><th>角色</th><th>操作</th></tr></thead><tbody>"
+          + renderPermissionRows(value || [])
+          + "</tbody></table></div><div class='form-actions'><button type='button' class='secondary' data-action='open-permission-modal'>添加规则</button></div>"
+          + hint + "</div>";
+      }
+      let control = "";
+      if (field.type === "BOOLEAN") {
+        control = "<label class='check-control'><input id='" + id + "' type='checkbox' data-config-input='" + esc(field.path) + "'" + (value === true ? " checked" : "") + ">启用</label>";
+      } else if (field.type === "SELECT") {
+        control = "<select id='" + id + "' data-config-input='" + esc(field.path) + "'>"
+          + (field.options || []).map(option => optionHtml(option.value, option.label || option.value, String(value) === String(option.value))).join("")
+          + "</select>";
+      } else if (field.type === "NUMBER") {
+        control = "<input id='" + id + "' type='number' data-config-input='" + esc(field.path) + "' value='" + esc(value ?? "") + "'>";
+      } else if (field.type === "TEXTAREA") {
+        control = "<textarea id='" + id + "' data-config-input='" + esc(field.path) + "'>" + esc(value ?? "") + "</textarea>";
+      } else if (field.type === "SECRET") {
+        const placeholder = detail.secretStates && detail.secretStates[field.path] ? "已设置，留空保留原值" : "";
+        control = "<input id='" + id + "' type='password' data-config-input='" + esc(field.path) + "' placeholder='" + esc(placeholder) + "'>";
+      } else {
+        control = "<input id='" + id + "' data-config-input='" + esc(field.path) + "' value='" + esc(value ?? "") + "'>";
+      }
+      return "<div class='form-field'>" + labelHtml + control + hint + "</div>";
+    }
+
+    function renderTemplateConfigRows(templates) {
+      const entries = Object.entries(templates);
+      if (!entries.length) return "<tr data-empty-row><td colspan='3'><div class='empty'>暂无模板</div></td></tr>";
+      return entries.map(([name, body]) => templateConfigRow(name, body)).join("");
+    }
+
+    function configRowDataAttr(value) {
+      return esc(JSON.stringify(value || {}));
+    }
+
+    function readConfigRowData(row) {
+      if (!row) return {};
+      try {
+        return JSON.parse(row.dataset.configJson || "{}");
+      } catch (_) {
+        return {};
+      }
+    }
+
+    function templateValueFromRow(row) {
+      const data = readConfigRowData(row);
+      return {
+        name: String(data.name || ""),
+        body: String(data.body || "")
+      };
+    }
+
+    function templateConfigRow(name, body) {
+      return "<tr data-template-row data-config-json='" + configRowDataAttr({ name: name || "", body: body || "" }) + "'>"
+        + "<td><div class='config-table-text'>" + esc(name || "") + "</div></td>"
+        + "<td><div class='config-table-text'>" + esc(body || "") + "</div></td>"
+        + "<td><div class='table-actions'><button type='button' class='secondary' data-action='edit-template-row'>修改</button><button type='button' class='secondary' data-action='remove-template-row'>移除</button></div></td>"
+        + "</tr>";
+    }
+
+    function renderPermissionRows(permissions) {
+      if (!permissions.length) return "<tr data-empty-row><td colspan='6'><div class='empty'>暂无权限规则</div></td></tr>";
+      return permissions.map(permissionConfigRow).join("");
+    }
+
+    function permissionConfigRow(rule) {
+      const value = rule || {};
+      const chatType = value.chatType || "";
+      const role = value.role || "ADMIN";
+      const normalized = {
+        platform: value.platform || "*",
+        chatType: chatType || null,
+        chatId: value.chatId || "*",
+        senderId: value.senderId || "*",
+        role: role
+      };
+      return "<tr data-permission-row data-config-json='" + configRowDataAttr(normalized) + "'>"
+        + "<td><div class='config-table-text'>" + esc(normalized.platform) + "</div></td>"
+        + "<td><div class='config-table-text'>" + esc(permissionChatTypeLabel(normalized.chatType)) + "</div></td>"
+        + "<td><div class='config-table-text'>" + esc(normalized.chatId) + "</div></td>"
+        + "<td><div class='config-table-text'>" + esc(normalized.senderId) + "</div></td>"
+        + "<td><div class='config-table-text'>" + esc(permissionRoleLabel(normalized.role)) + "</div></td>"
+        + "<td><div class='table-actions'><button type='button' class='secondary' data-action='edit-permission-row'>修改</button><button type='button' class='secondary' data-action='remove-permission-row'>移除</button></div></td>"
+        + "</tr>";
+    }
+
+    function permissionValueFromRow(row) {
+      const data = readConfigRowData(row);
+      return {
+        platform: String(data.platform || "*"),
+        chatType: data.chatType || null,
+        chatId: String(data.chatId || "*"),
+        senderId: String(data.senderId || "*"),
+        role: String(data.role || "ADMIN")
+      };
+    }
+
+    function permissionChatTypeLabel(value) {
+      return value === "GROUP" ? "群聊"
+        : value === "PRIVATE" ? "私聊"
+        : value === "CHANNEL" ? "频道"
+        : "全部会话类型";
+    }
+
+    function permissionRoleLabel(value) {
+      return value === "USER" ? "普通用户" : "管理员";
+    }
+
+    function setConfigItemMessage(text, isError) {
+      setMessage("configItemMessage", text || "", isError);
+    }
+
+    function openConfigItemModal(kind, row) {
+      const isEdit = Boolean(row);
+      state.configItemModal = { kind: kind, row: row || null };
+      setConfigItemMessage("", false);
+      els("configItemTitle").textContent = kind === "template"
+        ? (isEdit ? "修改模板" : "添加模板")
+        : (isEdit ? "修改权限规则" : "添加权限规则");
+      els("confirmConfigItem").textContent = isEdit ? "保存" : "添加";
+      if (kind === "template") {
+        const value = isEdit ? templateValueFromRow(row) : { name: "", body: "" };
+        els("configItemBody").innerHTML = "<div class='forms'>"
+          + "<div class='form-field full-width'><label for='configTemplateName'>模板名</label><input id='configTemplateName' placeholder='default' value='" + esc(value.name) + "'></div>"
+          + "<div class='form-field full-width'><label for='configTemplateBody'>模板内容</label><textarea id='configTemplateBody' placeholder='{draw}\\n{name}\\n{content}'>" + esc(value.body) + "</textarea></div>"
+          + "</div>";
+        els("configItemModal").hidden = false;
+        setTimeout(() => els("configTemplateName").focus(), 0);
+      } else {
+        const value = isEdit ? permissionValueFromRow(row) : {
+          platform: "*",
+          chatType: null,
+          chatId: "*",
+          senderId: "*",
+          role: "ADMIN"
+        };
+        els("configItemBody").innerHTML = "<div class='forms'>"
+          + "<div class='form-field'><label for='configPermissionPlatform'>平台</label><input id='configPermissionPlatform' value='" + esc(value.platform) + "'></div>"
+          + "<div class='form-field'><label for='configPermissionChatType'>会话类型</label><select id='configPermissionChatType'>"
+          + optionHtml("", "全部会话类型", !value.chatType) + optionHtml("GROUP", "群聊", value.chatType === "GROUP") + optionHtml("PRIVATE", "私聊", value.chatType === "PRIVATE") + optionHtml("CHANNEL", "频道", value.chatType === "CHANNEL")
+          + "</select></div>"
+          + "<div class='form-field'><label for='configPermissionChatId'>会话 ID</label><input id='configPermissionChatId' value='" + esc(value.chatId) + "'></div>"
+          + "<div class='form-field'><label for='configPermissionSenderId'>发送者 ID</label><input id='configPermissionSenderId' value='" + esc(value.senderId) + "'></div>"
+          + "<div class='form-field'><label for='configPermissionRole'>角色</label><select id='configPermissionRole'>"
+          + optionHtml("ADMIN", "管理员", value.role === "ADMIN") + optionHtml("USER", "普通用户", value.role === "USER")
+          + "</select></div>"
+          + "</div>";
+        els("configItemModal").hidden = false;
+        setTimeout(() => els("configPermissionPlatform").focus(), 0);
+      }
+    }
+
+    function closeConfigItemModal() {
+      state.configItemModal = null;
+      if (!els("configItemModal")) return;
+      els("configItemModal").hidden = true;
+      els("configItemBody").innerHTML = "";
+      setConfigItemMessage("", false);
+    }
+
+    function refreshConfigTableEmptyRows() {
+      const templateBody = document.querySelector("[data-config-templates] tbody");
+      if (templateBody && !templateBody.querySelector("[data-template-row]") && !templateBody.querySelector("[data-empty-row]")) {
+        templateBody.insertAdjacentHTML("beforeend", "<tr data-empty-row><td colspan='3'><div class='empty'>暂无模板</div></td></tr>");
+      }
+      const permissionBody = document.querySelector("[data-config-permissions] tbody");
+      if (permissionBody && !permissionBody.querySelector("[data-permission-row]") && !permissionBody.querySelector("[data-empty-row]")) {
+        permissionBody.insertAdjacentHTML("beforeend", "<tr data-empty-row><td colspan='6'><div class='empty'>暂无权限规则</div></td></tr>");
+      }
+    }
+
+    function addConfigItemFromModal() {
+      const modal = state.configItemModal;
+      if (!modal) return;
+      if (modal.kind === "template") {
+        const name = els("configTemplateName").value.trim();
+        const body = els("configTemplateBody").value;
+        if (!name) return setConfigItemMessage("请填写模板名", true);
+        const existingNames = Array.from(document.querySelectorAll("[data-template-row]"))
+          .filter(row => row !== modal.row)
+          .map(row => templateValueFromRow(row).name.trim());
+        if (existingNames.includes(name)) return setConfigItemMessage("模板名已存在", true);
+        const tbody = document.querySelector("[data-config-templates] tbody");
+        if (!tbody) return;
+        if (modal.row) {
+          modal.row.outerHTML = templateConfigRow(name, body);
+        } else {
+          const empty = tbody.querySelector("[data-empty-row]");
+          if (empty) empty.remove();
+          tbody.insertAdjacentHTML("beforeend", templateConfigRow(name, body));
+        }
+      } else {
+        const tbody = document.querySelector("[data-config-permissions] tbody");
+        if (!tbody) return;
+        const next = {
+          platform: els("configPermissionPlatform").value.trim() || "*",
+          chatType: els("configPermissionChatType").value || null,
+          chatId: els("configPermissionChatId").value.trim() || "*",
+          senderId: els("configPermissionSenderId").value.trim() || "*",
+          role: els("configPermissionRole").value || "ADMIN"
+        };
+        if (modal.row) {
+          modal.row.outerHTML = permissionConfigRow(next);
+        } else {
+          const empty = tbody.querySelector("[data-empty-row]");
+          if (empty) empty.remove();
+          tbody.insertAdjacentHTML("beforeend", permissionConfigRow(next));
+        }
+      }
+      closeConfigItemModal();
+    }
+
+    function collectConfigValues(detail) {
+      const values = {};
+      (detail.schema.fields || []).forEach(field => {
+        if (field.type === "TEMPLATE_MAP") {
+          const templates = {};
+          document.querySelectorAll("[data-template-row]").forEach(row => {
+            const value = templateValueFromRow(row);
+            const name = value.name.trim();
+            const body = value.body;
+            if (name) templates[name] = body;
+          });
+          values[field.path] = templates;
+        } else if (field.type === "COMMAND_PERMISSIONS") {
+          values[field.path] = Array.from(document.querySelectorAll("[data-permission-row]")).map(permissionValueFromRow);
+        } else {
+          const input = document.querySelector("[data-config-input='" + field.path + "']");
+          if (!input) return;
+          if (field.type === "BOOLEAN") {
+            values[field.path] = input.checked;
+          } else if (field.type === "NUMBER") {
+            values[field.path] = input.value === "" ? null : Number(input.value);
+          } else {
+            values[field.path] = input.value;
+          }
+        }
+      });
+      return values;
+    }
+
+    async function saveSelectedConfig() {
+      const id = state.selectedConfigId;
+      const detail = await ensureConfigDetail(id);
+      const values = collectConfigValues(detail);
+      if (id === "main") {
+        const templates = values.templates || {};
+        if (!templates.default || !String(templates.default).trim()) {
+          setConfigMessage("default 模板不能为空", true);
+          return;
+        }
+      }
+      const result = await api("/configs/" + encodeURIComponent(id), {
+        method: "PUT",
+        body: JSON.stringify({ values: values })
+      });
+      if (id === "main" && values["webAdmin.token"] && String(values["webAdmin.token"]).trim()) {
+        state.token = String(values["webAdmin.token"]).trim();
+        localStorage.setItem("dynamicBotAdminToken", state.token);
+      }
+      state.cache.configDetails[id] = Object.assign({}, detail, {
+        values: result.values,
+        secretStates: result.secretStates
+      });
+      if (id === "main") {
+        invalidate("overview", "templates");
+      }
+      renderConfigForm(state.cache.configDetails[id]);
+      const suffix = result.restartRequired ? "；需要重启 " + result.restartTargets.join(", ") : "";
+      setConfigMessage(result.message + suffix, false);
+      notify(result.message + suffix, false);
     }
 
     function invalidate(...keys) {
@@ -1619,8 +2164,30 @@
       const id = Number(button.dataset.id);
       const platform = button.dataset.platform;
       const publisherId = Number(button.dataset.publisherId);
+      const configId = button.dataset.configId;
       try {
-        if (action === "open-cookie-login") {
+        if (action === "select-config") {
+          state.selectedConfigId = configId;
+          await loadConfigs();
+        } else if (action === "open-template-modal") {
+          openConfigItemModal("template");
+        } else if (action === "edit-template-row") {
+          const row = button.closest("[data-template-row]");
+          if (row) openConfigItemModal("template", row);
+        } else if (action === "remove-template-row") {
+          const row = button.closest("[data-template-row]");
+          if (row) row.remove();
+          refreshConfigTableEmptyRows();
+        } else if (action === "open-permission-modal") {
+          openConfigItemModal("permission");
+        } else if (action === "edit-permission-row") {
+          const row = button.closest("[data-permission-row]");
+          if (row) openConfigItemModal("permission", row);
+        } else if (action === "remove-permission-row") {
+          const row = button.closest("[data-permission-row]");
+          if (row) row.remove();
+          refreshConfigTableEmptyRows();
+        } else if (action === "open-cookie-login") {
           openPlatformLoginModal(platform, "cookie");
         } else if (action === "open-qr-login") {
           openPlatformLoginModal(platform, "qr");
@@ -1678,6 +2245,7 @@
     els("logout").onclick = () => {
       closePlatformLoginModal();
       closeActionModal();
+      closeConfigItemModal();
       clearAllQrSessions(true);
       state.token = "";
       localStorage.removeItem("dynamicBotAdminToken");
@@ -1685,7 +2253,7 @@
     };
     els("refresh").onclick = async () => {
       try {
-        invalidate("overview", "platformLogins", "publishers", "subscribers", "subscriptions", "filters", "templates");
+        invalidate("overview", "platformLogins", "publishers", "subscribers", "subscriptions", "filters", "templates", "configs");
         await loadPage(state.page, true);
         notify("已刷新当前页面", false);
       } catch (error) {
@@ -1713,9 +2281,18 @@
     els("actionModal").addEventListener("click", event => {
       if (event.target === els("actionModal")) closeActionModal();
     });
+    els("cancelConfigItem").onclick = closeConfigItemModal;
+    els("confirmConfigItem").onclick = addConfigItemFromModal;
+    els("configItemModal").addEventListener("click", event => {
+      if (event.target === els("configItemModal")) closeConfigItemModal();
+    });
     els("openCreateSubscription").onclick = () => openActionModal("subscription").catch(handleError);
     els("openAddFilter").onclick = () => openActionModal("filter").catch(handleError);
     els("openTemplateBinding").onclick = () => openActionModal("template").catch(handleError);
+    els("saveConfig").onclick = () => saveSelectedConfig().catch(error => {
+      setConfigMessage(error.message, true);
+      handleError(error);
+    });
 
     els("loadFilters").onclick = () => loadFilters(true).catch(handleError);
     els("filterScopeSubscriptionId").onchange = () => loadFilters().catch(handleError);

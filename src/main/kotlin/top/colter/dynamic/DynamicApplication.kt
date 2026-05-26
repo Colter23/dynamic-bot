@@ -9,9 +9,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.admin.AdminServer
 import top.colter.dynamic.command.CommandListener
-import top.colter.dynamic.core.config.DefaultConfigService
-import top.colter.dynamic.core.config.loadOrCreate
-import top.colter.dynamic.core.config.save
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
 import top.colter.dynamic.core.event.DynamicEvent
@@ -39,8 +36,8 @@ public object DynamicApplication : CoroutineScope {
     private val pluginManager: PluginManager = PluginManager(pluginDirPath = "plugins")
     private val listenerTokens: MutableList<ListenerToken> = mutableListOf()
     private val taskScheduler: TaskScheduler = TaskScheduler(scope = this)
+    private val configStore: MainConfigStore = MainConfigStore()
     private var adminServer: AdminServer? = null
-    private var runtimeConfig: MainDynamicConfig? = null
 
     public fun run() {
         val dbPath = "data/dynamic.db"
@@ -53,8 +50,7 @@ public object DynamicApplication : CoroutineScope {
         }
 
         EventManger.configureScope(this)
-        val config = loadMainConfig()
-        runtimeConfig = config
+        val config = configStore.loadOrCreate { generateAdminToken() }
         registerCoreListeners(config)
 
         val loadResult = pluginManager.loadAllPlugins()
@@ -77,15 +73,6 @@ public object DynamicApplication : CoroutineScope {
         println("DynamicApplication started. Loaded plugins: ${loadResult.loadedPlugins}")
     }
 
-    private fun loadMainConfig(): MainDynamicConfig {
-        val loaded = DefaultConfigService.loadOrCreate(MainDynamicConfig.CONFIG_ID) { MainDynamicConfig() }
-        if (!loaded.webAdmin.enabled || loaded.webAdmin.token.isNotBlank()) return loaded
-
-        val updated = loaded.copy(webAdmin = loaded.webAdmin.copy(token = generateAdminToken()))
-        DefaultConfigService.save(MainDynamicConfig.CONFIG_ID, updated)
-        return updated
-    }
-
     private fun registerCoreListeners(config: MainDynamicConfig) {
         DynamicImageCache.configure(Paths.get(config.imageCache.sourceRoot))
         registerImageCleanupTask(config)
@@ -94,14 +81,14 @@ public object DynamicApplication : CoroutineScope {
             pluginManager.getDynamicLinkResolvers()
         }
 
-        listenerTokens += DynamicListener(config = config).register<DynamicEvent>()
+        listenerTokens += DynamicListener(configProvider = configStore::current).register<DynamicEvent>()
         listenerTokens += CommandListener(
-            config = config,
+            configProvider = configStore::current,
             dynamicLinkForwarder = dynamicLinkForwarder,
             platformPluginResolver = { platformId -> pluginManager.findPlatformPublisherPlugin(platformId) }
         ).register<CommandEvent>()
         listenerTokens += DynamicLinkAutoParseListener(
-            configProvider = { config },
+            configProvider = configStore::current,
             forwarder = dynamicLinkForwarder,
         ).register<CommandEvent>()
 
@@ -124,7 +111,8 @@ public object DynamicApplication : CoroutineScope {
         val server = AdminServer(
             config = config.webAdmin,
             pluginManager = pluginManager,
-            configProvider = { runtimeConfig ?: config },
+            configProvider = configStore::current,
+            mainConfigUpdater = configStore::save,
         )
         server.start()
         adminServer = server

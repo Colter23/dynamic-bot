@@ -1,6 +1,11 @@
 package top.colter.dynamic.admin
 
 import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.MainConfigForms
+import top.colter.dynamic.core.config.ConfigApplyResult
+import top.colter.dynamic.core.config.ConfigService
+import top.colter.dynamic.core.config.ConfigurablePlugin
+import top.colter.dynamic.core.config.DefaultConfigService
 import top.colter.dynamic.core.command.CommandRegistry
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicElementType
@@ -32,14 +37,24 @@ public class AdminService(
     private val pluginProvider: () -> List<PluginInfo>,
     private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
     private val configProvider: () -> MainDynamicConfig,
+    private val mainConfigUpdater: (MainDynamicConfig) -> ConfigApplyResult = {
+        throw IllegalStateException("main config editing is not configured")
+    },
+    private val configService: ConfigService = DefaultConfigService,
 ) {
     public constructor(
         pluginManager: PluginManager,
         configProvider: () -> MainDynamicConfig,
+        mainConfigUpdater: (MainDynamicConfig) -> ConfigApplyResult = {
+            throw IllegalStateException("main config editing is not configured")
+        },
+        configService: ConfigService = DefaultConfigService,
     ) : this(
         pluginProvider = { pluginManager.getAllPlugins() },
         platformPluginResolver = { platformId -> pluginManager.findPlatformPublisherPlugin(platformId) },
         configProvider = configProvider,
+        mainConfigUpdater = mainConfigUpdater,
+        configService = configService,
     )
 
     public fun overview(): OverviewResponse {
@@ -249,6 +264,60 @@ public class AdminService(
         )
     }
 
+    public fun configs(): List<ConfigSummaryDto> {
+        return buildList {
+            add(
+                ConfigSummaryDto(
+                    id = MainDynamicConfig.CONFIG_ID,
+                    name = "主配置",
+                    description = "主项目配置",
+                    sourcePath = configService.resolvePath(MainDynamicConfig.CONFIG_ID).toString(),
+                )
+            )
+            addAll(
+                configurablePlugins().map { (info, plugin) ->
+                    ConfigSummaryDto(
+                        id = plugin.configId,
+                        name = plugin.configName,
+                        description = plugin.configDescription,
+                        pluginId = info.descriptor.id,
+                        pluginName = info.descriptor.name,
+                        pluginState = info.state.name,
+                        sourcePath = configService.resolvePath(plugin.configId).toString(),
+                    )
+                }
+            )
+        }.sortedWith(compareBy<ConfigSummaryDto> {
+            if (it.id == MainDynamicConfig.CONFIG_ID) 0 else 1
+        }.thenBy { it.name })
+    }
+
+    public fun config(id: String): ConfigDetailDto {
+        if (id == MainDynamicConfig.CONFIG_ID) return mainConfigDetail()
+        val (info, plugin) = configurablePlugins().firstOrNull { (_, plugin) -> plugin.configId == id }
+            ?: throw NoSuchElementException("config not found: $id")
+        val current = plugin.currentConfig()
+        return ConfigDetailDto(
+            id = plugin.configId,
+            name = plugin.configName,
+            description = plugin.configDescription,
+            pluginId = info.descriptor.id,
+            pluginName = info.descriptor.name,
+            pluginState = info.state.name,
+            sourcePath = configService.resolvePath(plugin.configId).toString(),
+            schema = plugin.configFormSpec,
+            values = AdminConfigJson.valuesFor(current, plugin.configFormSpec),
+            secretStates = AdminConfigJson.secretStates(current, plugin.configFormSpec),
+        )
+    }
+
+    public fun updateConfig(id: String, request: UpdateConfigRequest): UpdateConfigResponse {
+        if (id == MainDynamicConfig.CONFIG_ID) return updateMainConfig(request)
+        val (_, plugin) = configurablePlugins().firstOrNull { (_, plugin) -> plugin.configId == id }
+            ?: throw NoSuchElementException("config not found: $id")
+        return updatePluginConfig(plugin, request)
+    }
+
     public fun setPublisherTemplate(publisherId: Int, request: TemplateBindingRequest): ActionResultResponse {
         val templateName = request.templateName.trim()
         require(templateName.isNotBlank()) { "templateName must not be blank" }
@@ -260,6 +329,86 @@ public class AdminService(
     public fun removePublisherTemplate(publisherId: Int): ActionResultResponse {
         val removed = PublisherTemplateRepository.removePublisherTemplate(publisherId)
         return ActionResultResponse(removed, if (removed) "template binding removed" else "template binding not found")
+    }
+
+    private fun mainConfigDetail(): ConfigDetailDto {
+        val current = configProvider()
+        return ConfigDetailDto(
+            id = MainDynamicConfig.CONFIG_ID,
+            name = "主配置",
+            description = "主项目配置",
+            sourcePath = configService.resolvePath(MainDynamicConfig.CONFIG_ID).toString(),
+            schema = MainConfigForms.formSpec,
+            values = AdminConfigJson.valuesFor(current, MainConfigForms.formSpec),
+            secretStates = AdminConfigJson.secretStates(current, MainConfigForms.formSpec),
+        )
+    }
+
+    private fun updateMainConfig(request: UpdateConfigRequest): UpdateConfigResponse {
+        val current = configProvider()
+        val next = AdminConfigJson.decode(
+            values = request.values,
+            current = current,
+            spec = MainConfigForms.formSpec,
+            clazz = MainDynamicConfig::class,
+        )
+        val result = mainConfigUpdater(next)
+        val saved = configProvider()
+        return UpdateConfigResponse(
+            changed = result.changed,
+            restartRequired = result.restartRequired,
+            restartTargets = result.restartTargets,
+            message = result.message,
+            values = AdminConfigJson.valuesFor(saved, MainConfigForms.formSpec),
+            secretStates = AdminConfigJson.secretStates(saved, MainConfigForms.formSpec),
+        )
+    }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun updatePluginConfig(
+        plugin: ConfigurablePlugin<*>,
+        request: UpdateConfigRequest,
+    ): UpdateConfigResponse {
+        return updatePluginConfigTyped(plugin as ConfigurablePlugin<Any>, request)
+    }
+
+    private fun <T : Any> updatePluginConfigTyped(
+        plugin: ConfigurablePlugin<T>,
+        request: UpdateConfigRequest,
+    ): UpdateConfigResponse {
+        val current = plugin.currentConfig()
+        val next = AdminConfigJson.decode(
+            values = request.values,
+            current = current,
+            spec = plugin.configFormSpec,
+            clazz = plugin.configClass,
+        )
+        val changed = current != next
+        val result = if (changed) {
+            plugin.applyConfig(next).also {
+                configService.save(plugin.configId, next, plugin.configClass)
+            }
+        } else {
+            ConfigApplyResult(changed = false, message = "${plugin.configName}配置未变化")
+        }
+        val saved = if (changed) next else current
+        return UpdateConfigResponse(
+            changed = result.changed,
+            restartRequired = result.restartRequired,
+            restartTargets = result.restartTargets,
+            message = result.message,
+            values = AdminConfigJson.valuesFor(saved, plugin.configFormSpec),
+            secretStates = AdminConfigJson.secretStates(saved, plugin.configFormSpec),
+        )
+    }
+
+    private fun configurablePlugins(): List<Pair<PluginInfo, ConfigurablePlugin<*>>> {
+        return pluginProvider()
+            .mapNotNull { info ->
+                val configurable = info.instance as? ConfigurablePlugin<*> ?: return@mapNotNull null
+                info to configurable
+            }
+            .sortedBy { (_, plugin) -> plugin.configId }
     }
 
     private suspend fun ensureFollowed(

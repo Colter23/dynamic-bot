@@ -9,8 +9,11 @@ import top.colter.dynamic.core.data.CommandRole
 
 internal class ParseDynamicLinkCommandHandler(
     private val forwarder: DynamicLinkForwarder,
-    private val commandPrefix: String,
+    private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
     override val spec: CommandSpec = CommandSpec(
         path = listOf("parse"),
         description = "parse and forward a dynamic link",

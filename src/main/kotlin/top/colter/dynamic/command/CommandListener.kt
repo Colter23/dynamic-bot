@@ -66,22 +66,23 @@ public class CommandListener(
     private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
     private val dynamicLinkForwarder: DynamicLinkForwarder = DynamicLinkForwarder { emptyList() },
     config: MainDynamicConfig? = null,
+    configProvider: (() -> MainDynamicConfig)? = null,
     private val configService: ConfigService = DefaultConfigService,
 ) : Listener<CommandEvent> {
     private companion object {
         private const val MAIN_OWNER: String = "main"
     }
 
-    private val runtimeConfig: MainDynamicConfig by lazy {
+    private val fixedConfig: MainDynamicConfig by lazy {
         config ?: configService.loadOrCreate(MainDynamicConfig.CONFIG_ID) { MainDynamicConfig() }
     }
+    private val runtimeConfigProvider: () -> MainDynamicConfig = configProvider ?: { fixedConfig }
+    private val runtimeConfig: MainDynamicConfig
+        get() = runtimeConfigProvider()
 
     private val commandPrefix: String
         get() = runtimeConfig.command.prefix
-
-    private val permissionResolver: CommandPermissionResolver by lazy {
-        CommandPermissionResolver(runtimeConfig.command.permissions)
-    }
+    private val commandPrefixProvider: () -> String = { commandPrefix }
 
     init {
         registerBuiltins()
@@ -103,7 +104,7 @@ public class CommandListener(
             return
         }
 
-        val role = permissionResolver.resolve(event.context)
+        val role = CommandPermissionResolver(runtimeConfig.command.permissions).resolve(event.context)
         if (!role.satisfies(match.spec.requiredRole)) {
             reply(event, CommandExecutionResult(CommandExecutionStatus.REJECTED, "permission denied"))
             return
@@ -150,21 +151,21 @@ public class CommandListener(
 
     private fun registerBuiltins() {
         CommandRegistry.unregisterByOwner(MAIN_OWNER)
-        CommandRegistry.register(HelpCommandHandler(commandPrefix), MAIN_OWNER)
+        CommandRegistry.register(HelpCommandHandler(commandPrefixProvider), MAIN_OWNER)
         CommandRegistry.register(StatusCommandHandler(), MAIN_OWNER)
-        CommandRegistry.register(ParseDynamicLinkCommandHandler(dynamicLinkForwarder, commandPrefix), MAIN_OWNER)
-        CommandRegistry.register(SubscribeCommandHandler(platformPluginResolver, commandPrefix), MAIN_OWNER)
-        CommandRegistry.register(LoginCommandHandler(platformPluginResolver, commandPrefix), MAIN_OWNER)
-        CommandRegistry.register(UnsubscribeCommandHandler(platformPluginResolver, { runtimeConfig }, commandPrefix), MAIN_OWNER)
+        CommandRegistry.register(ParseDynamicLinkCommandHandler(dynamicLinkForwarder, commandPrefixProvider), MAIN_OWNER)
+        CommandRegistry.register(SubscribeCommandHandler(platformPluginResolver, commandPrefixProvider), MAIN_OWNER)
+        CommandRegistry.register(LoginCommandHandler(platformPluginResolver, commandPrefixProvider), MAIN_OWNER)
+        CommandRegistry.register(UnsubscribeCommandHandler(platformPluginResolver, { runtimeConfig }, commandPrefixProvider), MAIN_OWNER)
         CommandRegistry.register(ListCommandHandler(), MAIN_OWNER)
         CommandRegistry.register(TemplateListCommandHandler { runtimeConfig }, MAIN_OWNER)
-        CommandRegistry.register(TemplateSetCommandHandler({ runtimeConfig }, commandPrefix), MAIN_OWNER)
-        CommandRegistry.register(TemplateRemoveCommandHandler(commandPrefix), MAIN_OWNER)
-        CommandRegistry.register(FilterAddElementCommandHandler(commandPrefix), MAIN_OWNER)
-        CommandRegistry.register(FilterAddContentCommandHandler(commandPrefix), MAIN_OWNER)
-        CommandRegistry.register(FilterListCommandHandler(commandPrefix), MAIN_OWNER)
-        CommandRegistry.register(FilterRemoveCommandHandler(commandPrefix), MAIN_OWNER)
-        CommandRegistry.register(FilterClearCommandHandler(commandPrefix), MAIN_OWNER)
+        CommandRegistry.register(TemplateSetCommandHandler({ runtimeConfig }, commandPrefixProvider), MAIN_OWNER)
+        CommandRegistry.register(TemplateRemoveCommandHandler(commandPrefixProvider), MAIN_OWNER)
+        CommandRegistry.register(FilterAddElementCommandHandler(commandPrefixProvider), MAIN_OWNER)
+        CommandRegistry.register(FilterAddContentCommandHandler(commandPrefixProvider), MAIN_OWNER)
+        CommandRegistry.register(FilterListCommandHandler(commandPrefixProvider), MAIN_OWNER)
+        CommandRegistry.register(FilterRemoveCommandHandler(commandPrefixProvider), MAIN_OWNER)
+        CommandRegistry.register(FilterClearCommandHandler(commandPrefixProvider), MAIN_OWNER)
     }
 }
 
@@ -248,8 +249,11 @@ private sealed interface FilterTargetResolveResult {
 }
 
 private class HelpCommandHandler(
-    private val commandPrefix: String,
+    private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
     override val spec: CommandSpec = CommandSpec(
         path = listOf("help"),
         description = "show available commands",
@@ -273,10 +277,13 @@ private class HelpCommandHandler(
 
 private class LoginCommandHandler(
     private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
-    private val commandPrefix: String,
+    private val commandPrefixProvider: () -> String,
     private val qrCodeRenderer: LoginQrCodeRenderer = LoginQrCodeRenderer(),
     private val loginScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
     private companion object {
         private const val QR_CHALLENGE_TIMEOUT_MS: Long = 10_000
     }
@@ -528,8 +535,11 @@ private class StatusCommandHandler : CommandHandler {
 
 private class SubscribeCommandHandler(
     private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
-    private val commandPrefix: String,
+    private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
     override val spec: CommandSpec = CommandSpec(
         path = listOf("subscribe"),
         description = "subscribe to a publisher on a supported platform",
@@ -607,8 +617,11 @@ private class SubscribeCommandHandler(
 private class UnsubscribeCommandHandler(
     private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
     private val configProvider: () -> MainDynamicConfig,
-    private val commandPrefix: String,
+    private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
     override val spec: CommandSpec = CommandSpec(
         path = listOf("unsubscribe"),
         description = "unsubscribe from a publisher",
@@ -704,8 +717,11 @@ private class TemplateListCommandHandler(
 
 private class TemplateSetCommandHandler(
     private val configProvider: () -> MainDynamicConfig,
-    private val commandPrefix: String,
+    private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
     override val spec: CommandSpec = CommandSpec(
         path = listOf("template", "set"),
         description = "bind a publisher to a message template",
@@ -743,8 +759,11 @@ private class TemplateSetCommandHandler(
 }
 
 private class TemplateRemoveCommandHandler(
-    private val commandPrefix: String,
+    private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
     override val spec: CommandSpec = CommandSpec(
         path = listOf("template", "remove"),
         description = "remove a publisher message template binding",
@@ -780,8 +799,11 @@ private class TemplateRemoveCommandHandler(
 }
 
 private class FilterAddElementCommandHandler(
-    private val commandPrefix: String,
+    private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "add", "element"),
         description = "add an element block filter for a subscription",
@@ -810,8 +832,11 @@ private class FilterAddElementCommandHandler(
 }
 
 private class FilterAddContentCommandHandler(
-    private val commandPrefix: String,
+    private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "add", "content"),
         description = "add a content block filter for a subscription",
@@ -848,8 +873,11 @@ private class FilterAddContentCommandHandler(
 }
 
 private class FilterListCommandHandler(
-    private val commandPrefix: String,
+    private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "list"),
         description = "list subscription filters for the current target",
@@ -909,8 +937,11 @@ private class FilterListCommandHandler(
 }
 
 private class FilterRemoveCommandHandler(
-    private val commandPrefix: String,
+    private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "remove"),
         description = "remove a subscription filter",
@@ -940,8 +971,11 @@ private class FilterRemoveCommandHandler(
 }
 
 private class FilterClearCommandHandler(
-    private val commandPrefix: String,
+    private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "clear"),
         description = "clear subscription filters",
