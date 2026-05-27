@@ -42,3 +42,7 @@ bin/
 .DS_Store
 
 .kotlin
+**/src/test/resources/output
+**/src/test/resources/cookie.json
+config
+data
