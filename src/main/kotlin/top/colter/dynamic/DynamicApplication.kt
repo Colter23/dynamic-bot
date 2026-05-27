@@ -24,11 +24,14 @@ import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.task.TaskDefinition
 import top.colter.dynamic.core.task.TaskSchedule
 import top.colter.dynamic.core.task.TaskScheduler
+import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.dynamic.link.DynamicLinkAutoParseListener
 import top.colter.dynamic.link.DynamicLinkForwarder
 import top.colter.dynamic.listener.DynamicListener
 import top.colter.dynamic.listener.ImageFileCleaner
+
+private val logger = loggerFor<DynamicApplication>()
 
 public object DynamicApplication : CoroutineScope {
     private val job: Job = Job()
@@ -51,9 +54,9 @@ public object DynamicApplication : CoroutineScope {
         val dbPath = "data/dynamic.db"
         try {
             PersistenceManager.init(dbPath)
-            println("Database initialized: $dbPath")
+            logger.info { "数据库已初始化：$dbPath" }
         } catch (e: Exception) {
-            println("Database initialization failed: path=$dbPath, error=${e.message}")
+            logger.error(e) { "数据库初始化失败：$dbPath" }
             throw e
         }
 
@@ -63,22 +66,21 @@ public object DynamicApplication : CoroutineScope {
 
         val loadResult = pluginManager.loadAllPlugins()
         if (loadResult.failedPlugins.isNotEmpty()) {
-            loadResult.failedPlugins.forEach { (id, error) ->
-                println("Plugin load failed: $id -> $error")
-            }
+            logger.warn { "部分插件加载失败：pluginIds=${loadResult.failedPlugins.keys.sorted()}" }
         }
         pluginManager.initAndStartAllPlugins()
 
-        pluginManager.getAllPlugins()
+        val failedPluginIds = pluginManager.getAllPlugins()
             .filter { it.state == PluginState.FAILED }
-            .forEach { info ->
-                val error = info.error?.message ?: info.error?.javaClass?.name ?: "Unknown error"
-                println("Plugin start failed: ${info.descriptor.id} -> $error")
-            }
+            .map { it.descriptor.id }
+            .sorted()
+        if (failedPluginIds.isNotEmpty()) {
+            logger.warn { "部分插件启动失败：pluginIds=$failedPluginIds" }
+        }
 
         startAdminServer(config)
 
-        println("DynamicApplication started. Loaded plugins: ${loadResult.loadedPlugins}")
+        logger.info { "主项目已启动，已加载插件=${loadResult.loadedPlugins}" }
     }
 
     private fun registerCoreListeners(config: MainDynamicConfig) {
@@ -103,7 +105,7 @@ public object DynamicApplication : CoroutineScope {
 
         listenerTokens += object : Listener<MessageEvent> {
             override suspend fun onMessage(event: MessageEvent) {
-                println("message event received: ${event.message.id}")
+                logger.debug { "分发推送消息：messageId=${event.message.id}，目标数=${event.message.targets.size}" }
                 pluginManager.dispatchMessageToSinks(event)
             }
         }.register<MessageEvent>()
@@ -126,10 +128,7 @@ public object DynamicApplication : CoroutineScope {
         )
         server.start()
         adminServer = server
-        println(
-            "Web admin started: http://${config.webAdmin.host}:${config.webAdmin.port}/admin " +
-                "(token=${config.webAdmin.token})",
-        )
+        logger.info { "管理后台已启动：http://${config.webAdmin.host}:${config.webAdmin.port}/admin" }
     }
 
     private fun generateAdminToken(): String {
@@ -153,14 +152,22 @@ public object DynamicApplication : CoroutineScope {
                             Paths.get(imageCacheConfig.sourceRoot),
                             imageCacheConfig.sourceCleanup.maxIdleDays,
                         )
-                        println("image cleanup source: deletedFiles=${result.deletedFiles}, deletedBytes=${result.deletedBytes}")
+                        if (result.deletedFiles > 0) {
+                            logger.info { "原图缓存已清理：文件=${result.deletedFiles}，字节=${result.deletedBytes}" }
+                        } else {
+                            logger.debug { "原图缓存无需清理" }
+                        }
                     }
                     if (imageCacheConfig.renderedCleanup.enabled) {
                         val result = cleaner.clean(
                             Paths.get(imageCacheConfig.renderedRoot),
                             imageCacheConfig.renderedCleanup.maxIdleDays,
                         )
-                        println("image cleanup rendered: deletedFiles=${result.deletedFiles}, deletedBytes=${result.deletedBytes}")
+                        if (result.deletedFiles > 0) {
+                            logger.info { "渲染图缓存已清理：文件=${result.deletedFiles}，字节=${result.deletedBytes}" }
+                        } else {
+                            logger.debug { "渲染图缓存无需清理" }
+                        }
                     }
                 },
             )
@@ -170,7 +177,7 @@ public object DynamicApplication : CoroutineScope {
     public fun requestStop(reason: String) {
         Thread(
             {
-                println("Stop requested: $reason")
+                logger.info { "收到停止请求：$reason" }
                 runCatching { Thread.sleep(500) }
                 shutdown()
             },
@@ -191,6 +198,7 @@ public object DynamicApplication : CoroutineScope {
             pluginManager.shutdown()
             EventManger.shutdown()
             job.cancel()
+            logger.info { "应用已关闭" }
         } finally {
             shutdownCallback?.invoke()
         }

@@ -25,6 +25,7 @@ dependencies {
 
     implementation("top.colter.dynamic:dynamic-bot-core:0.0.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
+    implementation("io.github.oshai:kotlin-logging-jvm:7.0.0")
     implementation("org.slf4j:slf4j-simple:2.0.16")
     implementation("com.google.zxing:core:3.5.3")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.20.0")

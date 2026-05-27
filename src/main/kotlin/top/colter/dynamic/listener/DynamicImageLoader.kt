@@ -25,9 +25,12 @@ import top.colter.dynamic.core.data.ImageType
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.LazyImageReference
 import top.colter.dynamic.core.data.collectLazyImageReferences
+import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.image.DynamicImageCache
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+
+private val logger = loggerFor<CachedDynamicImageLoader>()
 
 public fun interface DynamicImageLoader {
     public suspend fun load(dynamic: Dynamic)
@@ -86,10 +89,7 @@ public class CachedDynamicImageLoader(
             waiter.completeExceptionally(e)
             throw e
         } catch (t: Throwable) {
-            println(
-                "image download failed: platformId=$platformId, imageType=${imageType.name}, " +
-                    "uri=${image.uri}, error=${t.message}"
-            )
+            logger.warn(t) { "图片下载失败，使用占位图：platform=$platformId，type=${imageType.name}，uri=${image.uri}" }
             DynamicImageCache.putPlaceholder(image)
             waiter.complete(Unit)
         } finally {
@@ -113,7 +113,7 @@ public class HttpImageDownloader(
             "http", "https" -> downloadHttp(uri, timeoutMs)
             "file" -> Files.readAllBytes(Paths.get(parsed))
             null -> Files.readAllBytes(Paths.get(uri))
-            else -> error("Unsupported image URI scheme: ${parsed.scheme}")
+            else -> error("不支持的图片地址协议：${parsed.scheme}")
         }
     }
 
@@ -126,7 +126,7 @@ public class HttpImageDownloader(
             .sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
             .await()
         if (response.statusCode() !in 200..299) {
-            error("Image download failed with HTTP ${response.statusCode()}")
+            error("图片下载失败：HTTP ${response.statusCode()}")
         }
         return response.body()
     }

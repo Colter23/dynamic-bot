@@ -20,7 +20,6 @@ import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.Shadow
 import top.colter.skiko.layout.*
 import java.io.File
-import java.io.FileNotFoundException
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 
@@ -36,12 +35,6 @@ class DrawTest {
         FontUtils.loadTypeface(loadTestResource("font", "HarmonyOS_SansSC_Medium.ttf").absolutePath)
         FontUtils.loadEmojiTypeface(loadTestResource("font", "NotoColorEmoji.ttf").absolutePath)
 
-//        try {
-//            val cookies = loadTestText(fileName = "cookie.json").decode<List<EditCookie>>().map { it.toCookie() }
-//            client.storage.initialize(cookies)
-//        }catch (e: FileNotFoundException) {
-//            println("未找到cookie文件，将无法使用部分api")
-//        }
     }
 
     val json: Json = Json {

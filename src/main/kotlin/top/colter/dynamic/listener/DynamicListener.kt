@@ -21,7 +21,10 @@ import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
+import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.link.LINK_PARSE_EVENT_LABEL
+
+private val logger = loggerFor<DynamicListener>()
 
 public class DynamicListener(
     config: MainDynamicConfig? = null,
@@ -50,7 +53,7 @@ public class DynamicListener(
         val dynamic = event.dynamic
         val targets = resolveTargets(event)
         if (targets.isEmpty()) {
-            println("dynamic event skipped: ${dynamic.dynamicId}, reason=no_subscriber")
+            logger.debug { "跳过动态：dynamicId=${dynamic.dynamicId}，原因=没有订阅目标" }
             return
         }
 
@@ -60,16 +63,16 @@ public class DynamicListener(
             applyFilters(dynamic, targets.filterSubscribedBeforeDynamic(dynamic))
         }
         if (deliverableTargets.isEmpty()) {
-            println("dynamic event skipped: ${dynamic.dynamicId}, reason=filtered")
+            logger.debug { "跳过动态：dynamicId=${dynamic.dynamicId}，原因=过滤后无目标" }
             return
         }
 
-        println("dynamic event received: ${dynamic.dynamicId}")
+        logger.info { "收到动态：platform=${dynamic.platform.id}，dynamicId=${dynamic.dynamicId}，目标数=${deliverableTargets.size}" }
 
         val template = resolveTemplate(dynamic)
         val chain = buildMessageChain(template, dynamic)
         if (chain.isEmpty()) {
-            println("dynamic event skipped: ${dynamic.dynamicId}, reason=empty_message")
+            logger.warn { "跳过动态：dynamicId=${dynamic.dynamicId}，原因=模板渲染为空" }
             return
         }
 
@@ -80,6 +83,9 @@ public class DynamicListener(
             chain = chain,
         )
         MessageDeliveryRepository.createPending(message)
+        logger.debug {
+            "推送消息已生成：messageId=${message.id}，消息段数=${message.chain.size}，目标数=${message.targets.size}"
+        }
 
         MessageEvent(
             source = "main",
@@ -117,10 +123,9 @@ public class DynamicListener(
                 .orEmpty()
             val blocked = rules.isNotEmpty() && DynamicFilterEvaluator.isBlocked(dynamic, rules)
             if (blocked) {
-                println(
-                    "dynamic event target filtered: ${dynamic.dynamicId}, " +
-                        "subscriberId=${target.subscriber.id}, subscriptionId=${target.subscription?.id}"
-                )
+                logger.debug {
+                    "动态目标被过滤：dynamicId=${dynamic.dynamicId}，subscriberId=${target.subscriber.id}，subscriptionId=${target.subscription?.id}"
+                }
             }
             !blocked
         }
@@ -143,12 +148,9 @@ public class DynamicListener(
             runtimeImageLoader.load(dynamic)
             LazyImage(runtimeImageRenderer.render(dynamic).toString())
         }.onFailure {
-            System.err.println(
-                "dynamic draw failed: platformId=${dynamic.platform.id}, publisherId=${dynamic.publisher.id}, " +
-                    "publisherExternalId=${dynamic.publisher.externalId}, dynamicId=${dynamic.dynamicId}, " +
-                    "error=${it::class.qualifiedName}: ${it.message}"
-            )
-            it.printStackTrace(System.err)
+            logger.warn(it) {
+                "动态绘图失败，已降级为纯文本：platform=${dynamic.platform.id}，publisher=${dynamic.publisher.externalId}，dynamicId=${dynamic.dynamicId}"
+            }
         }.getOrNull()
     }
 
