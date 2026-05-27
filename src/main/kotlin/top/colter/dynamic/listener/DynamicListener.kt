@@ -140,7 +140,12 @@ public class DynamicListener(
             runtimeImageLoader.load(dynamic)
             LazyImage(runtimeImageRenderer.render(dynamic).toString())
         }.onFailure {
-            println("dynamic draw failed: ${dynamic.dynamicId}, error=${it.message}")
+            System.err.println(
+                "dynamic draw failed: platformId=${dynamic.platform.id}, publisherId=${dynamic.publisher.id}, " +
+                    "publisherExternalId=${dynamic.publisher.externalId}, dynamicId=${dynamic.dynamicId}, " +
+                    "error=${it::class.qualifiedName}: ${it.message}"
+            )
+            it.printStackTrace(System.err)
         }.getOrNull()
     }
 

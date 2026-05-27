@@ -1,5 +1,6 @@
 package top.colter.dynamic.listener
 
+import java.nio.file.Files
 import java.nio.file.Paths
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
@@ -32,6 +33,7 @@ import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
+import top.colter.skiko.FontUtils
 import kotlin.io.path.createTempDirectory
 import kotlin.test.AfterTest
 import kotlin.test.Test
@@ -96,6 +98,36 @@ class DynamicListenerTest {
         val contents = event.message.chain.single().content
         assertEquals(1, contents.size)
         assertEquals("fallback Demo UP", contents.single().fallbackText)
+    }
+
+    @Test
+    fun shouldRenderDrawWhenDefaultFontIsNotPreloaded() = runBlocking {
+        initDb("dynamic-listener-font-fallback")
+        val publisher = createPublisher()
+        val subscriber = createSubscriber()
+        val previousDefaultFont = FontUtils.defaultFont
+        val previousEmojiFont = FontUtils.emojiFont
+
+        FontUtils.defaultFont = null
+        FontUtils.emojiFont = null
+        try {
+            val outputDir = createTempDirectory("dynamic-bot-rendered")
+            val listener = DynamicListener(
+                config = MainDynamicConfig(templates = mapOf("default" to "{draw}\n{name}")),
+                imageLoader = DynamicImageLoader { },
+                imageRenderer = FileDynamicImageRenderer(outputDir),
+            )
+
+            val received = captureMessageEvent()
+            listener.onMessage(DynamicEvent(source = "test", target = subscriber, dynamic = demoDynamic(publisher)))
+            val event = withTimeout(3_000) { received.await() }
+
+            val image = event.message.chain.single().content.first() as MessageContent.Image
+            assertTrue(Files.isRegularFile(Paths.get(image.image.uri)))
+        } finally {
+            FontUtils.defaultFont = previousDefaultFont
+            FontUtils.emojiFont = previousEmojiFont
+        }
     }
 
     @Test

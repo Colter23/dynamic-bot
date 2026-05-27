@@ -14,8 +14,8 @@ import top.colter.skiko.layout.RichText
 fun Layout.drawDynamicContent(content: DynamicContent, config: DrawConfig) {
     if (content.contentNodes.isEmpty()) return
 
-    val style = TextStyle().setColor(Color.BLACK).setFontSize(30.px).setFontFamily(FontUtils.defaultFont!!.familyName)
-    val linkStyle = TextStyle().setColor(Color.makeRGB(23, 139, 207)).setFontSize(30.px).setFontFamily(FontUtils.defaultFont!!.familyName)
+    val style = TextStyle().setColor(Color.BLACK).setFontSize(30.px).withDefaultFontFamily()
+    val linkStyle = TextStyle().setColor(Color.makeRGB(23, 139, 207)).setFontSize(30.px).withDefaultFontFamily()
     val paragraph = RichParagraphBuilder(style)
 
     content.contentNodes.forEach {
@@ -35,6 +35,11 @@ fun Layout.drawDynamicContent(content: DynamicContent, config: DrawConfig) {
         modifier = Modifier().margin(bottom = 20.dp).fillMaxWidth()
     )
 
+}
+
+private fun TextStyle.withDefaultFontFamily(): TextStyle {
+    FontUtils.defaultFont?.familyName?.let { setFontFamily(it) }
+    return this
 }
 
 fun DynamicContentStyle.toTextStyle(textStyle: TextStyle = TextStyle()) = textStyle.also {

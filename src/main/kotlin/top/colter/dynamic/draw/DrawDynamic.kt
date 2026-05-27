@@ -15,6 +15,7 @@ import top.colter.skiko.layout.View
 
 
 fun DrawDynamic(dynamic: Dynamic, config: DrawConfig): Image {
+    DrawFontInitializer.ensureInitialized()
     return View(
         modifier = Modifier()
             .width(1000.dp)

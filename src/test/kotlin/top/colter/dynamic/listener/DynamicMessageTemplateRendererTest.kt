@@ -40,6 +40,18 @@ class DynamicMessageTemplateRendererTest {
     }
 
     @Test
+    fun shouldRenderEpochSecondTime() {
+        val text = renderer.render("{time}", demoDynamic(), drawImage = null)
+            .single()
+            .content
+            .single()
+            .fallbackText
+
+        assertTrue(text.startsWith("2024"))
+        assertFalse(text.startsWith("+"))
+    }
+
+    @Test
     fun shouldInsertDrawAndImagesAtTemplatePosition() {
         val chains = renderer.render(
             "before {draw} middle {images} after",
