@@ -17,13 +17,17 @@ fun Layout.MediaMini(
     desc: String,
     badge: String? = null,
     coverRatio: Float = Ratio.COVER_2,
+    accentColor: Int = Color.makeRGB(251, 114, 153),
+    cardColor: Int = Color.WHITE.withAlpha(0.6f),
+    borderColor: Int = Color.WHITE,
+    secondaryTextColor: Int = Color.BLACK.withAlpha(0.7f),
     modifier: Modifier = Modifier()
 ) = Row (
     modifier = modifier
         .height(100.dp)
         .fillMaxWidth()
-        .background(Color.WHITE.withAlpha(0.6f))
-        .border(3.dp, 15.dp)
+        .background(cardColor)
+        .border(3.dp, 15.dp, borderColor)
         .shadows(Shadow.ELEVATION_3)
 ) {
     require(modifier.height.isNotNull()) { "必须指定高度" }
@@ -51,7 +55,7 @@ fun Layout.MediaMini(
         Box(modifier = Modifier().fillMaxWidth().fillRatioHeight(0.6f)) {
             Text(
                 text = desc,
-                color = Color.BLACK.withAlpha(0.7f),
+                color = secondaryTextColor,
                 maxLinesCount = 2,
                 alignment = LayoutAlignment.LEFT,
                 modifier = Modifier().fillMaxWidth()
@@ -65,7 +69,7 @@ fun Layout.MediaMini(
             alignment = LayoutAlignment.RIGHT_TOP,
             modifier = Modifier()
                 .padding(horizontal = 20.dp, vertical = 3.dp)
-                .background(color = Color.makeRGB(251, 114, 153))
+                .background(color = accentColor)
                 .border(2.dp, listOf(0.dp, 10.dp, 0.dp, 10.dp))
                 .shadows(Shadow.ELEVATION_2)
         ) {

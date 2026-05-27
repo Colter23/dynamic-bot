@@ -30,12 +30,16 @@ fun Layout.Media(
     duration: String? = null,
     info: String? = null,
     coverRatio: Float = Ratio.COVER_1,
+    accentColor: Int = Color.makeRGB(251, 114, 153),
+    cardColor: Int = Color.WHITE.withAlpha(0.6f),
+    borderColor: Int = Color.WHITE,
+    secondaryTextColor: Int = Color.BLACK.withAlpha(0.7f),
     modifier: Modifier = Modifier()
 ) = Column(
     modifier = modifier
         .fillMaxWidth()
-        .background(Color.WHITE.withAlpha(0.6f))
-        .border(3.dp, 15.dp, Color.WHITE)
+        .background(cardColor)
+        .border(3.dp, 15.dp, borderColor)
         .shadows(Shadow.ELEVATION_3)
 ) {
     //require(modifier.width.isNotNull()) { "必须指定宽度" }
@@ -56,7 +60,7 @@ fun Layout.Media(
                 alignment = LayoutAlignment.RIGHT_TOP,
                 modifier = Modifier()
                     .padding(horizontal = 30.dp, vertical = 3.dp)
-                    .background(color = Color.makeRGB(251, 114, 153))
+                    .background(color = accentColor)
                     .border(2.dp, listOf(0.dp, 10.dp, 0.dp, 10.dp))
                     .shadows(Shadow.ELEVATION_1)
             ) {
@@ -130,7 +134,7 @@ fun Layout.Media(
     Text(
         text = desc,
         fontSize = 24.dp,
-        color = Color.BLACK.withAlpha(0.7f),
+        color = secondaryTextColor,
         maxLinesCount = 3,
         modifier = Modifier().margin(right = 15.dp, bottom = 15.dp, left = 15.dp)
     )

@@ -14,18 +14,24 @@ import top.colter.skiko.layout.RichText
 fun Layout.drawDynamicContent(content: DynamicContent, config: DrawConfig) {
     if (content.contentNodes.isEmpty()) return
 
-    val style = TextStyle().setColor(Color.BLACK).setFontSize(30.px).withDefaultFontFamily()
-    val linkStyle = TextStyle().setColor(Color.makeRGB(23, 139, 207)).setFontSize(30.px).withDefaultFontFamily()
+    val style = TextStyle()
+        .setColor(config.theme.textColor)
+        .setFontSize(30.px)
+        .withDefaultFontFamily(config.fontRegistry)
+    val linkStyle = TextStyle()
+        .setColor(config.theme.linkColor)
+        .setFontSize(30.px)
+        .withDefaultFontFamily(config.fontRegistry)
     val paragraph = RichParagraphBuilder(style)
 
     content.contentNodes.forEach {
         when (it) {
-            is DynamicContentNodeText -> paragraph.addText(it.text, it.style?.toTextStyle(style))
-            is DynamicContentNodeLink -> paragraph.addText(it.text, it.style?.toTextStyle(linkStyle) ?: linkStyle)
+            is DynamicContentNodeText -> paragraph.addText(it.text, it.style?.toTextStyle(style, config) ?: style)
+            is DynamicContentNodeLink -> paragraph.addText(it.text, it.style?.toTextStyle(linkStyle, config) ?: linkStyle)
             is DynamicContentNodeEmoji -> paragraph.addEmoji(
                 it.text,
                 config.image(it.image),
-                it.style?.toTextStyle(linkStyle) ?: linkStyle,
+                it.style?.toTextStyle(linkStyle, config) ?: linkStyle,
             )
         }
     }
@@ -37,17 +43,13 @@ fun Layout.drawDynamicContent(content: DynamicContent, config: DrawConfig) {
 
 }
 
-private fun TextStyle.withDefaultFontFamily(): TextStyle {
-    FontUtils.defaultFont?.familyName?.let { setFontFamily(it) }
-    return this
-}
-
-fun DynamicContentStyle.toTextStyle(textStyle: TextStyle = TextStyle()) = textStyle.also {
+fun DynamicContentStyle.toTextStyle(textStyle: TextStyle = TextStyle(), config: DrawConfig): TextStyle {
+    val result = textStyle.copyStyle()
 
     if (sizeNum != null) {
-        it.fontSize = sizeNum!!.px
+        result.fontSize = sizeNum!!.px
     } else if (size != null) {
-        it.fontSize = when (size!!) {
+        result.fontSize = when (size!!) {
             DynamicContentStyle.DynamicContentSize.SMALL -> 25.px
             DynamicContentStyle.DynamicContentSize.NORMAL -> 30.px
             DynamicContentStyle.DynamicContentSize.LARGE -> 35.px
@@ -55,15 +57,16 @@ fun DynamicContentStyle.toTextStyle(textStyle: TextStyle = TextStyle()) = textSt
     }
 
     if (color != null) {
-        it.color = Color.makeRGB(color!!)
+        result.color = Color.makeRGB(color!!)
     }
 
-    if (fontFamily != null && FontUtils.matchFamily(fontFamily!!).count() != 0) {
-        it.setFontFamily(fontFamily!!)
+    if (fontFamily != null && config.fontRegistry.matchFamily(fontFamily!!).count() != 0) {
+        result.setFontFamily(fontFamily!!)
     }
 
-    if (isBold && isItalic) it.fontStyle = FontStyle.BOLD_ITALIC
-    if (isBold) it.fontStyle = FontStyle.BOLD
-    if (isItalic) it.fontStyle = FontStyle.ITALIC
+    if (isBold && isItalic) result.fontStyle = FontStyle.BOLD_ITALIC
+    else if (isBold) result.fontStyle = FontStyle.BOLD
+    else if (isItalic) result.fontStyle = FontStyle.ITALIC
 
+    return result
 }

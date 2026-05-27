@@ -9,6 +9,7 @@ import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.config.DefaultConfigService
 import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.data.CommandRole
+import top.colter.dynamic.draw.DrawLayoutRegistry
 
 public class MainConfigStore(
     private val configService: ConfigService = DefaultConfigService,
@@ -62,10 +63,11 @@ public class MainConfigStore(
 }
 
 public object MainConfigForms {
-    public val formSpec: ConfigFormSpec = ConfigFormSpec(
-        title = "主配置",
-        description = "主项目的模板、命令、订阅、链接解析、图片缓存和 Web 后台设置。",
-        fields = listOf(
+    public val formSpec: ConfigFormSpec
+        get() = ConfigFormSpec(
+            title = "主配置",
+            description = "主项目的模板、命令、订阅、链接解析、图片缓存和 Web 后台设置。",
+            fields = listOf(
             ConfigFieldSpec(
                 path = "templates",
                 label = "消息模板",
@@ -198,6 +200,74 @@ public object MainConfigForms {
                 restartTarget = "主程序",
             ),
             ConfigFieldSpec(
+                path = "draw.layout",
+                label = "布局套装",
+                type = ConfigFieldType.SELECT,
+                section = "绘图",
+                options = DrawLayoutRegistry.options(),
+                required = true,
+            ),
+            ConfigFieldSpec(
+                path = "draw.themeColor",
+                label = "主题色",
+                type = ConfigFieldType.TEXT,
+                section = "绘图",
+                required = true,
+            ),
+            ConfigFieldSpec(
+                path = "draw.backgroundStartColor",
+                label = "背景起始色",
+                type = ConfigFieldType.TEXT,
+                section = "绘图",
+                required = true,
+            ),
+            ConfigFieldSpec(
+                path = "draw.backgroundEndColor",
+                label = "背景结束色",
+                type = ConfigFieldType.TEXT,
+                section = "绘图",
+                required = true,
+            ),
+            ConfigFieldSpec(
+                path = "draw.ornament",
+                label = "头部装饰",
+                type = ConfigFieldType.SELECT,
+                section = "绘图",
+                options = DrawOrnament.entries.map { ConfigFieldOption(it.name, it.name) },
+                required = true,
+            ),
+            ConfigFieldSpec(
+                path = "draw.width",
+                label = "绘图宽度",
+                type = ConfigFieldType.NUMBER,
+                section = "绘图",
+                min = 320,
+            ),
+            ConfigFieldSpec(
+                path = "draw.font.textFamily",
+                label = "正文字体名",
+                type = ConfigFieldType.TEXT,
+                section = "绘图字体",
+            ),
+            ConfigFieldSpec(
+                path = "draw.font.emojiFamily",
+                label = "Emoji 字体名",
+                type = ConfigFieldType.TEXT,
+                section = "绘图字体",
+            ),
+            ConfigFieldSpec(
+                path = "draw.font.textFontFile",
+                label = "正文字体文件",
+                type = ConfigFieldType.TEXT,
+                section = "绘图字体",
+            ),
+            ConfigFieldSpec(
+                path = "draw.font.emojiFontFile",
+                label = "Emoji 字体文件",
+                type = ConfigFieldType.TEXT,
+                section = "绘图字体",
+            ),
+            ConfigFieldSpec(
                 path = "webAdmin.enabled",
                 label = "启用 Web 后台",
                 type = ConfigFieldType.BOOLEAN,
@@ -231,8 +301,8 @@ public object MainConfigForms {
                 section = "Web 后台",
                 secret = true,
             ),
-        ),
-    )
+            ),
+        )
 
     public fun validate(config: MainDynamicConfig) {
         require(config.templates.containsKey(MainDynamicConfig.DEFAULT_TEMPLATE_NAME)) {
@@ -263,6 +333,14 @@ public object MainConfigForms {
         require(config.imageCache.renderedCleanup.maxIdleDays >= 0) {
             "imageCache.renderedCleanup.maxIdleDays must not be negative"
         }
+        require(config.draw.layout.isNotBlank()) { "draw.layout must not be blank" }
+        require(DrawLayoutRegistry.hasSuite(config.draw.layout)) {
+            "draw.layout must be one of ${DrawLayoutRegistry.options().joinToString("|") { it.value }}"
+        }
+        requireColor(config.draw.themeColor, "draw.themeColor")
+        requireColor(config.draw.backgroundStartColor, "draw.backgroundStartColor")
+        requireColor(config.draw.backgroundEndColor, "draw.backgroundEndColor")
+        require(config.draw.width >= 320) { "draw.width must be at least 320" }
         require(config.webAdmin.port in 1..65_535) { "webAdmin.port must be between 1 and 65535" }
         require(config.webAdmin.host.isNotBlank()) { "webAdmin.host must not be blank" }
         if (config.webAdmin.enabled) {
@@ -291,4 +369,12 @@ public object MainConfigForms {
     public fun chatTypeOptions(): List<ConfigFieldOption> {
         return ChatType.entries.map { ConfigFieldOption(it.name, it.name) }
     }
+
+    private fun requireColor(value: String, path: String) {
+        require(HEX_COLOR_REGEX.matches(value)) {
+            "$path must be #RRGGBB or #AARRGGBB"
+        }
+    }
+
+    private val HEX_COLOR_REGEX: Regex = Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?")
 }

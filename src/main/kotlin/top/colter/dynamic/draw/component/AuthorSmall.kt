@@ -19,6 +19,8 @@ fun Layout.AuthorSmall(
     name: String,
     time: String,
     badge: Image? = null,
+    accentColor: Int = Color.makeRGB(251, 114, 153),
+    mutedColor: Int = Color.makeRGB(156, 156, 156),
     alignment: LayoutAlignment = LayoutAlignment.CENTER,
     modifier: Modifier
 ) = Row (
@@ -37,14 +39,14 @@ fun Layout.AuthorSmall(
     ) {
         Text(
             text = name,
-            color = Color.makeRGB(251, 114, 153),
+            color = accentColor,
             fontSize = 30.dp,
             alignment = LayoutAlignment.LEFT,
             modifier = Modifier().margin(right = 15.dp)
         )
         Text(
             text = time,
-            color = Color.makeRGB(156, 156, 156),
+            color = mutedColor,
             fontSize = 22.dp,
             alignment = LayoutAlignment.LEFT,
         )

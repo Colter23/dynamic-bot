@@ -9,6 +9,7 @@ public data class MainDynamicConfig(
     val subscription: SubscriptionConfig = SubscriptionConfig(),
     val linkParsing: LinkParsingConfig = LinkParsingConfig(),
     val imageCache: ImageCacheConfig = ImageCacheConfig(),
+    val draw: DrawSettings = DrawSettings(),
     val webAdmin: WebAdminConfig = WebAdminConfig(),
 ) {
     public companion object {
@@ -50,6 +51,29 @@ public data class ImageCleanupConfig(
     val enabled: Boolean = true,
     val maxIdleDays: Long = 30,
 )
+
+public data class DrawSettings(
+    val layout: String = "default",
+    val themeColor: String = "#FE65A6",
+    val backgroundStartColor: String = "#C3C0FF",
+    val backgroundEndColor: String = "#BFFAFF",
+    val ornament: DrawOrnament = DrawOrnament.LOGO,
+    val width: Int = 1000,
+    val font: DrawFontSettings = DrawFontSettings(),
+)
+
+public data class DrawFontSettings(
+    val textFamily: String = "",
+    val emojiFamily: String = "",
+    val textFontFile: String = "",
+    val emojiFontFile: String = "",
+)
+
+public enum class DrawOrnament {
+    LOGO,
+    QRCODE,
+    NONE,
+}
 
 public data class CommandConfig(
     val prefix: String = "/db",

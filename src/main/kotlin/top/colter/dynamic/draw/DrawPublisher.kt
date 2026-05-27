@@ -1,5 +1,7 @@
 package top.colter.dynamic.draw
 
+import top.colter.dynamic.DrawOrnament
+import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.draw.component.Author
 import top.colter.dynamic.draw.component.AuthorSmall
@@ -8,24 +10,32 @@ import top.colter.skiko.*
 import top.colter.skiko.layout.Layout
 
 
-fun Layout.drawPublisher(publisher: Publisher, time: String, link: String, config: DrawConfig) {
+fun Layout.drawPublisher(
+    publisher: Publisher,
+    time: String,
+    link: String,
+    config: DrawConfig,
+    mode: DynamicRenderMode,
+) {
 
     val officialImage = publisher.official?.let { loadResourceImage(name = it) }
 
-    if (containsEnv("FORWARD")) {
+    if (mode == DynamicRenderMode.FORWARD) {
         AuthorSmall(
             face = config.image(publisher.face),
             name = publisher.name,
             time = time,
             badge = officialImage,
+            accentColor = config.theme.primaryColor,
+            mutedColor = config.theme.mutedTextColor,
             modifier = Modifier().fillMaxWidth().height(50.dp)//.margin(horizontal = 5.dp, vertical = 10.dp) // .background(Color.RED)
         )
     } else {
 
-        val ornamentImage = when (config.ornament) {
-            "LOGO" -> loadResourceImage(name = "BILIBILI_A.png")
-            "QRCODE" -> qrCode(link, config.themeColor.withAlpha(1f))
-            else -> null
+        val ornamentImage = when (config.settings.ornament) {
+            DrawOrnament.LOGO -> platformLogo(config)
+            DrawOrnament.QRCODE -> qrCode(link, config.theme.primaryColor.withAlpha(1f))
+            DrawOrnament.NONE -> null
         }
 
         Author(
@@ -42,3 +52,10 @@ fun Layout.drawPublisher(publisher: Publisher, time: String, link: String, confi
     }
 
 }
+
+private fun platformLogo(config: DrawConfig) =
+    loadResourceImage(name = "${config.platform.id.uppercase()}_A.png")
+        ?: loadResourceImage(name = "${config.platform.id.uppercase()}_LOGO.png")
+        ?: config.platform.iconUri
+            .takeIf { it.isNotBlank() }
+            ?.let { config.image(LazyImage(it)) }

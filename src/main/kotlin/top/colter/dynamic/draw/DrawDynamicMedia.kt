@@ -13,10 +13,14 @@ import top.colter.skiko.data.Shadow
 import top.colter.skiko.layout.*
 
 
-fun Layout.drawDynamicMedia(media: DynamicMedia, config: DrawConfig) {
+fun Layout.drawDynamicMedia(
+    media: DynamicMedia,
+    config: DrawConfig,
+    mode: DynamicRenderMode = DynamicRenderMode.ROOT,
+) {
 
     media.pics?.let { pics -> drawDynamicMediaPic(pics, config) }
-    media.video?.let { video -> drawDynamicMediaVideo(video, config) }
+    media.video?.let { video -> drawDynamicMediaVideo(video, config, mode) }
 //    media.article?.let { article -> drawDynamicMediaArticle(article) }
 
     media.card?.let { card -> drawDynamicMediaCard(card, config) }
@@ -28,7 +32,7 @@ fun Layout.drawDynamicMedia(media: DynamicMedia, config: DrawConfig) {
 
 fun Layout.drawDynamicMediaPic(pics: List<DynamicMediaPic>, config: DrawConfig) {
     val imgList = pics.map { it to config.image(it.pic) }
-    val imgModifier = Modifier().background(Color.WHITE.withAlpha(0.6f)).border(2.dp, 10.dp).shadows(Shadow.ELEVATION_1)
+    val imgModifier = Modifier().background(config.theme.cardColor).border(2.dp, 10.dp, config.theme.borderColor).shadows(Shadow.ELEVATION_1)
     if (imgList.size == 1) imgModifier.fillMaxWidth()
     val lineCount = if (imgList.size == 1) 1 else if (imgList.size == 2 || imgList.size == 4) 2 else 3
     Grid(
@@ -85,14 +89,18 @@ fun Layout.DynamicMediaPicItem(
 }
 
 
-fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo, config: DrawConfig) {
-    if (containsEnv("FORWARD")) {
+fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo, config: DrawConfig, mode: DynamicRenderMode) {
+    if (mode == DynamicRenderMode.FORWARD) {
         MediaSmall(
             cover = config.image(video.cover),
             title = video.title,
             desc = video.description,
             duration = video.duration,
-            badge = video.badge
+            badge = video.badge,
+            accentColor = config.theme.primaryColor,
+            cardColor = config.theme.cardColor,
+            borderColor = config.theme.borderColor,
+            secondaryTextColor = config.theme.secondaryTextColor,
         )
     } else {
         Media(
@@ -101,7 +109,11 @@ fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo, config: DrawConfig) {
             desc = video.description,
             duration = video.duration,
             badge = video.badge,
-            info = "${video.stats.play}播放 ${video.stats.danmaku}弹幕"
+            info = "${video.stats.play}播放 ${video.stats.danmaku}弹幕",
+            accentColor = config.theme.primaryColor,
+            cardColor = config.theme.cardColor,
+            borderColor = config.theme.borderColor,
+            secondaryTextColor = config.theme.secondaryTextColor,
         )
     }
 }
@@ -113,7 +125,11 @@ fun Layout.drawDynamicMediaCard(card: DynamicMediaCard, config: DrawConfig) {
         title = card.title,
         desc = card.description,
         badge = card.badge,
-        coverRatio = card.coverRatio ?: Ratio.COVER_1
+        coverRatio = card.coverRatio ?: Ratio.COVER_1,
+        accentColor = config.theme.primaryColor,
+        cardColor = config.theme.cardColor,
+        borderColor = config.theme.borderColor,
+        secondaryTextColor = config.theme.secondaryTextColor,
     )
 }
 
@@ -123,7 +139,11 @@ fun Layout.drawDynamicMediaSmallCard(card: DynamicMediaCard, config: DrawConfig)
         title = card.title,
         desc = card.description,
         badge = card.badge,
-        coverRatio = card.coverRatio ?: Ratio.COVER_1
+        coverRatio = card.coverRatio ?: Ratio.COVER_1,
+        accentColor = config.theme.primaryColor,
+        cardColor = config.theme.cardColor,
+        borderColor = config.theme.borderColor,
+        secondaryTextColor = config.theme.secondaryTextColor,
     )
 }
 
@@ -133,6 +153,10 @@ fun Layout.drawDynamicMediaMiniCard(card: DynamicMediaCard, config: DrawConfig) 
         title = card.title,
         desc = card.description,
         badge = card.badge,
-        coverRatio = card.coverRatio ?: Ratio.COVER_1
+        coverRatio = card.coverRatio ?: Ratio.COVER_1,
+        accentColor = config.theme.primaryColor,
+        cardColor = config.theme.cardColor,
+        borderColor = config.theme.borderColor,
+        secondaryTextColor = config.theme.secondaryTextColor,
     )
 }

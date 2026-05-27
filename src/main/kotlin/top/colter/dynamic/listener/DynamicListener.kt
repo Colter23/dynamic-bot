@@ -40,7 +40,10 @@ public class DynamicListener(
         imageLoader ?: CachedDynamicImageLoader(startupConfig.imageCache)
     }
     private val runtimeImageRenderer: DynamicImageRenderer by lazy {
-        imageRenderer ?: FileDynamicImageRenderer(Paths.get(startupConfig.imageCache.renderedRoot))
+        imageRenderer ?: FileDynamicImageRenderer(
+            outputDir = Paths.get(startupConfig.imageCache.renderedRoot),
+            drawSettingsProvider = { runtimeConfigProvider().draw },
+        )
     }
 
     override suspend fun onMessage(event: DynamicEvent) {
