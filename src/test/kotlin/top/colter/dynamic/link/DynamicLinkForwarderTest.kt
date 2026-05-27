@@ -19,9 +19,9 @@ import top.colter.dynamic.core.data.PublisherType
 import top.colter.dynamic.core.data.SubscriberType
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
-import top.colter.dynamic.core.event.DynamicEvent
 import top.colter.dynamic.core.event.EventManger
 import top.colter.dynamic.core.event.Listener
+import top.colter.dynamic.core.event.SourceUpdateEvent
 import top.colter.dynamic.core.event.register
 import top.colter.dynamic.core.link.DynamicLinkResolution
 import top.colter.dynamic.core.link.DynamicLinkResolver
@@ -61,7 +61,7 @@ class DynamicLinkForwarderTest {
         assertEquals(CommandStatus.SUCCESS, commandResult.status)
         assertTrue(renderMessage(commandResult).contains("已提交转发"))
         assertEquals(LINK_PARSE_EVENT_LABEL, dynamicEvent.label)
-        assertEquals("1", dynamicEvent.dynamic.dynamicId)
+        assertEquals("1", (dynamicEvent.update as Dynamic).dynamicId)
         assertEquals("100", dynamicEvent.target?.targetId)
         assertNotNull(PublisherRepository.findByPlatformAndExternalId("bilibili", "123"))
         assertNotNull(SubscriberRepository.findByPlatformAndTarget("onebot", SubscriberType.GROUP, "100"))
@@ -92,17 +92,17 @@ class DynamicLinkForwarderTest {
         )
 
         EventManger.shutdown()
-        val dynamic = CompletableDeferred<DynamicEvent>()
-        object : Listener<DynamicEvent> {
-            override suspend fun onMessage(event: DynamicEvent) {
+        val dynamic = CompletableDeferred<SourceUpdateEvent>()
+        object : Listener<SourceUpdateEvent> {
+            override suspend fun onMessage(event: SourceUpdateEvent) {
                 dynamic.complete(event)
             }
-        }.register<DynamicEvent>()
+        }.register<SourceUpdateEvent>()
 
         listener.onMessage(commandEvent("look https://t.bilibili.com/1"))
 
         val event = withTimeout(3_000) { dynamic.await() }
-        assertEquals("1", event.dynamic.dynamicId)
+        assertEquals("1", (event.update as Dynamic).dynamicId)
         assertEquals(1, resolver.resolveCalls)
     }
 
@@ -169,20 +169,20 @@ class DynamicLinkForwarderTest {
     private suspend fun dispatchCommandAndDynamic(
         listener: CommandListener,
         event: CommandEvent,
-    ): Pair<CommandResultEvent, DynamicEvent> {
+    ): Pair<CommandResultEvent, SourceUpdateEvent> {
         EventManger.shutdown()
         val commandResult = CompletableDeferred<CommandResultEvent>()
-        val dynamic = CompletableDeferred<DynamicEvent>()
+        val dynamic = CompletableDeferred<SourceUpdateEvent>()
         object : Listener<CommandResultEvent> {
             override suspend fun onMessage(event: CommandResultEvent) {
                 commandResult.complete(event)
             }
         }.register<CommandResultEvent>()
-        object : Listener<DynamicEvent> {
-            override suspend fun onMessage(event: DynamicEvent) {
+        object : Listener<SourceUpdateEvent> {
+            override suspend fun onMessage(event: SourceUpdateEvent) {
                 dynamic.complete(event)
             }
-        }.register<DynamicEvent>()
+        }.register<SourceUpdateEvent>()
 
         listener.onMessage(event)
         return Pair(

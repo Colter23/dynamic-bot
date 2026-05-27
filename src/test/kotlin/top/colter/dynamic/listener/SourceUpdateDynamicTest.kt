@@ -21,10 +21,10 @@ import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.PublisherType
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.SubscriberType
-import top.colter.dynamic.core.event.DynamicEvent
 import top.colter.dynamic.core.event.EventManger
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
+import top.colter.dynamic.core.event.SourceUpdateEvent
 import top.colter.dynamic.core.event.register
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
@@ -42,7 +42,7 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-class DynamicListenerTest {
+class SourceUpdateDynamicTest {
 
     @AfterTest
     fun cleanup() {
@@ -50,14 +50,14 @@ class DynamicListenerTest {
     }
 
     @Test
-    fun shouldConvertDynamicEventToMessageEventWithBoundTemplateAndImage() = runBlocking {
+    fun shouldConvertDynamicUpdateToMessageEventWithBoundTemplateAndImage() = runBlocking {
         initDb("dynamic-listener-bound-template")
         val publisher = createPublisher()
         val subscriber = createSubscriber()
         SubscriptionRepository.subscribe(subscriber.id, publisher.id)
         PublisherTemplateRepository.setPublisherTemplate(publisher.id, "bili-video")
 
-        val listener = DynamicListener(
+        val listener = SourceUpdateListener(
             config = MainDynamicConfig(
                 templates = mapOf(
                     "default" to "default {name}",
@@ -69,7 +69,7 @@ class DynamicListenerTest {
         )
 
         val received = captureMessageEvent()
-        listener.onMessage(DynamicEvent(source = "test", dynamic = demoDynamic(publisher)))
+        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(publisher)))
         val event = withTimeout(3_000) { received.await() }
 
         assertEquals(listOf(subscriber.toMessageTarget()), event.message.targets)
@@ -85,14 +85,14 @@ class DynamicListenerTest {
         val publisher = createPublisher()
         val subscriber = createSubscriber()
 
-        val listener = DynamicListener(
+        val listener = SourceUpdateListener(
             config = MainDynamicConfig(templates = mapOf("default" to "{draw}\nfallback {name}")),
             imageLoader = DynamicImageLoader { },
-            imageRenderer = DynamicImageRenderer { error("draw failed") },
+            imageRenderer = DynamicImageRenderer { error("绘制失败") },
         )
 
         val received = captureMessageEvent()
-        listener.onMessage(DynamicEvent(source = "test", target = subscriber, dynamic = demoDynamic(publisher)))
+        listener.onMessage(SourceUpdateEvent(source = "test", target = subscriber, update = demoDynamic(publisher)))
         val event = withTimeout(3_000) { received.await() }
 
         val contents = event.message.chain.single().content
@@ -112,14 +112,14 @@ class DynamicListenerTest {
         FontUtils.emojiFont = null
         try {
             val outputDir = createTempDirectory("dynamic-bot-rendered")
-            val listener = DynamicListener(
+            val listener = SourceUpdateListener(
                 config = MainDynamicConfig(templates = mapOf("default" to "{draw}\n{name}")),
                 imageLoader = DynamicImageLoader { },
                 imageRenderer = FileDynamicImageRenderer(outputDir),
             )
 
             val received = captureMessageEvent()
-            listener.onMessage(DynamicEvent(source = "test", target = subscriber, dynamic = demoDynamic(publisher)))
+            listener.onMessage(SourceUpdateEvent(source = "test", target = subscriber, update = demoDynamic(publisher)))
             val event = withTimeout(3_000) { received.await() }
 
             val image = event.message.chain.single().content.first() as MessageContent.Image
@@ -137,7 +137,7 @@ class DynamicListenerTest {
         val subscriber = createSubscriber()
         var renderCalls = 0
 
-        val listener = DynamicListener(
+        val listener = SourceUpdateListener(
             config = MainDynamicConfig(templates = mapOf("default" to "text only {name}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer {
@@ -147,7 +147,7 @@ class DynamicListenerTest {
         )
 
         val received = captureMessageEvent()
-        listener.onMessage(DynamicEvent(source = "test", target = subscriber, dynamic = demoDynamic(publisher)))
+        listener.onMessage(SourceUpdateEvent(source = "test", target = subscriber, update = demoDynamic(publisher)))
         val event = withTimeout(3_000) { received.await() }
 
         assertEquals(0, renderCalls)
@@ -160,14 +160,14 @@ class DynamicListenerTest {
         val publisher = createPublisher()
         val subscriber = createSubscriber()
 
-        val listener = DynamicListener(
+        val listener = SourceUpdateListener(
             config = MainDynamicConfig(templates = mapOf("default" to "first {name}\\rsecond {link}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/not-used.png") },
         )
 
         val received = captureMessageEvent()
-        listener.onMessage(DynamicEvent(source = "test", target = subscriber, dynamic = demoDynamic(publisher)))
+        listener.onMessage(SourceUpdateEvent(source = "test", target = subscriber, update = demoDynamic(publisher)))
         val event = withTimeout(3_000) { received.await() }
 
         assertEquals(2, event.message.chain.size)
@@ -186,7 +186,7 @@ class DynamicListenerTest {
 
         var loadCalls = 0
         var renderCalls = 0
-        val listener = DynamicListener(
+        val listener = SourceUpdateListener(
             config = MainDynamicConfig(templates = mapOf("default" to "filtered {name}")),
             imageLoader = DynamicImageLoader { loadCalls += 1 },
             imageRenderer = DynamicImageRenderer {
@@ -196,7 +196,7 @@ class DynamicListenerTest {
         )
 
         val received = captureMessageEvent()
-        listener.onMessage(DynamicEvent(source = "test", dynamic = demoDynamic(publisher)))
+        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(publisher)))
         val event = withTimeoutOrNull(300) { received.await() }
 
         assertNull(event)
@@ -216,14 +216,14 @@ class DynamicListenerTest {
         val filteredSubscription = SubscriptionRepository.findBySubscriberAndPublisher(filteredSubscriber.id, publisher.id)!!
         DynamicFilterRuleRepository.addElementRule(filteredSubscription.id, DynamicElementType.TEXT)
 
-        val listener = DynamicListener(
+        val listener = SourceUpdateListener(
             config = MainDynamicConfig(templates = mapOf("default" to "allowed {name}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/allowed.png") },
         )
 
         val received = captureMessageEvent()
-        listener.onMessage(DynamicEvent(source = "test", dynamic = demoDynamic(publisher)))
+        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(publisher)))
         val event = withTimeout(3_000) { received.await() }
 
         assertEquals(listOf(allowedSubscriber.toMessageTarget()), event.message.targets)
@@ -240,17 +240,17 @@ class DynamicListenerTest {
         val filteredSubscription = SubscriptionRepository.findBySubscriberAndPublisher(filteredSubscriber.id, publisher.id)!!
         DynamicFilterRuleRepository.addElementRule(filteredSubscription.id, DynamicElementType.TEXT)
 
-        val listener = DynamicListener(
+        val listener = SourceUpdateListener(
             config = MainDynamicConfig(templates = mapOf("default" to "direct {name}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/direct.png") },
         )
 
         val received = captureMessageEvent()
-        listener.onMessage(DynamicEvent(source = "test", target = filteredSubscriber, dynamic = demoDynamic(publisher)))
+        listener.onMessage(SourceUpdateEvent(source = "test", target = filteredSubscriber, update = demoDynamic(publisher)))
         assertNull(withTimeoutOrNull(300) { received.await() })
 
-        listener.onMessage(DynamicEvent(source = "test", target = directSubscriber, dynamic = demoDynamic(publisher)))
+        listener.onMessage(SourceUpdateEvent(source = "test", target = directSubscriber, update = demoDynamic(publisher)))
         val event = withTimeout(3_000) { received.await() }
 
         assertEquals(listOf(directSubscriber.toMessageTarget()), event.message.targets)
@@ -264,7 +264,7 @@ class DynamicListenerTest {
         SubscriptionRepository.subscribe(subscriber.id, publisher.id)
         val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!
 
-        val listener = DynamicListener(
+        val listener = SourceUpdateListener(
             config = MainDynamicConfig(templates = mapOf("default" to "old {name}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/old.png") },
@@ -272,9 +272,9 @@ class DynamicListenerTest {
 
         val received = captureMessageEvent()
         listener.onMessage(
-            DynamicEvent(
+            SourceUpdateEvent(
                 source = "test",
-                dynamic = demoDynamic(publisher, time = subscription.createdAtEpochSeconds - 1),
+                update = demoDynamic(publisher, time = subscription.createdAtEpochSeconds - 1),
             )
         )
 

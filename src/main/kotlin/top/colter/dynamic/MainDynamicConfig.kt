@@ -4,7 +4,7 @@ import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.data.CommandRole
 
 public data class MainDynamicConfig(
-    val templates: Map<String, String> = mapOf(DEFAULT_TEMPLATE_NAME to DEFAULT_TEMPLATE),
+    val templates: Map<String, String> = DEFAULT_TEMPLATES,
     val command: CommandConfig = CommandConfig(),
     val subscription: SubscriptionConfig = SubscriptionConfig(),
     val linkParsing: LinkParsingConfig = LinkParsingConfig(),
@@ -16,6 +16,15 @@ public data class MainDynamicConfig(
         public const val CONFIG_ID: String = "main"
         public const val DEFAULT_TEMPLATE_NAME: String = "default"
         public const val DEFAULT_TEMPLATE: String = "{draw}\n{name} 发布了新动态\n{content}\n{link}"
+        public const val LIVE_STARTED_TEMPLATE_NAME: String = "live_started"
+        public const val LIVE_ENDED_TEMPLATE_NAME: String = "live_ended"
+        public const val DEFAULT_LIVE_STARTED_TEMPLATE: String = "{draw}\n{name} 开播了\n{title}\n{link}"
+        public const val DEFAULT_LIVE_ENDED_TEMPLATE: String = "{name} 下播了\n{title}\n直播时长：{duration}\n{link}"
+        public val DEFAULT_TEMPLATES: Map<String, String> = mapOf(
+            DEFAULT_TEMPLATE_NAME to DEFAULT_TEMPLATE,
+            LIVE_STARTED_TEMPLATE_NAME to DEFAULT_LIVE_STARTED_TEMPLATE,
+            LIVE_ENDED_TEMPLATE_NAME to DEFAULT_LIVE_ENDED_TEMPLATE,
+        )
     }
 }
 

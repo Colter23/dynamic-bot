@@ -21,11 +21,14 @@ public class MainConfigStore(
         val loaded = configService.loadOrCreate(MainDynamicConfig.CONFIG_ID, MainDynamicConfig::class) {
             MainDynamicConfig()
         }
-        val resolved = if (loaded.webAdmin.enabled && loaded.webAdmin.token.isBlank()) {
+        val withToken = if (loaded.webAdmin.enabled && loaded.webAdmin.token.isBlank()) {
             loaded.copy(webAdmin = loaded.webAdmin.copy(token = adminTokenProvider()))
-                .also { configService.save(MainDynamicConfig.CONFIG_ID, it, MainDynamicConfig::class) }
         } else {
             loaded
+        }
+        val resolved = withToken.withDefaultTemplates()
+        if (resolved != loaded) {
+            configService.save(MainDynamicConfig.CONFIG_ID, resolved, MainDynamicConfig::class)
         }
         currentConfig = resolved
         return resolved
@@ -60,6 +63,11 @@ public class MainConfigStore(
     }
 
     public fun formSpec(): ConfigFormSpec = MainConfigForms.formSpec
+
+    private fun MainDynamicConfig.withDefaultTemplates(): MainDynamicConfig {
+        val mergedTemplates = MainDynamicConfig.DEFAULT_TEMPLATES + templates
+        return if (mergedTemplates == templates) this else copy(templates = mergedTemplates)
+    }
 }
 
 public object MainConfigForms {

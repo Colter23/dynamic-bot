@@ -8,7 +8,7 @@ import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.PublisherProfile
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.SubscriberType
-import top.colter.dynamic.core.event.DynamicEvent
+import top.colter.dynamic.core.event.SourceUpdateEvent
 import top.colter.dynamic.core.event.broadcast
 import top.colter.dynamic.core.link.DynamicLinkResolution
 import top.colter.dynamic.core.link.DynamicLinkResolver
@@ -76,11 +76,11 @@ public class DynamicLinkForwarder(
         )
         val normalizedDynamic = dynamic.copy(publisher = publisher)
 
-        DynamicEvent(
+        SourceUpdateEvent(
             source = LINK_PARSE_EVENT_SOURCE,
             target = subscriber,
             label = LINK_PARSE_EVENT_LABEL,
-            dynamic = normalizedDynamic,
+            update = normalizedDynamic,
         ).broadcast()
 
         return DynamicLinkForwardResult.Forwarded(

@@ -12,11 +12,11 @@ import top.colter.dynamic.admin.AdminServer
 import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
-import top.colter.dynamic.core.event.DynamicEvent
 import top.colter.dynamic.core.event.EventManger
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.ListenerToken
 import top.colter.dynamic.core.event.MessageEvent
+import top.colter.dynamic.core.event.SourceUpdateEvent
 import top.colter.dynamic.core.event.register
 import top.colter.dynamic.core.plugin.PluginManager
 import top.colter.dynamic.core.plugin.PluginState
@@ -28,8 +28,8 @@ import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.dynamic.link.DynamicLinkAutoParseListener
 import top.colter.dynamic.link.DynamicLinkForwarder
-import top.colter.dynamic.listener.DynamicListener
 import top.colter.dynamic.listener.ImageFileCleaner
+import top.colter.dynamic.listener.SourceUpdateListener
 
 private val logger = loggerFor<DynamicApplication>()
 
@@ -91,7 +91,7 @@ public object DynamicApplication : CoroutineScope {
             pluginManager.getDynamicLinkResolvers()
         }
 
-        listenerTokens += DynamicListener(configProvider = configStore::current).register<DynamicEvent>()
+        listenerTokens += SourceUpdateListener(configProvider = configStore::current).register<SourceUpdateEvent>()
         listenerTokens += CommandListener(
             configProvider = configStore::current,
             dynamicLinkForwarder = dynamicLinkForwarder,
