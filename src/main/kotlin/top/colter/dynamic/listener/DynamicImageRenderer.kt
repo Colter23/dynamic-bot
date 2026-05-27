@@ -7,19 +7,20 @@ import org.jetbrains.skia.EncodedImageFormat
 import top.colter.dynamic.DrawSettings
 import top.colter.dynamic.core.data.Dynamic
 import top.colter.dynamic.draw.DrawConfig
-import top.colter.dynamic.draw.DrawDynamic
+import top.colter.dynamic.draw.renderDynamicImage
 
 public fun interface DynamicImageRenderer {
     public fun render(dynamic: Dynamic): Path
 }
 
 public class FileDynamicImageRenderer(
-    private val outputDir: Path = Paths.get("data", "dynamic-images"),
+    private val outputDir: Path = Paths.get("data", "images", "dynamic"),
     private val drawSettingsProvider: () -> DrawSettings = { DrawSettings() },
 ) : DynamicImageRenderer {
     override fun render(dynamic: Dynamic): Path {
-        Files.createDirectories(outputDir)
-        val data = DrawDynamic(
+        val od = outputDir.resolve(dynamic.platform.id).resolve(dynamic.publisher.externalId.ifBlank { dynamic.publisher.id.toString() })
+        Files.createDirectories(od)
+        val data = renderDynamicImage(
             dynamic = dynamic,
             config = DrawConfig(
                 platform = dynamic.platform,
@@ -28,18 +29,9 @@ public class FileDynamicImageRenderer(
         )
             .encodeToData(EncodedImageFormat.PNG, 100)
             ?: error("failed to encode dynamic image")
-        val outputPath = outputDir.resolve(fileName(dynamic)).toAbsolutePath().normalize()
+        val outputPath = od.resolve(safeFileName(dynamic.dynamicId) + ".png").toAbsolutePath().normalize()
         Files.write(outputPath, data.bytes)
         return outputPath
-    }
-
-    private fun fileName(dynamic: Dynamic): String {
-        val rawName = listOf(
-            dynamic.platform.id,
-            dynamic.publisher.externalId.ifBlank { dynamic.publisher.id.toString() },
-            dynamic.dynamicId,
-        ).joinToString("-")
-        return safeFileName(rawName) + ".png"
     }
 
     private fun safeFileName(value: String): String {

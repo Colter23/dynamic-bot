@@ -38,8 +38,8 @@ public data class LinkParsingConfig(
 )
 
 public data class ImageCacheConfig(
-    val sourceRoot: String = "data/image-cache/source",
-    val renderedRoot: String = "data/dynamic-images",
+    val sourceRoot: String = "data/images/source",
+    val renderedRoot: String = "data/images/draw",
     val downloadTimeoutMs: Long = 10_000,
     val maxConcurrentDownloads: Int = 8,
     val cleanupCron: String = "0 4 * * *",

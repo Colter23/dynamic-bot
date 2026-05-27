@@ -3,12 +3,13 @@ package top.colter.dynamic.draw
 import org.jetbrains.skia.Image
 import top.colter.dynamic.core.config.ConfigFieldOption
 import top.colter.dynamic.core.data.Dynamic
+import top.colter.dynamic.draw.layout.default.DefaultDrawLayoutSuite
 
-sealed interface DrawScene {
+public sealed interface DrawScene {
     data class DynamicScene(val dynamic: Dynamic) : DrawScene
 }
 
-interface DrawLayoutSuite {
+public interface DrawLayoutSuite {
     val id: String
     val name: String
         get() = id
@@ -16,7 +17,7 @@ interface DrawLayoutSuite {
     fun render(scene: DrawScene, config: DrawConfig): Image
 }
 
-object DrawLayoutRegistry {
+public object DrawLayoutRegistry {
     private val suites: MutableMap<String, DrawLayoutSuite> = linkedMapOf(
         DefaultDrawLayoutSuite.id to DefaultDrawLayoutSuite,
     )

@@ -1,11 +1,12 @@
-package top.colter.dynamic.draw
+package top.colter.dynamic.draw.layout.default
 
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
 import top.colter.dynamic.core.data.*
-import top.colter.dynamic.draw.component.Media
-import top.colter.dynamic.draw.component.MediaMini
-import top.colter.dynamic.draw.component.MediaSmall
+import top.colter.dynamic.draw.DrawConfig
+import top.colter.dynamic.draw.layout.default.component.Media
+import top.colter.dynamic.draw.layout.default.component.MediaMini
+import top.colter.dynamic.draw.layout.default.component.MediaSmall
 import top.colter.skiko.*
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.Ratio
@@ -13,7 +14,7 @@ import top.colter.skiko.data.Shadow
 import top.colter.skiko.layout.*
 
 
-fun Layout.drawDynamicMedia(
+internal fun Layout.drawDynamicMedia(
     media: DynamicMedia,
     config: DrawConfig,
     mode: DynamicRenderMode = DynamicRenderMode.ROOT,
@@ -30,7 +31,7 @@ fun Layout.drawDynamicMedia(
 }
 
 
-fun Layout.drawDynamicMediaPic(pics: List<DynamicMediaPic>, config: DrawConfig) {
+private fun Layout.drawDynamicMediaPic(pics: List<DynamicMediaPic>, config: DrawConfig) {
     val imgList = pics.map { it to config.image(it.pic) }
     val imgModifier = Modifier().background(config.theme.cardColor).border(2.dp, 10.dp, config.theme.borderColor).shadows(Shadow.ELEVATION_1)
     if (imgList.size == 1) imgModifier.fillMaxWidth()
@@ -53,7 +54,7 @@ fun Layout.drawDynamicMediaPic(pics: List<DynamicMediaPic>, config: DrawConfig) 
     }
 }
 
-fun Layout.DynamicMediaPicItem(
+private fun Layout.DynamicMediaPicItem(
     image: Image,
     badge: String? = null,
     lineCount: Int,
@@ -89,7 +90,7 @@ fun Layout.DynamicMediaPicItem(
 }
 
 
-fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo, config: DrawConfig, mode: DynamicRenderMode) {
+private fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo, config: DrawConfig, mode: DynamicRenderMode) {
     if (mode == DynamicRenderMode.FORWARD) {
         MediaSmall(
             cover = config.image(video.cover),
@@ -119,7 +120,7 @@ fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo, config: DrawConfig, m
 }
 
 
-fun Layout.drawDynamicMediaCard(card: DynamicMediaCard, config: DrawConfig) {
+private fun Layout.drawDynamicMediaCard(card: DynamicMediaCard, config: DrawConfig) {
     Media(
         cover = config.image(card.cover),
         title = card.title,
@@ -133,7 +134,7 @@ fun Layout.drawDynamicMediaCard(card: DynamicMediaCard, config: DrawConfig) {
     )
 }
 
-fun Layout.drawDynamicMediaSmallCard(card: DynamicMediaCard, config: DrawConfig) {
+private fun Layout.drawDynamicMediaSmallCard(card: DynamicMediaCard, config: DrawConfig) {
     MediaSmall(
         cover = config.image(card.cover),
         title = card.title,
@@ -147,7 +148,7 @@ fun Layout.drawDynamicMediaSmallCard(card: DynamicMediaCard, config: DrawConfig)
     )
 }
 
-fun Layout.drawDynamicMediaMiniCard(card: DynamicMediaCard, config: DrawConfig) {
+private fun Layout.drawDynamicMediaMiniCard(card: DynamicMediaCard, config: DrawConfig) {
     MediaMini(
         cover = config.image(card.cover),
         title = card.title,

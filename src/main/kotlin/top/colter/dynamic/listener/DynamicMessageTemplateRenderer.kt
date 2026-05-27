@@ -6,7 +6,7 @@ import top.colter.dynamic.core.data.DynamicMediaCard
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.MessageChain
 import top.colter.dynamic.core.data.MessageContent
-import top.colter.dynamic.draw.tools.formatTime
+import top.colter.dynamic.util.formatTime
 
 public class DynamicMessageTemplateRenderer {
     public fun requiresDraw(template: String): Boolean {

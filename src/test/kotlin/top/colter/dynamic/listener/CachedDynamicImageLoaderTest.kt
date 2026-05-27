@@ -21,7 +21,7 @@ import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.core.data.PlatformKind
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.PublisherType
-import top.colter.dynamic.draw.DynamicImageCache
+import top.colter.dynamic.draw.image.DynamicImageCache
 
 class CachedDynamicImageLoaderTest {
 

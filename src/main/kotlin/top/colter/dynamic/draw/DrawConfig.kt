@@ -6,6 +6,7 @@ import top.colter.dynamic.DrawFontSettings
 import top.colter.dynamic.DrawSettings
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.PlatformDescriptor
+import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.skiko.FontConfig
 import top.colter.skiko.FontRegistry
 import top.colter.skiko.Fonts

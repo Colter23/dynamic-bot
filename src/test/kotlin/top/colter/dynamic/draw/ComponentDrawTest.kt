@@ -1,9 +1,9 @@
 
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.skia.Color
-import top.colter.dynamic.draw.component.*
-import top.colter.dynamic.draw.tools.loadSVG
-import top.colter.dynamic.draw.tools.makeImage
+import top.colter.dynamic.draw.layout.default.component.*
+import top.colter.dynamic.draw.resource.loadSVG
+import top.colter.dynamic.draw.resource.makeImage
 import top.colter.dynamic.loadTestImage
 import top.colter.dynamic.loadTestResource
 import top.colter.dynamic.resource

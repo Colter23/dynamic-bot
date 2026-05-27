@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw
+package top.colter.dynamic.draw.resource
 
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
@@ -6,7 +6,7 @@ import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Rect
 import org.jetbrains.skia.Surface
 
-fun qrCode(url: String, pointColor: Int = 0xFFFE65A6.toInt(), bgColor: Int = 0x00FFFFFF.toInt()): Image {
+internal fun qrCode(url: String, pointColor: Int = 0xFFFE65A6.toInt(), bgColor: Int = 0x00FFFFFF.toInt()): Image {
     val size = 500
     val cell = 20
     val cells = size / cell

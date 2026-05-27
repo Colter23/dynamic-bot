@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw.component
+package top.colter.dynamic.draw.layout.default.component
 
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
@@ -22,7 +22,7 @@ import top.colter.skiko.layout.*
  * @param coverRatio 封面比例
  *
  */
-fun Layout.Media(
+internal fun Layout.Media(
     cover: Image,
     title: String,
     desc: String,

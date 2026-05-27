@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw.component
+package top.colter.dynamic.draw.layout.default.component
 
 import org.jetbrains.skia.*
 import top.colter.skiko.*
@@ -11,7 +11,7 @@ import top.colter.skiko.layout.*
 /**
  * 作者组件
  */
-fun Layout.Author(
+internal fun Layout.Author(
     face: Image,
     pendant: Image? = null,
     head: Image? = null,

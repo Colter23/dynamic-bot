@@ -9,9 +9,8 @@ import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.core.data.PlatformKind
 import top.colter.dynamic.core.data.forEachLazyImageFields
 import top.colter.dynamic.draw.DrawConfig
-import top.colter.dynamic.draw.DrawDynamic
-import top.colter.dynamic.draw.DynamicImageCache
-import top.colter.dynamic.draw.component.Author
+import top.colter.dynamic.draw.image.DynamicImageCache
+import top.colter.dynamic.draw.renderDynamicImage
 import top.colter.dynamic.loadTestImage
 import top.colter.dynamic.loadTestResource
 import top.colter.dynamic.loadTestText
@@ -65,7 +64,7 @@ class DrawTest {
             }
         }
 
-        val img = DrawDynamic(
+        val img = renderDynamicImage(
             dynamic = dynamic,
             config = DrawConfig(
                 platform = PlatformDescriptor("", "", "", "",PlatformKind.PUBLISHER),
@@ -73,7 +72,7 @@ class DrawTest {
         )
 
         File("${testOutput.absolutePath}/test1.png").writeBytes(img.encodeToData()!!.bytes)
-        //DrawDynamic(dynamic)
+        //renderDynamicImage(dynamic)
     }
 
     @Test

@@ -1,17 +1,18 @@
-package top.colter.dynamic.draw
+package top.colter.dynamic.draw.layout.default
 
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.FontStyle
 import org.jetbrains.skia.paragraph.TextStyle
 import top.colter.dynamic.core.data.*
-import top.colter.dynamic.draw.tools.makeRGB
+import top.colter.dynamic.draw.DrawConfig
+import top.colter.dynamic.draw.parseHexColor
 import top.colter.skiko.*
 import top.colter.skiko.data.RichParagraphBuilder
 import top.colter.skiko.layout.Layout
 import top.colter.skiko.layout.RichText
 
 
-fun Layout.drawDynamicContent(content: DynamicContent, config: DrawConfig) {
+internal fun Layout.drawDynamicContent(content: DynamicContent, config: DrawConfig) {
     if (content.contentNodes.isEmpty()) return
 
     val style = TextStyle()
@@ -43,7 +44,7 @@ fun Layout.drawDynamicContent(content: DynamicContent, config: DrawConfig) {
 
 }
 
-fun DynamicContentStyle.toTextStyle(textStyle: TextStyle = TextStyle(), config: DrawConfig): TextStyle {
+private fun DynamicContentStyle.toTextStyle(textStyle: TextStyle = TextStyle(), config: DrawConfig): TextStyle {
     val result = textStyle.copyStyle()
 
     if (sizeNum != null) {
@@ -57,7 +58,7 @@ fun DynamicContentStyle.toTextStyle(textStyle: TextStyle = TextStyle(), config: 
     }
 
     if (color != null) {
-        result.color = Color.makeRGB(color!!)
+        result.color = parseHexColor(color!!)
     }
 
     if (fontFamily != null && config.fontRegistry.matchFamily(fontFamily!!).count() != 0) {

@@ -24,7 +24,7 @@ import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.task.TaskDefinition
 import top.colter.dynamic.core.task.TaskSchedule
 import top.colter.dynamic.core.task.TaskScheduler
-import top.colter.dynamic.draw.DynamicImageCache
+import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.dynamic.link.DynamicLinkAutoParseListener
 import top.colter.dynamic.link.DynamicLinkForwarder
 import top.colter.dynamic.listener.DynamicListener

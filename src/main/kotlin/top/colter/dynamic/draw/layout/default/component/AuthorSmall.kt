@@ -1,20 +1,17 @@
-package top.colter.dynamic.draw.component
+package top.colter.dynamic.draw.layout.default.component
 
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
-import top.colter.dynamic.draw.tools.loadSVG
-import top.colter.dynamic.draw.tools.makeImage
 import top.colter.skiko.*
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.layout.Layout
 import top.colter.skiko.layout.Row
 import top.colter.skiko.layout.Text
-import java.io.File
 
 /**
  * 作者小组件
  */
-fun Layout.AuthorSmall(
+internal fun Layout.AuthorSmall(
     face: Image,
     name: String,
     time: String,

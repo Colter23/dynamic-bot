@@ -1,16 +1,18 @@
-package top.colter.dynamic.draw
+package top.colter.dynamic.draw.layout.default
 
 import top.colter.dynamic.DrawOrnament
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.Publisher
-import top.colter.dynamic.draw.component.Author
-import top.colter.dynamic.draw.component.AuthorSmall
-import top.colter.dynamic.draw.tools.loadResourceImage
+import top.colter.dynamic.draw.DrawConfig
+import top.colter.dynamic.draw.layout.default.component.Author
+import top.colter.dynamic.draw.layout.default.component.AuthorSmall
+import top.colter.dynamic.draw.resource.loadResourceImage
+import top.colter.dynamic.draw.resource.qrCode
 import top.colter.skiko.*
 import top.colter.skiko.layout.Layout
 
 
-fun Layout.drawPublisher(
+internal fun Layout.drawPublisher(
     publisher: Publisher,
     time: String,
     link: String,

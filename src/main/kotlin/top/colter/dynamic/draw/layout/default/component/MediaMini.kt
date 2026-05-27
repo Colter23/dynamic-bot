@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw.component
+package top.colter.dynamic.draw.layout.default.component
 
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
@@ -11,7 +11,7 @@ import top.colter.skiko.layout.*
 /**
  * 迷你媒体组件
  */
-fun Layout.MediaMini(
+internal fun Layout.MediaMini(
     cover: Image? = null,
     title: String,
     desc: String,

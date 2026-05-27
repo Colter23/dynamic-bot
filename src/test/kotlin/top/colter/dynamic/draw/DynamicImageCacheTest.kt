@@ -12,6 +12,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import top.colter.dynamic.core.data.ImageType
 import top.colter.dynamic.core.data.LazyImage
+import top.colter.dynamic.draw.image.DynamicImageCache
 
 class DynamicImageCacheTest {
 

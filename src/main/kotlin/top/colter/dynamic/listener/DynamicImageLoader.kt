@@ -25,7 +25,7 @@ import top.colter.dynamic.core.data.ImageType
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.LazyImageReference
 import top.colter.dynamic.core.data.collectLazyImageReferences
-import top.colter.dynamic.draw.DynamicImageCache
+import top.colter.dynamic.draw.image.DynamicImageCache
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 

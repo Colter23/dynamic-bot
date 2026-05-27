@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw.component
+package top.colter.dynamic.draw.layout.default.component
 
 import org.jetbrains.skia.Image
 import top.colter.skiko.Modifier
@@ -27,7 +27,7 @@ import top.colter.skiko.layout.Layout
  * [pendant] 头像框
  * [badge] 右下角徽章
  */
-fun Layout.Avatar(
+internal fun Layout.Avatar(
     face: Image,
     pendant: Image? = null,
     badge: Image? = null,

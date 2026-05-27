@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw.component
+package top.colter.dynamic.draw.layout.default.component
 
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
@@ -13,7 +13,7 @@ import top.colter.skiko.layout.Layout
 /**
  * 装饰组件
  */
-fun Layout.Decorate(
+internal fun Layout.Decorate(
     image: Image? = null,
     qrCode: Image? = null,
     alignment: LayoutAlignment = LayoutAlignment.CENTER,

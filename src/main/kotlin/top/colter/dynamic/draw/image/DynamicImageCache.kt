@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw
+package top.colter.dynamic.draw.image
 
 import java.awt.Color
 import java.awt.image.BufferedImage
@@ -17,13 +17,14 @@ import javax.imageio.ImageIO
 import org.jetbrains.skia.Image
 import top.colter.dynamic.core.data.ImageType
 import top.colter.dynamic.core.data.LazyImage
+import top.colter.dynamic.draw.DynamicImageResolver
 
 public object DynamicImageCache : DynamicImageResolver {
     private val images: ConcurrentHashMap<String, ByteArray> = ConcurrentHashMap()
     private val imageFiles: ConcurrentHashMap<String, Path> = ConcurrentHashMap()
 
     @Volatile
-    private var sourceRoot: Path = Paths.get("data", "image-cache", "source")
+    private var sourceRoot: Path = Paths.get("data", "images", "source")
 
     private val placeholderBytes: ByteArray by lazy { createPlaceholderBytes() }
 
