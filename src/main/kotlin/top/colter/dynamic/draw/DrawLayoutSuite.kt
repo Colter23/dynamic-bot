@@ -4,6 +4,7 @@ import org.jetbrains.skia.Image
 import top.colter.dynamic.core.config.ConfigFieldOption
 import top.colter.dynamic.core.data.Dynamic
 import top.colter.dynamic.draw.layout.default.DefaultDrawLayoutSuite
+import top.colter.dynamic.draw.layout.minimal.MinimalDrawLayoutSuite
 
 public sealed interface DrawScene {
     data class DynamicScene(val dynamic: Dynamic) : DrawScene
@@ -20,6 +21,7 @@ public interface DrawLayoutSuite {
 public object DrawLayoutRegistry {
     private val suites: MutableMap<String, DrawLayoutSuite> = linkedMapOf(
         DefaultDrawLayoutSuite.id to DefaultDrawLayoutSuite,
+        MinimalDrawLayoutSuite.id to MinimalDrawLayoutSuite,
     )
 
     fun register(suite: DrawLayoutSuite) {
