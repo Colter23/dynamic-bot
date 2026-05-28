@@ -112,6 +112,7 @@ public data class SubscriptionDto(
     val subscriberId: Int,
     val publisherId: Int,
     val createdAtEpochSeconds: Long,
+    val atAllTypes: List<String> = emptyList(),
     val subscriber: SubscriberDto? = null,
     val publisher: PublisherDto? = null,
 )
@@ -190,6 +191,7 @@ public data class CreateSubscriptionRequest(
     val publisherPlatform: String,
     val publisherExternalId: String,
     val autoFollow: Boolean = true,
+    val atAllTypes: List<String> = emptyList(),
 )
 
 @Serializable
@@ -201,6 +203,11 @@ public data class CreateSubscriptionResponse(
     val subscriberUpdated: Boolean,
     val subscriptionCreated: Boolean,
     val autoFollowed: Boolean,
+)
+
+@Serializable
+public data class UpdateSubscriptionRequest(
+    val atAllTypes: List<String> = emptyList(),
 )
 
 @Serializable

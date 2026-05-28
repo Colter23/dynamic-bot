@@ -19,6 +19,7 @@ import top.colter.dynamic.core.data.PublisherProfile
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.SubscriberType
 import top.colter.dynamic.core.data.Subscription
+import top.colter.dynamic.core.data.SubscriptionAtAllType
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
@@ -243,6 +244,7 @@ public class AdminService(
     public suspend fun createSubscription(request: CreateSubscriptionRequest): CreateSubscriptionResponse {
         val platform = request.publisherPlatform.trim().lowercase()
         val externalId = request.publisherExternalId.trim()
+        val atAllTypes = parseAtAllTypes(request.atAllTypes)
         require(platform.isNotBlank()) { "publisherPlatform must not be blank" }
         require(externalId.isNotBlank()) { "publisherExternalId must not be blank" }
 
@@ -263,10 +265,19 @@ public class AdminService(
             name = request.subscriberName?.trim()?.takeIf { it.isNotBlank() } ?: request.subscriberTargetId.trim(),
             type = parseEnum<SubscriberType>(request.subscriberType, "subscriberType"),
         )
+        requireAtAllTargetAllowed(subscriberUpsert.value, atAllTypes)
         val subscriptionCreated = SubscriptionRepository.subscribe(
             subscriberId = subscriberUpsert.value.id,
             publisherId = publisherUpsert.value.id,
+            atAllTypes = atAllTypes,
         )
+        if (!subscriptionCreated && atAllTypes.isNotEmpty()) {
+            val existing = SubscriptionRepository.findBySubscriberAndPublisher(
+                subscriberId = subscriberUpsert.value.id,
+                publisherId = publisherUpsert.value.id,
+            ) ?: throw IllegalStateException("subscription was not found")
+            SubscriptionRepository.updateAtAllTypes(existing.id, atAllTypes)
+        }
         val subscription = SubscriptionRepository.findBySubscriberAndPublisher(
             subscriberId = subscriberUpsert.value.id,
             publisherId = publisherUpsert.value.id,
@@ -283,6 +294,19 @@ public class AdminService(
             subscriberUpdated = subscriberUpsert.updated,
             subscriptionCreated = subscriptionCreated,
             autoFollowed = autoFollowed,
+        )
+    }
+
+    public fun updateSubscription(id: Int, request: UpdateSubscriptionRequest): SubscriptionDto {
+        val subscription = SubscriptionRepository.findById(id) ?: throw NoSuchElementException("subscription not found: $id")
+        val atAllTypes = parseAtAllTypes(request.atAllTypes)
+        val subscriber = SubscriberRepository.findById(subscription.subscriberId)
+            ?: throw NoSuchElementException("subscriber not found: ${subscription.subscriberId}")
+        requireAtAllTargetAllowed(subscriber, atAllTypes)
+        val updated = SubscriptionRepository.updateAtAllTypes(subscription.id, atAllTypes)
+        return updated.toDto(
+            publishers = PublisherRepository.findById(updated.publisherId)?.let { mapOf(it.id to it) }.orEmpty(),
+            subscribers = mapOf(subscriber.id to subscriber),
         )
     }
 
@@ -576,6 +600,7 @@ private fun Subscription.toDto(
     subscriberId = subscriberId,
     publisherId = publisherId,
     createdAtEpochSeconds = createdAtEpochSeconds,
+    atAllTypes = atAllTypes.map { it.name }.sorted(),
     subscriber = subscribers[subscriberId]?.toDto(),
     publisher = publishers[publisherId]?.toDto(),
 )
@@ -596,6 +621,17 @@ private inline fun <reified T : Enum<T>> parseEnum(value: String, fieldName: Str
         ?: throw IllegalArgumentException(
             "invalid $fieldName: $value, expected ${enumValues<T>().joinToString("|") { it.name }}",
         )
+}
+
+private fun parseAtAllTypes(values: Iterable<String>): Set<SubscriptionAtAllType> {
+    return values.map { parseEnum<SubscriptionAtAllType>(it, "atAllTypes") }.toSet()
+}
+
+private fun requireAtAllTargetAllowed(subscriber: Subscriber, atAllTypes: Set<SubscriptionAtAllType>) {
+    if (atAllTypes.isEmpty()) return
+    require(subscriber.type == SubscriberType.GROUP) {
+        "atAllTypes can only be enabled for GROUP subscribers"
+    }
 }
 
 private fun PublisherProfile.normalized(): PublisherProfile = copy(

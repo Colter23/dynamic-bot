@@ -422,15 +422,25 @@ class AdminServerTest {
                     subscriberName = "group-100",
                     publisherPlatform = "bilibili",
                     publisherExternalId = "123",
+                    atAllTypes = listOf("DYNAMIC"),
                 )
             )
         }.body<CreateSubscriptionResponse>()
 
         assertTrue(created.subscriptionCreated)
         assertTrue(created.autoFollowed)
+        assertEquals(listOf("DYNAMIC"), created.subscription.atAllTypes)
         assertEquals(1, plugin.followCalls)
         assertNotNull(PublisherRepository.findByPlatformAndExternalId("bilibili", "123"))
         assertEquals(1L, SubscriptionRepository.countAll())
+
+        val updated = client.patch("/api/subscriptions/${created.subscription.id}") {
+            auth()
+            contentType(ContentType.Application.Json)
+            setBody(UpdateSubscriptionRequest(atAllTypes = listOf("LIVE", "VIDEO")))
+        }.body<SubscriptionDto>()
+
+        assertEquals(listOf("LIVE", "VIDEO"), updated.atAllTypes)
 
         val deleted = client.delete("/api/subscriptions/${created.subscription.id}") { auth() }
             .body<ActionResultResponse>()

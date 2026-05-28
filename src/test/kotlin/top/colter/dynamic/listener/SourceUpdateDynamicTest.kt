@@ -3,6 +3,7 @@ package top.colter.dynamic.listener
 import java.nio.file.Files
 import java.nio.file.Paths
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -12,6 +13,9 @@ import top.colter.dynamic.core.data.Dynamic
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicContentNodeText
 import top.colter.dynamic.core.data.DynamicElementType
+import top.colter.dynamic.core.data.DynamicMedia
+import top.colter.dynamic.core.data.DynamicMediaVideo
+import top.colter.dynamic.core.data.DynamicMediaVideoStats
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LazyImage
@@ -22,6 +26,7 @@ import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.PublisherType
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.SubscriberType
+import top.colter.dynamic.core.data.SubscriptionAtAllType
 import top.colter.dynamic.core.event.EventManger
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
@@ -215,6 +220,68 @@ class SourceUpdateDynamicTest {
     }
 
     @Test
+    fun shouldAppendMentionAllAtTailOnlyForEnabledDynamicSubscriptions() = runBlocking {
+        initDb("dynamic-listener-at-all-dynamic")
+        val publisher = createPublisher()
+        val atAllSubscriber = createSubscriber(id = 10, targetId = "100")
+        val normalSubscriber = createSubscriber(id = 11, targetId = "200")
+        SubscriptionRepository.subscribe(
+            subscriberId = atAllSubscriber.id,
+            publisherId = publisher.id,
+            atAllTypes = setOf(SubscriptionAtAllType.DYNAMIC),
+        )
+        SubscriptionRepository.subscribe(normalSubscriber.id, publisher.id)
+
+        val listener = SourceUpdateListener(
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "tail {name}")),
+            imageLoader = DynamicImageLoader { },
+            imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/not-used.png") },
+        )
+
+        val received = captureMessageEvents()
+        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(publisher)))
+
+        val events = listOf(
+            withTimeout(3_000) { received.receive() },
+            withTimeout(3_000) { received.receive() },
+        ).associateBy { it.message.targets.single().targetId }
+
+        val atAllContents = events.getValue("100").message.chain.single().content
+        assertEquals("tail Demo UP", atAllContents.first().fallbackText)
+        assertTrue(atAllContents.last() is MessageContent.MentionAll)
+        assertEquals(
+            "tail Demo UP",
+            events.getValue("200").message.chain.single().content.single().fallbackText,
+        )
+    }
+
+    @Test
+    fun shouldAppendMentionAllForVideoOnlySubscriptionWhenDynamicHasVideo() = runBlocking {
+        initDb("dynamic-listener-at-all-video")
+        val publisher = createPublisher()
+        val subscriber = createSubscriber()
+        SubscriptionRepository.subscribe(
+            subscriberId = subscriber.id,
+            publisherId = publisher.id,
+            atAllTypes = setOf(SubscriptionAtAllType.VIDEO),
+        )
+
+        val listener = SourceUpdateListener(
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "video {name}")),
+            imageLoader = DynamicImageLoader { },
+            imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/not-used.png") },
+        )
+
+        val received = captureMessageEvent()
+        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(publisher).withVideo()))
+        val event = withTimeout(3_000) { received.await() }
+
+        val contents = event.message.chain.single().content
+        assertEquals("video Demo UP", contents.first().fallbackText)
+        assertTrue(contents.last() is MessageContent.MentionAll)
+    }
+
+    @Test
     fun shouldSkipRenderingAndDeliveryWhenAllTargetsAreFiltered() = runBlocking {
         initDb("dynamic-listener-filter-all")
         val publisher = createPublisher()
@@ -331,6 +398,16 @@ class SourceUpdateDynamicTest {
         return received
     }
 
+    private fun captureMessageEvents(): Channel<MessageEvent> {
+        val received = Channel<MessageEvent>(Channel.UNLIMITED)
+        object : Listener<MessageEvent> {
+            override suspend fun onMessage(event: MessageEvent) {
+                received.send(event)
+            }
+        }.register<MessageEvent>()
+        return received
+    }
+
     private fun initDb(suffix: String) {
         val tempDir = createTempDirectory("dynamic-bot-main-$suffix").toFile()
         PersistenceManager.init(tempDir.resolve("test.db").path)
@@ -386,6 +463,23 @@ class SourceUpdateDynamicTest {
             time = time,
             link = "https://t.bilibili.com/dynamic-1",
             content = DynamicContent("Demo content", listOf(DynamicContentNodeText("Demo content"))),
+        )
+    }
+
+    private fun Dynamic.withVideo(): Dynamic {
+        return copy(
+            media = DynamicMedia(
+                video = DynamicMediaVideo(
+                    id = "BV1",
+                    title = "Demo video",
+                    description = "Demo video description",
+                    cover = LazyImage("https://example.com/cover.png"),
+                    duration = "01:00",
+                    badge = "video",
+                    stats = DynamicMediaVideoStats(play = "1", danmaku = "2", like = "3"),
+                    link = "https://www.bilibili.com/video/BV1",
+                )
+            )
         )
     }
 }

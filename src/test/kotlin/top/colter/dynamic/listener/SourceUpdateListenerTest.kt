@@ -18,6 +18,7 @@ import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.PublisherType
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.SubscriberType
+import top.colter.dynamic.core.data.SubscriptionAtAllType
 import top.colter.dynamic.core.event.EventManger
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
@@ -104,6 +105,44 @@ class SourceUpdateListenerTest {
         assertTrue(text.contains("Demo UP|123|456|Live title|Games"))
         assertTrue(text.contains("1小时 1分 1秒"))
         assertTrue(text.endsWith("https://live.bilibili.com/456"))
+    }
+
+    @Test
+    fun shouldAppendMentionAllForLiveStartedButNotLiveEnded() = runBlocking {
+        val (publisher, subscriber) = seededSubscription("live-at-all")
+        val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!
+        SubscriptionRepository.updateAtAllTypes(subscription.id, setOf(SubscriptionAtAllType.LIVE))
+        val listener = SourceUpdateListener(
+            config = MainDynamicConfig(
+                templates = PushTemplates(
+                    liveStarted = "started {title}",
+                    liveEnded = "ended {title}",
+                ),
+            ),
+        )
+        val startedAt = System.currentTimeMillis() / 1000 + 60
+
+        val startedReceived = captureMessageEvent()
+        listener.onMessage(
+            SourceUpdateEvent(
+                source = "test",
+                update = liveUpdate(publisher, LiveChange.STARTED, startedAt, null),
+            )
+        )
+        val started = withTimeout(3_000) { startedReceived.await() }
+        val startedContents = started.message.chain.single().content
+        assertEquals("started Live title", startedContents.first().fallbackText)
+        assertTrue(startedContents.last() is MessageContent.MentionAll)
+
+        val endedReceived = captureMessageEvent()
+        listener.onMessage(
+            SourceUpdateEvent(
+                source = "test",
+                update = liveUpdate(publisher, LiveChange.ENDED, startedAt + 60, startedAt),
+            )
+        )
+        val ended = withTimeout(3_000) { endedReceived.await() }
+        assertEquals("ended Live title", ended.message.chain.single().content.single().fallbackText)
     }
 
     private fun seededSubscription(suffix: String): Pair<Publisher, Subscriber> {

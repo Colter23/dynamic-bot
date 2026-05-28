@@ -937,9 +937,12 @@
       VIDEO: "视频",
       CARD: "卡片",
       ORIGIN: "转发源动态",
+      DYNAMIC: "动态",
+      LIVE: "直播",
       template: "模板"
     };
     const label = value => labels[value] || value;
+    const atAllTypeValues = ["DYNAMIC", "LIVE", "VIDEO"];
     const pageMeta = {
       overview: ["概览", "运行状态与插件健康情况。"],
       login: ["平台登录", "动态源账号认证。"],
@@ -1059,6 +1062,65 @@
       const subscriber = subscription.subscriber ? subscriberLabel(subscription.subscriber) : "目标 #" + subscription.subscriberId;
       const publisher = subscription.publisher ? publisherLabel(subscription.publisher) : "发布者 #" + subscription.publisherId;
       return "#" + subscription.id + " · " + subscriber + " -> " + publisher;
+    }
+
+    function subscriptionAtAllTypes(subscription) {
+      return Array.isArray(subscription.atAllTypes) ? subscription.atAllTypes : [];
+    }
+
+    function atAllSummary(subscription) {
+      const types = subscriptionAtAllTypes(subscription);
+      if (!types.length) return "<span class='muted'>关闭</span>";
+      const all = atAllTypeValues.every(type => types.includes(type));
+      return esc(all ? "全部" : types.map(type => label(type)).join("、"));
+    }
+
+    function renderAtAllControls(selectedTypes) {
+      const selected = new Set(selectedTypes || []);
+      return "<div class='form-field full-width'>"
+        + "<label>@全体</label>"
+        + "<div class='forms'>"
+        + "<label class='check-control'><input id='actionAtAllAll' type='checkbox'>全部</label>"
+        + atAllTypeValues.map(type =>
+            "<label class='check-control'><input type='checkbox' data-atall-type='" + type + "'" + (selected.has(type) ? " checked" : "") + ">" + label(type) + "</label>"
+          ).join("")
+        + "</div>"
+        + "<span id='actionAtAllHint' class='field-hint'></span>"
+        + "</div>";
+    }
+
+    function collectAtAllTypes() {
+      return Array.from(document.querySelectorAll("[data-atall-type]"))
+        .filter(input => input.checked && !input.disabled)
+        .map(input => input.dataset.atallType);
+    }
+
+    function bindAtAllControls(targetTypeProvider) {
+      const all = els("actionAtAllAll");
+      const checks = Array.from(document.querySelectorAll("[data-atall-type]"));
+      if (!all || checks.length === 0) return;
+      const refreshAll = () => {
+        all.checked = checks.every(input => input.checked);
+      };
+      const refreshAvailability = () => {
+        const enabled = targetTypeProvider() === "GROUP";
+        all.disabled = !enabled;
+        checks.forEach(input => {
+          input.disabled = !enabled;
+          if (!enabled) input.checked = false;
+        });
+        const hint = els("actionAtAllHint");
+        if (hint) hint.textContent = enabled ? "开启后会在匹配类型的推送消息结尾追加 @全体。" : "仅群目标支持 @全体。";
+        refreshAll();
+      };
+      all.onchange = () => {
+        checks.forEach(input => { input.checked = all.checked; });
+      };
+      checks.forEach(input => {
+        input.onchange = refreshAll;
+      });
+      refreshAvailability();
+      return refreshAvailability;
     }
 
     function uniqueValues(values) {
@@ -1306,8 +1368,9 @@
         { label: "ID", key: "id" },
         { label: "目标", render: r => esc((r.subscriber && r.subscriber.platformId + ":" + label(r.subscriber.type) + ":" + r.subscriber.targetId) || r.subscriberId) },
         { label: "发布者", render: r => esc((r.publisher && r.publisher.platformId + ":" + r.publisher.externalId + " " + r.publisher.name) || r.publisherId) },
+        { label: "@全体", render: r => atAllSummary(r) },
         { label: "创建时间", render: r => esc(formatTime(r.createdAtEpochSeconds)) },
-        { label: "操作", render: r => "<div class='table-actions'><button class='danger' data-action='delete-subscription' data-id='" + r.id + "'>删除</button></div>" }
+        { label: "操作", render: r => "<div class='table-actions'><button data-action='edit-subscription-atall' data-id='" + r.id + "'>编辑@全体</button><button class='danger' data-action='delete-subscription' data-id='" + r.id + "'>删除</button></div>" }
       ], state.cache.subscriptions);
     }
 
@@ -1946,6 +2009,26 @@
       }, 0);
     }
 
+    function openSubscriptionAtAllModal(id) {
+      closePlatformLoginModal();
+      const subscription = state.cache.subscriptions.find(item => Number(item.id) === Number(id));
+      if (!subscription) {
+        notify("未找到要修改的订阅，请刷新后重试", true);
+        return;
+      }
+      state.actionModal = { kind: "subscription-atall", id: Number(id) };
+      els("actionTitle").textContent = "编辑 @全体";
+      els("confirmAction").textContent = "保存";
+      els("confirmAction").disabled = false;
+      setActionMessage("", false);
+      els("actionBody").innerHTML = "<div class='forms'>"
+        + "<div class='form-field full-width'><label>订阅</label><div class='config-table-text'>" + esc(subscriptionLabel(subscription)) + "</div></div>"
+        + renderAtAllControls(subscriptionAtAllTypes(subscription))
+        + "</div>";
+      bindAtAllControls(() => subscription.subscriber ? subscription.subscriber.type : "");
+      els("actionModal").hidden = false;
+    }
+
     async function renderSubscriptionAction() {
       await Promise.all([ensureSubscribers(), ensurePublishers(), ensurePlatformLogins(), ensureSubscriberTargetPlatforms()]);
       const subscribers = state.cache.subscribers;
@@ -1969,19 +2052,32 @@
         + "</div>"
         + "<div class='form-field'><label for='actionPublisherPlatform'>发布者平台</label>" + publisherPlatformControl + "</div>"
         + "<div class='form-field'><label for='actionPublisherExternalId'>发布者外部 ID</label><input id='actionPublisherExternalId' placeholder='例如 Bilibili UID'></div>"
+        + renderAtAllControls([])
         + "</div>";
+      const refreshAtAllAvailability = bindAtAllControls(() => currentSubscriptionActionTargetType());
       els("actionSubscriberSelect").onchange = () => updateSubscriptionTargetFields().catch(error => setActionMessage(error.message, true));
       els("actionSubscriberPlatform").onchange = () => {
         updateSubscriberTypeOptions();
         loadSubscriptionTargetOptions().catch(error => setActionMessage(error.message, true));
+        if (refreshAtAllAvailability) refreshAtAllAvailability();
       };
-      els("actionSubscriberType").onchange = () => loadSubscriptionTargetOptions().catch(error => setActionMessage(error.message, true));
+      els("actionSubscriberType").onchange = () => {
+        loadSubscriptionTargetOptions().catch(error => setActionMessage(error.message, true));
+        if (refreshAtAllAvailability) refreshAtAllAvailability();
+      };
       els("actionSubscriberTargetId").onchange = updateSubscriptionSubmitState;
       els("actionPublisherPlatform").onchange = updateSubscriptionSubmitState;
       els("actionPublisherExternalId").oninput = updateSubscriptionSubmitState;
       updateSubscriberTypeOptions();
       await updateSubscriptionTargetFields();
       return selectedSubscriber !== "new" || Boolean(els("actionSubscriberTargetId").value);
+    }
+
+    function currentSubscriptionActionTargetType() {
+      const selectedValue = els("actionSubscriberSelect") ? els("actionSubscriberSelect").value : "";
+      const selectedSubscriber = state.cache.subscribers.find(item => String(item.id) === selectedValue);
+      if (selectedSubscriber) return selectedSubscriber.type;
+      return els("actionSubscriberType") ? els("actionSubscriberType").value : "";
     }
 
     async function updateSubscriptionTargetFields() {
@@ -1992,6 +2088,8 @@
       if (select.value === "new") {
         await loadSubscriptionTargetOptions();
       }
+      const refreshAtAll = bindAtAllControls(() => currentSubscriptionActionTargetType());
+      if (refreshAtAll) refreshAtAll();
       updateSubscriptionSubmitState();
     }
 
@@ -2003,6 +2101,8 @@
       const types = platform && platform.supportedTypes.length ? platform.supportedTypes : ["GROUP", "USER", "CHANNEL", "OTHER"];
       const current = typeSelect.value;
       typeSelect.innerHTML = types.map((type, index) => optionHtml(type, label(type), type === current || (!current && index === 0))).join("");
+      const refreshAtAll = bindAtAllControls(() => currentSubscriptionActionTargetType());
+      if (refreshAtAll) refreshAtAll();
     }
 
     async function loadSubscriptionTargetOptions() {
@@ -2094,6 +2194,8 @@
           await submitPublisherEditAction();
         } else if (state.actionModal.kind === "subscriber") {
           await submitSubscriberEditAction();
+        } else if (state.actionModal.kind === "subscription-atall") {
+          await submitSubscriptionAtAllAction();
         }
       } finally {
         if (state.actionModal) els("confirmAction").disabled = false;
@@ -2119,6 +2221,7 @@
       payload.publisherPlatform = els("actionPublisherPlatform").value;
       payload.publisherExternalId = els("actionPublisherExternalId").value;
       payload.autoFollow = true;
+      payload.atAllTypes = collectAtAllTypes();
       if (!payload.publisherPlatform.trim()) return setActionMessage("请选择发布者平台", true);
       if (!payload.publisherExternalId.trim()) return setActionMessage("请填写发布者外部 ID", true);
       if (!selectedSubscriber && !payload.subscriberTargetId.trim()) return setActionMessage("请选择消息目标", true);
@@ -2127,6 +2230,19 @@
       invalidate("overview", "publishers", "subscribers", "subscriptions", "filters");
       await loadSubscriptions(true);
       notify("订阅已创建", false);
+    }
+
+    async function submitSubscriptionAtAllAction() {
+      const modal = state.actionModal;
+      if (!modal || modal.kind !== "subscription-atall") return;
+      await api("/subscriptions/" + encodeURIComponent(modal.id), {
+        method: "PATCH",
+        body: JSON.stringify({ atAllTypes: collectAtAllTypes() })
+      });
+      closeActionModal();
+      invalidate("overview", "subscriptions");
+      await loadSubscriptions(true);
+      notify("@全体设置已保存", false);
     }
 
     async function submitFilterAction() {
@@ -2219,6 +2335,8 @@
           openEntityEditModal("publisher", id);
         } else if (action === "edit-subscriber") {
           openEntityEditModal("subscriber", id);
+        } else if (action === "edit-subscription-atall") {
+          openSubscriptionAtAllModal(id);
         } else if (action === "delete-publisher") {
           const count = countBy(state.cache.subscriptions, "publisherId", id);
           if (!confirm("确定删除这个发布者吗？将同步删除关联的 " + count + " 个订阅关系。")) return;

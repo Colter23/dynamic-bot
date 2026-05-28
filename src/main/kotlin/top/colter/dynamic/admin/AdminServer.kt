@@ -169,6 +169,11 @@ public fun Application.adminModule(context: AdminServerContext) {
                 if (!call.ensureAuthorized(context)) return@post
                 call.respondApi { context.service.createSubscription(call.receive()) }
             }
+            patch("/subscriptions/{id}") {
+                if (!call.ensureAuthorized(context)) return@patch
+                val id = call.pathInt("id")
+                call.respondApi { context.service.updateSubscription(id, call.receive()) }
+            }
             delete("/subscriptions/{id}") {
                 if (!call.ensureAuthorized(context)) return@delete
                 val id = call.pathInt("id")

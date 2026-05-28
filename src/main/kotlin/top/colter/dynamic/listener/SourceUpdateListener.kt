@@ -16,10 +16,13 @@ import top.colter.dynamic.core.data.LiveChange
 import top.colter.dynamic.core.data.LiveStatusUpdate
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageChain
+import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
+import top.colter.dynamic.core.data.SubscriberType
 import top.colter.dynamic.core.data.Subscription
+import top.colter.dynamic.core.data.SubscriptionAtAllType
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdateEvent
@@ -97,6 +100,7 @@ public class SourceUpdateListener(
             targets = deliverableTargets,
             chain = chain,
             skipReason = "dynamicId=${normalizedDynamic.dynamicId}",
+            atAllMatchTypes = atAllMatchTypes(event, normalizedDynamic),
         )
     }
 
@@ -150,6 +154,7 @@ public class SourceUpdateListener(
             targets = targets,
             chain = chain,
             skipReason = "roomId=${live.roomId}, change=${live.change}",
+            atAllMatchTypes = atAllMatchTypes(event, live),
         )
     }
 
@@ -241,11 +246,35 @@ public class SourceUpdateListener(
         targets: List<DeliveryTarget>,
         chain: List<MessageChain>,
         skipReason: String,
+        atAllMatchTypes: Set<SubscriptionAtAllType> = emptySet(),
     ) {
         if (chain.isEmpty()) {
             logger.warn { "跳过发布更新：$skipReason，原因=模板渲染为空" }
             return
         }
+
+        val (atAllTargets, normalTargets) = targets.partition { it.shouldMentionAll(atAllMatchTypes) }
+        publishMessageVariant(
+            messageId = messageId,
+            time = time,
+            targets = normalTargets,
+            chain = chain,
+        )
+        publishMessageVariant(
+            messageId = messageId,
+            time = time,
+            targets = atAllTargets,
+            chain = chain.withMentionAllAtTail(),
+        )
+    }
+
+    private fun publishMessageVariant(
+        messageId: Long,
+        time: Long,
+        targets: List<DeliveryTarget>,
+        chain: List<MessageChain>,
+    ) {
+        if (targets.isEmpty()) return
 
         val message = Message(
             id = messageId,
@@ -262,6 +291,35 @@ public class SourceUpdateListener(
             source = "main",
             message = message,
         ).broadcast()
+    }
+
+    private fun DeliveryTarget.shouldMentionAll(matchTypes: Set<SubscriptionAtAllType>): Boolean {
+        if (matchTypes.isEmpty()) return false
+        if (subscriber.type != SubscriberType.GROUP) return false
+        return subscription?.atAllTypes.orEmpty().any { it in matchTypes }
+    }
+
+    private fun atAllMatchTypes(event: SourceUpdateEvent, dynamic: Dynamic): Set<SubscriptionAtAllType> {
+        if (event.label == LINK_PARSE_EVENT_LABEL) return emptySet()
+        return buildSet {
+            add(SubscriptionAtAllType.DYNAMIC)
+            if (dynamic.media?.video != null) add(SubscriptionAtAllType.VIDEO)
+        }
+    }
+
+    private fun atAllMatchTypes(event: SourceUpdateEvent, live: LiveStatusUpdate): Set<SubscriptionAtAllType> {
+        if (event.label == LINK_PARSE_EVENT_LABEL) return emptySet()
+        return if (live.change == LiveChange.STARTED) setOf(SubscriptionAtAllType.LIVE) else emptySet()
+    }
+
+    private fun List<MessageChain>.withMentionAllAtTail(): List<MessageChain> {
+        if (isEmpty()) return this
+        val result = toMutableList()
+        val last = result.last()
+        result[result.lastIndex] = last.copy(
+            content = last.content + MessageContent.MentionAll(fallbackText = ""),
+        )
+        return result
     }
 
     private fun dynamicMessageId(dynamic: Dynamic): Long {
