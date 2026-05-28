@@ -8,107 +8,113 @@
   },
   "dynamicId": "1205230877720707077",
   "publisher": {
-    "id": 1,
-    "platformId": "bilibili",
-    "type": "USER",
-    "externalId": "1340190821",
-    "name": "崩坏星穹铁道",
+    "identity": {
+      "platformId": "bilibili",
+      "externalId": "1340190821",
+      "type": "USER"
+    },
+    "name": "Demo Publisher",
     "official": null,
     "state": "ACTIVE",
-    "face": "https://i2.hdslb.com/bfs/face/8f6e9e22b2bd31dd8a3314c0b2544045d28a9b9b.jpg",
+    "face": {
+      "uri": "https://i2.hdslb.com/bfs/face/demo.jpg",
+      "category": "USER"
+    },
     "pendant": null,
-    "header": null,
-    "createTime": 0,
-    "createUser": 0
+    "header": null
   },
-  "time": 1779453081000,
+  "time": 1779453081,
   "link": "https://t.bilibili.com/1205230877720707077",
-  "notice": "",
-  "title": null,
+  "labels": [
+    {
+      "text": "Pinned",
+      "kind": "NOTICE",
+      "sourceKey": "test.notice"
+    }
+  ],
+  "title": "Demo Dynamic",
   "content": {
-    "text": "互动抽奖 #绿联星穹铁道联名# #崩坏星穹铁道# #爻光随行电量满盈#\n \n《崩坏：星穹铁道》× 绿联联动即将开启！\n \n亲爱的开拓者，《崩坏：星穹铁道》× @UGREEN绿联 联动活动即将上线！\n漫漫开拓之旅，告别电量焦虑~爻光随时为你满血充能，护航每一次平稳跃迁。\n———————————————————\n▉转发抽奖：\n关注并转发本条动态，帕姆将于5月29日抽取10位幸运开拓者各获得「随机角色周边」一份。",
+    "text": "Demo content #topic# @friend",
     "contentNodes": [
       {
         "type": "TEXT",
-        "text": "互动抽奖",
+        "text": "Demo content ",
         "style": null
       },
       {
-        "type": "LINK",
-        "text": "#绿联星穹铁道联名#",
+        "type": "TAG",
+        "text": "#topic#",
         "style": null,
-        "icon": null,
-        "url": "https://search.bilibili.com/all?keyword=%E7%BB%BF%E8%81%94%E6%98%9F%E7%A9%B9%E9%93%81%E9%81%93%E8%81%94%E5%90%8D"
+        "tagType": "TOPIC",
+        "externalId": "66",
+        "url": "https://www.bilibili.com/topic/66"
       },
       {
-        "type": "LINK",
-        "text": "#崩坏星穹铁道#",
+        "type": "MENTION",
+        "text": "@friend",
         "style": null,
-        "icon": null,
-        "url": "https://search.bilibili.com/all?keyword=%E5%B4%A9%E5%9D%8F%E6%98%9F%E7%A9%B9%E9%93%81%E9%81%93"
-      },
-      {
-        "type": "LINK",
-        "text": "#爻光随行电量满盈#",
-        "style": null,
-        "icon": null,
-        "url": "https://search.bilibili.com/all?keyword=%E7%88%BB%E5%85%89%E9%9A%8F%E8%A1%8C%E7%94%B5%E9%87%8F%E6%BB%A1%E7%9B%88"
-      },
-      {
-        "type": "TEXT",
-        "text": "\n \n《崩坏：星穹铁道》× 绿联联动即将开启！\n \n亲爱的开拓者，《崩坏：星穹铁道》× ",
-        "style": null
-      },
-      {
-        "type": "LINK",
-        "text": "@UGREEN绿联",
-        "style": null,
-        "icon": null,
-        "url": "https://space.bilibili.com/342507763"
-      },
-      {
-        "type": "TEXT",
-        "text": " 联动活动即将上线！\n漫漫开拓之旅，告别电量焦虑~爻光随时为你满血充能，护航每一次平稳跃迁。\n———————————————————\n▉转发抽奖：\n关注并转发本条动态，帕姆将于5月29日抽取10位幸运开拓者各获得「随机角色周边」一份。",
-        "style": null
+        "platformId": "bilibili",
+        "externalId": "42",
+        "url": "https://space.bilibili.com/42"
       }
     ]
   },
-  "media": {
-    "pics": [
-      {
-        "pic": "http://i0.hdslb.com/bfs/new_dyn/aef092d8ca3f81174f0867eb083f9fd01340190821.jpg",
-        "width": 2560,
-        "height": 1440,
-        "size": 3487.165,
-        "badge": null
-      }
-    ],
-    "video": null,
-    "card": null,
-    "smallCard": {
+  "attachments": [
+    {
+      "type": "IMAGE",
+      "images": [
+        {
+          "image": {
+            "uri": "http://i0.hdslb.com/bfs/new_dyn/demo.jpg",
+            "width": 2560,
+            "height": 1440,
+            "category": "IMAGES"
+          },
+          "width": 2560,
+          "height": 1440,
+          "size": 3487.165,
+          "badge": null,
+          "alt": "Demo image"
+        }
+      ],
+      "display": "INLINE",
+      "id": null,
+      "link": null
+    },
+    {
+      "type": "CARD",
       "id": "107800",
-      "type": "additional_common:game",
-      "title": "崩坏：星穹铁道",
-      "description": "角色扮演/箱庭/二次元\n全新4.2版本「如是，众生欢笑不已」现已推出！",
-      "badge": "相关游戏",
-      "cover": "https://i0.hdslb.com/bfs/game/ba526b994b2f20c250307d1f61f69fa720a4f4a1.png",
+      "cardType": "additional_common:game",
+      "title": "Related Game",
+      "description": "Game card description",
+      "badge": "Related",
+      "cover": {
+        "uri": "https://i0.hdslb.com/bfs/game/demo.png",
+        "category": "COVER"
+      },
       "coverRatio": null,
       "info": null,
-      "link": "https://www.biligame.com/detail?id=107800&sourceFrom=1005&biz_scene=dynamic"
+      "link": "https://www.biligame.com/detail?id=107800",
+      "display": "SMALL_CARD"
+    }
+  ],
+  "metrics": [
+    {
+      "key": "like",
+      "raw": 28392,
+      "display": "28392"
     },
-    "miniCard": null
-  },
-  "additional": {
-    "card": {
-      "id": "107800"
+    {
+      "key": "comment",
+      "raw": 2066,
+      "display": "2066"
     },
-    "vote": null,
-    "tags": null
-  },
-  "stats": {
-    "like": "28392",
-    "comment": "2066",
-    "forward": "64879"
-  },
-  "origin": null
+    {
+      "key": "forward",
+      "raw": 64879,
+      "display": "64879"
+    }
+  ],
+  "references": [],
+  "extensions": {}
 }

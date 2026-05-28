@@ -195,7 +195,7 @@ class SourceUpdateListenerTest {
                 iconUri = "",
                 kind = PlatformKind.PUBLISHER,
             ),
-            publisher = publisher,
+            publisher = publisher.toSnapshot(),
             roomId = "456",
             time = time,
             title = "Live title",

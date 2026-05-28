@@ -29,6 +29,8 @@ internal fun Layout.drawDynamicContent(content: DynamicContent, config: DrawConf
         when (it) {
             is DynamicContentNodeText -> paragraph.addText(it.text, it.style?.toTextStyle(style, config) ?: style)
             is DynamicContentNodeLink -> paragraph.addText(it.text, it.style?.toTextStyle(linkStyle, config) ?: linkStyle)
+            is DynamicContentNodeMention -> paragraph.addText(it.text, it.style?.toTextStyle(linkStyle, config) ?: linkStyle)
+            is DynamicContentNodeTag -> paragraph.addText(it.text, it.style?.toTextStyle(linkStyle, config) ?: linkStyle)
             is DynamicContentNodeEmoji -> paragraph.addEmoji(
                 it.text,
                 config.image(it.image),

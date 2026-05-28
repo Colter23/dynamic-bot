@@ -18,7 +18,7 @@ public class FileDynamicImageRenderer(
     private val drawSettingsProvider: () -> DrawSettings = { DrawSettings() },
 ) : DynamicImageRenderer {
     override fun render(dynamic: Dynamic): Path {
-        val od = outputDir.resolve(dynamic.platform.id).resolve(dynamic.publisher.externalId.ifBlank { dynamic.publisher.id.toString() })
+        val od = outputDir.resolve(dynamic.platform.id).resolve(dynamic.publisher.externalId.ifBlank { "unknown" })
         Files.createDirectories(od)
         val data = renderDynamicImage(
             dynamic = dynamic,

@@ -2,7 +2,9 @@ package top.colter.dynamic.listener
 
 import top.colter.dynamic.core.data.Dynamic
 import top.colter.dynamic.core.data.DynamicContentNodeLink
-import top.colter.dynamic.core.data.DynamicMediaCard
+import top.colter.dynamic.core.data.DynamicContentNodeMention
+import top.colter.dynamic.core.data.DynamicContentNodeTag
+import top.colter.dynamic.core.data.DynamicImageAttachment
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.LiveChange
 import top.colter.dynamic.core.data.LiveStatusUpdate
@@ -76,8 +78,10 @@ public class PushTemplateRenderer {
     ) {
         when (key) {
             "draw" -> drawImage?.let { contents += MessageContent.Image(fallbackText = "", image = it) }
-            "images" -> dynamic.media?.pics.orEmpty().forEach {
-                contents += MessageContent.Image(fallbackText = "", image = it.pic)
+            "images" -> dynamic.attachments.filterIsInstance<DynamicImageAttachment>().forEach { attachment ->
+                attachment.images.forEach {
+                    contents += MessageContent.Image(fallbackText = "", image = it.image, altText = it.alt)
+                }
             }
             "links" -> appendText(contents, collectAdditionalLinks(dynamic).joinToString("\n"))
             else -> appendText(contents, dynamicTextValue(key, dynamic) ?: placeholder)
@@ -136,19 +140,20 @@ public class PushTemplateRenderer {
 
     private fun collectAdditionalLinks(dynamic: Dynamic): List<String> {
         val links = linkedSetOf<String>()
-        dynamic.media?.video?.link?.addIfUseful(links, dynamic.link)
-        dynamic.media?.card.addLinkIfUseful(links, dynamic.link)
-        dynamic.media?.smallCard.addLinkIfUseful(links, dynamic.link)
-        dynamic.media?.miniCard.addLinkIfUseful(links, dynamic.link)
+        dynamic.attachments.forEach { attachment ->
+            attachment.link.addIfUseful(links, dynamic.link)
+        }
         dynamic.content?.contentNodes
             .orEmpty()
-            .filterIsInstance<DynamicContentNodeLink>()
-            .forEach { it.url.addIfUseful(links, dynamic.link) }
+            .forEach {
+                when (it) {
+                    is DynamicContentNodeLink -> it.url.addIfUseful(links, dynamic.link)
+                    is DynamicContentNodeMention -> it.url.addIfUseful(links, dynamic.link)
+                    is DynamicContentNodeTag -> it.url.addIfUseful(links, dynamic.link)
+                    else -> Unit
+                }
+            }
         return links.toList()
-    }
-
-    private fun DynamicMediaCard?.addLinkIfUseful(links: MutableSet<String>, mainLink: String) {
-        this?.link.addIfUseful(links, mainLink)
     }
 
     private fun String?.addIfUseful(links: MutableSet<String>, mainLink: String) {

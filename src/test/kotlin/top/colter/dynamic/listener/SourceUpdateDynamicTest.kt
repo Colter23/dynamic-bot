@@ -13,9 +13,8 @@ import top.colter.dynamic.core.data.Dynamic
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicContentNodeText
 import top.colter.dynamic.core.data.DynamicElementType
-import top.colter.dynamic.core.data.DynamicMedia
-import top.colter.dynamic.core.data.DynamicMediaVideo
-import top.colter.dynamic.core.data.DynamicMediaVideoStats
+import top.colter.dynamic.core.data.DynamicMetric
+import top.colter.dynamic.core.data.DynamicVideoAttachment
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LazyImage
@@ -459,7 +458,7 @@ class SourceUpdateDynamicTest {
                 kind = PlatformKind.PUBLISHER,
             ),
             dynamicId = "dynamic-1",
-            publisher = publisher,
+            publisher = publisher.toSnapshot(),
             time = time,
             link = "https://t.bilibili.com/dynamic-1",
             content = DynamicContent("Demo content", listOf(DynamicContentNodeText("Demo content"))),
@@ -468,15 +467,19 @@ class SourceUpdateDynamicTest {
 
     private fun Dynamic.withVideo(): Dynamic {
         return copy(
-            media = DynamicMedia(
-                video = DynamicMediaVideo(
+            attachments = listOf(
+                DynamicVideoAttachment(
                     id = "BV1",
                     title = "Demo video",
                     description = "Demo video description",
                     cover = LazyImage("https://example.com/cover.png"),
                     duration = "01:00",
                     badge = "video",
-                    stats = DynamicMediaVideoStats(play = "1", danmaku = "2", like = "3"),
+                    metrics = listOf(
+                        DynamicMetric(key = "play", display = "1"),
+                        DynamicMetric(key = "danmaku", display = "2"),
+                        DynamicMetric(key = "like", display = "3"),
+                    ),
                     link = "https://www.bilibili.com/video/BV1",
                 )
             )

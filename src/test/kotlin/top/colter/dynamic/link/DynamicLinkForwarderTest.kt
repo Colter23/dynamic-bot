@@ -263,7 +263,7 @@ class DynamicLinkForwarderTest {
                     face = LazyImage("https://example.com/face.png"),
                     createTime = 0,
                     createUser = 0,
-                ),
+                ).toSnapshot(),
                 time = 1,
                 link = parsedLink.normalizedUrl,
             )

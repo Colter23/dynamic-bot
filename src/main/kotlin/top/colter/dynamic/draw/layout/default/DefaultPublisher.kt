@@ -2,7 +2,7 @@ package top.colter.dynamic.draw.layout.default
 
 import top.colter.dynamic.DrawOrnament
 import top.colter.dynamic.core.data.LazyImage
-import top.colter.dynamic.core.data.Publisher
+import top.colter.dynamic.core.data.PublisherSnapshot
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.draw.layout.default.component.Author
 import top.colter.dynamic.draw.layout.default.component.AuthorSmall
@@ -13,7 +13,7 @@ import top.colter.skiko.layout.Layout
 
 
 internal fun Layout.drawPublisher(
-    publisher: Publisher,
+    publisher: PublisherSnapshot,
     time: String,
     link: String,
     config: DrawConfig,

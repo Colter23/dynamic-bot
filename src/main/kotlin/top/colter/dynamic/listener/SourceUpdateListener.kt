@@ -6,10 +6,12 @@ import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.config.DefaultConfigService
 import top.colter.dynamic.core.config.loadOrCreate
 import top.colter.dynamic.core.data.Dynamic
+import top.colter.dynamic.core.data.DynamicAttachmentDisplay
+import top.colter.dynamic.core.data.DynamicCardAttachment
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicContentNodeText
-import top.colter.dynamic.core.data.DynamicMedia
-import top.colter.dynamic.core.data.DynamicMediaCard
+import top.colter.dynamic.core.data.DynamicLabel
+import top.colter.dynamic.core.data.DynamicVideoAttachment
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.LiveChange
@@ -18,6 +20,7 @@ import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageChain
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.Publisher
+import top.colter.dynamic.core.data.PublisherSnapshot
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.SubscriberType
@@ -71,8 +74,8 @@ public class SourceUpdateListener(
     }
 
     private suspend fun handleDynamic(event: SourceUpdateEvent, dynamic: Dynamic) {
-        val normalizedDynamic = normalizeDynamicPublisher(dynamic)
-        val targets = resolveTargets(event.target, normalizedDynamic.publisher)
+        val (normalizedDynamic, storedPublisher) = normalizeDynamicPublisher(dynamic)
+        val targets = resolveTargets(event.target, storedPublisher)
         if (targets.isEmpty()) {
             logger.debug { "跳过动态：dynamicId=${normalizedDynamic.dynamicId}，原因=没有推送目标" }
             return
@@ -104,9 +107,9 @@ public class SourceUpdateListener(
         )
     }
 
-    private fun normalizeDynamicPublisher(dynamic: Dynamic): Dynamic {
+    private fun normalizeDynamicPublisher(dynamic: Dynamic): Pair<Dynamic, Publisher?> {
         val incoming = dynamic.publisher
-        val stored = findStoredPublisher(incoming) ?: return dynamic
+        val stored = findStoredPublisher(incoming) ?: return dynamic to null
         val normalizedPublisher = stored.copy(
             platformId = incoming.platformId,
             type = incoming.type,
@@ -124,53 +127,73 @@ public class SourceUpdateListener(
                 "发布者信息已同步：publisherId=${normalizedPublisher.id}，uid=${normalizedPublisher.externalId}"
             }
         }
-        return dynamic.copy(publisher = normalizedPublisher)
+        return dynamic.copy(publisher = normalizedPublisher.toSnapshot()) to normalizedPublisher
     }
 
-    private fun findStoredPublisher(publisher: Publisher): Publisher? {
-        if (publisher.id > 0) {
-            PublisherRepository.findById(publisher.id)?.let { return it }
-        }
+    private fun findStoredPublisher(publisher: PublisherSnapshot): Publisher? {
         if (publisher.platformId.isBlank() || publisher.externalId.isBlank()) return null
         return PublisherRepository.findByPlatformAndExternalId(publisher.platformId, publisher.externalId)
     }
 
     private suspend fun handleLive(event: SourceUpdateEvent, live: LiveStatusUpdate) {
-        val targets = resolveTargets(event.target, live.publisher).filterSubscribedBefore(live.time)
+        val (normalizedLive, storedPublisher) = normalizeLivePublisher(live)
+        val targets = resolveTargets(event.target, storedPublisher).filterSubscribedBefore(normalizedLive.time)
         if (targets.isEmpty()) {
-            logger.debug { "跳过直播更新：roomId=${live.roomId}，状态变化=${live.change}，原因=没有推送目标" }
+            logger.debug { "跳过直播更新：roomId=${normalizedLive.roomId}，状态变化=${normalizedLive.change}，原因=没有推送目标" }
             return
         }
 
         logger.info {
-            "收到直播更新：platform=${live.platform.id}，roomId=${live.roomId}，状态变化=${live.change}，目标数=${targets.size}"
+            "收到直播更新：platform=${normalizedLive.platform.id}，roomId=${normalizedLive.roomId}，状态变化=${normalizedLive.change}，目标数=${targets.size}"
         }
 
-        val template = resolveLiveTemplate(live)
-        val chain = buildLiveMessageChain(template, live)
+        val template = resolveLiveTemplate(normalizedLive)
+        val chain = buildLiveMessageChain(template, normalizedLive)
         publishMessage(
-            messageId = liveMessageId(live),
+            messageId = liveMessageId(normalizedLive),
             time = System.currentTimeMillis() / 1000,
             targets = targets,
             chain = chain,
-            skipReason = "roomId=${live.roomId}, change=${live.change}",
-            atAllMatchTypes = atAllMatchTypes(event, live),
+            skipReason = "roomId=${normalizedLive.roomId}, change=${normalizedLive.change}",
+            atAllMatchTypes = atAllMatchTypes(event, normalizedLive),
         )
     }
 
-    private fun resolveTargets(target: Subscriber?, publisher: Publisher): List<DeliveryTarget> {
+    private fun normalizeLivePublisher(live: LiveStatusUpdate): Pair<LiveStatusUpdate, Publisher?> {
+        val stored = findStoredPublisher(live.publisher) ?: return live to null
+        val storedSnapshot = stored.toSnapshot()
+        val normalizedSnapshot = storedSnapshot.copy(
+            identity = storedSnapshot.identity.copy(
+                platformId = live.publisher.platformId,
+                externalId = live.publisher.externalId,
+                type = live.publisher.type,
+            ),
+            name = live.publisher.name,
+            official = live.publisher.official,
+            state = live.publisher.state,
+            face = live.publisher.face,
+            pendant = live.publisher.pendant,
+            header = live.publisher.header ?: stored.header,
+        )
+        return live.copy(publisher = normalizedSnapshot) to stored
+    }
+
+    private fun resolveTargets(target: Subscriber?, publisher: Publisher?): List<DeliveryTarget> {
         target?.let {
             if (it.state != EntityState.ACTIVE) return emptyList()
             return listOf(
                 DeliveryTarget(
                     subscriber = it,
-                    subscription = SubscriptionRepository.findBySubscriberAndPublisher(
-                        subscriberId = it.id,
-                        publisherId = publisher.id,
-                    ),
+                    subscription = publisher?.let { stored ->
+                        SubscriptionRepository.findBySubscriberAndPublisher(
+                            subscriberId = it.id,
+                            publisherId = stored.id,
+                        )
+                    },
                 )
             )
         }
+        if (publisher == null) return emptyList()
         return SubscriptionRepository
             .findSubscriptionsWithSubscribersByPublisherId(publisher.id)
             .filter { it.subscriber.state == EntityState.ACTIVE }
@@ -303,7 +326,7 @@ public class SourceUpdateListener(
         if (event.label == LINK_PARSE_EVENT_LABEL) return emptySet()
         return buildSet {
             add(SubscriptionAtAllType.DYNAMIC)
-            if (dynamic.media?.video != null) add(SubscriptionAtAllType.VIDEO)
+            if (dynamic.attachments.any { it is DynamicVideoAttachment }) add(SubscriptionAtAllType.VIDEO)
         }
     }
 
@@ -323,7 +346,7 @@ public class SourceUpdateListener(
     }
 
     private fun dynamicMessageId(dynamic: Dynamic): Long {
-        return positiveHash("${dynamic.platform.id}:${dynamic.publisher.id}:${dynamic.dynamicId}")
+        return positiveHash("${dynamic.platform.id}:${dynamic.publisher.externalId}:${dynamic.dynamicId}")
     }
 
     private fun liveMessageId(live: LiveStatusUpdate): Long {
@@ -342,14 +365,15 @@ public class SourceUpdateListener(
             link.takeIf { it.isNotBlank() },
         ).joinToString("\n")
         val card = cover?.let {
-            DynamicMediaCard(
+            DynamicCardAttachment(
                 id = roomId,
-                type = "live",
+                cardType = "live",
                 title = liveTitle,
                 description = area.orEmpty(),
                 badge = "直播中",
                 cover = it,
                 link = link,
+                display = DynamicAttachmentDisplay.LARGE_CARD,
             )
         }
 
@@ -359,13 +383,13 @@ public class SourceUpdateListener(
             publisher = publisher,
             time = startedAt ?: time,
             link = link,
-            notice = "直播中",
+            labels = listOf(DynamicLabel("直播中")),
             title = liveTitle,
             content = DynamicContent(
                 text = contentText,
                 contentNodes = listOf(DynamicContentNodeText(contentText)),
             ),
-            media = card?.let { DynamicMedia(card = it) },
+            attachments = card?.let { listOf(it) }.orEmpty(),
         )
     }
 

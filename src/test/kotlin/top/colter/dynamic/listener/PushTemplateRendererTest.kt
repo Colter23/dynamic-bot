@@ -1,14 +1,14 @@
 package top.colter.dynamic.listener
 
 import top.colter.dynamic.core.data.Dynamic
+import top.colter.dynamic.core.data.DynamicCardAttachment
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicContentNodeLink
 import top.colter.dynamic.core.data.DynamicContentNodeText
-import top.colter.dynamic.core.data.DynamicMedia
-import top.colter.dynamic.core.data.DynamicMediaCard
-import top.colter.dynamic.core.data.DynamicMediaPic
-import top.colter.dynamic.core.data.DynamicMediaVideo
-import top.colter.dynamic.core.data.DynamicMediaVideoStats
+import top.colter.dynamic.core.data.DynamicImageAttachment
+import top.colter.dynamic.core.data.DynamicImageItem
+import top.colter.dynamic.core.data.DynamicMetric
+import top.colter.dynamic.core.data.DynamicVideoAttachment
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.LiveChange
@@ -144,7 +144,7 @@ class PushTemplateRendererTest {
                 face = LazyImage("https://example.com/face.png"),
                 createTime = 1,
                 createUser = 1,
-            ),
+            ).toSnapshot(),
             time = 1_710_000_000,
             link = "https://t.bilibili.com/dynamic-1",
             title = "Demo Title",
@@ -155,24 +155,30 @@ class PushTemplateRendererTest {
                     DynamicContentNodeLink("link", url = "https://example.com/content-link"),
                 ),
             ),
-            media = DynamicMedia(
-                pics = listOf(
-                    DynamicMediaPic(LazyImage("https://example.com/pic-a.png"), width = 100, height = 100),
-                    DynamicMediaPic(LazyImage("https://example.com/pic-b.png"), width = 100, height = 100),
+            attachments = listOf(
+                DynamicImageAttachment(
+                    images = listOf(
+                        DynamicImageItem(LazyImage("https://example.com/pic-a.png"), width = 100, height = 100),
+                        DynamicImageItem(LazyImage("https://example.com/pic-b.png"), width = 100, height = 100),
+                    ),
                 ),
-                video = DynamicMediaVideo(
+                DynamicVideoAttachment(
                     id = "BV1",
                     title = "video",
                     description = "desc",
                     cover = LazyImage("https://example.com/cover.png"),
                     duration = "01:00",
                     badge = "video",
-                    stats = DynamicMediaVideoStats(play = "1", danmaku = "2", like = "3"),
+                    metrics = listOf(
+                        DynamicMetric(key = "play", display = "1"),
+                        DynamicMetric(key = "danmaku", display = "2"),
+                        DynamicMetric(key = "like", display = "3"),
+                    ),
                     link = "https://www.bilibili.com/video/BV1",
                 ),
-                card = DynamicMediaCard(
+                DynamicCardAttachment(
                     id = "card-1",
-                    type = "article",
+                    cardType = "article",
                     title = "card",
                     description = "desc",
                     badge = "card",

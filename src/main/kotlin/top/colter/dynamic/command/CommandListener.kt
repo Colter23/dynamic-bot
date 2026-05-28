@@ -740,7 +740,7 @@ private class FilterAddElementCommandHandler(
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "add", "element"),
         description = "add an element block filter for a subscription",
-        usage = "filter add element <platform> <publisherUserId> <text|image|video|card|origin>",
+        usage = "filter add element <platform> <publisherUserId> <text|image|video|audio|card|poll|tag|file|origin>",
         requiredRole = CommandRole.USER,
     )
 

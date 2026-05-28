@@ -14,25 +14,28 @@ import top.colter.skiko.data.Shadow
 import top.colter.skiko.layout.*
 
 
-internal fun Layout.drawDynamicMedia(
-    media: DynamicMedia,
+internal fun Layout.drawDynamicAttachments(
+    attachments: List<DynamicAttachment>,
     config: DrawConfig,
     mode: DynamicRenderMode = DynamicRenderMode.ROOT,
 ) {
-
-    media.pics?.let { pics -> drawDynamicMediaPic(pics, config) }
-    media.video?.let { video -> drawDynamicMediaVideo(video, config, mode) }
-//    media.article?.let { article -> drawDynamicMediaArticle(article) }
-
-    media.card?.let { card -> drawDynamicMediaCard(card, config) }
-    media.smallCard?.let { card -> drawDynamicMediaSmallCard(card, config) }
-    media.miniCard?.let { card -> drawDynamicMediaMiniCard(card, config) }
-
+    attachments.forEach { attachment ->
+        when (attachment) {
+            is DynamicImageAttachment -> drawDynamicImages(attachment.images, config)
+            is DynamicVideoAttachment -> drawDynamicVideo(attachment, config, mode)
+            is DynamicCardAttachment -> when (attachment.display) {
+                DynamicAttachmentDisplay.MINI_CARD -> drawDynamicMiniCard(attachment, config)
+                DynamicAttachmentDisplay.SMALL_CARD -> drawDynamicSmallCard(attachment, config)
+                else -> drawDynamicCard(attachment, config)
+            }
+            else -> Unit
+        }
+    }
 }
 
 
-private fun Layout.drawDynamicMediaPic(pics: List<DynamicMediaPic>, config: DrawConfig) {
-    val imgList = pics.map { it to config.image(it.pic) }
+private fun Layout.drawDynamicImages(pics: List<DynamicImageItem>, config: DrawConfig) {
+    val imgList = pics.map { it to config.image(it.image) }
     val imgModifier = Modifier().background(config.theme.cardColor).border(2.dp, 10.dp, config.theme.borderColor).shadows(Shadow.ELEVATION_1)
     if (imgList.size == 1) imgModifier.fillMaxWidth()
     val lineCount = if (imgList.size == 1) 1 else if (imgList.size == 2 || imgList.size == 4) 2 else 3
@@ -43,7 +46,7 @@ private fun Layout.drawDynamicMediaPic(pics: List<DynamicMediaPic>, config: Draw
         modifier = Modifier().fillMaxWidth()
     ) {
         for ((pic, image) in imgList) {
-            DynamicMediaPicItem(
+            DynamicImageTile(
                 image = image,
                 badge = pic.badge,
                 lineCount = lineCount,
@@ -54,7 +57,7 @@ private fun Layout.drawDynamicMediaPic(pics: List<DynamicMediaPic>, config: Draw
     }
 }
 
-private fun Layout.DynamicMediaPicItem(
+private fun Layout.DynamicImageTile(
     image: Image,
     badge: String? = null,
     lineCount: Int,
@@ -90,14 +93,15 @@ private fun Layout.DynamicMediaPicItem(
 }
 
 
-private fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo, config: DrawConfig, mode: DynamicRenderMode) {
+private fun Layout.drawDynamicVideo(video: DynamicVideoAttachment, config: DrawConfig, mode: DynamicRenderMode) {
+    val cover = video.cover ?: return
     if (mode == DynamicRenderMode.FORWARD) {
         MediaSmall(
-            cover = config.image(video.cover),
+            cover = config.image(cover),
             title = video.title,
             desc = video.description,
-            duration = video.duration,
-            badge = video.badge,
+            duration = video.duration.orEmpty(),
+            badge = video.badge.orEmpty(),
             accentColor = config.theme.primaryColor,
             cardColor = config.theme.cardColor,
             borderColor = config.theme.borderColor,
@@ -105,12 +109,12 @@ private fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo, config: DrawC
         )
     } else {
         Media(
-            cover = config.image(video.cover),
+            cover = config.image(cover),
             title = video.title,
             desc = video.description,
-            duration = video.duration,
-            badge = video.badge,
-            info = "${video.stats.play}播放 ${video.stats.danmaku}弹幕",
+            duration = video.duration.orEmpty(),
+            badge = video.badge.orEmpty(),
+            info = video.metricText("play", "播放") + " " + video.metricText("danmaku", "弹幕"),
             accentColor = config.theme.primaryColor,
             cardColor = config.theme.cardColor,
             borderColor = config.theme.borderColor,
@@ -120,12 +124,13 @@ private fun Layout.drawDynamicMediaVideo(video: DynamicMediaVideo, config: DrawC
 }
 
 
-private fun Layout.drawDynamicMediaCard(card: DynamicMediaCard, config: DrawConfig) {
+private fun Layout.drawDynamicCard(card: DynamicCardAttachment, config: DrawConfig) {
+    val cover = card.cover ?: return
     Media(
-        cover = config.image(card.cover),
+        cover = config.image(cover),
         title = card.title,
         desc = card.description,
-        badge = card.badge,
+        badge = card.badge.orEmpty(),
         coverRatio = card.coverRatio ?: Ratio.COVER_1,
         accentColor = config.theme.primaryColor,
         cardColor = config.theme.cardColor,
@@ -134,12 +139,13 @@ private fun Layout.drawDynamicMediaCard(card: DynamicMediaCard, config: DrawConf
     )
 }
 
-private fun Layout.drawDynamicMediaSmallCard(card: DynamicMediaCard, config: DrawConfig) {
+private fun Layout.drawDynamicSmallCard(card: DynamicCardAttachment, config: DrawConfig) {
+    val cover = card.cover ?: return
     MediaSmall(
-        cover = config.image(card.cover),
+        cover = config.image(cover),
         title = card.title,
         desc = card.description,
-        badge = card.badge,
+        badge = card.badge.orEmpty(),
         coverRatio = card.coverRatio ?: Ratio.COVER_1,
         accentColor = config.theme.primaryColor,
         cardColor = config.theme.cardColor,
@@ -148,16 +154,22 @@ private fun Layout.drawDynamicMediaSmallCard(card: DynamicMediaCard, config: Dra
     )
 }
 
-private fun Layout.drawDynamicMediaMiniCard(card: DynamicMediaCard, config: DrawConfig) {
+private fun Layout.drawDynamicMiniCard(card: DynamicCardAttachment, config: DrawConfig) {
+    val cover = card.cover ?: return
     MediaMini(
-        cover = config.image(card.cover),
+        cover = config.image(cover),
         title = card.title,
         desc = card.description,
-        badge = card.badge,
+        badge = card.badge.orEmpty(),
         coverRatio = card.coverRatio ?: Ratio.COVER_1,
         accentColor = config.theme.primaryColor,
         cardColor = config.theme.cardColor,
         borderColor = config.theme.borderColor,
         secondaryTextColor = config.theme.secondaryTextColor,
     )
+}
+
+private fun DynamicVideoAttachment.metricText(key: String, suffix: String): String {
+    val value = metrics.firstOrNull { it.key == key }?.display.orEmpty()
+    return if (value.isBlank()) "" else "$value$suffix"
 }

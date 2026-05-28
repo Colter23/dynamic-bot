@@ -4,8 +4,8 @@ import java.util.concurrent.ConcurrentHashMap
 import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.Dynamic
-import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.PublisherProfile
+import top.colter.dynamic.core.data.PublisherSnapshot
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.SubscriberType
 import top.colter.dynamic.core.event.SourceUpdateEvent
@@ -74,7 +74,7 @@ public class DynamicLinkForwarder(
             name = context.chatId,
             type = context.chatType.toSubscriberType(),
         )
-        val normalizedDynamic = dynamic.copy(publisher = publisher)
+        val normalizedDynamic = dynamic.copy(publisher = publisher.toSnapshot())
 
         SourceUpdateEvent(
             source = LINK_PARSE_EVENT_SOURCE,
@@ -100,7 +100,7 @@ public class DynamicLinkForwarder(
         ).joinToString(":")
     }
 
-    private fun Publisher.toProfile(): PublisherProfile {
+    private fun PublisherSnapshot.toProfile(): PublisherProfile {
         return PublisherProfile(
             platformId = platformId,
             externalId = externalId,

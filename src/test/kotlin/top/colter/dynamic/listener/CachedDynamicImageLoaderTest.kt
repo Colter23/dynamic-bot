@@ -112,7 +112,7 @@ class CachedDynamicImageLoaderTest {
                 header = header,
                 createTime = 1,
                 createUser = 1,
-            ),
+            ).toSnapshot(),
             time = 1,
             link = "https://t.bilibili.com/1",
         )

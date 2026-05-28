@@ -3,6 +3,7 @@ package top.colter.dynamic.draw.layout.default
 import org.jetbrains.skia.FontStyle
 import org.jetbrains.skia.Image
 import top.colter.dynamic.core.data.Dynamic
+import top.colter.dynamic.core.data.DynamicReferenceKind
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.util.formatTime
 import top.colter.skiko.Modifier
@@ -70,10 +71,15 @@ private fun Layout.DefaultDynamicView(
                 )
             }
             dynamic.content?.let { content -> drawDynamicContent(content, config) }
-            dynamic.media?.let { media -> drawDynamicMedia(media, config, mode) }
-            dynamic.origin?.let {
-                DefaultDynamicView(it, config, DynamicRenderMode.FORWARD)
+            if (dynamic.attachments.isNotEmpty()) {
+                drawDynamicAttachments(dynamic.attachments, config, mode)
             }
+            dynamic.references
+                .filter { reference -> reference.kind == DynamicReferenceKind.ORIGIN }
+                .mapNotNull { reference -> reference.update }
+                .forEach { origin ->
+                    DefaultDynamicView(origin, config, DynamicRenderMode.FORWARD)
+                }
         }
     }
 }
