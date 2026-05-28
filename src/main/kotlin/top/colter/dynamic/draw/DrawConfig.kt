@@ -2,12 +2,11 @@ package top.colter.dynamic.draw
 
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
-import top.colter.dynamic.DrawFontSettings
 import top.colter.dynamic.DrawSettings
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.draw.image.DynamicImageCache
-import top.colter.skiko.FontConfig
+import top.colter.dynamic.draw.resource.DrawFonts
 import top.colter.skiko.FontRegistry
 import top.colter.skiko.Fonts
 import top.colter.skiko.withAlpha
@@ -24,7 +23,7 @@ data class DrawConfig(
     val fontRegistry: FontRegistry = Fonts.default,
 ) {
     init {
-        fontRegistry.ensureDefaultFont(settings.font.toFontConfig())
+        DrawFonts.ensureDefaultFonts(fontRegistry, settings.font)
     }
 
     fun image(image: LazyImage): Image = imageResolver.image(image)
@@ -51,15 +50,6 @@ data class DrawTheme(
             )
         }
     }
-}
-
-private fun DrawFontSettings.toFontConfig(): FontConfig {
-    return FontConfig(
-        defaultFamily = textFamily,
-        emojiFamily = emojiFamily,
-        defaultFontFile = textFontFile,
-        emojiFontFile = emojiFontFile,
-    )
 }
 
 internal fun parseHexColor(value: String): Int {
