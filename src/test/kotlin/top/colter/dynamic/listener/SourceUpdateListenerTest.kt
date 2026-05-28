@@ -5,6 +5,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.PushTemplates
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.LiveChange
@@ -44,9 +45,8 @@ class SourceUpdateListenerTest {
         val (publisher, subscriber) = seededSubscription("live-started")
         val listener = SourceUpdateListener(
             config = MainDynamicConfig(
-                templates = mapOf(
-                    "default" to "default",
-                    "live_started" to "{draw}\\n{name}|{uid}|{rid}|{title}|{area}\\n{cover}\\n{link}\\rnext",
+                templates = PushTemplates(
+                    liveStarted = "{draw}\\n{name}|{uid}|{rid}|{title}|{area}\\n{cover}\\n{link}\\rnext",
                 ),
             ),
             imageLoader = DynamicImageLoader { },
@@ -82,9 +82,8 @@ class SourceUpdateListenerTest {
         val (publisher, subscriber) = seededSubscription("live-ended")
         val listener = SourceUpdateListener(
             config = MainDynamicConfig(
-                templates = mapOf(
-                    "default" to "default",
-                    "live_ended" to "{name}|{uid}|{rid}|{title}|{area}|{startTime}|{endTime}|{duration}|{link}",
+                templates = PushTemplates(
+                    liveEnded = "{name}|{uid}|{rid}|{title}|{area}|{startTime}|{endTime}|{duration}|{link}",
                 ),
             ),
         )

@@ -23,7 +23,7 @@ dependencies {
     implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.3")// 临时
 
-    implementation("top.colter.dynamic:dynamic-bot-core:0.0.4")
+    implementation("top.colter.dynamic:dynamic-bot-core:0.0.5")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("io.github.oshai:kotlin-logging-jvm:7.0.0")
     implementation("org.slf4j:slf4j-simple:2.0.16")

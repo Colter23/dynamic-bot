@@ -194,10 +194,6 @@ public fun Application.adminModule(context: AdminServerContext) {
                 val id = call.pathInt("id")
                 call.respondApi { context.service.clearFilterRules(id) }
             }
-            get("/templates") {
-                if (!call.ensureAuthorized(context)) return@get
-                call.respondApi { context.service.templates() }
-            }
             get("/configs") {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.configs() }
@@ -211,16 +207,6 @@ public fun Application.adminModule(context: AdminServerContext) {
                 if (!call.ensureAuthorized(context)) return@put
                 val id = call.pathString("id")
                 call.respondApi { context.service.updateConfig(id, call.receive()) }
-            }
-            put("/template-bindings/publisher/{publisherId}") {
-                if (!call.ensureAuthorized(context)) return@put
-                val publisherId = call.pathInt("publisherId")
-                call.respondApi { context.service.setPublisherTemplate(publisherId, call.receive()) }
-            }
-            delete("/template-bindings/publisher/{publisherId}") {
-                if (!call.ensureAuthorized(context)) return@delete
-                val publisherId = call.pathInt("publisherId")
-                call.respondApi { context.service.removePublisherTemplate(publisherId) }
             }
             post("/platforms/{platform}/login/cookie") {
                 if (!call.ensureAuthorized(context)) return@post

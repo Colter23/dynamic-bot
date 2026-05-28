@@ -7,6 +7,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.PushTemplates
 import top.colter.dynamic.core.data.Dynamic
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicContentNodeText
@@ -30,7 +31,6 @@ import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
 import top.colter.skiko.FontUtils
@@ -50,19 +50,15 @@ class SourceUpdateDynamicTest {
     }
 
     @Test
-    fun shouldConvertDynamicUpdateToMessageEventWithBoundTemplateAndImage() = runBlocking {
-        initDb("dynamic-listener-bound-template")
+    fun shouldConvertDynamicUpdateToMessageEventWithGlobalTemplateAndImage() = runBlocking {
+        initDb("dynamic-listener-global-template")
         val publisher = createPublisher()
         val subscriber = createSubscriber()
         SubscriptionRepository.subscribe(subscriber.id, publisher.id)
-        PublisherTemplateRepository.setPublisherTemplate(publisher.id, "bili-video")
 
         val listener = SourceUpdateListener(
             config = MainDynamicConfig(
-                templates = mapOf(
-                    "default" to "default {name}",
-                    "bili-video" to "{draw}\nvideo {name} {content}",
-                ),
+                templates = PushTemplates(dynamic = "{draw}\nvideo {name} {content}"),
             ),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/dynamic.png") },
@@ -102,7 +98,7 @@ class SourceUpdateDynamicTest {
         var renderedHeader: String? = null
 
         val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = mapOf("default" to "{draw}\n{name}")),
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "{draw}\n{name}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { dynamic ->
                 renderedHeader = dynamic.publisher.header?.uri
@@ -129,7 +125,7 @@ class SourceUpdateDynamicTest {
         val subscriber = createSubscriber()
 
         val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = mapOf("default" to "{draw}\nfallback {name}")),
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "{draw}\nfallback {name}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { error("绘制失败") },
         )
@@ -156,7 +152,7 @@ class SourceUpdateDynamicTest {
         try {
             val outputDir = createTempDirectory("dynamic-bot-rendered")
             val listener = SourceUpdateListener(
-                config = MainDynamicConfig(templates = mapOf("default" to "{draw}\n{name}")),
+                config = MainDynamicConfig(templates = PushTemplates(dynamic = "{draw}\n{name}")),
                 imageLoader = DynamicImageLoader { },
                 imageRenderer = FileDynamicImageRenderer(outputDir),
             )
@@ -181,7 +177,7 @@ class SourceUpdateDynamicTest {
         var renderCalls = 0
 
         val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = mapOf("default" to "text only {name}")),
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "text only {name}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer {
                 renderCalls += 1
@@ -204,7 +200,7 @@ class SourceUpdateDynamicTest {
         val subscriber = createSubscriber()
 
         val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = mapOf("default" to "first {name}\\rsecond {link}")),
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "first {name}\\rsecond {link}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/not-used.png") },
         )
@@ -230,7 +226,7 @@ class SourceUpdateDynamicTest {
         var loadCalls = 0
         var renderCalls = 0
         val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = mapOf("default" to "filtered {name}")),
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "filtered {name}")),
             imageLoader = DynamicImageLoader { loadCalls += 1 },
             imageRenderer = DynamicImageRenderer {
                 renderCalls += 1
@@ -260,7 +256,7 @@ class SourceUpdateDynamicTest {
         DynamicFilterRuleRepository.addElementRule(filteredSubscription.id, DynamicElementType.TEXT)
 
         val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = mapOf("default" to "allowed {name}")),
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "allowed {name}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/allowed.png") },
         )
@@ -284,7 +280,7 @@ class SourceUpdateDynamicTest {
         DynamicFilterRuleRepository.addElementRule(filteredSubscription.id, DynamicElementType.TEXT)
 
         val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = mapOf("default" to "direct {name}")),
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "direct {name}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/direct.png") },
         )
@@ -308,7 +304,7 @@ class SourceUpdateDynamicTest {
         val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!
 
         val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = mapOf("default" to "old {name}")),
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "old {name}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/old.png") },
         )

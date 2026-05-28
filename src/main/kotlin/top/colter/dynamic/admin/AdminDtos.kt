@@ -128,28 +128,6 @@ public data class DynamicFilterRuleDto(
 )
 
 @Serializable
-public data class TemplateDto(
-    val name: String,
-    val body: String,
-)
-
-@Serializable
-public data class TemplateBindingDto(
-    val id: Int,
-    val publisherId: Int? = null,
-    val platformId: String? = null,
-    val dynamicType: String? = null,
-    val templateName: String,
-    val priority: Int,
-)
-
-@Serializable
-public data class TemplatesResponse(
-    val templates: List<TemplateDto>,
-    val bindings: List<TemplateBindingDto>,
-)
-
-@Serializable
 public data class ConfigSummaryDto(
     val id: String,
     val name: String,
@@ -231,11 +209,6 @@ public data class CreateFilterRuleRequest(
     val ruleType: String,
     val matcher: String,
     val value: String,
-)
-
-@Serializable
-public data class TemplateBindingRequest(
-    val templateName: String,
 )
 
 @Serializable

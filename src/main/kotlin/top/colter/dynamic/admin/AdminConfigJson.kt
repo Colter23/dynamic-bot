@@ -84,9 +84,6 @@ internal object AdminConfigJson {
                 ConfigFieldType.NUMBER -> validateNumber(field, value)
                 ConfigFieldType.SELECT -> validateSelect(field, value)
                 ConfigFieldType.BOOLEAN -> validateBoolean(field, value)
-                ConfigFieldType.TEMPLATE_MAP -> require(value is JsonObject) {
-                    "${field.path} must be an object"
-                }
                 ConfigFieldType.COMMAND_PERMISSIONS -> require(value is JsonArray) {
                     "${field.path} must be an array"
                 }

@@ -28,7 +28,6 @@ import top.colter.dynamic.core.filter.DynamicFilterEvaluator
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.link.LINK_PARSE_EVENT_LABEL
@@ -39,8 +38,7 @@ public class SourceUpdateListener(
     config: MainDynamicConfig? = null,
     configProvider: (() -> MainDynamicConfig)? = null,
     private val configService: ConfigService = DefaultConfigService,
-    private val dynamicTemplateRenderer: DynamicMessageTemplateRenderer = DynamicMessageTemplateRenderer(),
-    private val liveTemplateRenderer: LiveMessageTemplateRenderer = LiveMessageTemplateRenderer(),
+    private val templateRenderer: PushTemplateRenderer = PushTemplateRenderer(),
     imageLoader: DynamicImageLoader? = null,
     imageRenderer: DynamicImageRenderer? = null,
 ) : Listener<SourceUpdateEvent> {
@@ -91,7 +89,7 @@ public class SourceUpdateListener(
             "收到动态：platform=${normalizedDynamic.platform.id}，dynamicId=${normalizedDynamic.dynamicId}，目标数=${deliverableTargets.size}"
         }
 
-        val template = resolveDynamicTemplate(normalizedDynamic)
+        val template = resolveDynamicTemplate()
         val chain = buildDynamicMessageChain(template, normalizedDynamic)
         publishMessage(
             messageId = dynamicMessageId(normalizedDynamic),
@@ -201,17 +199,17 @@ public class SourceUpdateListener(
     }
 
     private suspend fun buildDynamicMessageChain(template: String, dynamic: Dynamic): List<MessageChain> {
-        val drawImage = if (dynamicTemplateRenderer.requiresDraw(template)) renderImage(dynamic) else null
-        return dynamicTemplateRenderer.render(template, dynamic, drawImage)
+        val drawImage = if (templateRenderer.requiresDraw(template, dynamic)) renderImage(dynamic) else null
+        return templateRenderer.render(template, dynamic, drawImage)
     }
 
     private suspend fun buildLiveMessageChain(template: String, live: LiveStatusUpdate): List<MessageChain> {
-        val drawImage = if (liveTemplateRenderer.requiresDraw(template, live)) {
+        val drawImage = if (templateRenderer.requiresDraw(template, live)) {
             renderImage(live.toDrawableDynamic())
         } else {
             null
         }
-        return liveTemplateRenderer.render(template, live, drawImage)
+        return templateRenderer.render(template, live, drawImage)
     }
 
     private suspend fun renderImage(dynamic: Dynamic): LazyImage? {
@@ -225,42 +223,15 @@ public class SourceUpdateListener(
         }.getOrNull()
     }
 
-    private fun resolveDynamicTemplate(dynamic: Dynamic): String {
-        val runtimeConfig = runtimeConfigProvider()
-        val templateName = PublisherTemplateRepository.findTemplateName(
-            publisherId = dynamic.publisher.id,
-            platformId = dynamic.platform.id,
-            dynamicType = dynamicType(dynamic),
-        )
-        return templateName
-            ?.let { runtimeConfig.templates[it] }
-            ?: runtimeConfig.templates[MainDynamicConfig.DEFAULT_TEMPLATE_NAME]
-            ?: MainDynamicConfig.DEFAULT_TEMPLATE
+    private fun resolveDynamicTemplate(): String {
+        return runtimeConfigProvider().templates.dynamic
     }
 
     private fun resolveLiveTemplate(live: LiveStatusUpdate): String {
-        val runtimeConfig = runtimeConfigProvider()
-        val templateName = PublisherTemplateRepository.findTemplateName(
-            publisherId = live.publisher.id,
-            platformId = live.platform.id,
-            dynamicType = live.updateType,
-        )
-        return templateName
-            ?.let { runtimeConfig.templates[it] }
-            ?: runtimeConfig.templates[live.updateType]
-            ?: when (live.change) {
-                LiveChange.STARTED -> MainDynamicConfig.DEFAULT_LIVE_STARTED_TEMPLATE
-                LiveChange.ENDED -> MainDynamicConfig.DEFAULT_LIVE_ENDED_TEMPLATE
-            }
-    }
-
-    private fun dynamicType(dynamic: Dynamic): String {
-        val media = dynamic.media
-        return when {
-            media?.video != null -> "video"
-            !media?.pics.isNullOrEmpty() -> "image"
-            media?.card != null || media?.smallCard != null || media?.miniCard != null -> "card"
-            else -> "text"
+        val templates = runtimeConfigProvider().templates
+        return when (live.change) {
+            LiveChange.STARTED -> templates.liveStarted
+            LiveChange.ENDED -> templates.liveEnded
         }
     }
 

@@ -700,7 +700,6 @@
         <button data-nav="subscriptions"><span class="nav-icon">订</span><span>订阅管理</span></button>
         <button data-nav="entities"><span class="nav-icon">源</span><span>发布者与目标</span></button>
         <button data-nav="filters"><span class="nav-icon">滤</span><span>过滤规则</span></button>
-        <button data-nav="templates"><span class="nav-icon">模</span><span>模板绑定</span></button>
         <button data-nav="configs"><span class="nav-icon">Cfg</span><span>配置</span></button>
       </nav>
       <div class="sidebar-footer">
@@ -818,21 +817,6 @@
           </div>
         </section>
 
-        <section class="page" data-page="templates" hidden>
-          <div class="page-grid">
-            <section class="panel full">
-              <div class="panel-head">
-                <div>
-                  <h2>模板与绑定</h2>
-                  <p>模板来自配置文件，绑定关系存储在数据库中。</p>
-                </div>
-                <button id="openTemplateBinding">绑定模板</button>
-              </div>
-              <div class="table-wrap"><table id="templates"></table></div>
-            </section>
-          </div>
-        </section>
-
         <section class="page" data-page="configs" hidden>
           <div class="config-shell">
             <section class="panel">
@@ -921,7 +905,6 @@
         subscribers: [],
         subscriptions: [],
         filters: [],
-        templates: null,
         subscriberTargetPlatforms: null,
         configs: null,
         configDetails: {}
@@ -954,8 +937,7 @@
       VIDEO: "视频",
       CARD: "卡片",
       ORIGIN: "转发源动态",
-      template: "模板",
-      binding: "绑定"
+      template: "模板"
     };
     const label = value => labels[value] || value;
     const pageMeta = {
@@ -964,7 +946,6 @@
       subscriptions: ["订阅管理", "创建和管理发布者转发关系。"],
       entities: ["发布者与目标", "管理动态发布者和消息接收目标。"],
       filters: ["过滤规则", "管理每个订阅的动态屏蔽规则。"],
-      templates: ["模板绑定", "查看模板并管理发布者绑定。"],
       configs: ["配置", "在线编辑主项目和插件配置。"]
     };
     state.initialPage = pageFromLocation();
@@ -1139,7 +1120,6 @@
       if (page === "subscriptions") return loadSubscriptions(force);
       if (page === "entities") return loadEntities(force);
       if (page === "filters") return loadFilters(force);
-      if (page === "templates") return loadTemplates(force);
       if (page === "configs") return loadConfigs(force);
     }
 
@@ -1243,10 +1223,6 @@
         const match = text.match(/count=(\d+)/i);
         return match ? "过滤规则已清空：" + match[1] + " 条" : "过滤规则已清空";
       }
-      if (lower.includes("template binding updated")) return "模板绑定已保存";
-      if (lower.includes("template binding unchanged")) return "模板绑定未变化";
-      if (lower.includes("template binding removed")) return "模板绑定已移除";
-      if (lower.includes("template binding not found")) return "未找到模板绑定";
       if (lower.includes("publisher removed")) {
         const match = text.match(/subscriptions=(\d+)/i);
         return match ? "发布者已删除，关联订阅已删除 " + match[1] + " 个" : "发布者已删除";
@@ -1298,13 +1274,6 @@
         state.cache.subscriptions = await api("/subscriptions");
       }
       return state.cache.subscriptions;
-    }
-
-    async function ensureTemplates(force) {
-      if (force || !state.cache.templates) {
-        state.cache.templates = await api("/templates");
-      }
-      return state.cache.templates;
     }
 
     async function loadEntities(force) {
@@ -1366,29 +1335,6 @@
         .map(subscription => optionHtml(subscription.id, subscriptionLabel(subscription), String(subscription.id) === String(current)))
         .join("");
       els("clearFilters").disabled = !select.value;
-    }
-
-    async function loadTemplates(force) {
-      const data = await ensureTemplates(force);
-      await ensurePublishers(force);
-      const publishersById = Object.fromEntries(state.cache.publishers.map(publisher => [String(publisher.id), publisher]));
-      const rows = data.templates.map(t => ({ kind: "template", id: "", name: t.name, value: t.body }))
-        .concat(data.bindings.map(b => ({
-          kind: "binding",
-          id: b.id,
-          publisherId: b.publisherId,
-          name: b.publisherId ? publisherLabel(publishersById[String(b.publisherId)]) : (b.platformId || ""),
-          value: b.templateName
-        })));
-      renderTable("templates", [
-        { label: "类型", render: r => esc(label(r.kind)) },
-        { label: "ID", key: "id" },
-        { label: "名称", key: "name" },
-        { label: "内容", key: "value" },
-        { label: "操作", render: r => r.kind === "binding" && r.publisherId
-          ? "<div class='table-actions'><button class='danger' data-action='delete-template-binding' data-publisher-id='" + esc(r.publisherId) + "'>移除</button></div>"
-          : "<span class='muted'>-</span>" }
-      ], rows);
     }
 
     async function ensureConfigs(force) {
@@ -1489,13 +1435,6 @@
       const value = configValue(detail, field.path);
       const hint = field.description ? "<span class='field-hint'>" + esc(field.description) + "</span>" : "";
       const labelHtml = configLabelHtml(field, id);
-      if (field.type === "TEMPLATE_MAP") {
-        return "<div class='form-field full-width'>" + labelHtml
-          + "<div class='config-table-wrap' data-config-templates='" + esc(field.path) + "'><table><thead><tr><th>模板名</th><th>模板内容</th><th>操作</th></tr></thead><tbody>"
-          + renderTemplateConfigRows(value || {})
-          + "</tbody></table></div><div class='form-actions'><button type='button' class='secondary' data-action='open-template-modal'>添加模板</button></div>"
-          + hint + "</div>";
-      }
       if (field.type === "COMMAND_PERMISSIONS") {
         return "<div class='form-field full-width'>" + labelHtml
           + "<div class='config-table-wrap' data-config-permissions='" + esc(field.path) + "'><table><thead><tr><th>平台</th><th>会话类型</th><th>会话 ID</th><th>发送者 ID</th><th>角色</th><th>操作</th></tr></thead><tbody>"
@@ -1523,12 +1462,6 @@
       return "<div class='form-field'>" + labelHtml + control + hint + "</div>";
     }
 
-    function renderTemplateConfigRows(templates) {
-      const entries = Object.entries(templates);
-      if (!entries.length) return "<tr data-empty-row><td colspan='3'><div class='empty'>暂无模板</div></td></tr>";
-      return entries.map(([name, body]) => templateConfigRow(name, body)).join("");
-    }
-
     function configRowDataAttr(value) {
       return esc(JSON.stringify(value || {}));
     }
@@ -1540,22 +1473,6 @@
       } catch (_) {
         return {};
       }
-    }
-
-    function templateValueFromRow(row) {
-      const data = readConfigRowData(row);
-      return {
-        name: String(data.name || ""),
-        body: String(data.body || "")
-      };
-    }
-
-    function templateConfigRow(name, body) {
-      return "<tr data-template-row data-config-json='" + configRowDataAttr({ name: name || "", body: body || "" }) + "'>"
-        + "<td><div class='config-table-text'>" + esc(name || "") + "</div></td>"
-        + "<td><div class='config-table-text'>" + esc(body || "") + "</div></td>"
-        + "<td><div class='table-actions'><button type='button' class='secondary' data-action='edit-template-row'>修改</button><button type='button' class='secondary' data-action='remove-template-row'>移除</button></div></td>"
-        + "</tr>";
     }
 
     function renderPermissionRows(permissions) {
@@ -1614,40 +1531,28 @@
       const isEdit = Boolean(row);
       state.configItemModal = { kind: kind, row: row || null };
       setConfigItemMessage("", false);
-      els("configItemTitle").textContent = kind === "template"
-        ? (isEdit ? "修改模板" : "添加模板")
-        : (isEdit ? "修改权限规则" : "添加权限规则");
+      els("configItemTitle").textContent = isEdit ? "修改权限规则" : "添加权限规则";
       els("confirmConfigItem").textContent = isEdit ? "保存" : "添加";
-      if (kind === "template") {
-        const value = isEdit ? templateValueFromRow(row) : { name: "", body: "" };
-        els("configItemBody").innerHTML = "<div class='forms'>"
-          + "<div class='form-field full-width'><label for='configTemplateName'>模板名</label><input id='configTemplateName' placeholder='default' value='" + esc(value.name) + "'></div>"
-          + "<div class='form-field full-width'><label for='configTemplateBody'>模板内容</label><textarea id='configTemplateBody' placeholder='{draw}\\n{name}\\n{content}'>" + esc(value.body) + "</textarea></div>"
-          + "</div>";
-        els("configItemModal").hidden = false;
-        setTimeout(() => els("configTemplateName").focus(), 0);
-      } else {
-        const value = isEdit ? permissionValueFromRow(row) : {
-          platform: "*",
-          chatType: null,
-          chatId: "*",
-          senderId: "*",
-          role: "ADMIN"
-        };
-        els("configItemBody").innerHTML = "<div class='forms'>"
-          + "<div class='form-field'><label for='configPermissionPlatform'>平台</label><input id='configPermissionPlatform' value='" + esc(value.platform) + "'></div>"
-          + "<div class='form-field'><label for='configPermissionChatType'>会话类型</label><select id='configPermissionChatType'>"
-          + optionHtml("", "全部会话类型", !value.chatType) + optionHtml("GROUP", "群聊", value.chatType === "GROUP") + optionHtml("PRIVATE", "私聊", value.chatType === "PRIVATE") + optionHtml("CHANNEL", "频道", value.chatType === "CHANNEL")
-          + "</select></div>"
-          + "<div class='form-field'><label for='configPermissionChatId'>会话 ID</label><input id='configPermissionChatId' value='" + esc(value.chatId) + "'></div>"
-          + "<div class='form-field'><label for='configPermissionSenderId'>发送者 ID</label><input id='configPermissionSenderId' value='" + esc(value.senderId) + "'></div>"
-          + "<div class='form-field'><label for='configPermissionRole'>角色</label><select id='configPermissionRole'>"
-          + optionHtml("ADMIN", "管理员", value.role === "ADMIN") + optionHtml("USER", "普通用户", value.role === "USER")
-          + "</select></div>"
-          + "</div>";
-        els("configItemModal").hidden = false;
-        setTimeout(() => els("configPermissionPlatform").focus(), 0);
-      }
+      const value = isEdit ? permissionValueFromRow(row) : {
+        platform: "*",
+        chatType: null,
+        chatId: "*",
+        senderId: "*",
+        role: "ADMIN"
+      };
+      els("configItemBody").innerHTML = "<div class='forms'>"
+        + "<div class='form-field'><label for='configPermissionPlatform'>平台</label><input id='configPermissionPlatform' value='" + esc(value.platform) + "'></div>"
+        + "<div class='form-field'><label for='configPermissionChatType'>会话类型</label><select id='configPermissionChatType'>"
+        + optionHtml("", "全部会话类型", !value.chatType) + optionHtml("GROUP", "群聊", value.chatType === "GROUP") + optionHtml("PRIVATE", "私聊", value.chatType === "PRIVATE") + optionHtml("CHANNEL", "频道", value.chatType === "CHANNEL")
+        + "</select></div>"
+        + "<div class='form-field'><label for='configPermissionChatId'>会话 ID</label><input id='configPermissionChatId' value='" + esc(value.chatId) + "'></div>"
+        + "<div class='form-field'><label for='configPermissionSenderId'>发送者 ID</label><input id='configPermissionSenderId' value='" + esc(value.senderId) + "'></div>"
+        + "<div class='form-field'><label for='configPermissionRole'>角色</label><select id='configPermissionRole'>"
+        + optionHtml("ADMIN", "管理员", value.role === "ADMIN") + optionHtml("USER", "普通用户", value.role === "USER")
+        + "</select></div>"
+        + "</div>";
+      els("configItemModal").hidden = false;
+      setTimeout(() => els("configPermissionPlatform").focus(), 0);
     }
 
     function closeConfigItemModal() {
@@ -1659,10 +1564,6 @@
     }
 
     function refreshConfigTableEmptyRows() {
-      const templateBody = document.querySelector("[data-config-templates] tbody");
-      if (templateBody && !templateBody.querySelector("[data-template-row]") && !templateBody.querySelector("[data-empty-row]")) {
-        templateBody.insertAdjacentHTML("beforeend", "<tr data-empty-row><td colspan='3'><div class='empty'>暂无模板</div></td></tr>");
-      }
       const permissionBody = document.querySelector("[data-config-permissions] tbody");
       if (permissionBody && !permissionBody.querySelector("[data-permission-row]") && !permissionBody.querySelector("[data-empty-row]")) {
         permissionBody.insertAdjacentHTML("beforeend", "<tr data-empty-row><td colspan='6'><div class='empty'>暂无权限规则</div></td></tr>");
@@ -1672,40 +1573,21 @@
     function addConfigItemFromModal() {
       const modal = state.configItemModal;
       if (!modal) return;
-      if (modal.kind === "template") {
-        const name = els("configTemplateName").value.trim();
-        const body = els("configTemplateBody").value;
-        if (!name) return setConfigItemMessage("请填写模板名", true);
-        const existingNames = Array.from(document.querySelectorAll("[data-template-row]"))
-          .filter(row => row !== modal.row)
-          .map(row => templateValueFromRow(row).name.trim());
-        if (existingNames.includes(name)) return setConfigItemMessage("模板名已存在", true);
-        const tbody = document.querySelector("[data-config-templates] tbody");
-        if (!tbody) return;
-        if (modal.row) {
-          modal.row.outerHTML = templateConfigRow(name, body);
-        } else {
-          const empty = tbody.querySelector("[data-empty-row]");
-          if (empty) empty.remove();
-          tbody.insertAdjacentHTML("beforeend", templateConfigRow(name, body));
-        }
+      const tbody = document.querySelector("[data-config-permissions] tbody");
+      if (!tbody) return;
+      const next = {
+        platform: els("configPermissionPlatform").value.trim() || "*",
+        chatType: els("configPermissionChatType").value || null,
+        chatId: els("configPermissionChatId").value.trim() || "*",
+        senderId: els("configPermissionSenderId").value.trim() || "*",
+        role: els("configPermissionRole").value || "ADMIN"
+      };
+      if (modal.row) {
+        modal.row.outerHTML = permissionConfigRow(next);
       } else {
-        const tbody = document.querySelector("[data-config-permissions] tbody");
-        if (!tbody) return;
-        const next = {
-          platform: els("configPermissionPlatform").value.trim() || "*",
-          chatType: els("configPermissionChatType").value || null,
-          chatId: els("configPermissionChatId").value.trim() || "*",
-          senderId: els("configPermissionSenderId").value.trim() || "*",
-          role: els("configPermissionRole").value || "ADMIN"
-        };
-        if (modal.row) {
-          modal.row.outerHTML = permissionConfigRow(next);
-        } else {
-          const empty = tbody.querySelector("[data-empty-row]");
-          if (empty) empty.remove();
-          tbody.insertAdjacentHTML("beforeend", permissionConfigRow(next));
-        }
+        const empty = tbody.querySelector("[data-empty-row]");
+        if (empty) empty.remove();
+        tbody.insertAdjacentHTML("beforeend", permissionConfigRow(next));
       }
       closeConfigItemModal();
     }
@@ -1713,16 +1595,7 @@
     function collectConfigValues(detail) {
       const values = {};
       (detail.schema.fields || []).forEach(field => {
-        if (field.type === "TEMPLATE_MAP") {
-          const templates = {};
-          document.querySelectorAll("[data-template-row]").forEach(row => {
-            const value = templateValueFromRow(row);
-            const name = value.name.trim();
-            const body = value.body;
-            if (name) templates[name] = body;
-          });
-          values[field.path] = templates;
-        } else if (field.type === "COMMAND_PERMISSIONS") {
+        if (field.type === "COMMAND_PERMISSIONS") {
           values[field.path] = Array.from(document.querySelectorAll("[data-permission-row]")).map(permissionValueFromRow);
         } else {
           const input = document.querySelector("[data-config-input='" + field.path + "']");
@@ -1744,9 +1617,9 @@
       const detail = await ensureConfigDetail(id);
       const values = collectConfigValues(detail);
       if (id === "main") {
-        const templates = values.templates || {};
-        if (!templates.default || !String(templates.default).trim()) {
-          setConfigMessage("default 模板不能为空", true);
+        const requiredTemplates = ["templates.dynamic", "templates.liveStarted", "templates.liveEnded"];
+        if (requiredTemplates.some(path => !String(values[path] || "").trim())) {
+          setConfigMessage("三种推送模板都不能为空", true);
           return;
         }
       }
@@ -1762,9 +1635,7 @@
         values: result.values,
         secretStates: result.secretStates
       });
-      if (id === "main") {
-        invalidate("overview", "templates");
-      }
+      if (id === "main") invalidate("overview");
       renderConfigForm(state.cache.configDetails[id]);
       if (result.restartRequired && result.pluginId) {
         showConfigReloadAction(result.pluginId);
@@ -2012,13 +1883,11 @@
       state.actionModal = { kind };
       const titles = {
         subscription: "创建订阅",
-        filter: "添加过滤规则",
-        template: "绑定发布者模板"
+        filter: "添加过滤规则"
       };
       const confirmTexts = {
         subscription: "创建",
-        filter: "添加",
-        template: "绑定"
+        filter: "添加"
       };
       els("actionTitle").textContent = titles[kind] || "操作";
       els("confirmAction").textContent = confirmTexts[kind] || "保存";
@@ -2030,7 +1899,6 @@
         let canSubmit = true;
         if (kind === "subscription") canSubmit = await renderSubscriptionAction();
         if (kind === "filter") canSubmit = await renderFilterAction();
-        if (kind === "template") canSubmit = await renderTemplateAction();
         els("confirmAction").disabled = canSubmit === false;
       } catch (error) {
         setActionMessage(error.message, true);
@@ -2214,29 +2082,6 @@
       if (els("actionFilterElementWrap")) els("actionFilterElementWrap").hidden = !isElement;
     }
 
-    async function renderTemplateAction() {
-      await Promise.all([ensureTemplates(), ensurePublishers()]);
-      const templates = state.cache.templates.templates || [];
-      const publishers = state.cache.publishers;
-      if (templates.length === 0) {
-        els("actionBody").innerHTML = "<div class='empty'>main.yml 中还没有可绑定模板。</div>";
-        return false;
-      }
-      if (publishers.length === 0) {
-        els("actionBody").innerHTML = "<div class='empty'>暂无发布者，请先创建订阅或同步发布者。</div>";
-        return false;
-      }
-      els("actionBody").innerHTML = "<div class='forms'>"
-        + "<div class='form-field full-width'><label for='actionTemplatePublisherId'>发布者</label><select id='actionTemplatePublisherId'>"
-        + publishers.map((publisher, index) => optionHtml(publisher.id, publisherLabel(publisher), index === 0)).join("")
-        + "</select></div>"
-        + "<div class='form-field full-width'><label for='actionTemplateName'>模板</label><select id='actionTemplateName'>"
-        + templates.map((template, index) => optionHtml(template.name, template.name, index === 0)).join("")
-        + "</select></div>"
-        + "</div>";
-      return true;
-    }
-
     async function submitActionModal() {
       if (!state.actionModal) return;
       els("confirmAction").disabled = true;
@@ -2245,8 +2090,6 @@
           await submitSubscriptionAction();
         } else if (state.actionModal.kind === "filter") {
           await submitFilterAction();
-        } else if (state.actionModal.kind === "template") {
-          await submitTemplateAction();
         } else if (state.actionModal.kind === "publisher") {
           await submitPublisherEditAction();
         } else if (state.actionModal.kind === "subscriber") {
@@ -2281,7 +2124,7 @@
       if (!selectedSubscriber && !payload.subscriberTargetId.trim()) return setActionMessage("请选择消息目标", true);
       await api("/subscriptions", { method: "POST", body: JSON.stringify(payload) });
       closeActionModal();
-      invalidate("overview", "publishers", "subscribers", "subscriptions", "filters", "templates");
+      invalidate("overview", "publishers", "subscribers", "subscriptions", "filters");
       await loadSubscriptions(true);
       notify("订阅已创建", false);
     }
@@ -2302,21 +2145,6 @@
       notify("过滤规则已添加", false);
     }
 
-    async function submitTemplateAction() {
-      const publisherId = els("actionTemplatePublisherId").value;
-      const templateName = els("actionTemplateName").value;
-      if (!publisherId) return setActionMessage("请选择发布者", true);
-      if (!templateName) return setActionMessage("请选择模板", true);
-      const result = await api("/template-bindings/publisher/" + encodeURIComponent(publisherId), {
-        method: "PUT",
-        body: JSON.stringify({ templateName: templateName })
-      });
-      closeActionModal();
-      invalidate("templates");
-      await loadTemplates(true);
-      notify(localizeActionMessage(result.message, "模板绑定已保存"), false);
-    }
-
     async function submitPublisherEditAction() {
       const modal = state.actionModal;
       if (!modal || modal.kind !== "publisher") return;
@@ -2329,7 +2157,7 @@
         body: JSON.stringify(payload)
       });
       closeActionModal();
-      invalidate("overview", "publishers", "subscriptions", "templates");
+      invalidate("overview", "publishers", "subscriptions");
       await loadEntities(true);
       notify("发布者已保存", false);
     }
@@ -2359,7 +2187,6 @@
       const action = button.dataset.action;
       const id = Number(button.dataset.id);
       const platform = button.dataset.platform;
-      const publisherId = Number(button.dataset.publisherId);
       const configId = button.dataset.configId;
       const pluginId = button.dataset.pluginId;
       try {
@@ -2368,15 +2195,6 @@
           await loadConfigs();
         } else if (action === "reload-plugin") {
           await reloadPlugin(pluginId);
-        } else if (action === "open-template-modal") {
-          openConfigItemModal("template");
-        } else if (action === "edit-template-row") {
-          const row = button.closest("[data-template-row]");
-          if (row) openConfigItemModal("template", row);
-        } else if (action === "remove-template-row") {
-          const row = button.closest("[data-template-row]");
-          if (row) row.remove();
-          refreshConfigTableEmptyRows();
         } else if (action === "open-permission-modal") {
           openConfigItemModal("permission");
         } else if (action === "edit-permission-row") {
@@ -2405,7 +2223,7 @@
           const count = countBy(state.cache.subscriptions, "publisherId", id);
           if (!confirm("确定删除这个发布者吗？将同步删除关联的 " + count + " 个订阅关系。")) return;
           const result = await api("/publishers/" + id, { method: "DELETE" });
-          invalidate("overview", "publishers", "subscriptions", "filters", "templates");
+          invalidate("overview", "publishers", "subscriptions", "filters");
           await loadEntities(true);
           notify(localizeActionMessage(result.message, "发布者已删除"), false);
         } else if (action === "delete-subscriber") {
@@ -2426,12 +2244,6 @@
           const result = await api("/filter-rules/" + id, { method: "DELETE" });
           await loadFilters(true);
           notify(localizeActionMessage(result.message, "过滤规则已删除"), false);
-        } else if (action === "delete-template-binding") {
-          if (!confirm("确定移除这个模板绑定吗？")) return;
-          const result = await api("/template-bindings/publisher/" + encodeURIComponent(publisherId), { method: "DELETE" });
-          invalidate("templates");
-          await loadTemplates(true);
-          notify(localizeActionMessage(result.message, "模板绑定已移除"), false);
         }
       } catch (error) {
         handleError(error);
@@ -2466,7 +2278,7 @@
     };
     els("refresh").onclick = async () => {
       try {
-        invalidate("overview", "platformLogins", "publishers", "subscribers", "subscriptions", "filters", "templates", "subscriberTargetPlatforms", "configs");
+        invalidate("overview", "platformLogins", "publishers", "subscribers", "subscriptions", "filters", "subscriberTargetPlatforms", "configs");
         await loadPage(state.page, true);
         notify("已刷新当前页面", false);
       } catch (error) {
@@ -2496,7 +2308,6 @@
     });
     els("openCreateSubscription").onclick = () => openActionModal("subscription").catch(handleError);
     els("openAddFilter").onclick = () => openActionModal("filter").catch(handleError);
-    els("openTemplateBinding").onclick = () => openActionModal("template").catch(handleError);
     els("saveConfig").onclick = () => saveSelectedConfig().catch(error => {
       setConfigMessage(error.message, true);
       handleError(error);

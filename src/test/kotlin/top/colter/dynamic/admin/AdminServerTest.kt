@@ -23,6 +23,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import top.colter.dynamic.MainConfigForms
 import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.PushTemplates
 import top.colter.dynamic.WebAdminConfig
 import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.config.ConfigFieldSpec
@@ -57,7 +58,6 @@ import top.colter.dynamic.core.plugin.Plugin
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
 import kotlin.io.path.createTempDirectory
@@ -116,7 +116,8 @@ class AdminServerTest {
         assertTrue(html.contains("id=\"toastStack\""))
         assertTrue(html.contains("id=\"openCreateSubscription\""))
         assertTrue(html.contains("id=\"openAddFilter\""))
-        assertTrue(html.contains("id=\"openTemplateBinding\""))
+        val oldTemplateButtonId = "openTemplate" + "Binding"
+        assertTrue(!html.contains("id=\"$oldTemplateButtonId\""))
         assertTrue(html.contains("id=\"filterScopeSubscriptionId\""))
         assertTrue(html.contains("/subscriber-target-platforms"))
         assertTrue(html.contains("/subscriber-targets"))
@@ -138,9 +139,9 @@ class AdminServerTest {
         assertTrue(html.contains("restart-mark"))
         assertTrue(html.contains("⚠️"))
         assertTrue(html.contains("id=\"configItemModal\""))
-        assertTrue(html.contains("data-action='open-template-modal'"))
+        assertTrue(!html.contains("data-action='open-template-modal'"))
         assertTrue(html.contains("data-action='open-permission-modal'"))
-        assertTrue(html.contains("data-action='edit-template-row'"))
+        assertTrue(!html.contains("data-action='edit-template-row'"))
         assertTrue(html.contains("data-action='edit-permission-row'"))
         assertTrue(html.contains("data-action='reload-plugin'"))
         assertTrue(html.contains("id=\"configReloadActions\""))
@@ -477,28 +478,20 @@ class AdminServerTest {
     }
 
     @Test
-    fun `template endpoints should list bind and remove publisher template`() = testApplication {
+    fun `template binding endpoints should be removed`() = testApplication {
         initDb("admin-templates")
-        val publisher = seedPublisher()
         val plugin = FakePlatformPublisherPlugin()
         application { adminModule(testContext(plugin)) }
         val client = jsonClient()
 
-        val templates = client.get("/api/templates") { auth() }.body<TemplatesResponse>()
-        assertTrue(templates.templates.any { it.name == "rich" })
-
-        val bound = client.put("/api/template-bindings/publisher/${publisher.id}") {
+        val oldTemplatesPath = "/api/" + "templates"
+        val oldBindingPath = "/api/template-" + "bindings/publisher/1"
+        assertEquals(HttpStatusCode.NotFound, client.get(oldTemplatesPath) { auth() }.status)
+        assertEquals(HttpStatusCode.NotFound, client.put(oldBindingPath) {
             auth()
             contentType(ContentType.Application.Json)
-            setBody(TemplateBindingRequest("rich"))
-        }.body<ActionResultResponse>()
-
-        assertTrue(bound.changed)
-        assertEquals("rich", PublisherTemplateRepository.findTemplateName(publisher.id, "bilibili", "text"))
-
-        val removed = client.delete("/api/template-bindings/publisher/${publisher.id}") { auth() }
-            .body<ActionResultResponse>()
-        assertTrue(removed.changed)
+            setBody("{}")
+        }.status)
     }
 
     @Test
@@ -540,6 +533,9 @@ class AdminServerTest {
         val detail = client.get("/api/configs/main") { auth() }.body<ConfigDetailDto>()
         assertEquals("", detail.values["webAdmin.token"].toString().trim('"'))
         assertEquals(true, detail.secretStates["webAdmin.token"])
+        assertTrue(detail.schema.fields.any { it.path == "templates.dynamic" && it.type == ConfigFieldType.TEXTAREA })
+        assertTrue(detail.schema.fields.any { it.path == "templates.liveStarted" && it.type == ConfigFieldType.TEXTAREA })
+        assertTrue(detail.schema.fields.any { it.path == "templates.liveEnded" && it.type == ConfigFieldType.TEXTAREA })
 
         val updated = client.put("/api/configs/main") {
             auth()
@@ -697,9 +693,10 @@ class AdminServerTest {
                 platformPluginResolver = platformPluginResolver,
                 configProvider = {
                     MainDynamicConfig(
-                        templates = mapOf(
-                            "default" to "{content}",
-                            "rich" to "{name}: {content}",
+                        templates = PushTemplates(
+                            dynamic = "{content}",
+                            liveStarted = "{name} 开播",
+                            liveEnded = "{name} 下播",
                         )
                     )
                 },

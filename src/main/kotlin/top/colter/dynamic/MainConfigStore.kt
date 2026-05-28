@@ -26,12 +26,8 @@ public class MainConfigStore(
         } else {
             loaded
         }
-        val resolved = withToken.withDefaultTemplates()
-        if (resolved != loaded) {
-            configService.save(MainDynamicConfig.CONFIG_ID, resolved, MainDynamicConfig::class)
-        }
-        currentConfig = resolved
-        return resolved
+        currentConfig = withToken
+        return withToken
     }
 
     public fun current(): MainDynamicConfig {
@@ -64,10 +60,6 @@ public class MainConfigStore(
 
     public fun formSpec(): ConfigFormSpec = MainConfigForms.formSpec
 
-    private fun MainDynamicConfig.withDefaultTemplates(): MainDynamicConfig {
-        val mergedTemplates = MainDynamicConfig.DEFAULT_TEMPLATES + templates
-        return if (mergedTemplates == templates) this else copy(templates = mergedTemplates)
-    }
 }
 
 public object MainConfigForms {
@@ -77,10 +69,27 @@ public object MainConfigForms {
             description = "主项目的模板、命令、订阅、链接解析、图片缓存和 Web 后台设置。",
             fields = listOf(
             ConfigFieldSpec(
-                path = "templates",
-                label = "消息模板",
-                type = ConfigFieldType.TEMPLATE_MAP,
+                path = "templates.dynamic",
+                label = "动态模板",
+                type = ConfigFieldType.TEXTAREA,
                 section = "消息模板",
+                description = "支持 {draw} {name} {uid} {did} {time} {content} {images} {link} {links}，\\n 换行，\\r 分割为多条消息。",
+                required = true,
+            ),
+            ConfigFieldSpec(
+                path = "templates.liveStarted",
+                label = "开播模板",
+                type = ConfigFieldType.TEXTAREA,
+                section = "消息模板",
+                description = "支持 {draw} {name} {uid} {rid} {time} {title} {area} {cover} {link}，\\n 换行，\\r 分割为多条消息。",
+                required = true,
+            ),
+            ConfigFieldSpec(
+                path = "templates.liveEnded",
+                label = "下播模板",
+                type = ConfigFieldType.TEXTAREA,
+                section = "消息模板",
+                description = "支持 {name} {uid} {rid} {title} {area} {startTime} {endTime} {duration} {link}，\\n 换行。",
                 required = true,
             ),
             ConfigFieldSpec(
@@ -313,13 +322,9 @@ public object MainConfigForms {
         )
 
     public fun validate(config: MainDynamicConfig) {
-        require(config.templates.containsKey(MainDynamicConfig.DEFAULT_TEMPLATE_NAME)) {
-            "templates must include '${MainDynamicConfig.DEFAULT_TEMPLATE_NAME}'"
-        }
-        require(config.templates[MainDynamicConfig.DEFAULT_TEMPLATE_NAME]?.isNotBlank() == true) {
-            "default template must not be blank"
-        }
-        require(config.templates.keys.all { it.isNotBlank() }) { "template names must not be blank" }
+        require(config.templates.dynamic.isNotBlank()) { "templates.dynamic must not be blank" }
+        require(config.templates.liveStarted.isNotBlank()) { "templates.liveStarted must not be blank" }
+        require(config.templates.liveEnded.isNotBlank()) { "templates.liveEnded must not be blank" }
         require(config.command.prefix.isNotBlank()) { "command prefix must not be blank" }
         config.command.permissions.forEachIndexed { index, rule ->
             require(rule.platform.isNotBlank()) { "command.permissions[$index].platform must not be blank" }

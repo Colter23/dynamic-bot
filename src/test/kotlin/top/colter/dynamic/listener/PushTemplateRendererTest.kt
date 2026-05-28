@@ -11,6 +11,9 @@ import top.colter.dynamic.core.data.DynamicMediaVideo
 import top.colter.dynamic.core.data.DynamicMediaVideoStats
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LazyImage
+import top.colter.dynamic.core.data.LiveChange
+import top.colter.dynamic.core.data.LiveStatus
+import top.colter.dynamic.core.data.LiveStatusUpdate
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.core.data.PlatformKind
@@ -21,19 +24,19 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class DynamicMessageTemplateRendererTest {
-    private val renderer = DynamicMessageTemplateRenderer()
+class PushTemplateRendererTest {
+    private val renderer = PushTemplateRenderer()
 
     @Test
     fun shouldRenderTextPlaceholdersAndKeepUnknownPlaceholders() {
         val chains = renderer.render(
-            "{platform} {name} {uid} {did} {time} {content} {link} {unknown}",
+            "{name} {uid} {did} {time} {content} {link} {unknown}",
             demoDynamic(),
             drawImage = null,
         )
 
         val text = chains.single().content.single().fallbackText
-        assertTrue(text.contains("BiliBili Demo UP 123 dynamic-1"))
+        assertTrue(text.contains("Demo UP 123 dynamic-1"))
         assertTrue(text.contains("Demo content"))
         assertTrue(text.contains("https://t.bilibili.com/dynamic-1"))
         assertTrue(text.contains("{unknown}"))
@@ -108,8 +111,17 @@ class DynamicMessageTemplateRendererTest {
 
     @Test
     fun shouldDetectDrawPlaceholder() {
-        assertTrue(renderer.requiresDraw("{draw}\n{name}"))
-        assertFalse(renderer.requiresDraw("{images}\n{name}"))
+        val dynamic = demoDynamic()
+        assertTrue(renderer.requiresDraw("{draw}\n{name}", dynamic))
+        assertFalse(renderer.requiresDraw("{images}\n{name}", dynamic))
+    }
+
+    @Test
+    fun shouldNotSplitLiveEndedOnConversationSeparator() {
+        val chains = renderer.render("{name}\\r{duration}", demoLiveEnded(), drawImage = null)
+
+        assertEquals(1, chains.size)
+        assertTrue(chains.single().content.single().fallbackText.contains("\\r"))
     }
 
     private fun demoDynamic(): Dynamic {
@@ -168,6 +180,25 @@ class DynamicMessageTemplateRendererTest {
                     link = "https://example.com/card",
                 ),
             ),
+        )
+    }
+
+    private fun demoLiveEnded(): LiveStatusUpdate {
+        val dynamic = demoDynamic()
+        return LiveStatusUpdate(
+            platform = dynamic.platform,
+            publisher = dynamic.publisher,
+            roomId = "456",
+            time = 1_710_003_600,
+            title = "Live title",
+            area = "Games",
+            cover = LazyImage("https://example.com/live.png"),
+            link = "https://live.bilibili.com/456",
+            status = LiveStatus.CLOSE,
+            previousStatus = LiveStatus.OPEN,
+            change = LiveChange.ENDED,
+            startedAt = 1_710_000_000,
+            endedAt = 1_710_003_600,
         )
     }
 }

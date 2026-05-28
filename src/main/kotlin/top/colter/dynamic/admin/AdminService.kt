@@ -35,7 +35,6 @@ import top.colter.dynamic.core.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.repository.PublisherCursorRepository
 import top.colter.dynamic.core.repository.PublisherLiveStatusRepository
 import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
 
@@ -145,7 +144,6 @@ public class AdminService(
         val removedSubscriptions = SubscriptionRepository.findAll()
             .filter { it.publisherId == publisher.id }
             .count { subscription -> SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId) }
-        PublisherTemplateRepository.removePublisherTemplate(publisher.id)
         PublisherCursorRepository.deleteByPublisherId(publisher.id)
         PublisherLiveStatusRepository.deleteByPublisherId(publisher.id)
         val removed = PublisherRepository.deleteById(publisher.id)
@@ -345,27 +343,6 @@ public class AdminService(
         return ActionResultResponse(removed > 0, "filter rules removed: count=$removed")
     }
 
-    public fun templates(): TemplatesResponse {
-        val config = configProvider()
-        return TemplatesResponse(
-            templates = config.templates
-                .toSortedMap()
-                .map { (name, body) -> TemplateDto(name, body) },
-            bindings = PublisherTemplateRepository.findAll()
-                .sortedWith(compareBy({ it.publisherId ?: 0 }, { it.platformId ?: "" }, { it.dynamicType ?: "" }))
-                .map { rule ->
-                    TemplateBindingDto(
-                        id = rule.id,
-                        publisherId = rule.publisherId,
-                        platformId = rule.platformId,
-                        dynamicType = rule.dynamicType,
-                        templateName = rule.templateName,
-                        priority = rule.priority,
-                    )
-                },
-        )
-    }
-
     public fun configs(): List<ConfigSummaryDto> {
         return buildList {
             add(
@@ -418,19 +395,6 @@ public class AdminService(
         val (info, plugin) = configurablePlugins().firstOrNull { (_, plugin) -> plugin.configId == id }
             ?: throw NoSuchElementException("config not found: $id")
         return updatePluginConfig(info, plugin, request)
-    }
-
-    public fun setPublisherTemplate(publisherId: Int, request: TemplateBindingRequest): ActionResultResponse {
-        val templateName = request.templateName.trim()
-        require(templateName.isNotBlank()) { "templateName must not be blank" }
-        require(configProvider().templates.containsKey(templateName)) { "template not found: $templateName" }
-        val changed = PublisherTemplateRepository.setPublisherTemplate(publisherId, templateName)
-        return ActionResultResponse(changed, if (changed) "template binding updated" else "template binding unchanged")
-    }
-
-    public fun removePublisherTemplate(publisherId: Int): ActionResultResponse {
-        val removed = PublisherTemplateRepository.removePublisherTemplate(publisherId)
-        return ActionResultResponse(removed, if (removed) "template binding removed" else "template binding not found")
     }
 
     private fun mainConfigDetail(): ConfigDetailDto {

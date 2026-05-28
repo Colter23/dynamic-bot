@@ -6,6 +6,7 @@ import kotlinx.coroutines.withTimeout
 import top.colter.dynamic.CommandConfig
 import top.colter.dynamic.CommandPermissionRule
 import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.PushTemplates
 import top.colter.dynamic.core.command.CommandRegistry
 import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.data.CommandContext
@@ -35,7 +36,6 @@ import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
 import kotlin.io.path.createTempDirectory
@@ -319,76 +319,18 @@ class CommandListenerTest {
     }
 
     @Test
-    fun `template set should bind publisher to existing template`() = runBlocking {
-        initDb("template-set")
-        CommandRegistry.clear()
-        val publisher = createPublisher()
-        val listener = CommandListener(
-            platformPluginResolver = { null },
-            config = adminConfig(templates = mapOf("default" to "default", "bili-video" to "video")),
-        )
-
-        val result = dispatch(
-            listener = listener,
-            event = commandEvent(
-                commandTokens = listOf("template", "set", "bilibili", "123", "bili-video"),
-            ),
-        )
-
-        assertEquals(CommandStatus.SUCCESS, result.status)
-        assertEquals("bili-video", PublisherTemplateRepository.findTemplateName(publisher.id, "bilibili", "text"))
-        assertTrue(renderMessage(result).contains("template binding updated"))
-    }
-
-    @Test
-    fun `template set should fail when template is missing`() = runBlocking {
-        initDb("template-set-missing")
-        CommandRegistry.clear()
-        createPublisher()
-        val listener = CommandListener(
-            platformPluginResolver = { null },
-            config = adminConfig(templates = mapOf("default" to "default")),
-        )
-
-        val result = dispatch(
-            listener = listener,
-            event = commandEvent(
-                commandTokens = listOf("template", "set", "bilibili", "123", "missing"),
-            ),
-        )
-
-        assertEquals(CommandStatus.FAILED, result.status)
-        assertTrue(renderMessage(result).contains("template not found"))
-    }
-
-    @Test
-    fun `template remove should delete binding`() = runBlocking {
-        initDb("template-remove")
-        CommandRegistry.clear()
-        val publisher = createPublisher()
-        PublisherTemplateRepository.setPublisherTemplate(publisher.id, "bili-video")
-        val listener = CommandListener(platformPluginResolver = { null }, config = adminConfig())
-
-        val result = dispatch(
-            listener = listener,
-            event = commandEvent(
-                commandTokens = listOf("template", "remove", "bilibili", "123"),
-            ),
-        )
-
-        assertEquals(CommandStatus.SUCCESS, result.status)
-        assertNull(PublisherTemplateRepository.findTemplateName(publisher.id, "bilibili", "text"))
-    }
-
-    @Test
-    fun `template list should show configured templates and bindings`() = runBlocking {
+    fun `template list should show global templates`() = runBlocking {
         initDb("template-list")
         CommandRegistry.clear()
-        val publisher = createPublisher()
-        PublisherTemplateRepository.setPublisherTemplate(publisher.id, "bili-video")
         val listener = CommandListener(
             platformPluginResolver = { null },
-            config = MainDynamicConfig(templates = mapOf("default" to "default", "bili-video" to "video")),
+            config = MainDynamicConfig(
+                templates = PushTemplates(
+                    dynamic = "dynamic template",
+                    liveStarted = "live started template",
+                    liveEnded = "live ended template",
+                ),
+            ),
         )
 
         val result = dispatch(
@@ -400,9 +342,9 @@ class CommandListenerTest {
 
         assertEquals(CommandStatus.SUCCESS, result.status)
         val message = renderMessage(result)
-        assertTrue(message.contains("templates: bili-video, default"))
-        assertTrue(message.contains("bilibili:123"))
-        assertTrue(message.contains("-> bili-video"))
+        assertTrue(message.contains("dynamic:\ndynamic template"))
+        assertTrue(message.contains("liveStarted:\nlive started template"))
+        assertTrue(message.contains("liveEnded:\nlive ended template"))
     }
 
     @Test
@@ -558,11 +500,8 @@ class CommandListenerTest {
         )
     }
 
-    private fun adminConfig(
-        templates: Map<String, String> = mapOf("default" to "default"),
-    ): MainDynamicConfig {
+    private fun adminConfig(): MainDynamicConfig {
         return MainDynamicConfig(
-            templates = templates,
             command = CommandConfig(
                 permissions = listOf(
                     CommandPermissionRule(

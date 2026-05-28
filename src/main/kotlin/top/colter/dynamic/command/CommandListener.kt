@@ -50,7 +50,6 @@ import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
 import top.colter.dynamic.link.DynamicLinkForwarder
@@ -161,8 +160,6 @@ public class CommandListener(
         CommandRegistry.register(UnsubscribeCommandHandler(platformPluginResolver, { runtimeConfig }, commandPrefixProvider), MAIN_OWNER)
         CommandRegistry.register(ListCommandHandler(), MAIN_OWNER)
         CommandRegistry.register(TemplateListCommandHandler { runtimeConfig }, MAIN_OWNER)
-        CommandRegistry.register(TemplateSetCommandHandler({ runtimeConfig }, commandPrefixProvider), MAIN_OWNER)
-        CommandRegistry.register(TemplateRemoveCommandHandler(commandPrefixProvider), MAIN_OWNER)
         CommandRegistry.register(FilterAddElementCommandHandler(commandPrefixProvider), MAIN_OWNER)
         CommandRegistry.register(FilterAddContentCommandHandler(commandPrefixProvider), MAIN_OWNER)
         CommandRegistry.register(FilterListCommandHandler(commandPrefixProvider), MAIN_OWNER)
@@ -715,113 +712,22 @@ private class TemplateListCommandHandler(
 ) : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("template", "list"),
-        description = "list message templates and publisher bindings",
+        description = "list message templates",
         usage = "template list",
         requiredRole = CommandRole.USER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
-        val templateNames = configProvider().templates.keys.sorted()
-        val bindings = PublisherTemplateRepository.findPublisherBindings()
-            .sortedBy { it.publisherId }
-            .map { binding ->
-                val publisher = PublisherRepository.findById(binding.publisherId)
-                val publisherName = if (publisher != null) {
-                    "${publisher.platformId}:${publisher.externalId} (${publisher.name})"
-                } else {
-                    "publisherId=${binding.publisherId}"
-                }
-                "$publisherName -> ${binding.templateName}"
-            }
-
-        val lines = mutableListOf<String>()
-        lines += "templates: ${templateNames.ifEmpty { listOf("(none)") }.joinToString(", ")}"
-        lines += "bindings:"
-        lines += bindings.ifEmpty { listOf("(none)") }
-        return CommandExecutionResult(CommandExecutionStatus.SUCCESS, lines.joinToString("\n"))
-    }
-}
-
-private class TemplateSetCommandHandler(
-    private val configProvider: () -> MainDynamicConfig,
-    private val commandPrefixProvider: () -> String,
-) : CommandHandler {
-    private val commandPrefix: String
-        get() = commandPrefixProvider()
-
-    override val spec: CommandSpec = CommandSpec(
-        path = listOf("template", "set"),
-        description = "bind a publisher to a message template",
-        usage = "template set <platform> <publisherUserId> <templateName>",
-        requiredRole = CommandRole.ADMIN,
-    )
-
-    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
-        if (invocation.args.size < 3) {
-            return CommandExecutionResult(CommandExecutionStatus.FAILED, "usage: $commandPrefix ${spec.usage}")
-        }
-        val platform = invocation.args[0].lowercase()
-        val publisherUserId = invocation.args[1]
-        val templateName = invocation.args[2]
-        val config = configProvider()
-        if (!config.templates.containsKey(templateName)) {
-            return CommandExecutionResult(
-                CommandExecutionStatus.FAILED,
-                "template not found: $templateName",
-            )
-        }
-        val publisher = PublisherRepository.findByPlatformAndExternalId(platform, publisherUserId)
-            ?: return CommandExecutionResult(
-                CommandExecutionStatus.FAILED,
-                "publisher not found: $platform:$publisherUserId",
-            )
-
-        val changed = PublisherTemplateRepository.setPublisherTemplate(publisher.id, templateName)
-        val state = if (changed) "updated" else "unchanged"
-        return CommandExecutionResult(
-            CommandExecutionStatus.SUCCESS,
-            "template binding $state: ${publisher.platformId}:${publisher.externalId} -> $templateName",
+        val templates = configProvider().templates
+        val lines = listOf(
+            "dynamic:",
+            templates.dynamic,
+            "liveStarted:",
+            templates.liveStarted,
+            "liveEnded:",
+            templates.liveEnded,
         )
-    }
-}
-
-private class TemplateRemoveCommandHandler(
-    private val commandPrefixProvider: () -> String,
-) : CommandHandler {
-    private val commandPrefix: String
-        get() = commandPrefixProvider()
-
-    override val spec: CommandSpec = CommandSpec(
-        path = listOf("template", "remove"),
-        description = "remove a publisher message template binding",
-        usage = "template remove <platform> <publisherUserId>",
-        requiredRole = CommandRole.ADMIN,
-    )
-
-    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
-        if (invocation.args.size < 2) {
-            return CommandExecutionResult(CommandExecutionStatus.FAILED, "usage: $commandPrefix ${spec.usage}")
-        }
-        val platform = invocation.args[0].lowercase()
-        val publisherUserId = invocation.args[1]
-        val publisher = PublisherRepository.findByPlatformAndExternalId(platform, publisherUserId)
-            ?: return CommandExecutionResult(
-                CommandExecutionStatus.FAILED,
-                "publisher not found: $platform:$publisherUserId",
-            )
-
-        val removed = PublisherTemplateRepository.removePublisherTemplate(publisher.id)
-        return if (removed) {
-            CommandExecutionResult(
-                CommandExecutionStatus.SUCCESS,
-                "template binding removed: ${publisher.platformId}:${publisher.externalId}",
-            )
-        } else {
-            CommandExecutionResult(
-                CommandExecutionStatus.SUCCESS,
-                "template binding not found: ${publisher.platformId}:${publisher.externalId}",
-            )
-        }
+        return CommandExecutionResult(CommandExecutionStatus.SUCCESS, lines.joinToString("\n"))
     }
 }
 
