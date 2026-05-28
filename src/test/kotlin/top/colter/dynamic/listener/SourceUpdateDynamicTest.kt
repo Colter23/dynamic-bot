@@ -80,6 +80,49 @@ class SourceUpdateDynamicTest {
     }
 
     @Test
+    fun shouldSyncPublisherInfoAndFillMissingHeaderFromLocalRecord() = runBlocking {
+        initDb("dynamic-listener-sync-publisher")
+        val publisher = createPublisher()
+        val subscriber = createSubscriber()
+        SubscriptionRepository.subscribe(subscriber.id, publisher.id)
+
+        val storedHeader = LazyImage("https://example.com/header.png")
+        PublisherRepository.replace(
+            publisher.copy(
+                name = "Old UP",
+                face = LazyImage("https://example.com/old-face.png"),
+                header = storedHeader,
+            )
+        )
+        val incomingPublisher = assertNotNull(PublisherRepository.findById(publisher.id)).copy(
+            name = "New UP",
+            face = LazyImage("https://example.com/new-face.png"),
+            header = null,
+        )
+        var renderedHeader: String? = null
+
+        val listener = SourceUpdateListener(
+            config = MainDynamicConfig(templates = mapOf("default" to "{draw}\n{name}")),
+            imageLoader = DynamicImageLoader { },
+            imageRenderer = DynamicImageRenderer { dynamic ->
+                renderedHeader = dynamic.publisher.header?.uri
+                Paths.get("D:/tmp/synced.png")
+            },
+        )
+
+        val received = captureMessageEvent()
+        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(incomingPublisher)))
+        val event = withTimeout(3_000) { received.await() }
+
+        val updated = assertNotNull(PublisherRepository.findById(publisher.id))
+        assertEquals("New UP", updated.name)
+        assertEquals("https://example.com/new-face.png", updated.face.uri)
+        assertEquals(storedHeader.uri, updated.header?.uri)
+        assertEquals(storedHeader.uri, renderedHeader)
+        assertEquals("\nNew UP", event.message.chain.single().content.filterIsInstance<MessageContent.Text>().single().fallbackText)
+    }
+
+    @Test
     fun shouldFallbackToTextWhenDrawFails() = runBlocking {
         initDb("dynamic-listener-draw-fail")
         val publisher = createPublisher()

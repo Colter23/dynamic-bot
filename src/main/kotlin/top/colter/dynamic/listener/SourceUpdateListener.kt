@@ -27,6 +27,7 @@ import top.colter.dynamic.core.event.broadcast
 import top.colter.dynamic.core.filter.DynamicFilterEvaluator
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
+import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
 import top.colter.dynamic.core.tools.loggerFor
@@ -69,35 +70,67 @@ public class SourceUpdateListener(
     }
 
     private suspend fun handleDynamic(event: SourceUpdateEvent, dynamic: Dynamic) {
-        val targets = resolveTargets(event.target, dynamic.publisher)
+        val normalizedDynamic = normalizeDynamicPublisher(dynamic)
+        val targets = resolveTargets(event.target, normalizedDynamic.publisher)
         if (targets.isEmpty()) {
-            logger.debug { "跳过动态：dynamicId=${dynamic.dynamicId}，原因=没有推送目标" }
+            logger.debug { "跳过动态：dynamicId=${normalizedDynamic.dynamicId}，原因=没有推送目标" }
             return
         }
 
         val deliverableTargets = if (event.label == LINK_PARSE_EVENT_LABEL) {
             targets
         } else {
-            applyFilters(dynamic, targets.filterSubscribedBefore(dynamic.time))
+            applyFilters(normalizedDynamic, targets.filterSubscribedBefore(normalizedDynamic.time))
         }
         if (deliverableTargets.isEmpty()) {
-            logger.debug { "跳过动态：dynamicId=${dynamic.dynamicId}，原因=过滤后没有推送目标" }
+            logger.debug { "跳过动态：dynamicId=${normalizedDynamic.dynamicId}，原因=过滤后没有推送目标" }
             return
         }
 
         logger.info {
-            "收到动态：platform=${dynamic.platform.id}，dynamicId=${dynamic.dynamicId}，目标数=${deliverableTargets.size}"
+            "收到动态：platform=${normalizedDynamic.platform.id}，dynamicId=${normalizedDynamic.dynamicId}，目标数=${deliverableTargets.size}"
         }
 
-        val template = resolveDynamicTemplate(dynamic)
-        val chain = buildDynamicMessageChain(template, dynamic)
+        val template = resolveDynamicTemplate(normalizedDynamic)
+        val chain = buildDynamicMessageChain(template, normalizedDynamic)
         publishMessage(
-            messageId = dynamicMessageId(dynamic),
+            messageId = dynamicMessageId(normalizedDynamic),
             time = System.currentTimeMillis() / 1000,
             targets = deliverableTargets,
             chain = chain,
-            skipReason = "dynamicId=${dynamic.dynamicId}",
+            skipReason = "dynamicId=${normalizedDynamic.dynamicId}",
         )
+    }
+
+    private fun normalizeDynamicPublisher(dynamic: Dynamic): Dynamic {
+        val incoming = dynamic.publisher
+        val stored = findStoredPublisher(incoming) ?: return dynamic
+        val normalizedPublisher = stored.copy(
+            platformId = incoming.platformId,
+            type = incoming.type,
+            externalId = incoming.externalId,
+            name = incoming.name,
+            official = incoming.official,
+            state = incoming.state,
+            face = incoming.face,
+            pendant = incoming.pendant,
+            header = incoming.header ?: stored.header,
+        )
+        if (normalizedPublisher != stored) {
+            PublisherRepository.replace(normalizedPublisher)
+            logger.debug {
+                "发布者信息已同步：publisherId=${normalizedPublisher.id}，uid=${normalizedPublisher.externalId}"
+            }
+        }
+        return dynamic.copy(publisher = normalizedPublisher)
+    }
+
+    private fun findStoredPublisher(publisher: Publisher): Publisher? {
+        if (publisher.id > 0) {
+            PublisherRepository.findById(publisher.id)?.let { return it }
+        }
+        if (publisher.platformId.isBlank() || publisher.externalId.isBlank()) return null
+        return PublisherRepository.findByPlatformAndExternalId(publisher.platformId, publisher.externalId)
     }
 
     private suspend fun handleLive(event: SourceUpdateEvent, live: LiveStatusUpdate) {

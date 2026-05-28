@@ -13,6 +13,7 @@ import top.colter.dynamic.core.data.DynamicFilterMatcher
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.DynamicFilterRuleType
 import top.colter.dynamic.core.data.EntityState
+import top.colter.dynamic.core.data.LazyImage
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.PublisherProfile
 import top.colter.dynamic.core.data.Subscriber
@@ -20,6 +21,8 @@ import top.colter.dynamic.core.data.SubscriberType
 import top.colter.dynamic.core.data.Subscription
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
+import top.colter.dynamic.core.plugin.MessageSinkPlugin
+import top.colter.dynamic.core.plugin.MessageTargetCandidate
 import top.colter.dynamic.core.plugin.PlatformPublisherPlugin
 import top.colter.dynamic.core.plugin.PluginInfo
 import top.colter.dynamic.core.plugin.PluginManager
@@ -29,6 +32,8 @@ import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
+import top.colter.dynamic.core.repository.PublisherCursorRepository
+import top.colter.dynamic.core.repository.PublisherLiveStatusRepository
 import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.PublisherTemplateRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
@@ -127,16 +132,80 @@ public class AdminService(
         val publisher = PublisherRepository.findById(id) ?: throw NoSuchElementException("publisher not found: $id")
         val updated = publisher.copy(
             name = request.name?.trim()?.takeIf { it.isNotBlank() } ?: publisher.name,
+            header = request.headerUri?.trim()?.takeIf { it.isNotBlank() }?.let(::LazyImage)
+                ?: if (request.headerUri != null) null else publisher.header,
             state = request.state?.let { parseEnum<EntityState>(it, "state") } ?: publisher.state,
         )
         PublisherRepository.replace(updated)
         return PublisherRepository.findById(id)?.toDto() ?: updated.toDto()
     }
 
+    public fun deletePublisher(id: Int): ActionResultResponse {
+        val publisher = PublisherRepository.findById(id) ?: throw NoSuchElementException("publisher not found: $id")
+        val removedSubscriptions = SubscriptionRepository.findAll()
+            .filter { it.publisherId == publisher.id }
+            .count { subscription -> SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId) }
+        PublisherTemplateRepository.removePublisherTemplate(publisher.id)
+        PublisherCursorRepository.deleteByPublisherId(publisher.id)
+        PublisherLiveStatusRepository.deleteByPublisherId(publisher.id)
+        val removed = PublisherRepository.deleteById(publisher.id)
+        return ActionResultResponse(
+            changed = removed,
+            message = if (removed) {
+                "publisher removed: subscriptions=$removedSubscriptions"
+            } else {
+                "publisher unchanged"
+            },
+        )
+    }
+
     public fun subscribers(): List<SubscriberDto> {
         return SubscriberRepository.findAll()
             .sortedWith(compareBy<Subscriber> { it.platformId }.thenBy { it.type.name }.thenBy { it.targetId })
             .map { it.toDto() }
+    }
+
+    public fun subscriberTargetPlatforms(): List<SubscriberTargetPlatformDto> {
+        return pluginProvider()
+            .filter { it.state == PluginState.ACTIVE }
+            .mapNotNull { info ->
+                val sink = info.instance as? MessageSinkPlugin ?: return@mapNotNull null
+                val platformId = sink.targetPlatformId.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                SubscriberTargetPlatformDto(
+                    platformId = platformId,
+                    pluginId = info.descriptor.id,
+                    pluginName = info.descriptor.name,
+                    pluginState = info.state.name,
+                    supportedTypes = sink.supportedTargetTypes.map { it.name }.sorted(),
+                )
+            }
+            .sortedWith(compareBy<SubscriberTargetPlatformDto> { it.platformId }.thenBy { it.pluginId })
+    }
+
+    public suspend fun subscriberTargets(platformId: String?, type: String?): List<SubscriberTargetDto> {
+        val normalizedPlatform = platformId?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+        val targetType = type?.trim()?.takeIf { it.isNotBlank() }?.let { parseEnum<SubscriberType>(it, "type") }
+        val targets = mutableListOf<SubscriberTargetDto>()
+        pluginProvider()
+            .filter { it.state == PluginState.ACTIVE }
+            .forEach { info ->
+                val sink = info.instance as? MessageSinkPlugin ?: return@forEach
+                val sinkPlatform = sink.targetPlatformId.takeIf { it.isNotBlank() } ?: return@forEach
+                if (normalizedPlatform != null && !sinkPlatform.equals(normalizedPlatform, ignoreCase = true)) {
+                    return@forEach
+                }
+                if (targetType != null && sink.supportedTargetTypes.isNotEmpty() && targetType !in sink.supportedTargetTypes) {
+                    return@forEach
+                }
+                targets += sink.listMessageTargets(targetType)
+                    .filter { target ->
+                        (normalizedPlatform == null || target.platformId.equals(normalizedPlatform, ignoreCase = true)) &&
+                            (targetType == null || target.type == targetType)
+                    }
+                    .map { target -> target.toDto(info) }
+            }
+        return targets
+            .sortedWith(compareBy<SubscriberTargetDto> { it.platformId }.thenBy { it.type }.thenBy { it.name }.thenBy { it.targetId })
     }
 
     public fun updateSubscriber(id: Int, request: UpdateSubscriberRequest): SubscriberDto {
@@ -147,6 +216,22 @@ public class AdminService(
         )
         SubscriberRepository.replace(updated)
         return SubscriberRepository.findById(id)?.toDto() ?: updated.toDto()
+    }
+
+    public fun deleteSubscriber(id: Int): ActionResultResponse {
+        val subscriber = SubscriberRepository.findById(id) ?: throw NoSuchElementException("subscriber not found: $id")
+        val removedSubscriptions = SubscriptionRepository.findAll()
+            .filter { it.subscriberId == subscriber.id }
+            .count { subscription -> SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId) }
+        val removed = SubscriberRepository.deleteById(subscriber.id)
+        return ActionResultResponse(
+            changed = removed,
+            message = if (removed) {
+                "subscriber removed: subscriptions=$removedSubscriptions"
+            } else {
+                "subscriber unchanged"
+            },
+        )
     }
 
     public fun subscriptions(): List<SubscriptionDto> {
@@ -508,6 +593,15 @@ private fun Subscriber.toDto(): SubscriberDto = SubscriberDto(
     state = state.name,
     createTime = createTime,
     createUser = createUser,
+)
+
+private fun MessageTargetCandidate.toDto(info: PluginInfo): SubscriberTargetDto = SubscriberTargetDto(
+    platformId = platformId,
+    type = type.name,
+    targetId = targetId,
+    name = name,
+    sourcePluginId = info.descriptor.id,
+    sourcePluginName = info.descriptor.name,
 )
 
 private fun Subscription.toDto(

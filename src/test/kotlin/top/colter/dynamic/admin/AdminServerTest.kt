@@ -40,6 +40,8 @@ import top.colter.dynamic.core.data.SubscriberType
 import top.colter.dynamic.core.plugin.FollowActionResult
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
+import top.colter.dynamic.core.plugin.MessageSinkPlugin
+import top.colter.dynamic.core.plugin.MessageTargetCandidate
 import top.colter.dynamic.core.plugin.PlatformPublisherPlugin
 import top.colter.dynamic.core.plugin.PluginCapability
 import top.colter.dynamic.core.plugin.PluginDescriptor
@@ -116,6 +118,17 @@ class AdminServerTest {
         assertTrue(html.contains("id=\"openAddFilter\""))
         assertTrue(html.contains("id=\"openTemplateBinding\""))
         assertTrue(html.contains("id=\"filterScopeSubscriptionId\""))
+        assertTrue(html.contains("/subscriber-target-platforms"))
+        assertTrue(html.contains("/subscriber-targets"))
+        assertTrue(html.contains("id='actionSubscriberTargetId'"))
+        assertTrue(!html.contains("id=\"editModal\""))
+        assertTrue(!html.contains("id=\"entitySummary\""))
+        assertTrue(!html.contains("renderEntitySummary"))
+        assertTrue(html.contains("data-action='edit-publisher'"))
+        assertTrue(html.contains("data-action='edit-subscriber'"))
+        assertTrue(html.contains("data-action='delete-publisher'"))
+        assertTrue(html.contains("data-action='delete-subscriber'"))
+        assertTrue(html.contains("id='actionEntityHeaderUri'"))
         assertTrue(html.contains("data-nav=\"configs\""))
         assertTrue(html.contains("data-page=\"configs\""))
         assertTrue(html.contains("id=\"configForm\""))
@@ -305,6 +318,89 @@ class AdminServerTest {
         assertEquals("readonly", logins.single().platformId)
         assertTrue(logins.single().supportedLoginMethods.isEmpty())
         assertEquals("UNSUPPORTED", logins.single().status)
+    }
+
+    @Test
+    fun `subscriber target endpoints should require token and expose sink plugin targets`() = testApplication {
+        initDb("admin-subscriber-targets")
+        val plugin = FakeMessageSinkPlugin()
+        application { adminModule(testContext(listOf(plugin.info()))) }
+        val client = jsonClient()
+
+        assertEquals(HttpStatusCode.Unauthorized, client.get("/api/subscriber-target-platforms").status)
+        assertEquals(HttpStatusCode.Unauthorized, client.get("/api/subscriber-targets?platformId=onebot&type=GROUP").status)
+
+        val platforms = client.get("/api/subscriber-target-platforms") { auth() }
+            .body<List<SubscriberTargetPlatformDto>>()
+        assertEquals(1, platforms.size)
+        assertEquals("onebot", platforms.single().platformId)
+        assertEquals("onebot-gateway", platforms.single().pluginId)
+        assertEquals(listOf("GROUP", "USER"), platforms.single().supportedTypes)
+
+        val groups = client.get("/api/subscriber-targets?platformId=onebot&type=GROUP") { auth() }
+            .body<List<SubscriberTargetDto>>()
+        assertEquals(1, groups.size)
+        assertEquals("GROUP", groups.single().type)
+        assertEquals("100", groups.single().targetId)
+        assertEquals("测试群", groups.single().name)
+
+        val allTargets = client.get("/api/subscriber-targets?platformId=onebot") { auth() }
+            .body<List<SubscriberTargetDto>>()
+        assertEquals(2, allTargets.size)
+    }
+
+    @Test
+    fun `publisher endpoint should update header state and delete related subscriptions`() = testApplication {
+        initDb("admin-publisher-entity")
+        seedSubscription()
+        val publisher = PublisherRepository.findByPlatformAndExternalId("bilibili", "123")!!
+        application { adminModule(testContext(FakePlatformPublisherPlugin())) }
+        val client = jsonClient()
+
+        val updated = client.patch("/api/publishers/${publisher.id}") {
+            auth()
+            contentType(ContentType.Application.Json)
+            setBody(
+                UpdatePublisherRequest(
+                    headerUri = "https://example.com/header.png",
+                    state = "DISABLED",
+                )
+            )
+        }.body<PublisherDto>()
+
+        assertEquals("DISABLED", updated.state)
+        assertEquals("https://example.com/header.png", updated.headerUri)
+
+        val deleted = client.delete("/api/publishers/${publisher.id}") { auth() }
+            .body<ActionResultResponse>()
+
+        assertTrue(deleted.changed)
+        assertEquals(null, PublisherRepository.findById(publisher.id))
+        assertEquals(0L, SubscriptionRepository.countAll())
+    }
+
+    @Test
+    fun `subscriber endpoint should update state and delete related subscriptions`() = testApplication {
+        initDb("admin-subscriber-entity")
+        val subscriptionId = seedSubscription()
+        val subscriberId = SubscriptionRepository.findById(subscriptionId)!!.subscriberId
+        application { adminModule(testContext(FakePlatformPublisherPlugin())) }
+        val client = jsonClient()
+
+        val updated = client.patch("/api/subscribers/$subscriberId") {
+            auth()
+            contentType(ContentType.Application.Json)
+            setBody(UpdateSubscriberRequest(state = "DISABLED"))
+        }.body<SubscriberDto>()
+
+        assertEquals("DISABLED", updated.state)
+
+        val deleted = client.delete("/api/subscribers/$subscriberId") { auth() }
+            .body<ActionResultResponse>()
+
+        assertTrue(deleted.changed)
+        assertEquals(null, SubscriberRepository.findById(subscriberId))
+        assertEquals(0L, SubscriptionRepository.countAll())
     }
 
     @Test
@@ -871,6 +967,58 @@ class AdminServerTest {
             instance = this,
             classLoader = null,
             sourceJarPath = "fake.jar",
+            loadTime = 1L,
+        )
+    }
+
+    private class FakeMessageSinkPlugin : MessageSinkPlugin {
+        override val targetPlatformId: String = "onebot"
+        override val supportedTargetTypes: Set<SubscriberType> = setOf(SubscriberType.GROUP, SubscriberType.USER)
+
+        private val targets = listOf(
+            MessageTargetCandidate(
+                platformId = targetPlatformId,
+                type = SubscriberType.GROUP,
+                targetId = "100",
+                name = "测试群",
+            ),
+            MessageTargetCandidate(
+                platformId = targetPlatformId,
+                type = SubscriberType.USER,
+                targetId = "200",
+                name = "测试用户",
+            ),
+        )
+
+        override suspend fun listMessageTargets(type: SubscriberType?): List<MessageTargetCandidate> {
+            return targets.filter { target -> type == null || target.type == type }
+        }
+
+        override fun init() {
+        }
+
+        override fun start() {
+        }
+
+        override fun stop() {
+        }
+
+        override fun cleanup() {
+        }
+
+        fun info(): PluginInfo = PluginInfo(
+            descriptor = PluginDescriptor(
+                id = "onebot-gateway",
+                name = "OneBot Gateway",
+                version = "0.0.1",
+                mainClass = "FakeMessageSinkPlugin",
+                capabilities = setOf(PluginCapability.MESSAGE_SINK),
+                apiVersion = "2.0.0",
+            ),
+            state = PluginState.ACTIVE,
+            instance = this,
+            classLoader = null,
+            sourceJarPath = "onebot.jar",
             loadTime = 1L,
         )
     }

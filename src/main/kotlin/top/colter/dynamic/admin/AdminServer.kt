@@ -129,14 +129,37 @@ public fun Application.adminModule(context: AdminServerContext) {
                 val id = call.pathInt("id")
                 call.respondApi { context.service.updatePublisher(id, call.receive()) }
             }
+            delete("/publishers/{id}") {
+                if (!call.ensureAuthorized(context)) return@delete
+                val id = call.pathInt("id")
+                call.respondApi { context.service.deletePublisher(id) }
+            }
             get("/subscribers") {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.subscribers() }
+            }
+            get("/subscriber-target-platforms") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi { context.service.subscriberTargetPlatforms() }
+            }
+            get("/subscriber-targets") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi {
+                    context.service.subscriberTargets(
+                        platformId = call.request.queryParameters["platformId"],
+                        type = call.request.queryParameters["type"],
+                    )
+                }
             }
             patch("/subscribers/{id}") {
                 if (!call.ensureAuthorized(context)) return@patch
                 val id = call.pathInt("id")
                 call.respondApi { context.service.updateSubscriber(id, call.receive()) }
+            }
+            delete("/subscribers/{id}") {
+                if (!call.ensureAuthorized(context)) return@delete
+                val id = call.pathInt("id")
+                call.respondApi { context.service.deleteSubscriber(id) }
             }
             get("/subscriptions") {
                 if (!call.ensureAuthorized(context)) return@get

@@ -88,6 +88,25 @@ public data class SubscriberDto(
 )
 
 @Serializable
+public data class SubscriberTargetPlatformDto(
+    val platformId: String,
+    val pluginId: String,
+    val pluginName: String,
+    val pluginState: String,
+    val supportedTypes: List<String>,
+)
+
+@Serializable
+public data class SubscriberTargetDto(
+    val platformId: String,
+    val type: String,
+    val targetId: String,
+    val name: String,
+    val sourcePluginId: String,
+    val sourcePluginName: String,
+)
+
+@Serializable
 public data class SubscriptionDto(
     val id: Int,
     val subscriberId: Int,
@@ -174,6 +193,7 @@ public data class UpdateConfigResponse(
 @Serializable
 public data class UpdatePublisherRequest(
     val name: String? = null,
+    val headerUri: String? = null,
     val state: String? = null,
 )
 
