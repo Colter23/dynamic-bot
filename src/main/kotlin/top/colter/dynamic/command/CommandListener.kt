@@ -11,7 +11,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.MainDynamicConfig
-import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.command.CommandExecutionResult
 import top.colter.dynamic.core.command.CommandExecutionStatus
 import top.colter.dynamic.core.command.CommandHandler
@@ -39,7 +38,6 @@ import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.PublisherKind
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.Subscription
-import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
@@ -47,7 +45,9 @@ import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.broadcast
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
-import top.colter.dynamic.core.plugin.PlatformPublisherPlugin
+import top.colter.dynamic.core.plugin.PublisherFollowPlugin
+import top.colter.dynamic.core.plugin.PublisherLookupPlugin
+import top.colter.dynamic.core.plugin.PublisherLoginProvider
 import top.colter.dynamic.core.plugin.PublisherLoginMethod
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
@@ -67,7 +67,13 @@ import java.nio.file.Paths
 import javax.imageio.ImageIO
 
 public class CommandListener(
-    private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
+    private val publisherLookupResolver: (String) -> PublisherLookupPlugin?,
+    private val publisherFollowResolver: (String) -> PublisherFollowPlugin? = { platform ->
+        publisherLookupResolver(platform) as? PublisherFollowPlugin
+    },
+    private val publisherLoginResolver: (String) -> PublisherLoginProvider? = { platform ->
+        publisherLookupResolver(platform) as? PublisherLoginProvider
+    },
     private val dynamicLinkForwarder: DynamicLinkForwarder = DynamicLinkForwarder { emptyList() },
     config: MainDynamicConfig? = null,
     configProvider: (() -> MainDynamicConfig)? = null,
@@ -142,9 +148,7 @@ public class CommandListener(
         CommandResultEvent(
             sourcePlugin = MAIN_OWNER,
             target = CommandTarget(
-                platform = event.context.platform,
-                chatType = event.context.chatType,
-                chatId = event.context.chatId,
+                address = event.context.target,
                 senderId = event.context.senderId,
             ),
             chain = result.chain ?: listOf(MessageBatch(listOf(MessageContent.Text(result.message)))),
@@ -160,9 +164,9 @@ public class CommandListener(
         CommandRegistry.register(StatusCommandHandler(), MAIN_OWNER)
         stopRequester?.let { CommandRegistry.register(StopApplicationCommandHandler(it), MAIN_OWNER) }
         CommandRegistry.register(ParseDynamicLinkCommandHandler(dynamicLinkForwarder, commandPrefixProvider), MAIN_OWNER)
-        CommandRegistry.register(SubscribeCommandHandler(platformPluginResolver, commandPrefixProvider), MAIN_OWNER)
-        CommandRegistry.register(LoginCommandHandler(platformPluginResolver, commandPrefixProvider), MAIN_OWNER)
-        CommandRegistry.register(UnsubscribeCommandHandler(platformPluginResolver, { runtimeConfig }, commandPrefixProvider), MAIN_OWNER)
+        CommandRegistry.register(SubscribeCommandHandler(publisherLookupResolver, publisherFollowResolver, commandPrefixProvider), MAIN_OWNER)
+        CommandRegistry.register(LoginCommandHandler(publisherLoginResolver, commandPrefixProvider), MAIN_OWNER)
+        CommandRegistry.register(UnsubscribeCommandHandler(publisherFollowResolver, { runtimeConfig }, commandPrefixProvider), MAIN_OWNER)
         CommandRegistry.register(ListCommandHandler(), MAIN_OWNER)
         CommandRegistry.register(TemplateListCommandHandler { runtimeConfig }, MAIN_OWNER)
         CommandRegistry.register(FilterAddElementCommandHandler(commandPrefixProvider), MAIN_OWNER)
@@ -173,22 +177,8 @@ public class CommandListener(
     }
 }
 
-private fun ChatType.toTargetKind(): TargetKind {
-    return when (this) {
-        ChatType.GROUP -> TargetKind.GROUP
-        ChatType.PRIVATE -> TargetKind.USER
-        ChatType.CHANNEL -> TargetKind.CHANNEL
-    }
-}
-
 private fun CommandInvocation.currentSubscriber(): Subscriber? {
-    return SubscriberRepository.findByAddress(
-        TargetAddress.of(
-            platformId = context.platform,
-            kind = context.chatType.toTargetKind(),
-            externalId = context.chatId,
-        )
-    )
+    return SubscriberRepository.findByAddress(context.target)
 }
 
 private fun success(message: String): CommandExecutionResult {
@@ -279,7 +269,7 @@ private class HelpCommandHandler(
 }
 
 private class LoginCommandHandler(
-    private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
+    private val loginProviderResolver: (String) -> PublisherLoginProvider?,
     private val commandPrefixProvider: () -> String,
     private val qrCodeRenderer: LoginQrCodeRenderer = LoginQrCodeRenderer(),
     private val loginScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
@@ -305,8 +295,8 @@ private class LoginCommandHandler(
 
         val platform = invocation.args[0].lowercase()
         val method = invocation.args[1].lowercase()
-        val plugin = platformPluginResolver(platform)
-            ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "platform plugin not found: $platform")
+        val plugin = loginProviderResolver(platform)
+            ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "platform login provider not found: $platform")
 
         return when (method) {
             "cookie" -> handleCookieLogin(plugin, platform, invocation.args.drop(2).joinToString(" ").trim())
@@ -316,7 +306,7 @@ private class LoginCommandHandler(
     }
 
     private suspend fun handleCookieLogin(
-        plugin: PlatformPublisherPlugin,
+        plugin: PublisherLoginProvider,
         platform: String,
         cookie: String,
     ): CommandExecutionResult {
@@ -341,7 +331,7 @@ private class LoginCommandHandler(
     }
 
     private suspend fun handleQrLogin(
-        plugin: PlatformPublisherPlugin,
+        plugin: PublisherLoginProvider,
         platform: String,
         invocation: CommandInvocation,
     ): CommandExecutionResult {
@@ -470,9 +460,7 @@ private class LoginCommandHandler(
         CommandResultEvent(
             sourcePlugin = "main",
             target = CommandTarget(
-                platform = invocation.context.platform,
-                chatType = invocation.context.chatType,
-                chatId = invocation.context.chatId,
+                address = invocation.context.target,
                 senderId = invocation.context.senderId,
             ),
             chain = commandResult.chain ?: listOf(MessageBatch(listOf(MessageContent.Text(commandResult.message)))),
@@ -562,7 +550,8 @@ private class StopApplicationCommandHandler(
 }
 
 private class SubscribeCommandHandler(
-    private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
+    private val lookupResolver: (String) -> PublisherLookupPlugin?,
+    private val followResolver: (String) -> PublisherFollowPlugin?,
     private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
     private val commandPrefix: String
@@ -582,20 +571,22 @@ private class SubscribeCommandHandler(
 
         val platform = invocation.args[0].lowercase()
         val publisherUserId = invocation.args[1]
-        val plugin = platformPluginResolver(platform)
-            ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "platform plugin not found: $platform")
+        val lookupPlugin = lookupResolver(platform)
+            ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "publisher lookup plugin not found: $platform")
+        val followPlugin = followResolver(platform)
+            ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "publisher follow plugin not found: $platform")
 
-        val publisherInfo = plugin.fetchPublisherInfo(publisherUserId)
+        val publisherInfo = lookupPlugin.fetchPublisherInfo(publisherUserId)
             ?: return CommandExecutionResult(
                 CommandExecutionStatus.FAILED,
                 "publisher not found on $platform: $publisherUserId",
             )
 
-        val followState = plugin.queryFollowState(publisherUserId)
+        val followState = followPlugin.queryFollowState(publisherUserId)
         val autoFollowed = when (followState) {
             FollowState.FOLLOWING -> false
             FollowState.NOT_FOLLOWING -> {
-                val followResult = plugin.followPublisher(publisherUserId)
+                val followResult = followPlugin.followPublisher(publisherUserId)
                 when (followResult.status) {
                     FollowActionStatus.FOLLOWED -> true
                     FollowActionStatus.ALREADY_FOLLOWING -> false
@@ -623,11 +614,7 @@ private class SubscribeCommandHandler(
 
         val publisherUpsert = PublisherRepository.upsertInfo(publisherInfo)
         val subscriber = SubscriberRepository.ensure(
-            address = TargetAddress.of(
-                platformId = invocation.context.platform,
-                kind = invocation.context.chatType.toTargetKind(),
-                externalId = invocation.context.chatId,
-            ),
+            address = invocation.context.target,
             name = invocation.context.chatId,
         )
         val created = SubscriptionRepository.subscribe(subscriber.id, publisherUpsert.value.id)
@@ -644,7 +631,7 @@ private class SubscribeCommandHandler(
 }
 
 private class UnsubscribeCommandHandler(
-    private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
+    private val followResolver: (String) -> PublisherFollowPlugin?,
     private val configProvider: () -> MainDynamicConfig,
     private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
@@ -671,7 +658,7 @@ private class UnsubscribeCommandHandler(
             ?: return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
         val removed = SubscriptionRepository.unsubscribe(subscriber.id, publisher.id)
         if (removed && configProvider().subscription.unfollowWhenNoSubscribers && SubscriptionRepository.countByPublisherId(publisher.id) == 0L) {
-            platformPluginResolver(platform)?.unfollowPublisher(publisher.externalId)
+            followResolver(platform)?.unfollowPublisher(publisher.externalId)
         }
         return if (removed) {
             CommandExecutionResult(CommandExecutionStatus.SUCCESS, "unsubscribed: ${publisher.name}")

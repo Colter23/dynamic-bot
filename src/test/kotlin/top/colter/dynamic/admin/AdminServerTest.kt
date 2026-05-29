@@ -14,6 +14,7 @@ import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MentionMode
 import top.colter.dynamic.core.data.MentionRule
+import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.SourceEventType
@@ -24,7 +25,7 @@ import top.colter.dynamic.core.data.UpdateSelector
 import top.colter.dynamic.core.plugin.FollowActionResult
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
-import top.colter.dynamic.core.plugin.PlatformPublisherPlugin
+import top.colter.dynamic.core.plugin.PublisherFollowPlugin
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.repository.PublisherRepository
@@ -36,7 +37,7 @@ class AdminServerTest {
     @Test
     fun createSubscriptionShouldPersistPublisherSubscriberAndPolicy() = runBlocking {
         initDb("admin-create-subscription")
-        val service = service(FakePlatformPublisherPlugin())
+        val service = service(FakePublisherFollowPlugin())
         val policy = SubscriptionPolicy(
             updateSelectors = listOf(
                 UpdateSelector(
@@ -78,7 +79,7 @@ class AdminServerTest {
     @Test
     fun createSubscriptionShouldRejectMentionAllForNonGroupTargets() = runBlocking {
         initDb("admin-create-subscription-mention")
-        val service = service(FakePlatformPublisherPlugin())
+        val service = service(FakePublisherFollowPlugin())
         val policy = SubscriptionPolicy(
             mentionRules = listOf(
                 MentionRule(
@@ -109,7 +110,7 @@ class AdminServerTest {
         val subscriber = SubscriberRepository.ensure(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "group")
         SubscriptionRepository.subscribe(subscriber.id, publisher.id)
         val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!
-        val service = service(FakePlatformPublisherPlugin())
+        val service = service(FakePublisherFollowPlugin())
 
         val updated = service.updatePublisher(
             publisher.id,
@@ -134,21 +135,22 @@ class AdminServerTest {
         PersistenceManager.init(tempDir.resolve("test.db").path)
     }
 
-    private fun service(plugin: PlatformPublisherPlugin): AdminService {
+    private fun service(plugin: PublisherFollowPlugin): AdminService {
         return AdminService(
             pluginProvider = { emptyList() },
-            platformPluginResolver = { platformId -> plugin.takeIf { platformId == plugin.platformId } },
+            publisherLookupResolver = { platformId -> plugin.takeIf { platformId == plugin.platformId.value } },
+            publisherFollowResolver = { platformId -> plugin.takeIf { platformId == plugin.platformId.value } },
             configProvider = { MainDynamicConfig() },
         )
     }
 
-    private class FakePlatformPublisherPlugin : PlatformPublisherPlugin {
-        override val platformId: String = "bilibili"
+    private class FakePublisherFollowPlugin : PublisherFollowPlugin {
+        override val platformId: PlatformId = PlatformId.of("bilibili")
         var followed: Boolean = false
 
         override suspend fun fetchPublisherInfo(userId: String): PublisherInfo? {
             return PublisherInfo(
-                key = PublisherKey.of(platformId = platformId, externalId = userId),
+                key = PublisherKey.of(platformId = platformId.value, externalId = userId),
                 name = "demo-up",
                 avatar = MediaRef("https://example.com/face.png", MediaKind.AVATAR),
             )
@@ -160,10 +162,5 @@ class AdminServerTest {
             followed = true
             return FollowActionResult(FollowActionStatus.FOLLOWED)
         }
-
-        override fun init() {}
-        override fun start() {}
-        override fun stop() {}
-        override fun cleanup() {}
     }
 }

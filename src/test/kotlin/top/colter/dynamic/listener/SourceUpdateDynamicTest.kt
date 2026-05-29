@@ -35,7 +35,7 @@ import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.data.UpdateSelector
 import top.colter.dynamic.core.data.VideoAttachment
-import top.colter.dynamic.core.event.EventManger
+import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdateEvent
@@ -55,7 +55,7 @@ class SourceUpdateDynamicTest {
 
     @AfterTest
     fun cleanup() {
-        EventManger.shutdown()
+        EventBus.global.shutdown()
     }
 
     @Test

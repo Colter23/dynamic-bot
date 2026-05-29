@@ -12,7 +12,7 @@ import top.colter.dynamic.admin.AdminServer
 import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
-import top.colter.dynamic.core.event.EventManger
+import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.ListenerToken
 import top.colter.dynamic.core.event.MessageEvent
@@ -37,7 +37,8 @@ public object DynamicApplication : CoroutineScope {
     private val job: Job = Job()
     override val coroutineContext = Dispatchers.Default + job
 
-    private val pluginManager: PluginManager = PluginManager(pluginDirPath = "plugins")
+    private val eventBus: EventBus = EventBus.global
+    private val pluginManager: PluginManager = PluginManager(pluginDirPath = "plugins", eventBus = eventBus)
     private val listenerTokens: MutableList<ListenerToken> = mutableListOf()
     private val taskScheduler: TaskScheduler = TaskScheduler(scope = this)
     private val configStore: MainConfigStore = MainConfigStore()
@@ -60,7 +61,7 @@ public object DynamicApplication : CoroutineScope {
             throw e
         }
 
-        EventManger.configureScope(this)
+        eventBus.configureScope(this)
         val config = configStore.loadOrCreate { generateAdminToken() }
         registerCoreListeners(config)
 
@@ -68,7 +69,7 @@ public object DynamicApplication : CoroutineScope {
         if (loadResult.failedPlugins.isNotEmpty()) {
             logger.warn { "部分插件加载失败：pluginIds=${loadResult.failedPlugins.keys.sorted()}" }
         }
-        pluginManager.initAndStartAllPlugins()
+        pluginManager.startAllPlugins()
 
         val failedPluginIds = pluginManager.getAllPlugins()
             .filter { it.state == PluginState.FAILED }
@@ -91,30 +92,32 @@ public object DynamicApplication : CoroutineScope {
             pluginManager.getDynamicLinkResolvers()
         }
 
-        listenerTokens += SourceUpdateListener(configProvider = configStore::current).register<SourceUpdateEvent>()
+        listenerTokens += SourceUpdateListener(configProvider = configStore::current).register<SourceUpdateEvent>(eventBus)
         listenerTokens += CommandListener(
             configProvider = configStore::current,
             dynamicLinkForwarder = dynamicLinkForwarder,
-            platformPluginResolver = { platformId -> pluginManager.findPlatformPublisherPlugin(platformId) },
+            publisherLookupResolver = { platformId -> pluginManager.findPublisherLookupPlugin(platformId) },
+            publisherFollowResolver = { platformId -> pluginManager.findPublisherFollowPlugin(platformId) },
+            publisherLoginResolver = { platformId -> pluginManager.findPublisherLoginProvider(platformId) },
             stopRequester = { reason -> requestStop(reason) },
-        ).register<CommandEvent>()
+        ).register<CommandEvent>(eventBus)
         listenerTokens += DynamicLinkAutoParseListener(
             configProvider = configStore::current,
             forwarder = dynamicLinkForwarder,
-        ).register<CommandEvent>()
+        ).register<CommandEvent>(eventBus)
 
         listenerTokens += object : Listener<MessageEvent> {
             override suspend fun onMessage(event: MessageEvent) {
                 logger.debug { "分发推送消息：messageId=${event.message.id}，目标数=${event.message.targets.size}" }
                 pluginManager.dispatchMessageToSinks(event)
             }
-        }.register<MessageEvent>()
+        }.register<MessageEvent>(eventBus)
 
         listenerTokens += object : Listener<CommandResultEvent> {
             override suspend fun onMessage(event: CommandResultEvent) {
                 pluginManager.dispatchCommandResultToSinks(event)
             }
-        }.register<CommandResultEvent>()
+        }.register<CommandResultEvent>(eventBus)
     }
 
     private fun startAdminServer(config: MainDynamicConfig) {
@@ -190,13 +193,13 @@ public object DynamicApplication : CoroutineScope {
         try {
             adminServer?.stop()
             adminServer = null
-            listenerTokens.forEach { EventManger.removeListener(it) }
+            listenerTokens.forEach { eventBus.removeListener(it) }
             listenerTokens.clear()
             runBlocking {
                 taskScheduler.stopAll()
             }
             pluginManager.shutdown()
-            EventManger.shutdown()
+            eventBus.shutdown()
             job.cancel()
             logger.info { "应用已关闭" }
         } finally {

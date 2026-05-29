@@ -1,12 +1,9 @@
 package top.colter.dynamic.link
 
 import java.util.concurrent.ConcurrentHashMap
-import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
-import top.colter.dynamic.core.data.TargetAddress
-import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.event.SourceUpdateEvent
 import top.colter.dynamic.core.event.broadcast
 import top.colter.dynamic.core.link.DynamicLinkResolution
@@ -68,11 +65,7 @@ public class DynamicLinkForwarder(
 
         val publisher = PublisherRepository.upsertInfo(sourcePublisher).value
         val subscriber = SubscriberRepository.ensure(
-            address = TargetAddress.of(
-                platformId = context.platform,
-                kind = context.chatType.toTargetKind(),
-                externalId = context.chatId,
-            ),
+            address = context.target,
             name = context.chatId,
         )
         val normalizedUpdate = update.copy(publisher = publisher.toInfo())
@@ -99,14 +92,6 @@ public class DynamicLinkForwarder(
             parsedLink.platformId,
             parsedLink.updateId,
         ).joinToString(":")
-    }
-
-    private fun ChatType.toTargetKind(): TargetKind {
-        return when (this) {
-            ChatType.GROUP -> TargetKind.GROUP
-            ChatType.PRIVATE -> TargetKind.USER
-            ChatType.CHANNEL -> TargetKind.CHANNEL
-        }
     }
 }
 

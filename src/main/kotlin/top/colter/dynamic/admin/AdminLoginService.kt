@@ -19,7 +19,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import top.colter.dynamic.core.plugin.PlatformPublisherPlugin
+import top.colter.dynamic.core.plugin.PublisherLoginProvider
 import top.colter.dynamic.core.plugin.PublisherLoginAccount
 import top.colter.dynamic.core.plugin.PublisherLoginMethod
 import top.colter.dynamic.core.plugin.PublisherLoginResult
@@ -27,7 +27,7 @@ import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
 
 public class AdminLoginService(
-    private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
+    private val loginProviderResolver: (String) -> PublisherLoginProvider?,
     private val loginScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     private val qrCodeRenderer: AdminQrCodeRenderer = AdminQrCodeRenderer(),
 ) {
@@ -167,10 +167,10 @@ public class AdminLoginService(
         return sessions[loginId] ?: throw NoSuchElementException("QR login session not found: $loginId")
     }
 
-    private fun resolvePlugin(platformId: String): PlatformPublisherPlugin {
+    private fun resolvePlugin(platformId: String): PublisherLoginProvider {
         require(platformId.isNotBlank()) { "platform must not be blank" }
-        return platformPluginResolver(platformId)
-            ?: throw NoSuchElementException("platform plugin not found: $platformId")
+        return loginProviderResolver(platformId)
+            ?: throw NoSuchElementException("platform login provider not found: $platformId")
     }
 
     private companion object {

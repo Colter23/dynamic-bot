@@ -43,9 +43,7 @@ internal class DynamicLinkAutoParseListener(
         CommandResultEvent(
             sourcePlugin = LINK_PARSE_EVENT_SOURCE,
             target = CommandTarget(
-                platform = event.context.platform,
-                chatType = event.context.chatType,
-                chatId = event.context.chatId,
+                address = event.context.target,
                 senderId = event.context.senderId,
             ),
             chain = listOf(MessageBatch(listOf(MessageContent.Text(message)))),

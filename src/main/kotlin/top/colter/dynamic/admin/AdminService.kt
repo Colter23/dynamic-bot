@@ -27,11 +27,13 @@ import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.core.plugin.MessageTargetCandidate
-import top.colter.dynamic.core.plugin.PlatformPublisherPlugin
+import top.colter.dynamic.core.plugin.PluginHandle
 import top.colter.dynamic.core.plugin.PluginInfo
 import top.colter.dynamic.core.plugin.PluginManager
 import top.colter.dynamic.core.plugin.PluginReloadResult
-import top.colter.dynamic.core.plugin.PluginState
+import top.colter.dynamic.core.plugin.PublisherFollowPlugin
+import top.colter.dynamic.core.plugin.PublisherLookupPlugin
+import top.colter.dynamic.core.plugin.PublisherLoginProvider
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
@@ -44,7 +46,11 @@ import top.colter.dynamic.core.repository.SubscriptionRepository
 
 public class AdminService(
     private val pluginProvider: () -> List<PluginInfo>,
-    private val platformPluginResolver: (String) -> PlatformPublisherPlugin?,
+    private val messageSinkProvider: () -> List<PluginHandle<MessageSinkPlugin>> = { emptyList() },
+    private val publisherLoginProvider: () -> List<PluginHandle<PublisherLoginProvider>> = { emptyList() },
+    private val publisherLookupResolver: (String) -> PublisherLookupPlugin?,
+    private val publisherFollowResolver: (String) -> PublisherFollowPlugin?,
+    private val configurablePluginProvider: () -> List<PluginHandle<ConfigurablePlugin<*>>> = { emptyList() },
     private val configProvider: () -> MainDynamicConfig,
     private val mainConfigUpdater: (MainDynamicConfig) -> ConfigApplyResult = {
         throw IllegalStateException("main config editing is not configured")
@@ -63,7 +69,11 @@ public class AdminService(
         configService: ConfigService = DefaultConfigService,
     ) : this(
         pluginProvider = { pluginManager.getAllPlugins() },
-        platformPluginResolver = { platformId -> pluginManager.findPlatformPublisherPlugin(platformId) },
+        messageSinkProvider = { pluginManager.getMessageSinkPlugins() },
+        publisherLoginProvider = { pluginManager.getPublisherLoginProviders() },
+        publisherLookupResolver = { platformId -> pluginManager.findPublisherLookupPlugin(platformId) },
+        publisherFollowResolver = { platformId -> pluginManager.findPublisherFollowPlugin(platformId) },
+        configurablePluginProvider = { pluginManager.getConfigurablePlugins() },
         configProvider = configProvider,
         mainConfigUpdater = mainConfigUpdater,
         configService = configService,
@@ -99,10 +109,10 @@ public class AdminService(
     }
 
     public suspend fun platformLogins(): List<PlatformLoginDto> {
-        return pluginProvider()
-            .filter { it.state == PluginState.ACTIVE }
-            .mapNotNull { info ->
-                val plugin = info.instance as? PlatformPublisherPlugin ?: return@mapNotNull null
+        return publisherLoginProvider()
+            .map { handle ->
+                val info = handle.info
+                val plugin = handle.instance
                 val loginState = runCatching { plugin.checkLoginState() }
                     .getOrElse { error ->
                         PublisherLoginResult(
@@ -111,7 +121,7 @@ public class AdminService(
                         )
                     }
                 PlatformLoginDto(
-                    platformId = plugin.platformId,
+                    platformId = plugin.platformId.value,
                     pluginId = info.descriptor.id,
                     pluginName = info.descriptor.name,
                     pluginVersion = info.descriptor.version,
@@ -168,17 +178,17 @@ public class AdminService(
     }
 
     public fun subscriberTargetPlatforms(): List<SubscriberTargetPlatformDto> {
-        return pluginProvider()
-            .filter { it.state == PluginState.ACTIVE }
-            .mapNotNull { info ->
-                val sink = info.instance as? MessageSinkPlugin ?: return@mapNotNull null
-                val platformId = sink.targetPlatformId.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+        return messageSinkProvider()
+            .map { handle ->
+                val info = handle.info
+                val sink = handle.instance
+                val platformId = sink.platformId.value
                 SubscriberTargetPlatformDto(
                     platformId = platformId,
                     pluginId = info.descriptor.id,
                     pluginName = info.descriptor.name,
                     pluginState = info.state.name,
-                    supportedTypes = sink.supportedTargetTypes.map { it.name }.sorted(),
+                    supportedTypes = sink.supportedTargetKinds.map { it.name }.sorted(),
                 )
             }
             .sortedWith(compareBy<SubscriberTargetPlatformDto> { it.platformId }.thenBy { it.pluginId })
@@ -188,21 +198,21 @@ public class AdminService(
         val normalizedPlatform = platformId?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
         val targetType = type?.trim()?.takeIf { it.isNotBlank() }?.let { parseEnum<TargetKind>(it, "type") }
         val targets = mutableListOf<SubscriberTargetDto>()
-        pluginProvider()
-            .filter { it.state == PluginState.ACTIVE }
-            .forEach { info ->
-                val sink = info.instance as? MessageSinkPlugin ?: return@forEach
-                val sinkPlatform = sink.targetPlatformId.takeIf { it.isNotBlank() } ?: return@forEach
+        messageSinkProvider()
+            .forEach { handle ->
+                val info = handle.info
+                val sink = handle.instance
+                val sinkPlatform = sink.platformId.value
                 if (normalizedPlatform != null && !sinkPlatform.equals(normalizedPlatform, ignoreCase = true)) {
                     return@forEach
                 }
-                if (targetType != null && sink.supportedTargetTypes.isNotEmpty() && targetType !in sink.supportedTargetTypes) {
+                if (targetType != null && sink.supportedTargetKinds.isNotEmpty() && targetType !in sink.supportedTargetKinds) {
                     return@forEach
                 }
                 targets += sink.listMessageTargets(targetType)
                     .filter { target ->
-                        (normalizedPlatform == null || target.platformId.equals(normalizedPlatform, ignoreCase = true)) &&
-                            (targetType == null || target.type == targetType)
+                        (normalizedPlatform == null || target.address.platformId.value.equals(normalizedPlatform, ignoreCase = true)) &&
+                            (targetType == null || target.address.kind == targetType)
                     }
                     .map { target -> target.toDto(info) }
             }
@@ -250,12 +260,18 @@ public class AdminService(
         require(platform.isNotBlank()) { "publisherPlatform must not be blank" }
         require(externalId.isNotBlank()) { "publisherExternalId must not be blank" }
 
-        val plugin = platformPluginResolver(platform)
-            ?: throw NoSuchElementException("platform plugin not found: $platform")
-        val publisherInfo = plugin.fetchPublisherInfo(externalId)
+        val lookupPlugin = publisherLookupResolver(platform)
+            ?: throw NoSuchElementException("publisher lookup plugin not found: $platform")
+        val publisherInfo = lookupPlugin.fetchPublisherInfo(externalId)
             ?: throw NoSuchElementException("publisher not found on $platform: $externalId")
 
-        val autoFollowed = if (request.autoFollow) ensureFollowed(plugin, platform, externalId) else false
+        val autoFollowed = if (request.autoFollow) {
+            val followPlugin = publisherFollowResolver(platform)
+                ?: throw NoSuchElementException("publisher follow plugin not found: $platform")
+            ensureFollowed(followPlugin, platform, externalId)
+        } else {
+            false
+        }
         val publisherUpsert = PublisherRepository.upsertInfo(publisherInfo.normalized())
         val subscriberPlatform = request.subscriberPlatform.trim().lowercase().also {
             require(it.isNotBlank()) { "subscriberPlatform must not be blank" }
@@ -323,7 +339,7 @@ public class AdminService(
         val removed = SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId)
         if (removed && publisher != null && configProvider().subscription.unfollowWhenNoSubscribers) {
             if (SubscriptionRepository.countByPublisherId(publisher.id) == 0L) {
-                platformPluginResolver(publisher.platformId.value)?.unfollowPublisher(publisher.externalId)
+                publisherFollowResolver(publisher.platformId.value)?.unfollowPublisher(publisher.externalId)
             }
         }
         return ActionResultResponse(removed, if (removed) "subscription removed" else "subscription unchanged")
@@ -495,16 +511,13 @@ public class AdminService(
     }
 
     private fun configurablePlugins(): List<Pair<PluginInfo, ConfigurablePlugin<*>>> {
-        return pluginProvider()
-            .mapNotNull { info ->
-                val configurable = info.instance as? ConfigurablePlugin<*> ?: return@mapNotNull null
-                info to configurable
-            }
+        return configurablePluginProvider()
+            .map { it.info to it.instance }
             .sortedBy { (_, plugin) -> plugin.configId }
     }
 
     private suspend fun ensureFollowed(
-        plugin: PlatformPublisherPlugin,
+        plugin: PublisherFollowPlugin,
         platform: String,
         externalId: String,
     ): Boolean {
@@ -534,7 +547,7 @@ private fun PluginInfo.toDto(): PluginDto = PluginDto(
     id = descriptor.id,
     name = descriptor.name,
     version = descriptor.version,
-    capabilities = descriptor.capabilities.map { it.name }.sorted(),
+    capabilities = capabilities.map { it.name }.sorted(),
     state = state.name,
     error = error?.message ?: error?.javaClass?.name,
     sourceJarPath = sourceJarPath,
@@ -585,9 +598,9 @@ private fun Subscriber.toDto(): SubscriberDto = SubscriberDto(
 )
 
 private fun MessageTargetCandidate.toDto(info: PluginInfo): SubscriberTargetDto = SubscriberTargetDto(
-    platformId = platformId,
-    targetKind = type.name,
-    externalId = targetId,
+    platformId = address.platformId.value,
+    targetKind = address.kind.name,
+    externalId = address.externalId,
     name = name,
     sourcePluginId = info.descriptor.id,
     sourcePluginName = info.descriptor.name,

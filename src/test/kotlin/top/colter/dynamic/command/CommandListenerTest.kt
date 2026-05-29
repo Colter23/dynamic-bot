@@ -11,25 +11,25 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.command.CommandRegistry
-import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.DynamicAttachmentKind
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
-import top.colter.dynamic.core.event.EventManger
+import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.register
 import top.colter.dynamic.core.plugin.FollowActionResult
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
-import top.colter.dynamic.core.plugin.PlatformPublisherPlugin
+import top.colter.dynamic.core.plugin.PublisherFollowPlugin
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.repository.PublisherRepository
@@ -40,16 +40,16 @@ import top.colter.dynamic.testPublisherInfo
 class CommandListenerTest {
     @AfterTest
     fun cleanup() {
-        EventManger.shutdown()
+        EventBus.global.shutdown()
         CommandRegistry.clear()
     }
 
     @Test
     fun subscribeShouldCreatePublisherSubscriberAndSubscription() = runBlocking {
         initDb("command-subscribe")
-        val plugin = FakePlatformPublisherPlugin()
+        val plugin = FakePublisherFollowPlugin()
         val listener = CommandListener(
-            platformPluginResolver = { id -> plugin.takeIf { id == "bilibili" } },
+            publisherLookupResolver = { id -> plugin.takeIf { id == "bilibili" } },
             config = MainDynamicConfig(),
         )
 
@@ -69,7 +69,7 @@ class CommandListenerTest {
     fun filterAddElementShouldUseAttachmentKindCondition() = runBlocking {
         initDb("command-filter")
         seedSubscription()
-        val listener = CommandListener(platformPluginResolver = { null }, config = MainDynamicConfig())
+        val listener = CommandListener(publisherLookupResolver = { null }, config = MainDynamicConfig())
 
         val result = dispatch(listener, commandEvent("/db filter add element bilibili 123 video"))
 
@@ -83,7 +83,7 @@ class CommandListenerTest {
         initDb("command-unsubscribe")
         seedSubscription()
         val listener = CommandListener(
-            platformPluginResolver = { null },
+            publisherLookupResolver = { null },
             config = MainDynamicConfig(),
         )
 
@@ -98,7 +98,7 @@ class CommandListenerTest {
     }
 
     private suspend fun dispatch(listener: CommandListener, event: CommandEvent): CommandResultEvent {
-        EventManger.shutdown()
+        EventBus.global.shutdown()
         val result = CompletableDeferred<CommandResultEvent>()
         object : Listener<CommandResultEvent> {
             override suspend fun onMessage(event: CommandResultEvent) {
@@ -127,10 +127,10 @@ class CommandListenerTest {
     private fun commandEvent(rawText: String): CommandEvent {
         return CommandEvent(
             sourcePlugin = "test",
-            context = CommandContext(
+            context = CommandContext.of(
                 platform = "onebot",
-                chatType = ChatType.GROUP,
-                chatId = "100",
+                kind = TargetKind.GROUP,
+                externalId = "100",
                 senderId = "sender",
             ),
             rawText = rawText,
@@ -147,12 +147,12 @@ class CommandListenerTest {
         }
     }
 
-    private class FakePlatformPublisherPlugin : PlatformPublisherPlugin {
-        override val platformId: String = "bilibili"
+    private class FakePublisherFollowPlugin : PublisherFollowPlugin {
+        override val platformId: PlatformId = PlatformId.of("bilibili")
 
         override suspend fun fetchPublisherInfo(userId: String): PublisherInfo? {
             return testPublisherInfo(
-                key = PublisherKey.of(platformId = platformId, externalId = userId),
+                key = PublisherKey.of(platformId = platformId.value, externalId = userId),
                 name = "demo-up",
             )
         }
@@ -162,10 +162,5 @@ class CommandListenerTest {
         override suspend fun followPublisher(userId: String): FollowActionResult {
             return FollowActionResult(FollowActionStatus.FOLLOWED)
         }
-
-        override fun init() {}
-        override fun start() {}
-        override fun stop() {}
-        override fun cleanup() {}
     }
 }

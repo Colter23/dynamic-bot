@@ -12,16 +12,16 @@ import kotlinx.coroutines.withTimeout
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.core.command.CommandRegistry
-import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
-import top.colter.dynamic.core.event.EventManger
+import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.SourceUpdateEvent
 import top.colter.dynamic.core.event.register
@@ -38,7 +38,7 @@ import top.colter.dynamic.testPublisherKey
 class DynamicLinkForwarderTest {
     @AfterTest
     fun cleanup() {
-        EventManger.shutdown()
+        EventBus.global.shutdown()
         CommandRegistry.clear()
     }
 
@@ -48,7 +48,7 @@ class DynamicLinkForwarderTest {
         CommandRegistry.clear()
         val resolver = FakeDynamicLinkResolver()
         val listener = CommandListener(
-            platformPluginResolver = { null },
+            publisherLookupResolver = { null },
             dynamicLinkForwarder = DynamicLinkForwarder { listOf(resolver) },
         )
 
@@ -75,7 +75,7 @@ class DynamicLinkForwarderTest {
         initDb("parse-unsupported")
         CommandRegistry.clear()
         val listener = CommandListener(
-            platformPluginResolver = { null },
+            publisherLookupResolver = { null },
             dynamicLinkForwarder = DynamicLinkForwarder { listOf(FakeDynamicLinkResolver()) },
         )
 
@@ -130,7 +130,7 @@ class DynamicLinkForwarderTest {
         listener: CommandListener,
         event: CommandEvent,
     ): CommandResultEvent {
-        EventManger.shutdown()
+        EventBus.global.shutdown()
         val result = CompletableDeferred<CommandResultEvent>()
         object : Listener<CommandResultEvent> {
             override suspend fun onMessage(event: CommandResultEvent) {
@@ -146,7 +146,7 @@ class DynamicLinkForwarderTest {
         listener: CommandListener,
         event: CommandEvent,
     ): Pair<CommandResultEvent, SourceUpdateEvent> {
-        EventManger.shutdown()
+        EventBus.global.shutdown()
         val commandResult = CompletableDeferred<CommandResultEvent>()
         val dynamic = CompletableDeferred<SourceUpdateEvent>()
         object : Listener<CommandResultEvent> {
@@ -175,10 +175,10 @@ class DynamicLinkForwarderTest {
     private fun commandEvent(rawText: String): CommandEvent {
         return CommandEvent(
             sourcePlugin = "test",
-            context = CommandContext(
+            context = CommandContext.of(
                 platform = "onebot",
-                chatType = ChatType.GROUP,
-                chatId = "100",
+                kind = TargetKind.GROUP,
+                externalId = "100",
                 senderId = "sender",
             ),
             rawText = rawText,
@@ -191,7 +191,7 @@ class DynamicLinkForwarderTest {
     }
 
     private class FakeDynamicLinkResolver : DynamicLinkResolver {
-        override val platformId: String = "bilibili"
+        override val platformId: PlatformId = PlatformId.of("bilibili")
         var resolveCalls: Int = 0
             private set
         val resolvedUpdateIds: MutableList<String> = mutableListOf()
@@ -202,7 +202,7 @@ class DynamicLinkForwarderTest {
                 .takeIf { it.isNotBlank() }
                 ?: return null
             return ParsedDynamicLink(
-                platformId = platformId,
+                platformId = platformId.value,
                 updateId = updateId,
                 normalizedUrl = "https://t.bilibili.com/$updateId",
                 sourceUrl = inputUrl,
@@ -217,7 +217,7 @@ class DynamicLinkForwarderTest {
 
         private fun demoUpdate(parsedLink: ParsedDynamicLink) = testDynamicUpdate(
             publisher = testPublisherInfo(
-                key = testPublisherKey(platformId = platformId, externalId = "123"),
+                key = testPublisherKey(platformId = platformId.value, externalId = "123"),
                 name = "demo-up",
             ),
             externalId = parsedLink.updateId,

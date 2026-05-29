@@ -7,8 +7,8 @@ import top.colter.dynamic.core.config.ConfigFieldType
 import top.colter.dynamic.core.config.ConfigFormSpec
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.config.DefaultConfigService
-import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.data.CommandRole
+import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.draw.DrawLayoutRegistry
 
 public class MainConfigStore(
@@ -380,7 +380,8 @@ public object MainConfigForms {
     }
 
     public fun chatTypeOptions(): List<ConfigFieldOption> {
-        return ChatType.entries.map { ConfigFieldOption(it.name, it.name) }
+        return listOf(TargetKind.GROUP, TargetKind.USER, TargetKind.CHANNEL)
+            .map { ConfigFieldOption(it.name, it.name) }
     }
 
     private fun requireColor(value: String, path: String) {

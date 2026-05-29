@@ -48,7 +48,7 @@ public class AdminServer(
             tokenProvider = { configProvider().webAdmin.token },
             service = AdminService(pluginManager, configProvider, mainConfigUpdater),
             loginService = AdminLoginService(
-                platformPluginResolver = { platformId -> pluginManager.findPlatformPublisherPlugin(platformId) },
+                loginProviderResolver = { platformId -> pluginManager.findPublisherLoginProvider(platformId) },
             ),
             stopRequester = stopRequester,
         )

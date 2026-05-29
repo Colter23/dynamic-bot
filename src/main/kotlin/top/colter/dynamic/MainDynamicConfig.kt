@@ -1,7 +1,7 @@
 package top.colter.dynamic
 
-import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.data.CommandRole
+import top.colter.dynamic.core.data.TargetKind
 
 public data class MainDynamicConfig(
     val templates: PushTemplates = PushTemplates(),
@@ -92,7 +92,7 @@ public data class CommandConfig(
 
 public data class CommandPermissionRule(
     val platform: String = "*",
-    val chatType: ChatType? = null,
+    val chatType: TargetKind? = null,
     val chatId: String = "*",
     val senderId: String = "*",
     val role: CommandRole = CommandRole.ADMIN,
