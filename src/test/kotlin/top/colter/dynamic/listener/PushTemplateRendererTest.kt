@@ -1,28 +1,27 @@
 package top.colter.dynamic.listener
 
-import top.colter.dynamic.core.data.Dynamic
-import top.colter.dynamic.core.data.DynamicCardAttachment
-import top.colter.dynamic.core.data.DynamicContent
-import top.colter.dynamic.core.data.DynamicContentNodeLink
-import top.colter.dynamic.core.data.DynamicContentNodeText
-import top.colter.dynamic.core.data.DynamicImageAttachment
-import top.colter.dynamic.core.data.DynamicImageItem
-import top.colter.dynamic.core.data.DynamicMetric
-import top.colter.dynamic.core.data.DynamicVideoAttachment
-import top.colter.dynamic.core.data.EntityState
-import top.colter.dynamic.core.data.LazyImage
-import top.colter.dynamic.core.data.LiveChange
-import top.colter.dynamic.core.data.LiveStatus
-import top.colter.dynamic.core.data.LiveStatusUpdate
-import top.colter.dynamic.core.data.MessageContent
-import top.colter.dynamic.core.data.PlatformDescriptor
-import top.colter.dynamic.core.data.PlatformKind
-import top.colter.dynamic.core.data.Publisher
-import top.colter.dynamic.core.data.PublisherType
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import top.colter.dynamic.core.data.CardAttachment
+import top.colter.dynamic.core.data.DynamicContent
+import top.colter.dynamic.core.data.DynamicContentNodeLink
+import top.colter.dynamic.core.data.DynamicContentNodeText
+import top.colter.dynamic.core.data.DynamicMetric
+import top.colter.dynamic.core.data.DynamicPayload
+import top.colter.dynamic.core.data.ImageAttachment
+import top.colter.dynamic.core.data.ImageItem
+import top.colter.dynamic.core.data.LivePayload
+import top.colter.dynamic.core.data.LiveStatus
+import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
+import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.SourceEventType
+import top.colter.dynamic.core.data.SourceUpdate
+import top.colter.dynamic.testDynamicUpdate
+import top.colter.dynamic.testMedia
+import top.colter.dynamic.testPublisherInfo
 
 class PushTemplateRendererTest {
     private val renderer = PushTemplateRenderer()
@@ -59,7 +58,7 @@ class PushTemplateRendererTest {
         val chains = renderer.render(
             "before {draw} middle {images} after",
             demoDynamic(),
-            drawImage = LazyImage("D:/tmp/draw.png"),
+            drawImage = MediaRef("D:/tmp/draw.png", MediaKind.IMAGE),
         )
 
         val contents = chains.single().content
@@ -124,87 +123,74 @@ class PushTemplateRendererTest {
         assertTrue(chains.single().content.single().fallbackText.contains("\\r"))
     }
 
-    private fun demoDynamic(): Dynamic {
-        return Dynamic(
-            platform = PlatformDescriptor(
-                id = "bilibili",
-                name = "BiliBili",
-                homepage = "https://www.bilibili.com",
-                iconUri = "",
-                kind = PlatformKind.PUBLISHER,
+    private fun demoDynamic(): SourceUpdate {
+        return testDynamicUpdate(
+            publisher = testPublisherInfo(name = "Demo UP"),
+            externalId = "dynamic-1",
+            payload = DynamicPayload(
+                title = "Demo Title",
+                content = DynamicContent(
+                    listOf(
+                        DynamicContentNodeText("Demo content"),
+                        DynamicContentNodeLink("link", url = "https://example.com/content-link"),
+                    ),
+                ),
+                attachments = listOf(
+                    ImageAttachment(
+                        images = listOf(
+                            ImageItem(testMedia("https://example.com/pic-a.png", MediaKind.IMAGE), width = 100, height = 100),
+                            ImageItem(testMedia("https://example.com/pic-b.png", MediaKind.IMAGE), width = 100, height = 100),
+                        ),
+                    ),
+                    top.colter.dynamic.core.data.VideoAttachment(
+                        id = "BV1",
+                        title = "video",
+                        description = "desc",
+                        cover = testMedia("https://example.com/cover.png", MediaKind.COVER),
+                        durationSeconds = 60,
+                        badge = "video",
+                        metrics = listOf(
+                            DynamicMetric(key = "play", display = "1"),
+                            DynamicMetric(key = "danmaku", display = "2"),
+                            DynamicMetric(key = "like", display = "3"),
+                        ),
+                        link = "https://www.bilibili.com/video/BV1",
+                    ),
+                    CardAttachment(
+                        id = "card-1",
+                        cardKind = "article",
+                        title = "card",
+                        description = "desc",
+                        badge = "card",
+                        cover = testMedia("https://example.com/card.png", MediaKind.COVER),
+                        link = "https://example.com/card",
+                    ),
+                ),
             ),
-            dynamicId = "dynamic-1",
-            publisher = Publisher(
-                id = 1,
-                platformId = "bilibili",
-                type = PublisherType.USER,
-                externalId = "123",
-                name = "Demo UP",
-                state = EntityState.ACTIVE,
-                face = LazyImage("https://example.com/face.png"),
-                createTime = 1,
-                createUser = 1,
-            ).toSnapshot(),
-            time = 1_710_000_000,
+        ).copy(
+            occurredAtEpochSeconds = 1_710_000_000,
             link = "https://t.bilibili.com/dynamic-1",
-            title = "Demo Title",
-            content = DynamicContent(
-                text = "Demo content",
-                contentNodes = listOf(
-                    DynamicContentNodeText("Demo content"),
-                    DynamicContentNodeLink("link", url = "https://example.com/content-link"),
-                ),
-            ),
-            attachments = listOf(
-                DynamicImageAttachment(
-                    images = listOf(
-                        DynamicImageItem(LazyImage("https://example.com/pic-a.png"), width = 100, height = 100),
-                        DynamicImageItem(LazyImage("https://example.com/pic-b.png"), width = 100, height = 100),
-                    ),
-                ),
-                DynamicVideoAttachment(
-                    id = "BV1",
-                    title = "video",
-                    description = "desc",
-                    cover = LazyImage("https://example.com/cover.png"),
-                    duration = "01:00",
-                    badge = "video",
-                    metrics = listOf(
-                        DynamicMetric(key = "play", display = "1"),
-                        DynamicMetric(key = "danmaku", display = "2"),
-                        DynamicMetric(key = "like", display = "3"),
-                    ),
-                    link = "https://www.bilibili.com/video/BV1",
-                ),
-                DynamicCardAttachment(
-                    id = "card-1",
-                    cardType = "article",
-                    title = "card",
-                    description = "desc",
-                    badge = "card",
-                    cover = LazyImage("https://example.com/card.png"),
-                    link = "https://example.com/card",
-                ),
-            ),
         )
     }
 
-    private fun demoLiveEnded(): LiveStatusUpdate {
-        val dynamic = demoDynamic()
-        return LiveStatusUpdate(
-            platform = dynamic.platform,
-            publisher = dynamic.publisher,
-            roomId = "456",
-            time = 1_710_003_600,
-            title = "Live title",
-            area = "Games",
-            cover = LazyImage("https://example.com/live.png"),
+    private fun demoLiveEnded(): SourceUpdate {
+        return testDynamicUpdate(
+            publisher = testPublisherInfo(name = "Demo UP"),
+            eventType = SourceEventType.LIVE_ENDED,
+            externalId = "live-456-ended",
+            payload = LivePayload(
+                roomId = "456",
+                title = "Live title",
+                area = "Games",
+                cover = testMedia("https://example.com/live.png", MediaKind.COVER),
+                status = LiveStatus.CLOSE,
+                previousStatus = LiveStatus.OPEN,
+                startedAtEpochSeconds = 1_710_000_000,
+                endedAtEpochSeconds = 1_710_003_600,
+            ),
+        ).copy(
+            occurredAtEpochSeconds = 1_710_003_600,
             link = "https://live.bilibili.com/456",
-            status = LiveStatus.CLOSE,
-            previousStatus = LiveStatus.OPEN,
-            change = LiveChange.ENDED,
-            startedAt = 1_710_000_000,
-            endedAt = 1_710_003_600,
         )
     }
 }

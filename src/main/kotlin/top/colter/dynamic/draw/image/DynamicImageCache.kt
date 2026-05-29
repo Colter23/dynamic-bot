@@ -5,6 +5,7 @@ import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.net.URI
 import java.net.URLDecoder
+import java.security.MessageDigest
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
@@ -131,7 +132,19 @@ public object DynamicImageCache : DynamicImageResolver {
         val safe = decoded
             .replace(Regex("""[<>:"/\\|?*\u0000-\u001F]+"""), "_")
             .trim { it <= ' ' || it == '.' || it == '_' }
-        return safe.ifBlank { "image.img" }
+        val hash = sha256(trimmed).take(16)
+        val fileName = safe.ifBlank { "image.img" }
+        val dotIndex = fileName.lastIndexOf('.')
+        return if (dotIndex > 0 && dotIndex < fileName.lastIndex - 1) {
+            fileName.substring(0, dotIndex) + "-$hash" + fileName.substring(dotIndex)
+        } else {
+            "$fileName-$hash"
+        }
+    }
+
+    private fun sha256(value: String): String {
+        val digest = MessageDigest.getInstance("SHA-256").digest(value.toByteArray(StandardCharsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it.toInt() and 0xff) }
     }
 
     private fun uriPathFileName(uri: String): String? {

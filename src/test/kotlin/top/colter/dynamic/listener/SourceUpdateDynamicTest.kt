@@ -1,7 +1,13 @@
 package top.colter.dynamic.listener
 
-import java.nio.file.Files
 import java.nio.file.Paths
+import kotlin.io.path.createTempDirectory
+import kotlin.test.AfterTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
@@ -9,23 +15,26 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.PushTemplates
-import top.colter.dynamic.core.data.Dynamic
-import top.colter.dynamic.core.data.DynamicContent
-import top.colter.dynamic.core.data.DynamicContentNodeText
-import top.colter.dynamic.core.data.DynamicElementType
-import top.colter.dynamic.core.data.DynamicMetric
-import top.colter.dynamic.core.data.DynamicVideoAttachment
 import top.colter.dynamic.core.data.DeliveryStatus
+import top.colter.dynamic.core.data.DynamicAttachmentKind
+import top.colter.dynamic.core.data.DynamicContent
+import top.colter.dynamic.core.data.DynamicMetric
+import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.EntityState
-import top.colter.dynamic.core.data.LazyImage
+import top.colter.dynamic.core.data.FilterAction
+import top.colter.dynamic.core.data.FilterCondition
+import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MentionMode
+import top.colter.dynamic.core.data.MentionRule
 import top.colter.dynamic.core.data.MessageContent
-import top.colter.dynamic.core.data.PlatformDescriptor
-import top.colter.dynamic.core.data.PlatformKind
 import top.colter.dynamic.core.data.Publisher
-import top.colter.dynamic.core.data.PublisherType
+import top.colter.dynamic.core.data.SourceEventType
+import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
-import top.colter.dynamic.core.data.SubscriberType
-import top.colter.dynamic.core.data.SubscriptionAtAllType
+import top.colter.dynamic.core.data.SubscriptionPolicy
+import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.data.UpdateSelector
+import top.colter.dynamic.core.data.VideoAttachment
 import top.colter.dynamic.core.event.EventManger
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
@@ -37,14 +46,10 @@ import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
-import top.colter.skiko.FontUtils
-import kotlin.io.path.createTempDirectory
-import kotlin.test.AfterTest
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
-import kotlin.test.assertNull
-import kotlin.test.assertTrue
+import top.colter.dynamic.testDynamicUpdate
+import top.colter.dynamic.testMedia
+import top.colter.dynamic.testPublisher
+import top.colter.dynamic.testTargetAddress
 
 class SourceUpdateDynamicTest {
 
@@ -59,11 +64,8 @@ class SourceUpdateDynamicTest {
         val publisher = createPublisher()
         val subscriber = createSubscriber()
         SubscriptionRepository.subscribe(subscriber.id, publisher.id)
-
         val listener = SourceUpdateListener(
-            config = MainDynamicConfig(
-                templates = PushTemplates(dynamic = "{draw}\nvideo {name} {content}"),
-            ),
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "{draw}\nvideo {name} {content}")),
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/dynamic.png") },
         )
@@ -72,165 +74,77 @@ class SourceUpdateDynamicTest {
         listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(publisher)))
         val event = withTimeout(3_000) { received.await() }
 
-        assertEquals(listOf(subscriber.toMessageTarget()), event.message.targets)
-        val contents = event.message.chain.single().content
+        assertEquals(listOf(subscriber.address), event.message.targets)
+        val contents = event.message.batches.single().content
         assertTrue(contents.first() is MessageContent.Image)
         assertEquals("D:\\tmp\\dynamic.png", (contents.first() as MessageContent.Image).image.uri)
         assertEquals("\nvideo Demo UP Demo content", contents.filterIsInstance<MessageContent.Text>().single().fallbackText)
     }
 
     @Test
-    fun shouldSyncPublisherInfoAndFillMissingHeaderFromLocalRecord() = runBlocking {
+    fun shouldSyncPublisherInfoAndFillMissingBannerFromLocalRecord() = runBlocking {
         initDb("dynamic-listener-sync-publisher")
         val publisher = createPublisher()
         val subscriber = createSubscriber()
         SubscriptionRepository.subscribe(subscriber.id, publisher.id)
-
-        val storedHeader = LazyImage("https://example.com/header.png")
+        val storedBanner = testMedia("https://example.com/header.png", MediaKind.COVER)
         PublisherRepository.replace(
             publisher.copy(
                 name = "Old UP",
-                face = LazyImage("https://example.com/old-face.png"),
-                header = storedHeader,
-            )
+                avatar = testMedia("https://example.com/old-face.png", MediaKind.AVATAR),
+                banner = storedBanner,
+            ),
         )
-        val incomingPublisher = assertNotNull(PublisherRepository.findById(publisher.id)).copy(
+        val incoming = assertNotNull(PublisherRepository.findById(publisher.id)).copy(
             name = "New UP",
-            face = LazyImage("https://example.com/new-face.png"),
-            header = null,
+            avatar = testMedia("https://example.com/new-face.png", MediaKind.AVATAR),
+            banner = null,
         )
-        var renderedHeader: String? = null
-
+        var renderedBanner: String? = null
         val listener = SourceUpdateListener(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "{draw}\n{name}")),
             imageLoader = DynamicImageLoader { },
-            imageRenderer = DynamicImageRenderer { dynamic ->
-                renderedHeader = dynamic.publisher.header?.uri
+            imageRenderer = DynamicImageRenderer { update ->
+                renderedBanner = update.publisher.banner?.uri
                 Paths.get("D:/tmp/synced.png")
             },
         )
 
         val received = captureMessageEvent()
-        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(incomingPublisher)))
+        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(incoming)))
         val event = withTimeout(3_000) { received.await() }
 
         val updated = assertNotNull(PublisherRepository.findById(publisher.id))
         assertEquals("New UP", updated.name)
-        assertEquals("https://example.com/new-face.png", updated.face.uri)
-        assertEquals(storedHeader.uri, updated.header?.uri)
-        assertEquals(storedHeader.uri, renderedHeader)
-        assertEquals("\nNew UP", event.message.chain.single().content.filterIsInstance<MessageContent.Text>().single().fallbackText)
+        assertEquals("https://example.com/new-face.png", updated.avatar.uri)
+        assertEquals(storedBanner.uri, updated.banner?.uri)
+        assertEquals(storedBanner.uri, renderedBanner)
+        assertEquals("\nNew UP", event.message.batches.single().content.filterIsInstance<MessageContent.Text>().single().fallbackText)
     }
 
     @Test
-    fun shouldFallbackToTextWhenDrawFails() = runBlocking {
-        initDb("dynamic-listener-draw-fail")
-        val publisher = createPublisher()
-        val subscriber = createSubscriber()
-
-        val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = PushTemplates(dynamic = "{draw}\nfallback {name}")),
-            imageLoader = DynamicImageLoader { },
-            imageRenderer = DynamicImageRenderer { error("绘制失败") },
-        )
-
-        val received = captureMessageEvent()
-        listener.onMessage(SourceUpdateEvent(source = "test", target = subscriber, update = demoDynamic(publisher)))
-        val event = withTimeout(3_000) { received.await() }
-
-        val contents = event.message.chain.single().content
-        assertEquals(1, contents.size)
-        assertEquals("fallback Demo UP", contents.single().fallbackText)
-    }
-
-    @Test
-    fun shouldRenderDrawWhenDefaultFontIsNotPreloaded() = runBlocking {
-        initDb("dynamic-listener-font-fallback")
-        val publisher = createPublisher()
-        val subscriber = createSubscriber()
-        val previousDefaultFont = FontUtils.defaultFont
-        val previousEmojiFont = FontUtils.emojiFont
-
-        FontUtils.defaultFont = null
-        FontUtils.emojiFont = null
-        try {
-            val outputDir = createTempDirectory("dynamic-bot-rendered")
-            val listener = SourceUpdateListener(
-                config = MainDynamicConfig(templates = PushTemplates(dynamic = "{draw}\n{name}")),
-                imageLoader = DynamicImageLoader { },
-                imageRenderer = FileDynamicImageRenderer(outputDir),
-            )
-
-            val received = captureMessageEvent()
-            listener.onMessage(SourceUpdateEvent(source = "test", target = subscriber, update = demoDynamic(publisher)))
-            val event = withTimeout(3_000) { received.await() }
-
-            val image = event.message.chain.single().content.first() as MessageContent.Image
-            assertTrue(Files.isRegularFile(Paths.get(image.image.uri)))
-        } finally {
-            FontUtils.defaultFont = previousDefaultFont
-            FontUtils.emojiFont = previousEmojiFont
-        }
-    }
-
-    @Test
-    fun shouldNotRenderDrawWhenTemplateDoesNotContainDrawPlaceholder() = runBlocking {
-        initDb("dynamic-listener-no-draw")
-        val publisher = createPublisher()
-        val subscriber = createSubscriber()
-        var renderCalls = 0
-
-        val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = PushTemplates(dynamic = "text only {name}")),
-            imageLoader = DynamicImageLoader { },
-            imageRenderer = DynamicImageRenderer {
-                renderCalls += 1
-                Paths.get("D:/tmp/not-used.png")
-            },
-        )
-
-        val received = captureMessageEvent()
-        listener.onMessage(SourceUpdateEvent(source = "test", target = subscriber, update = demoDynamic(publisher)))
-        val event = withTimeout(3_000) { received.await() }
-
-        assertEquals(0, renderCalls)
-        assertEquals("text only Demo UP", event.message.chain.single().content.single().fallbackText)
-    }
-
-    @Test
-    fun shouldSplitTemplateIntoMultipleMessageChains() = runBlocking {
-        initDb("dynamic-listener-split-chain")
-        val publisher = createPublisher()
-        val subscriber = createSubscriber()
-
-        val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = PushTemplates(dynamic = "first {name}\\rsecond {link}")),
-            imageLoader = DynamicImageLoader { },
-            imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/not-used.png") },
-        )
-
-        val received = captureMessageEvent()
-        listener.onMessage(SourceUpdateEvent(source = "test", target = subscriber, update = demoDynamic(publisher)))
-        val event = withTimeout(3_000) { received.await() }
-
-        assertEquals(2, event.message.chain.size)
-        assertEquals("first Demo UP", event.message.chain[0].content.single().fallbackText)
-        assertEquals("second https://t.bilibili.com/dynamic-1", event.message.chain[1].content.single().fallbackText)
-    }
-
-    @Test
-    fun shouldAppendMentionAllAtTailOnlyForEnabledDynamicSubscriptions() = runBlocking {
-        initDb("dynamic-listener-at-all-dynamic")
+    fun shouldAppendMentionAllByEventTypeAndAttachmentSelector() = runBlocking {
+        initDb("dynamic-listener-at-all")
         val publisher = createPublisher()
         val atAllSubscriber = createSubscriber(id = 10, targetId = "100")
         val normalSubscriber = createSubscriber(id = 11, targetId = "200")
         SubscriptionRepository.subscribe(
-            subscriberId = atAllSubscriber.id,
-            publisherId = publisher.id,
-            atAllTypes = setOf(SubscriptionAtAllType.DYNAMIC),
+            atAllSubscriber.id,
+            publisher.id,
+            SubscriptionPolicy(
+                updateSelectors = listOf(UpdateSelector.default()),
+                mentionRules = listOf(
+                    MentionRule(
+                        selector = UpdateSelector(
+                            eventTypes = setOf(SourceEventType.DYNAMIC_CREATED),
+                            attachmentKinds = setOf(DynamicAttachmentKind.VIDEO),
+                        ),
+                        mode = MentionMode.MENTION_ALL,
+                    ),
+                ),
+            ),
         )
         SubscriptionRepository.subscribe(normalSubscriber.id, publisher.id)
-
         val listener = SourceUpdateListener(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "tail {name}")),
             imageLoader = DynamicImageLoader { },
@@ -238,153 +152,54 @@ class SourceUpdateDynamicTest {
         )
 
         val received = captureMessageEvents()
-        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(publisher)))
+        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(publisher, withVideo = true)))
 
         val events = listOf(
             withTimeout(3_000) { received.receive() },
             withTimeout(3_000) { received.receive() },
-        ).associateBy { it.message.targets.single().targetId }
+        ).associateBy { it.message.targets.single().externalId }
 
-        val atAllContents = events.getValue("100").message.chain.single().content
+        val atAllContents = events.getValue("100").message.batches.single().content
         assertEquals("tail Demo UP", atAllContents.first().fallbackText)
         assertTrue(atAllContents.last() is MessageContent.MentionAll)
-        assertEquals(
-            "tail Demo UP",
-            events.getValue("200").message.chain.single().content.single().fallbackText,
-        )
+        assertEquals("tail Demo UP", events.getValue("200").message.batches.single().content.single().fallbackText)
     }
 
     @Test
-    fun shouldAppendMentionAllForVideoOnlySubscriptionWhenDynamicHasVideo() = runBlocking {
-        initDb("dynamic-listener-at-all-video")
-        val publisher = createPublisher()
-        val subscriber = createSubscriber()
-        SubscriptionRepository.subscribe(
-            subscriberId = subscriber.id,
-            publisherId = publisher.id,
-            atAllTypes = setOf(SubscriptionAtAllType.VIDEO),
-        )
-
-        val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = PushTemplates(dynamic = "video {name}")),
-            imageLoader = DynamicImageLoader { },
-            imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/not-used.png") },
-        )
-
-        val received = captureMessageEvent()
-        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(publisher).withVideo()))
-        val event = withTimeout(3_000) { received.await() }
-
-        val contents = event.message.chain.single().content
-        assertEquals("video Demo UP", contents.first().fallbackText)
-        assertTrue(contents.last() is MessageContent.MentionAll)
-    }
-
-    @Test
-    fun shouldSkipRenderingAndDeliveryWhenAllTargetsAreFiltered() = runBlocking {
-        initDb("dynamic-listener-filter-all")
-        val publisher = createPublisher()
-        val subscriber = createSubscriber()
-        SubscriptionRepository.subscribe(subscriber.id, publisher.id)
-        val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!
-        DynamicFilterRuleRepository.addElementRule(subscription.id, DynamicElementType.TEXT)
-
-        var loadCalls = 0
-        var renderCalls = 0
-        val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = PushTemplates(dynamic = "filtered {name}")),
-            imageLoader = DynamicImageLoader { loadCalls += 1 },
-            imageRenderer = DynamicImageRenderer {
-                renderCalls += 1
-                Paths.get("D:/tmp/filtered.png")
-            },
-        )
-
-        val received = captureMessageEvent()
-        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(publisher)))
-        val event = withTimeoutOrNull(300) { received.await() }
-
-        assertNull(event)
-        assertEquals(0, loadCalls)
-        assertEquals(0, renderCalls)
-        assertEquals(0, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
-    }
-
-    @Test
-    fun shouldDeliverOnlyUnfilteredTargets() = runBlocking {
-        initDb("dynamic-listener-filter-partial")
+    fun shouldDeliverOnlyUnfilteredTargetsAndSkipDrawWhenAllFiltered() = runBlocking {
+        initDb("dynamic-listener-filter")
         val publisher = createPublisher()
         val filteredSubscriber = createSubscriber(id = 10, targetId = "100")
         val allowedSubscriber = createSubscriber(id = 11, targetId = "200")
         SubscriptionRepository.subscribe(filteredSubscriber.id, publisher.id)
         SubscriptionRepository.subscribe(allowedSubscriber.id, publisher.id)
         val filteredSubscription = SubscriptionRepository.findBySubscriberAndPublisher(filteredSubscriber.id, publisher.id)!!
-        DynamicFilterRuleRepository.addElementRule(filteredSubscription.id, DynamicElementType.TEXT)
-
+        DynamicFilterRuleRepository.addRule(
+            filteredSubscription.id,
+            FilterAction.BLOCK,
+            FilterCondition.TextContains("Demo content"),
+        )
+        var renderCalls = 0
         val listener = SourceUpdateListener(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "allowed {name}")),
             imageLoader = DynamicImageLoader { },
-            imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/allowed.png") },
+            imageRenderer = DynamicImageRenderer {
+                renderCalls += 1
+                Paths.get("D:/tmp/allowed.png")
+            },
         )
 
         val received = captureMessageEvent()
         listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(publisher)))
         val event = withTimeout(3_000) { received.await() }
 
-        assertEquals(listOf(allowedSubscriber.toMessageTarget()), event.message.targets)
+        assertEquals(listOf(allowedSubscriber.address), event.message.targets)
+        assertEquals(0, renderCalls)
         assertEquals(1, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
-    }
 
-    @Test
-    fun shouldApplyFiltersToTargetEventsOnlyWhenSubscriptionExists() = runBlocking {
-        initDb("dynamic-listener-filter-target")
-        val publisher = createPublisher()
-        val filteredSubscriber = createSubscriber(id = 10, targetId = "100")
-        val directSubscriber = createSubscriber(id = 11, targetId = "200")
-        SubscriptionRepository.subscribe(filteredSubscriber.id, publisher.id)
-        val filteredSubscription = SubscriptionRepository.findBySubscriberAndPublisher(filteredSubscriber.id, publisher.id)!!
-        DynamicFilterRuleRepository.addElementRule(filteredSubscription.id, DynamicElementType.TEXT)
-
-        val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = PushTemplates(dynamic = "direct {name}")),
-            imageLoader = DynamicImageLoader { },
-            imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/direct.png") },
-        )
-
-        val received = captureMessageEvent()
-        listener.onMessage(SourceUpdateEvent(source = "test", target = filteredSubscriber, update = demoDynamic(publisher)))
-        assertNull(withTimeoutOrNull(300) { received.await() })
-
-        listener.onMessage(SourceUpdateEvent(source = "test", target = directSubscriber, update = demoDynamic(publisher)))
-        val event = withTimeout(3_000) { received.await() }
-
-        assertEquals(listOf(directSubscriber.toMessageTarget()), event.message.targets)
-    }
-
-    @Test
-    fun shouldSkipOrdinaryDynamicBeforeSubscriptionCreatedAt() = runBlocking {
-        initDb("dynamic-listener-subscription-created-at")
-        val publisher = createPublisher()
-        val subscriber = createSubscriber()
-        SubscriptionRepository.subscribe(subscriber.id, publisher.id)
-        val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!
-
-        val listener = SourceUpdateListener(
-            config = MainDynamicConfig(templates = PushTemplates(dynamic = "old {name}")),
-            imageLoader = DynamicImageLoader { },
-            imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/old.png") },
-        )
-
-        val received = captureMessageEvent()
-        listener.onMessage(
-            SourceUpdateEvent(
-                source = "test",
-                update = demoDynamic(publisher, time = subscription.createdAtEpochSeconds - 1),
-            )
-        )
-
-        assertNull(withTimeoutOrNull(300) { received.await() })
-        assertEquals(0, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
+        val targetReceived = captureMessageEvent()
+        listener.onMessage(SourceUpdateEvent(source = "test", targetOverride = filteredSubscriber, update = demoDynamic(publisher)))
+        assertNull(withTimeoutOrNull(300) { targetReceived.await() })
     }
 
     private fun captureMessageEvent(): CompletableDeferred<MessageEvent> {
@@ -413,76 +228,59 @@ class SourceUpdateDynamicTest {
     }
 
     private fun createPublisher(): Publisher {
-        PublisherRepository.create(
-            Publisher(
-                id = 1,
-                platformId = "bilibili",
-                type = PublisherType.USER,
-                externalId = "123",
-                name = "Demo UP",
-                state = EntityState.ACTIVE,
-                face = LazyImage("https://example.com/face.png"),
-                createTime = 1,
-                createUser = 1,
-            )
-        )
-        return assertNotNull(PublisherRepository.findByPlatformAndExternalId("bilibili", "123"))
+        PublisherRepository.create(testPublisher(id = 1, name = "Demo UP"))
+        return assertNotNull(PublisherRepository.findByKey(testPublisher().key))
     }
 
     private fun createSubscriber(id: Int = 10, targetId: String = "100"): Subscriber {
+        val address = testTargetAddress(kind = TargetKind.GROUP, externalId = targetId)
         SubscriberRepository.create(
             Subscriber(
                 id = id,
-                platformId = "onebot",
-                type = SubscriberType.GROUP,
-                targetId = targetId,
+                address = address,
                 name = "group",
                 state = EntityState.ACTIVE,
                 createTime = 1,
                 createUser = 1,
-            )
+            ),
         )
-        return assertNotNull(SubscriberRepository.findByPlatformAndTarget("onebot", SubscriberType.GROUP, targetId))
+        return assertNotNull(SubscriberRepository.findByAddress(address))
     }
 
     private fun demoDynamic(
         publisher: Publisher,
         time: Long = System.currentTimeMillis() / 1000 + 60,
-    ): Dynamic {
-        return Dynamic(
-            platform = PlatformDescriptor(
-                id = "bilibili",
-                name = "BiliBili",
-                homepage = "https://www.bilibili.com",
-                iconUri = "",
-                kind = PlatformKind.PUBLISHER,
+        withVideo: Boolean = false,
+    ): SourceUpdate {
+        return testDynamicUpdate(
+            publisher = publisher.toInfo(),
+            externalId = "dynamic-1",
+            payload = DynamicPayload(
+                content = DynamicContent.text("Demo content"),
+                attachments = if (withVideo) {
+                    listOf(
+                        VideoAttachment(
+                            id = "BV1",
+                            title = "Demo video",
+                            description = "Demo video description",
+                            cover = testMedia("https://example.com/cover.png", MediaKind.COVER),
+                            durationSeconds = 60,
+                            badge = "video",
+                            metrics = listOf(
+                                DynamicMetric(key = "play", display = "1"),
+                                DynamicMetric(key = "danmaku", display = "2"),
+                                DynamicMetric(key = "like", display = "3"),
+                            ),
+                            link = "https://www.bilibili.com/video/BV1",
+                        ),
+                    )
+                } else {
+                    emptyList()
+                },
             ),
-            dynamicId = "dynamic-1",
-            publisher = publisher.toSnapshot(),
-            time = time,
+        ).copy(
+            occurredAtEpochSeconds = time,
             link = "https://t.bilibili.com/dynamic-1",
-            content = DynamicContent("Demo content", listOf(DynamicContentNodeText("Demo content"))),
-        )
-    }
-
-    private fun Dynamic.withVideo(): Dynamic {
-        return copy(
-            attachments = listOf(
-                DynamicVideoAttachment(
-                    id = "BV1",
-                    title = "Demo video",
-                    description = "Demo video description",
-                    cover = LazyImage("https://example.com/cover.png"),
-                    duration = "01:00",
-                    badge = "video",
-                    metrics = listOf(
-                        DynamicMetric(key = "play", display = "1"),
-                        DynamicMetric(key = "danmaku", display = "2"),
-                        DynamicMetric(key = "like", display = "3"),
-                    ),
-                    link = "https://www.bilibili.com/video/BV1",
-                )
-            )
         )
     }
 }

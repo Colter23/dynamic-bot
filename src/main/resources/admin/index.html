@@ -1079,23 +1079,24 @@
     }
 
     function mentionRuleKey(selector) {
-      if (selector.operation === "STATE_CHANGED") return "LIVE";
+      const eventTypes = Array.isArray(selector.eventTypes) ? selector.eventTypes : [];
+      if (eventTypes.includes("live.started") || eventTypes.includes("live.ended")) return "LIVE";
       if (Array.isArray(selector.attachmentKinds) && selector.attachmentKinds.includes("VIDEO")) return "VIDEO";
-      if (selector.updateType === "dynamic" || selector.operation === "CREATED") return "DYNAMIC";
+      if (eventTypes.includes("dynamic.created")) return "DYNAMIC";
       return "";
     }
 
     function buildSubscriptionPolicy(basePolicy, atAllTypes) {
       const policy = Object.assign({
-        updateSelectors: [{ operation: "CREATED", attachmentKinds: [] }],
+        updateSelectors: [{ eventTypes: ["dynamic.created"], attachmentKinds: [] }],
         mentionRules: [],
         templateId: null,
         filtersEnabled: true
       }, basePolicy || {});
       const selectors = {
-        DYNAMIC: { updateType: "dynamic", operation: "CREATED", attachmentKinds: [] },
-        LIVE: { operation: "STATE_CHANGED", attachmentKinds: [] },
-        VIDEO: { operation: "CREATED", attachmentKinds: ["VIDEO"] }
+        DYNAMIC: { eventTypes: ["dynamic.created"], attachmentKinds: [] },
+        LIVE: { eventTypes: ["live.started", "live.ended"], attachmentKinds: [] },
+        VIDEO: { eventTypes: ["dynamic.created"], attachmentKinds: ["VIDEO"] }
       };
       policy.mentionRules = (atAllTypes || [])
         .filter(type => selectors[type])
@@ -2209,7 +2210,7 @@
         + optionHtml("KEYWORD", "关键词", true) + optionHtml("REGEX", "正则表达式", false)
         + "</select></div>"
         + "<div class='form-field' id='actionFilterElementWrap'><label for='actionFilterElement'>元素</label><select id='actionFilterElement'>"
-        + ["IMAGE", "VIDEO", "AUDIO", "CARD", "POLL", "TAG", "FILE", "ORIGIN"].map((item, index) => optionHtml(item, label(item), index === 0)).join("")
+        + ["IMAGE", "VIDEO", "CARD", "POLL"].map((item, index) => optionHtml(item, label(item), index === 0)).join("")
         + "</select></div>"
         + "<div class='form-field full-width' id='actionFilterValueWrap'><label for='actionFilterValue'>匹配内容</label><input id='actionFilterValue' placeholder='关键词或正则表达式'></div>"
         + "</div>";

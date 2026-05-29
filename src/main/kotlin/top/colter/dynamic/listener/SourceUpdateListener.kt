@@ -10,7 +10,6 @@ import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicLabel
 import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.EntityState
-import top.colter.dynamic.core.data.LiveChange
 import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
@@ -19,12 +18,10 @@ import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.Publisher
-import top.colter.dynamic.core.data.PublisherSnapshot
+import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.TargetKind
-import top.colter.dynamic.core.data.UpdateKey
-import top.colter.dynamic.core.data.UpdateOperation
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdateEvent
@@ -66,7 +63,6 @@ public class SourceUpdateListener(
         when (event.update.payload) {
             is DynamicPayload -> handleDynamic(event, event.update)
             is LivePayload -> handleLive(event, event.update)
-            else -> logger.warn { "skip unsupported source payload: ${event.update.payload::class.qualifiedName}" }
         }
     }
 
@@ -117,12 +113,11 @@ public class SourceUpdateListener(
             avatar = incoming.avatar,
             pendant = incoming.pendant,
             banner = incoming.banner ?: stored.banner,
-            metadata = incoming.metadata,
         )
         if (normalizedPublisher != stored) {
             PublisherRepository.replace(normalizedPublisher)
         }
-        return update.copy(publisher = normalizedPublisher.toSnapshot()) to normalizedPublisher
+        return update.copy(publisher = normalizedPublisher.toInfo()) to normalizedPublisher
     }
 
     private fun resolveTargets(target: Subscriber?, publisher: Publisher?): List<DeliveryTarget> {
@@ -191,9 +186,10 @@ public class SourceUpdateListener(
     private fun resolveLiveTemplate(update: SourceUpdate): String {
         val live = update.payload as? LivePayload ?: return runtimeConfigProvider().templates.dynamic
         val templates = runtimeConfigProvider().templates
-        return when (live.change) {
-            LiveChange.STARTED -> templates.liveStarted
-            LiveChange.ENDED -> templates.liveEnded
+        return when (update.eventType) {
+            SourceEventType.LIVE_STARTED -> templates.liveStarted
+            SourceEventType.LIVE_ENDED -> templates.liveEnded
+            else -> templates.dynamic
         }
     }
 
@@ -272,13 +268,6 @@ public class SourceUpdateListener(
         }
 
         return copy(
-            key = UpdateKey(
-                platformId = key.platformId,
-                updateType = "live_draw",
-                externalId = key.externalId,
-                publisherKey = key.publisherKey,
-            ),
-            operation = UpdateOperation.CREATED,
             payload = DynamicPayload(
                 labels = listOf(DynamicLabel("LIVE")),
                 title = liveTitle,

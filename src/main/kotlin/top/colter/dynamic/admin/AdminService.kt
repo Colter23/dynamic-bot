@@ -16,8 +16,8 @@ import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MentionMode
 import top.colter.dynamic.core.data.Publisher
+import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.PublisherKey
-import top.colter.dynamic.core.data.PublisherProfile
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.Subscription
 import top.colter.dynamic.core.data.SubscriptionPolicy
@@ -252,11 +252,11 @@ public class AdminService(
 
         val plugin = platformPluginResolver(platform)
             ?: throw NoSuchElementException("platform plugin not found: $platform")
-        val profile = plugin.fetchPublisherProfile(externalId)
+        val publisherInfo = plugin.fetchPublisherInfo(externalId)
             ?: throw NoSuchElementException("publisher not found on $platform: $externalId")
 
         val autoFollowed = if (request.autoFollow) ensureFollowed(plugin, platform, externalId) else false
-        val publisherUpsert = PublisherRepository.upsertProfile(profile.normalized())
+        val publisherUpsert = PublisherRepository.upsertInfo(publisherInfo.normalized())
         val subscriberPlatform = request.subscriberPlatform.trim().lowercase().also {
             require(it.isNotBlank()) { "subscriberPlatform must not be blank" }
         }
@@ -634,6 +634,6 @@ private fun requireMentionRulesTargetAllowed(subscriber: Subscriber, policy: Sub
     }
 }
 
-private fun PublisherProfile.normalized(): PublisherProfile = copy(
+private fun PublisherInfo.normalized(): PublisherInfo = copy(
     key = PublisherKey.of(platformId.value, kind, externalId),
 )

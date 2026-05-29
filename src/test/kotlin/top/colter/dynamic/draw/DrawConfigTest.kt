@@ -1,5 +1,4 @@
 import top.colter.dynamic.core.data.PlatformDescriptor
-import top.colter.dynamic.core.data.PlatformKind
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.skiko.FontRegistry
 import kotlin.test.Test
@@ -11,7 +10,7 @@ class DrawConfigTest {
         val fontRegistry = FontRegistry()
 
         DrawConfig(
-            platform = PlatformDescriptor("", "", "", "", PlatformKind.PUBLISHER),
+            platform = PlatformDescriptor.of("bilibili", "Bilibili"),
             fontRegistry = fontRegistry,
         )
 

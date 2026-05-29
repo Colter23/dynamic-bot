@@ -9,19 +9,25 @@ import kotlin.io.path.exists
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import top.colter.dynamic.core.data.ImageType
-import top.colter.dynamic.core.data.LazyImage
+import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.draw.image.DynamicImageCache
 
 class DynamicImageCacheTest {
 
     @Test
-    fun fileNameForUriShouldUseOriginalUrlFileName() {
-        assertEquals("avatar.png", DynamicImageCache.fileNameForUri("https://example.com/path/avatar.png?size=large"))
-        assertEquals("测试 图.jpg", DynamicImageCache.fileNameForUri("https://example.com/%E6%B5%8B%E8%AF%95%20%E5%9B%BE.jpg"))
-        assertEquals("bad_name.png", DynamicImageCache.fileNameForUri("https://example.com/path/bad:name.png"))
-        assertEquals("image.img", DynamicImageCache.fileNameForUri("https://example.com/path/"))
+    fun fileNameForUriShouldKeepReadableNameAndAppendUriHash() {
+        val avatar = DynamicImageCache.fileNameForUri("https://example.com/path/avatar.png?size=large")
+        val badName = DynamicImageCache.fileNameForUri("https://example.com/path/bad:name.png")
+        val blank = DynamicImageCache.fileNameForUri("https://example.com/path/")
+
+        assertTrue(avatar.startsWith("avatar-"))
+        assertTrue(avatar.endsWith(".png"))
+        assertTrue(badName.startsWith("bad_name-"))
+        assertTrue(badName.endsWith(".png"))
+        assertTrue(blank.startsWith("image-"))
     }
 
     @Test
@@ -29,29 +35,35 @@ class DynamicImageCacheTest {
         val root = createTempDirectory("dynamic-image-cache-store")
         DynamicImageCache.configure(root)
 
-        val image = LazyImage("https://example.com/images/avatar.png?x=1")
+        val image = MediaRef("https://example.com/images/avatar.png?x=1", MediaKind.AVATAR)
         val bytes = pngBytes(Color.RED)
 
-        val path = DynamicImageCache.store(image, "bilibili", ImageType.USER, bytes)
+        val path = DynamicImageCache.store(image, "bilibili", MediaKind.AVATAR, bytes)
 
-        assertEquals(root.resolve("bilibili").resolve("USER").resolve("avatar.png").toAbsolutePath().normalize(), path)
+        assertEquals(
+            root.resolve("bilibili")
+                .resolve("AVATAR")
+                .resolve(DynamicImageCache.fileNameForUri(image.uri))
+                .toAbsolutePath()
+                .normalize(),
+            path,
+        )
         assertTrue(path.exists())
         assertContentEquals(bytes, DynamicImageCache.bytes(image))
     }
 
     @Test
-    fun sameFileNameShouldHitExistingFile() {
+    fun sameFileNameWithDifferentUriShouldNotHitExistingFile() {
         val root = createTempDirectory("dynamic-image-cache-hit")
         DynamicImageCache.configure(root)
 
-        val first = LazyImage("https://i0.example.com/path/shared.jpg?one")
-        val second = LazyImage("https://i1.example.com/other/shared.jpg?two")
+        val first = MediaRef("https://i0.example.com/path/shared.jpg?one", MediaKind.IMAGE)
+        val second = MediaRef("https://i1.example.com/other/shared.jpg?two", MediaKind.IMAGE)
         val bytes = pngBytes(Color.BLUE)
 
-        DynamicImageCache.store(first, "bilibili", ImageType.IMAGES, bytes)
+        DynamicImageCache.store(first, "bilibili", MediaKind.IMAGE, bytes)
 
-        assertTrue(DynamicImageCache.loadFromDisk(second, "bilibili", ImageType.IMAGES))
-        assertContentEquals(bytes, DynamicImageCache.bytes(second))
+        assertFalse(DynamicImageCache.loadFromDisk(second, "bilibili", MediaKind.IMAGE))
     }
 
     @Test
@@ -59,7 +71,7 @@ class DynamicImageCacheTest {
         val root = createTempDirectory("dynamic-image-cache-placeholder")
         DynamicImageCache.configure(root)
 
-        val image = DynamicImageCache.image(LazyImage("https://example.com/missing.png"))
+        val image = DynamicImageCache.image(MediaRef("https://example.com/missing.png", MediaKind.IMAGE))
 
         assertTrue(image.width > 0)
         assertTrue(image.height > 0)

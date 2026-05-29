@@ -585,7 +585,7 @@ private class SubscribeCommandHandler(
         val plugin = platformPluginResolver(platform)
             ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "platform plugin not found: $platform")
 
-        val profile = plugin.fetchPublisherProfile(publisherUserId)
+        val publisherInfo = plugin.fetchPublisherInfo(publisherUserId)
             ?: return CommandExecutionResult(
                 CommandExecutionStatus.FAILED,
                 "publisher not found on $platform: $publisherUserId",
@@ -621,7 +621,7 @@ private class SubscribeCommandHandler(
             }
         }
 
-        val publisherUpsert = PublisherRepository.upsertProfile(profile)
+        val publisherUpsert = PublisherRepository.upsertInfo(publisherInfo)
         val subscriber = SubscriberRepository.ensure(
             address = TargetAddress.of(
                 platformId = invocation.context.platform,
@@ -737,7 +737,7 @@ private class FilterAddElementCommandHandler(
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "add", "element"),
         description = "add an element block filter for a subscription",
-        usage = "filter add element <platform> <publisherUserId> <text|image|video|audio|card|poll|tag|file|origin>",
+        usage = "filter add element <platform> <publisherUserId> <image|video|card|poll>",
         requiredRole = CommandRole.USER,
     )
 

@@ -5,11 +5,11 @@ import top.colter.dynamic.core.data.DynamicContentNodeMention
 import top.colter.dynamic.core.data.DynamicContentNodeTag
 import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.ImageAttachment
-import top.colter.dynamic.core.data.LiveChange
 import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.util.formatTime
 
@@ -18,13 +18,12 @@ public class PushTemplateRenderer {
         val payload = update.payload
         return when (payload) {
             is DynamicPayload -> DRAW_PLACEHOLDER in template
-            is LivePayload -> payload.change == LiveChange.STARTED && DRAW_PLACEHOLDER in template
-            else -> false
+            is LivePayload -> update.eventType == SourceEventType.LIVE_STARTED && DRAW_PLACEHOLDER in template
         }
     }
 
     public fun render(template: String, update: SourceUpdate, drawImage: MediaRef?): List<MessageBatch> {
-        val splitConversation = (update.payload as? LivePayload)?.change != LiveChange.ENDED
+        val splitConversation = update.eventType != SourceEventType.LIVE_ENDED
         return renderTemplate(
             template = template,
             splitConversation = splitConversation,
@@ -32,7 +31,6 @@ public class PushTemplateRenderer {
                 when (val payload = update.payload) {
                     is DynamicPayload -> appendDynamicPlaceholder(contents, placeholder, key, update, payload, drawImage)
                     is LivePayload -> appendLivePlaceholder(contents, placeholder, key, update, payload, drawImage)
-                    else -> appendText(contents, placeholder)
                 }
             },
         )
@@ -107,12 +105,12 @@ public class PushTemplateRenderer {
         drawImage: MediaRef?,
     ) {
         when (key) {
-            "draw" -> if (live.change == LiveChange.STARTED) {
+            "draw" -> if (update.eventType == SourceEventType.LIVE_STARTED) {
                 drawImage?.let { contents += MessageContent.Image(fallbackText = "", image = it) }
             } else {
                 appendText(contents, placeholder)
             }
-            "cover" -> if (live.change == LiveChange.STARTED) {
+            "cover" -> if (update.eventType == SourceEventType.LIVE_STARTED) {
                 live.cover?.let { contents += MessageContent.Image(fallbackText = "", image = it) }
             } else {
                 appendText(contents, placeholder)
@@ -126,7 +124,7 @@ public class PushTemplateRenderer {
             "name" -> update.publisher.name
             "uid" -> update.publisher.externalId
             "rid" -> live.roomId
-            "time" -> if (live.change == LiveChange.STARTED) {
+            "time" -> if (update.eventType == SourceEventType.LIVE_STARTED) {
                 (live.startedAtEpochSeconds ?: update.occurredAtEpochSeconds).formatTime()
             } else {
                 null
@@ -134,13 +132,13 @@ public class PushTemplateRenderer {
             "title" -> live.title
             "area" -> live.area.orEmpty()
             "link" -> update.link
-            "startTime" -> if (live.change == LiveChange.ENDED) live.startedAtEpochSeconds?.formatTime().orEmpty() else null
-            "endTime" -> if (live.change == LiveChange.ENDED) {
+            "startTime" -> if (update.eventType == SourceEventType.LIVE_ENDED) live.startedAtEpochSeconds?.formatTime().orEmpty() else null
+            "endTime" -> if (update.eventType == SourceEventType.LIVE_ENDED) {
                 (live.endedAtEpochSeconds ?: update.occurredAtEpochSeconds).formatTime()
             } else {
                 null
             }
-            "duration" -> if (live.change == LiveChange.ENDED) durationText(update, live) else null
+            "duration" -> if (update.eventType == SourceEventType.LIVE_ENDED) durationText(update, live) else null
             else -> null
         }
     }

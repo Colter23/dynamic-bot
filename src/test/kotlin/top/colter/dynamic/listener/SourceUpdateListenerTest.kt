@@ -1,24 +1,31 @@
 package top.colter.dynamic.listener
 
 import java.nio.file.Paths
+import kotlin.io.path.createTempDirectory
+import kotlin.test.AfterTest
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.PushTemplates
 import top.colter.dynamic.core.data.EntityState
-import top.colter.dynamic.core.data.LazyImage
-import top.colter.dynamic.core.data.LiveChange
+import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.LiveStatus
-import top.colter.dynamic.core.data.LiveStatusUpdate
+import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MentionMode
+import top.colter.dynamic.core.data.MentionRule
 import top.colter.dynamic.core.data.MessageContent
-import top.colter.dynamic.core.data.PlatformDescriptor
-import top.colter.dynamic.core.data.PlatformKind
 import top.colter.dynamic.core.data.Publisher
-import top.colter.dynamic.core.data.PublisherType
+import top.colter.dynamic.core.data.SourceEventType
+import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
-import top.colter.dynamic.core.data.SubscriberType
-import top.colter.dynamic.core.data.SubscriptionAtAllType
+import top.colter.dynamic.core.data.SubscriptionPolicy
+import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.data.UpdateSelector
 import top.colter.dynamic.core.event.EventManger
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
@@ -28,12 +35,10 @@ import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
-import kotlin.io.path.createTempDirectory
-import kotlin.test.AfterTest
-import kotlin.test.Test
-import kotlin.test.assertEquals
-import kotlin.test.assertNotNull
-import kotlin.test.assertTrue
+import top.colter.dynamic.testDynamicUpdate
+import top.colter.dynamic.testMedia
+import top.colter.dynamic.testPublisher
+import top.colter.dynamic.testTargetAddress
 
 class SourceUpdateListenerTest {
     @AfterTest
@@ -42,7 +47,7 @@ class SourceUpdateListenerTest {
     }
 
     @Test
-    fun shouldRenderLiveStartedTemplateWithDrawCoverAndSplitChains() = runBlocking {
+    fun shouldRenderLiveStartedTemplateWithDrawCoverAndSplitBatches() = runBlocking {
         val (publisher, subscriber) = seededSubscription("live-started")
         val listener = SourceUpdateListener(
             config = MainDynamicConfig(
@@ -56,26 +61,18 @@ class SourceUpdateListenerTest {
         val received = captureMessageEvent()
         val startedAt = System.currentTimeMillis() / 1000 + 60
 
-        listener.onMessage(
-            SourceUpdateEvent(
-                source = "test",
-                update = liveUpdate(publisher, LiveChange.STARTED, startedAt, null),
-            )
-        )
+        listener.onMessage(SourceUpdateEvent(source = "test", update = liveUpdate(publisher, SourceEventType.LIVE_STARTED, startedAt)))
         val event = withTimeout(3_000) { received.await() }
 
-        assertEquals(listOf(subscriber.toMessageTarget()), event.message.targets)
-        assertEquals(2, event.message.chain.size)
-        val first = event.message.chain.first().content
+        assertEquals(listOf(subscriber.address), event.message.targets)
+        assertEquals(2, event.message.batches.size)
+        val first = event.message.batches.first().content
         assertEquals(2, first.filterIsInstance<MessageContent.Image>().size)
-        assertEquals(
-            "D:\\tmp\\live-started.png",
-            first.filterIsInstance<MessageContent.Image>().first().image.uri,
-        )
+        assertEquals("D:\\tmp\\live-started.png", first.filterIsInstance<MessageContent.Image>().first().image.uri)
         val text = first.filterIsInstance<MessageContent.Text>().joinToString("") { it.fallbackText }
         assertTrue(text.contains("Demo UP|123|456|Live title|Games"))
         assertTrue(text.contains("https://live.bilibili.com/456"))
-        assertEquals("next", event.message.chain[1].content.single().fallbackText)
+        assertEquals("next", event.message.batches[1].content.single().fallbackText)
     }
 
     @Test
@@ -92,26 +89,30 @@ class SourceUpdateListenerTest {
         val start = System.currentTimeMillis() / 1000 + 60
         val end = start + 3_661
 
-        listener.onMessage(
-            SourceUpdateEvent(
-                source = "test",
-                update = liveUpdate(publisher, LiveChange.ENDED, end, start),
-            )
-        )
+        listener.onMessage(SourceUpdateEvent(source = "test", update = liveUpdate(publisher, SourceEventType.LIVE_ENDED, end, start)))
         val event = withTimeout(3_000) { received.await() }
 
-        assertEquals(listOf(subscriber.toMessageTarget()), event.message.targets)
-        val text = event.message.chain.single().content.filterIsInstance<MessageContent.Text>().single().fallbackText
+        assertEquals(listOf(subscriber.address), event.message.targets)
+        val text = event.message.batches.single().content.filterIsInstance<MessageContent.Text>().single().fallbackText
         assertTrue(text.contains("Demo UP|123|456|Live title|Games"))
-        assertTrue(text.contains("1小时 1分 1秒"))
+        assertTrue(text.contains("1h 1m 1s"))
         assertTrue(text.endsWith("https://live.bilibili.com/456"))
     }
 
     @Test
     fun shouldAppendMentionAllForLiveStartedButNotLiveEnded() = runBlocking {
-        val (publisher, subscriber) = seededSubscription("live-at-all")
-        val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!
-        SubscriptionRepository.updateAtAllTypes(subscription.id, setOf(SubscriptionAtAllType.LIVE))
+        val (publisher, _) = seededSubscription(
+            "live-at-all",
+            policy = SubscriptionPolicy(
+                updateSelectors = listOf(UpdateSelector.any()),
+                mentionRules = listOf(
+                    MentionRule(
+                        selector = UpdateSelector(eventTypes = setOf(SourceEventType.LIVE_STARTED)),
+                        mode = MentionMode.MENTION_ALL,
+                    ),
+                ),
+            ),
+        )
         val listener = SourceUpdateListener(
             config = MainDynamicConfig(
                 templates = PushTemplates(
@@ -123,90 +124,64 @@ class SourceUpdateListenerTest {
         val startedAt = System.currentTimeMillis() / 1000 + 60
 
         val startedReceived = captureMessageEvent()
-        listener.onMessage(
-            SourceUpdateEvent(
-                source = "test",
-                update = liveUpdate(publisher, LiveChange.STARTED, startedAt, null),
-            )
-        )
+        listener.onMessage(SourceUpdateEvent(source = "test", update = liveUpdate(publisher, SourceEventType.LIVE_STARTED, startedAt)))
         val started = withTimeout(3_000) { startedReceived.await() }
-        val startedContents = started.message.chain.single().content
+        val startedContents = started.message.batches.single().content
         assertEquals("started Live title", startedContents.first().fallbackText)
         assertTrue(startedContents.last() is MessageContent.MentionAll)
 
         val endedReceived = captureMessageEvent()
-        listener.onMessage(
-            SourceUpdateEvent(
-                source = "test",
-                update = liveUpdate(publisher, LiveChange.ENDED, startedAt + 60, startedAt),
-            )
-        )
+        listener.onMessage(SourceUpdateEvent(source = "test", update = liveUpdate(publisher, SourceEventType.LIVE_ENDED, startedAt + 60, startedAt)))
         val ended = withTimeout(3_000) { endedReceived.await() }
-        assertEquals("ended Live title", ended.message.chain.single().content.single().fallbackText)
+        assertEquals("ended Live title", ended.message.batches.single().content.single().fallbackText)
     }
 
-    private fun seededSubscription(suffix: String): Pair<Publisher, Subscriber> {
+    private fun seededSubscription(
+        suffix: String,
+        policy: SubscriptionPolicy = SubscriptionPolicy(updateSelectors = listOf(UpdateSelector.any())),
+    ): Pair<Publisher, Subscriber> {
         val tempDir = createTempDirectory("dynamic-bot-main-$suffix").toFile()
         PersistenceManager.init(tempDir.resolve("test.db").path)
-        PublisherRepository.create(
-            Publisher(
-                id = 1,
-                platformId = "bilibili",
-                type = PublisherType.USER,
-                externalId = "123",
-                name = "Demo UP",
-                state = EntityState.ACTIVE,
-                face = LazyImage("https://example.com/face.png"),
-                createTime = 1,
-                createUser = 1,
-            )
-        )
+        PublisherRepository.create(testPublisher(id = 1, name = "Demo UP"))
         SubscriberRepository.create(
             Subscriber(
                 id = 10,
-                platformId = "onebot",
-                type = SubscriberType.GROUP,
-                targetId = "100",
+                address = testTargetAddress(kind = TargetKind.GROUP, externalId = "100"),
                 name = "group",
                 state = EntityState.ACTIVE,
                 createTime = 1,
                 createUser = 1,
-            )
+            ),
         )
-        val publisher = assertNotNull(PublisherRepository.findByPlatformAndExternalId("bilibili", "123"))
-        val subscriber = assertNotNull(
-            SubscriberRepository.findByPlatformAndTarget("onebot", SubscriberType.GROUP, "100")
-        )
-        SubscriptionRepository.subscribe(subscriber.id, publisher.id)
+        val publisher = assertNotNull(PublisherRepository.findByKey(testPublisher().key))
+        val subscriber = assertNotNull(SubscriberRepository.findByAddress(testTargetAddress(kind = TargetKind.GROUP, externalId = "100")))
+        SubscriptionRepository.subscribe(subscriber.id, publisher.id, policy)
         return publisher to subscriber
     }
 
     private fun liveUpdate(
         publisher: Publisher,
-        change: LiveChange,
+        eventType: SourceEventType,
         time: Long,
-        startedAt: Long?,
-    ): LiveStatusUpdate {
-        return LiveStatusUpdate(
-            platform = PlatformDescriptor(
-                id = "bilibili",
-                name = "Bilibili",
-                homepage = "https://www.bilibili.com",
-                iconUri = "",
-                kind = PlatformKind.PUBLISHER,
+        startedAt: Long? = null,
+    ): SourceUpdate {
+        return testDynamicUpdate(
+            publisher = publisher.toInfo(),
+            eventType = eventType,
+            externalId = "live-456-${eventType.value}",
+            payload = LivePayload(
+                roomId = "456",
+                title = "Live title",
+                area = "Games",
+                cover = testMedia("https://example.com/cover.png", MediaKind.COVER),
+                status = if (eventType == SourceEventType.LIVE_STARTED) LiveStatus.OPEN else LiveStatus.CLOSE,
+                previousStatus = if (eventType == SourceEventType.LIVE_STARTED) LiveStatus.CLOSE else LiveStatus.OPEN,
+                startedAtEpochSeconds = startedAt ?: time,
+                endedAtEpochSeconds = if (eventType == SourceEventType.LIVE_ENDED) time else null,
             ),
-            publisher = publisher.toSnapshot(),
-            roomId = "456",
-            time = time,
-            title = "Live title",
-            area = "Games",
-            cover = LazyImage("https://example.com/cover.png"),
+        ).copy(
+            occurredAtEpochSeconds = time,
             link = "https://live.bilibili.com/456",
-            status = if (change == LiveChange.STARTED) LiveStatus.OPEN else LiveStatus.CLOSE,
-            previousStatus = if (change == LiveChange.STARTED) LiveStatus.CLOSE else LiveStatus.OPEN,
-            change = change,
-            startedAt = startedAt ?: time,
-            endedAt = if (change == LiveChange.ENDED) time else null,
         )
     }
 

@@ -3,7 +3,7 @@ package top.colter.dynamic.draw.layout.default
 import top.colter.dynamic.DrawOrnament
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
-import top.colter.dynamic.core.data.PublisherSnapshot
+import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.draw.layout.default.component.Author
 import top.colter.dynamic.draw.layout.default.component.AuthorSmall
@@ -14,7 +14,7 @@ import top.colter.skiko.layout.Layout
 
 
 internal fun Layout.drawPublisher(
-    publisher: PublisherSnapshot,
+    publisher: PublisherInfo,
     time: String,
     link: String,
     config: DrawConfig,

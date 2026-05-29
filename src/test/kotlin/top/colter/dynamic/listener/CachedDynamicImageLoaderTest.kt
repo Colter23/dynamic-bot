@@ -13,20 +13,16 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.ImageCacheConfig
-import top.colter.dynamic.core.data.Dynamic
-import top.colter.dynamic.core.data.EntityState
-import top.colter.dynamic.core.data.ImageType
-import top.colter.dynamic.core.data.LazyImage
-import top.colter.dynamic.core.data.PlatformDescriptor
-import top.colter.dynamic.core.data.PlatformKind
-import top.colter.dynamic.core.data.Publisher
-import top.colter.dynamic.core.data.PublisherType
+import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.draw.image.DynamicImageCache
+import top.colter.dynamic.testDynamicUpdate
+import top.colter.dynamic.testPublisherInfo
 
 class CachedDynamicImageLoaderTest {
 
     @Test
-    fun loadShouldDownloadOnceAndThenHitSameFileNameOnDisk(): Unit = runBlocking {
+    fun loadShouldUseFullUriHashForSameFileNameOnDisk(): Unit = runBlocking {
         val root = createTempDirectory("dynamic-loader-hit")
         val downloadCount = AtomicInteger()
         val bytes = pngBytes(Color.GREEN)
@@ -34,12 +30,15 @@ class CachedDynamicImageLoaderTest {
             downloadCount.incrementAndGet()
             bytes
         }
+        val first = "https://i0.example.com/path/avatar.png?one"
+        val second = "https://i1.example.com/other/avatar.png?two"
 
-        loader.load(dynamic(face = LazyImage("https://i0.example.com/path/avatar.png?one")))
-        loader.load(dynamic(face = LazyImage("https://i1.example.com/other/avatar.png?two")))
+        loader.load(dynamic(avatar = MediaRef(first, MediaKind.AVATAR)))
+        loader.load(dynamic(avatar = MediaRef(second, MediaKind.AVATAR)))
 
-        assertEquals(1, downloadCount.get())
-        assertTrue(root.resolve("bilibili").resolve("USER").resolve("avatar.png").exists())
+        assertEquals(2, downloadCount.get())
+        assertTrue(root.resolve("bilibili").resolve("AVATAR").resolve(DynamicImageCache.fileNameForUri(first)).exists())
+        assertTrue(root.resolve("bilibili").resolve("AVATAR").resolve(DynamicImageCache.fileNameForUri(second)).exists())
     }
 
     @Test
@@ -52,13 +51,9 @@ class CachedDynamicImageLoaderTest {
             delay(50)
             bytes
         }
+        val shared = MediaRef("https://i0.example.com/path/shared.png?same", MediaKind.AVATAR)
 
-        loader.load(
-            dynamic(
-                face = LazyImage("https://i0.example.com/path/shared.png?face"),
-                header = LazyImage("https://i1.example.com/other/shared.png?header"),
-            )
-        )
+        loader.load(dynamic(avatar = shared, pendant = shared))
 
         assertEquals(1, downloadCount.get())
     }
@@ -66,10 +61,10 @@ class CachedDynamicImageLoaderTest {
     @Test
     fun loadShouldUsePlaceholderWhenDownloadFails(): Unit = runBlocking {
         val root = createTempDirectory("dynamic-loader-failure")
-        val image = LazyImage("https://example.com/failure.png")
+        val image = MediaRef("https://example.com/failure.png", MediaKind.AVATAR)
         val loader = loader(root.toString()) { _, _ -> error("boom") }
 
-        loader.load(dynamic(face = image))
+        loader.load(dynamic(avatar = image))
 
         assertTrue(DynamicImageCache.image(image).width > 0)
     }
@@ -89,34 +84,17 @@ class CachedDynamicImageLoaderTest {
     }
 
     private fun dynamic(
-        face: LazyImage,
-        header: LazyImage? = null,
-    ): Dynamic {
-        return Dynamic(
-            platform = PlatformDescriptor(
-                id = "bilibili",
-                name = "Bilibili",
-                homepage = "https://www.bilibili.com",
-                iconUri = "",
-                kind = PlatformKind.PUBLISHER,
-            ),
-            dynamicId = "dynamic-${face.uri.hashCode()}",
-            publisher = Publisher(
-                id = 1,
-                platformId = "bilibili",
-                type = PublisherType.USER,
-                externalId = "123",
-                name = "Demo",
-                state = EntityState.ACTIVE,
-                face = face,
-                header = header,
-                createTime = 1,
-                createUser = 1,
-            ).toSnapshot(),
-            time = 1,
-            link = "https://t.bilibili.com/1",
-        )
-    }
+        avatar: MediaRef,
+        banner: MediaRef? = null,
+        pendant: MediaRef? = null,
+    ) = testDynamicUpdate(
+        externalId = "dynamic-${avatar.uri.hashCode()}",
+        publisher = testPublisherInfo(
+            avatar = avatar,
+            banner = banner,
+            pendant = pendant,
+        ),
+    )
 
     private fun pngBytes(color: Color): ByteArray {
         val image = BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB)

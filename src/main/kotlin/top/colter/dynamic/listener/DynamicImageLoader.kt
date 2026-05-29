@@ -22,7 +22,7 @@ import kotlinx.coroutines.sync.withPermit
 import top.colter.dynamic.ImageCacheConfig
 import top.colter.dynamic.core.data.MediaReference
 import top.colter.dynamic.core.data.SourceUpdate
-import top.colter.dynamic.core.data.collectMediaReferences
+import top.colter.dynamic.core.data.mediaReferences
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.image.DynamicImageCache
 import kotlin.coroutines.resume
@@ -45,7 +45,7 @@ public class CachedDynamicImageLoader(
     }
 
     override suspend fun load(update: SourceUpdate) {
-        val references = collectMediaReferences(update)
+        val references = update.mediaReferences()
             .filter { it.media.uri.isNotBlank() }
         if (references.isEmpty()) return
 

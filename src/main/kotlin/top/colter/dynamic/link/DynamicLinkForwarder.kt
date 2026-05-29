@@ -66,7 +66,7 @@ public class DynamicLinkForwarder(
             return DynamicLinkForwardResult.Failed("dynamic publisher id is missing")
         }
 
-        val publisher = PublisherRepository.upsertProfile(sourcePublisher.toProfile()).value
+        val publisher = PublisherRepository.upsertInfo(sourcePublisher).value
         val subscriber = SubscriberRepository.ensure(
             address = TargetAddress.of(
                 platformId = context.platform,
@@ -75,7 +75,7 @@ public class DynamicLinkForwarder(
             ),
             name = context.chatId,
         )
-        val normalizedUpdate = update.copy(publisher = publisher.toSnapshot())
+        val normalizedUpdate = update.copy(publisher = publisher.toInfo())
 
         SourceUpdateEvent(
             source = LINK_PARSE_EVENT_SOURCE,
