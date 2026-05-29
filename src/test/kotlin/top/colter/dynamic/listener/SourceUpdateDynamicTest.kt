@@ -86,6 +86,7 @@ class SourceUpdateDynamicTest {
         PublisherRepository.replace(
             publisher.copy(
                 name = "Old UP",
+                state = EntityState.DISABLED,
                 avatar = testMedia("https://example.com/old-face.png", MediaKind.AVATAR),
                 banner = storedBanner,
             ),
@@ -112,6 +113,7 @@ class SourceUpdateDynamicTest {
 
         val updated = assertNotNull(PublisherRepository.findById(publisher.id))
         assertEquals("New UP", updated.name)
+        assertEquals(EntityState.DISABLED, updated.state)
         assertEquals("https://example.com/new-face.png", updated.avatar.uri)
         assertEquals(storedBanner.uri, updated.banner?.uri)
         assertEquals(storedBanner.uri, renderedBanner)

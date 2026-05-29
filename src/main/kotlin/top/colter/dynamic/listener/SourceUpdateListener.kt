@@ -26,8 +26,11 @@ import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdateEvent
+import top.colter.dynamic.core.event.SourceUpdatePublishRequest
+import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.core.filter.DynamicFilterEvaluator
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
+import top.colter.dynamic.core.repository.MessageEnqueueResult
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
@@ -44,6 +47,8 @@ public class SourceUpdateListener(
     private val templateRenderer: PushTemplateRenderer = PushTemplateRenderer(),
     imageLoader: DynamicImageLoader? = null,
     imageRenderer: DynamicImageRenderer? = null,
+    private val broadcastMessages: Boolean = true,
+    private val onDeliveriesQueued: suspend () -> Unit = {},
 ) : Listener<SourceUpdateEvent> {
     private val fixedConfig: MainDynamicConfig by lazy {
         config ?: configService.loadOrCreate(MainDynamicConfig.CONFIG_ID) { MainDynamicConfig() }
@@ -61,26 +66,42 @@ public class SourceUpdateListener(
     }
 
     override suspend fun onMessage(event: SourceUpdateEvent) {
-        when (event.update.payload) {
-            is DynamicPayload -> handleDynamic(event, event.update)
-            is LivePayload -> handleLive(event, event.update)
+        process(
+            SourceUpdatePublishRequest(
+                sourcePlugin = event.sourcePlugin,
+                update = event.update,
+                deliveryTarget = event.deliveryTarget,
+                deliveryTag = event.deliveryTag,
+            ),
+        )
+    }
+
+    public suspend fun process(request: SourceUpdatePublishRequest): SourceUpdatePublishResult {
+        return runCatching {
+            when (request.update.payload) {
+                is DynamicPayload -> handleDynamic(request, request.update)
+                is LivePayload -> handleLive(request, request.update)
+            }
+        }.getOrElse { error ->
+            logger.error(error) { "来源更新处理失败：update=${request.update.key.stableValue()}" }
+            SourceUpdatePublishResult.failed(error.message ?: "来源更新处理失败")
         }
     }
 
-    private suspend fun handleDynamic(event: SourceUpdateEvent, update: SourceUpdate) {
+    private suspend fun handleDynamic(request: SourceUpdatePublishRequest, update: SourceUpdate): SourceUpdatePublishResult {
         val (normalizedUpdate, storedPublisher) = normalizePublisher(update)
-        val targets = resolveTargets(event.deliveryTarget, storedPublisher)
-        if (targets.isEmpty()) return
+        val targets = resolveTargets(request.deliveryTarget, storedPublisher)
+        if (targets.isEmpty()) return SourceUpdatePublishResult.ignored("没有可投递目标")
 
-        val deliverableTargets = if (event.deliveryTag == LINK_PARSE_EVENT_LABEL) {
+        val deliverableTargets = if (request.deliveryTag == LINK_PARSE_EVENT_LABEL) {
             targets
         } else {
             applyFilters(normalizedUpdate, targets.filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds))
         }
-        if (deliverableTargets.isEmpty()) return
+        if (deliverableTargets.isEmpty()) return SourceUpdatePublishResult.ignored("所有目标均被过滤或订阅时间晚于动态时间")
 
         val chain = buildMessageBatches(resolveDynamicTemplate(), normalizedUpdate)
-        publishMessage(
+        return publishMessage(
             update = normalizedUpdate,
             targets = deliverableTargets,
             batches = chain,
@@ -88,14 +109,14 @@ public class SourceUpdateListener(
         )
     }
 
-    private suspend fun handleLive(event: SourceUpdateEvent, update: SourceUpdate) {
+    private suspend fun handleLive(request: SourceUpdatePublishRequest, update: SourceUpdate): SourceUpdatePublishResult {
         val (normalizedUpdate, storedPublisher) = normalizePublisher(update)
-        val targets = resolveTargets(event.deliveryTarget, storedPublisher)
+        val targets = resolveTargets(request.deliveryTarget, storedPublisher)
             .filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds)
-        if (targets.isEmpty()) return
+        if (targets.isEmpty()) return SourceUpdatePublishResult.ignored("没有可投递目标")
 
         val chain = buildMessageBatches(resolveLiveTemplate(normalizedUpdate), normalizedUpdate)
-        publishMessage(
+        return publishMessage(
             update = normalizedUpdate,
             targets = targets,
             batches = chain,
@@ -110,7 +131,6 @@ public class SourceUpdateListener(
             key = incoming.key,
             name = incoming.name,
             official = incoming.official,
-            state = incoming.state,
             avatar = incoming.avatar,
             pendant = incoming.pendant,
             banner = incoming.banner ?: stored.banner,
@@ -194,20 +214,31 @@ public class SourceUpdateListener(
         }
     }
 
-    private fun publishMessage(
+    private suspend fun publishMessage(
         update: SourceUpdate,
         targets: List<DeliveryTarget>,
         batches: List<MessageBatch>,
         skipReason: String,
-    ) {
+    ): SourceUpdatePublishResult {
         if (batches.isEmpty()) {
             logger.warn { "跳过来源更新：$skipReason，渲染后的消息为空" }
-            return
+            return SourceUpdatePublishResult.ignored("渲染后的消息为空")
         }
 
         val (mentionAllTargets, normalTargets) = targets.partition { it.shouldMentionAll(update) }
-        publishMessageVariant(update, normalTargets, batches, "default")
-        publishMessageVariant(update, mentionAllTargets, batches.withMentionAllAtTail(), "mention_all")
+        val results = listOfNotNull(
+            publishMessageVariant(update, normalTargets, batches, "default"),
+            publishMessageVariant(update, mentionAllTargets, batches.withMentionAllAtTail(), "mention_all"),
+        )
+        val newDeliveryCount = results.sumOf { it.newDeliveries.size }
+        return when {
+            newDeliveryCount > 0 -> {
+                onDeliveriesQueued()
+                SourceUpdatePublishResult.enqueued(newDeliveryCount)
+            }
+            results.isNotEmpty() -> SourceUpdatePublishResult.duplicate()
+            else -> SourceUpdatePublishResult.ignored("没有可投递目标")
+        }
     }
 
     private fun publishMessageVariant(
@@ -215,8 +246,8 @@ public class SourceUpdateListener(
         targets: List<DeliveryTarget>,
         batches: List<MessageBatch>,
         renderVariant: String,
-    ) {
-        if (targets.isEmpty()) return
+    ): MessageEnqueueResult? {
+        if (targets.isEmpty()) return null
 
         val message = Message(
             id = "${update.key.stableValue()}:$renderVariant",
@@ -226,8 +257,12 @@ public class SourceUpdateListener(
             targets = targets.map { it.subscriber.address },
             batches = batches,
         )
-        MessageDeliveryRepository.createPending(message)
-        MessageEvent(sourcePlugin = "main", message = message).let { eventBus.broadcast(it) }
+        val result = MessageDeliveryRepository.enqueue(message)
+        if (broadcastMessages && result.newDeliveries.isNotEmpty()) {
+            val broadcastMessage = message.copy(targets = result.newDeliveries.map { it.target })
+            MessageEvent(sourcePlugin = "main", message = broadcastMessage).let { eventBus.broadcast(it) }
+        }
+        return result
     }
 
     private fun DeliveryTarget.shouldMentionAll(update: SourceUpdate): Boolean {
@@ -283,3 +318,5 @@ public class SourceUpdateListener(
         val subscription: top.colter.dynamic.core.data.Subscription?,
     )
 }
+
+public typealias SourceUpdateProcessor = SourceUpdateListener

@@ -124,10 +124,10 @@ public fun Application.adminModule(context: AdminServerContext) {
                 if (!call.ensureAuthorized(context)) return@post
                 val requester = context.stopRequester
                 if (requester == null) {
-                    call.respond(HttpStatusCode.Conflict, ErrorResponse("application stop is not configured"))
+                    call.respond(HttpStatusCode.Conflict, ErrorResponse("主项目停止功能未配置"))
                     return@post
                 }
-                call.respond(ActionResultResponse(changed = true, message = "application stop requested"))
+                call.respond(ActionResultResponse(changed = true, message = "已请求停止主项目"))
                 requester("web-admin")
             }
             get("/platform-logins") {
@@ -275,7 +275,7 @@ private object AdminAuth {
 
 private suspend fun ApplicationCall.ensureAuthorized(context: AdminServerContext): Boolean {
     if (AdminAuth.isAuthorized(context.tokenProvider(), this)) return true
-    respond(HttpStatusCode.Unauthorized, ErrorResponse("unauthorized"))
+    respond(HttpStatusCode.Unauthorized, ErrorResponse("认证失败"))
     return false
 }
 
@@ -285,25 +285,25 @@ private suspend inline fun <reified T : Any> ApplicationCall.respondApi(crossinl
     } catch (e: IllegalArgumentException) {
         respond(HttpStatusCode.BadRequest, ErrorResponse(e.message ?: "bad request"))
     } catch (e: SerializationException) {
-        respond(HttpStatusCode.BadRequest, ErrorResponse(e.message ?: "invalid request body"))
+        respond(HttpStatusCode.BadRequest, ErrorResponse(e.message ?: "请求体格式无效"))
     } catch (e: NoSuchElementException) {
-        respond(HttpStatusCode.NotFound, ErrorResponse(e.message ?: "not found"))
+        respond(HttpStatusCode.NotFound, ErrorResponse(e.message ?: "资源不存在"))
     } catch (e: PluginReloadFailedException) {
         respond(HttpStatusCode.Conflict, e.response)
     } catch (e: IllegalStateException) {
-        respond(HttpStatusCode.Conflict, ErrorResponse(e.message ?: "conflict"))
+        respond(HttpStatusCode.Conflict, ErrorResponse(e.message ?: "当前状态不允许执行该操作"))
     }
 }
 
 private fun ApplicationCall.pathInt(name: String): Int {
-    return pathString(name).toIntOrNull() ?: throw IllegalArgumentException("invalid $name")
+    return pathString(name).toIntOrNull() ?: throw IllegalArgumentException("路径参数无效：$name")
 }
 
 private fun ApplicationCall.pathString(name: String): String {
-    return parameters[name] ?: throw IllegalArgumentException("missing $name")
+    return parameters[name] ?: throw IllegalArgumentException("缺少路径参数：$name")
 }
 
 private fun ApplicationCall.optionalQueryInt(name: String): Int? {
     val raw = request.queryParameters[name] ?: return null
-    return raw.toIntOrNull() ?: throw IllegalArgumentException("invalid $name")
+    return raw.toIntOrNull() ?: throw IllegalArgumentException("查询参数无效：$name")
 }

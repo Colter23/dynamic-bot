@@ -61,7 +61,7 @@ public class AdminService(
     private val commandRegistry: CommandRegistry = CommandRegistry(),
     private val eventBus: EventBus = EventBus(),
     private val pluginReloader: (String) -> PluginReloadResult = {
-        throw IllegalStateException("plugin reload is not configured")
+        throw IllegalStateException("插件重载功能未配置")
     },
 ) {
     public constructor(
@@ -106,9 +106,9 @@ public class AdminService(
 
     public fun reloadPlugin(id: String): PluginReloadResponse {
         val pluginId = id.trim()
-        require(pluginId.isNotBlank()) { "plugin id must not be blank" }
+        require(pluginId.isNotBlank()) { "插件 ID 不能为空" }
         pluginProvider().firstOrNull { it.descriptor.id == pluginId }
-            ?: throw NoSuchElementException("plugin not found: $pluginId")
+            ?: throw NoSuchElementException("未找到插件：$pluginId")
 
         val result = pluginReloader(pluginId)
         val response = result.toResponse()
@@ -121,11 +121,11 @@ public class AdminService(
             .map { handle ->
                 val info = handle.info
                 val plugin = handle.instance
-                val loginState = runCatching { plugin.checkLoginState() }
+                    val loginState = runCatching { plugin.checkLoginState() }
                     .getOrElse { error ->
                         PublisherLoginResult(
                             status = PublisherLoginStatus.FAILED,
-                            message = error.message ?: "login status check failed",
+                            message = error.message ?: "登录状态检查失败",
                         )
                     }
                 PlatformLoginDto(
@@ -150,7 +150,7 @@ public class AdminService(
     }
 
     public fun updatePublisher(id: Int, request: UpdatePublisherRequest): PublisherDto {
-        val publisher = PublisherRepository.findById(id) ?: throw NoSuchElementException("publisher not found: $id")
+        val publisher = PublisherRepository.findById(id) ?: throw NoSuchElementException("未找到发布者：$id")
         val updated = publisher.copy(
             name = request.name?.trim()?.takeIf { it.isNotBlank() } ?: publisher.name,
             banner = request.headerUri?.trim()?.takeIf { it.isNotBlank() }?.let { MediaRef(uri = it, kind = MediaKind.COVER) }
@@ -162,7 +162,7 @@ public class AdminService(
     }
 
     public fun deletePublisher(id: Int): ActionResultResponse {
-        val publisher = PublisherRepository.findById(id) ?: throw NoSuchElementException("publisher not found: $id")
+        val publisher = PublisherRepository.findById(id) ?: throw NoSuchElementException("未找到发布者：$id")
         val removedSubscriptions = SubscriptionRepository.findAll()
             .filter { it.publisherId == publisher.id }
             .count { subscription ->
@@ -176,9 +176,9 @@ public class AdminService(
         return ActionResultResponse(
             changed = removed,
             message = if (removed) {
-                "publisher removed: subscriptions=$removedSubscriptions"
+                "发布者已删除：关联订阅=$removedSubscriptions"
             } else {
-                "publisher unchanged"
+                "发布者未变化"
             },
         )
     }
@@ -233,7 +233,7 @@ public class AdminService(
     }
 
     public fun updateSubscriber(id: Int, request: UpdateSubscriberRequest): SubscriberDto {
-        val subscriber = SubscriberRepository.findById(id) ?: throw NoSuchElementException("subscriber not found: $id")
+        val subscriber = SubscriberRepository.findById(id) ?: throw NoSuchElementException("未找到消息目标：$id")
         val updated = subscriber.copy(
             name = request.name?.trim()?.takeIf { it.isNotBlank() } ?: subscriber.name,
             state = request.state?.let { parseEnum<EntityState>(it, "state") } ?: subscriber.state,
@@ -243,7 +243,7 @@ public class AdminService(
     }
 
     public fun deleteSubscriber(id: Int): ActionResultResponse {
-        val subscriber = SubscriberRepository.findById(id) ?: throw NoSuchElementException("subscriber not found: $id")
+        val subscriber = SubscriberRepository.findById(id) ?: throw NoSuchElementException("未找到消息目标：$id")
         val removedSubscriptions = SubscriptionRepository.findAll()
             .filter { it.subscriberId == subscriber.id }
             .count { subscription ->
@@ -255,9 +255,9 @@ public class AdminService(
         return ActionResultResponse(
             changed = removed,
             message = if (removed) {
-                "subscriber removed: subscriptions=$removedSubscriptions"
+                "消息目标已删除：关联订阅=$removedSubscriptions"
             } else {
-                "subscriber unchanged"
+                "消息目标未变化"
             },
         )
     }
@@ -273,27 +273,27 @@ public class AdminService(
     public suspend fun createSubscription(request: CreateSubscriptionRequest): CreateSubscriptionResponse {
         val platform = request.publisherPlatform.trim().lowercase()
         val externalId = request.publisherExternalId.trim()
-        require(platform.isNotBlank()) { "publisherPlatform must not be blank" }
-        require(externalId.isNotBlank()) { "publisherExternalId must not be blank" }
+        require(platform.isNotBlank()) { "发布者平台不能为空" }
+        require(externalId.isNotBlank()) { "发布者外部 ID 不能为空" }
 
         val lookupPlugin = publisherLookupResolver(platform)
-            ?: throw NoSuchElementException("publisher lookup plugin not found: $platform")
+            ?: throw NoSuchElementException("未找到发布者查询插件：$platform")
         val publisherInfo = lookupPlugin.fetchPublisherInfo(externalId)
-            ?: throw NoSuchElementException("publisher not found on $platform: $externalId")
+            ?: throw NoSuchElementException("未找到发布者：$platform:$externalId")
 
         val autoFollowed = if (request.autoFollow) {
             val followPlugin = publisherFollowResolver(platform)
-                ?: throw NoSuchElementException("publisher follow plugin not found: $platform")
+                ?: throw NoSuchElementException("未找到发布者关注插件：$platform")
             ensureFollowed(followPlugin, platform, externalId)
         } else {
             false
         }
         val publisherUpsert = PublisherRepository.upsertInfo(publisherInfo.normalized())
         val subscriberPlatform = request.subscriberPlatform.trim().lowercase().also {
-            require(it.isNotBlank()) { "subscriberPlatform must not be blank" }
+            require(it.isNotBlank()) { "消息目标平台不能为空" }
         }
         val subscriberExternalId = request.subscriberTargetId.trim().also {
-            require(it.isNotBlank()) { "subscriberTargetId must not be blank" }
+            require(it.isNotBlank()) { "消息目标 ID 不能为空" }
         }
         val subscriberAddress = TargetAddress.of(
             platformId = subscriberPlatform,
@@ -315,7 +315,7 @@ public class AdminService(
             val existing = SubscriptionRepository.findBySubscriberAndPublisher(
                 subscriberId = subscriberUpsert.value.id,
                 publisherId = publisherUpsert.value.id,
-            ) ?: throw IllegalStateException("subscription was not found")
+            ) ?: throw IllegalStateException("订阅未找到")
             SubscriptionRepository.updatePolicy(existing.id, request.policy)
         }
         val subscription = SubscriptionRepository.findBySubscriberAndPublisher(
@@ -338,9 +338,9 @@ public class AdminService(
     }
 
     public fun updateSubscription(id: Int, request: UpdateSubscriptionRequest): SubscriptionDto {
-        val subscription = SubscriptionRepository.findById(id) ?: throw NoSuchElementException("subscription not found: $id")
+        val subscription = SubscriptionRepository.findById(id) ?: throw NoSuchElementException("未找到订阅：$id")
         val subscriber = SubscriberRepository.findById(subscription.subscriberId)
-            ?: throw NoSuchElementException("subscriber not found: ${subscription.subscriberId}")
+            ?: throw NoSuchElementException("未找到消息目标：${subscription.subscriberId}")
         requireMentionRulesTargetAllowed(subscriber, request.policy)
         val updated = SubscriptionRepository.updatePolicy(subscription.id, request.policy)
         return updated.toDto(
@@ -351,7 +351,7 @@ public class AdminService(
 
     public suspend fun deleteSubscription(id: Int): ActionResultResponse {
         val subscription = SubscriptionRepository.findById(id)
-            ?: throw NoSuchElementException("subscription not found: $id")
+            ?: throw NoSuchElementException("未找到订阅：$id")
         val publisher = PublisherRepository.findById(subscription.publisherId)
         val removed = applySubscriptionMutation(
             SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId),
@@ -361,7 +361,7 @@ public class AdminService(
                 publisherFollowResolver(publisher.platformId.value)?.unfollowPublisher(publisher.externalId)
             }
         }
-        return ActionResultResponse(removed, if (removed) "subscription removed" else "subscription unchanged")
+        return ActionResultResponse(removed, if (removed) "订阅已删除" else "订阅未变化")
     }
 
     public fun filterRules(subscriptionId: Int?): List<DynamicFilterRuleDto> {
@@ -369,7 +369,7 @@ public class AdminService(
             DynamicFilterRuleRepository.findAll()
         } else {
             require(SubscriptionRepository.findById(subscriptionId) != null) {
-                "subscription not found: $subscriptionId"
+                "未找到订阅：$subscriptionId"
             }
             DynamicFilterRuleRepository.findBySubscriptionId(subscriptionId)
         }
@@ -388,16 +388,16 @@ public class AdminService(
 
     public fun deleteFilterRule(id: Int): ActionResultResponse {
         val removed = DynamicFilterRuleRepository.removeById(id)
-        if (!removed) throw NoSuchElementException("filter rule not found: $id")
-        return ActionResultResponse(true, "filter rule removed")
+        if (!removed) throw NoSuchElementException("未找到过滤规则：$id")
+        return ActionResultResponse(true, "过滤规则已删除")
     }
 
     public fun clearFilterRules(subscriptionId: Int): ActionResultResponse {
         require(SubscriptionRepository.findById(subscriptionId) != null) {
-            "subscription not found: $subscriptionId"
+            "未找到订阅：$subscriptionId"
         }
         val removed = DynamicFilterRuleRepository.clearBySubscriptionId(subscriptionId)
-        return ActionResultResponse(removed > 0, "filter rules removed: count=$removed")
+        return ActionResultResponse(removed > 0, "过滤规则已清空：数量=$removed")
     }
 
     public fun configs(): List<ConfigSummaryDto> {
@@ -431,7 +431,7 @@ public class AdminService(
     public fun config(id: String): ConfigDetailDto {
         if (id == MainDynamicConfig.CONFIG_ID) return mainConfigDetail()
         val (info, plugin) = configurablePlugins().firstOrNull { (_, plugin) -> plugin.configId == id }
-            ?: throw NoSuchElementException("config not found: $id")
+            ?: throw NoSuchElementException("未找到配置：$id")
         val current = plugin.currentConfig()
         return ConfigDetailDto(
             id = plugin.configId,
@@ -450,7 +450,7 @@ public class AdminService(
     public fun updateConfig(id: String, request: UpdateConfigRequest): UpdateConfigResponse {
         if (id == MainDynamicConfig.CONFIG_ID) return updateMainConfig(request)
         val (info, plugin) = configurablePlugins().firstOrNull { (_, plugin) -> plugin.configId == id }
-            ?: throw NoSuchElementException("config not found: $id")
+            ?: throw NoSuchElementException("未找到配置：$id")
         return updatePluginConfig(info, plugin, request)
     }
 
@@ -553,12 +553,12 @@ public class AdminService(
                     FollowActionStatus.FOLLOWED -> true
                     FollowActionStatus.ALREADY_FOLLOWING -> false
                     FollowActionStatus.FAILED -> throw IllegalStateException(
-                        result.message ?: "failed to follow publisher on $platform",
+                        result.message ?: "关注发布者失败：$platform",
                     )
-                    FollowActionStatus.UNSUPPORTED -> throw IllegalStateException("follow action is unsupported on $platform")
+                    FollowActionStatus.UNSUPPORTED -> throw IllegalStateException("平台不支持关注操作：$platform")
                 }
             }
-            FollowState.UNSUPPORTED -> throw IllegalStateException("follow check is unsupported on $platform")
+            FollowState.UNSUPPORTED -> throw IllegalStateException("平台不支持关注状态检查：$platform")
         }
     }
 }
@@ -659,7 +659,7 @@ private inline fun <reified T : Enum<T>> parseEnum(value: String, fieldName: Str
     val normalized = value.trim()
     return enumValues<T>().firstOrNull { it.name.equals(normalized, ignoreCase = true) }
         ?: throw IllegalArgumentException(
-            "invalid $fieldName: $value, expected ${enumValues<T>().joinToString("|") { it.name }}",
+            "$fieldName 无效：$value，可选值=${enumValues<T>().joinToString("|") { it.name }}",
         )
 }
 
@@ -667,7 +667,7 @@ private fun requireMentionRulesTargetAllowed(subscriber: Subscriber, policy: Sub
     val mentionsAll = policy.mentionRules.any { it.mode == MentionMode.MENTION_ALL }
     if (!mentionsAll) return
     require(subscriber.kind == TargetKind.GROUP) {
-        "MENTION_ALL can only be enabled for GROUP targets"
+        "只有 GROUP 消息目标可以启用 MENTION_ALL"
     }
 }
 

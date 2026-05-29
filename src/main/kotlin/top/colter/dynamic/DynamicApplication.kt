@@ -9,6 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlin.time.Duration.Companion.milliseconds
 import top.colter.dynamic.admin.AdminServer
 import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.core.command.CommandRegistry
@@ -19,8 +20,10 @@ import top.colter.dynamic.core.event.CommandResultEvent
 import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.ListenerToken
-import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdateEvent
+import top.colter.dynamic.core.event.SourceUpdatePublishRequest
+import top.colter.dynamic.core.event.SourceUpdatePublishResult
+import top.colter.dynamic.core.event.SourceUpdatePublisher
 import top.colter.dynamic.core.plugin.PluginManager
 import top.colter.dynamic.core.plugin.PluginState
 import top.colter.dynamic.core.repository.PersistenceManager
@@ -29,10 +32,11 @@ import top.colter.dynamic.core.task.TaskSchedule
 import top.colter.dynamic.core.task.TaskScheduler
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.image.DynamicImageCache
+import top.colter.dynamic.listener.DeliveryDispatcher
 import top.colter.dynamic.link.DynamicLinkAutoParseListener
 import top.colter.dynamic.link.DynamicLinkForwarder
 import top.colter.dynamic.listener.ImageFileCleaner
-import top.colter.dynamic.listener.SourceUpdateListener
+import top.colter.dynamic.listener.SourceUpdateProcessor
 
 private val logger = loggerFor<DynamicApplication>()
 
@@ -43,12 +47,22 @@ public object DynamicApplication : CoroutineScope {
     private val eventBus: EventBus = EventBus()
     private val configService: ConfigService = YamlConfigService()
     private val commandRegistry: CommandRegistry = CommandRegistry()
+    private lateinit var sourceUpdateProcessor: SourceUpdateProcessor
+    private lateinit var deliveryDispatcher: DeliveryDispatcher
+    private val sourceUpdatePublisher: SourceUpdatePublisher = SourceUpdatePublisher { request ->
+        if (::sourceUpdateProcessor.isInitialized) {
+            sourceUpdateProcessor.process(request)
+        } else {
+            SourceUpdatePublishResult.failed("主项目来源更新处理器尚未初始化")
+        }
+    }
     private val pluginManager: PluginManager = PluginManager(
         pluginDirPath = "plugins",
         scope = this,
         eventBus = eventBus,
         configService = configService,
         commandRegistry = commandRegistry,
+        sourceUpdatePublisher = sourceUpdatePublisher,
     )
     private val listenerTokens: MutableList<ListenerToken> = mutableListOf()
     private val taskScheduler: TaskScheduler = TaskScheduler(scope = this)
@@ -91,6 +105,7 @@ public object DynamicApplication : CoroutineScope {
             logger.warn { "部分插件启动失败：pluginIds=$failedPluginIds" }
         }
 
+        runBlocking { deliveryDispatcher.dispatchDue() }
         startAdminServer(config)
 
         logger.info { "主项目已启动，已加载插件=${loadResult.loadedPlugins}" }
@@ -99,18 +114,39 @@ public object DynamicApplication : CoroutineScope {
     private fun registerCoreListeners(config: MainDynamicConfig) {
         DynamicImageCache.configure(Paths.get(config.imageCache.sourceRoot))
         registerImageCleanupTask(config)
+        deliveryDispatcher = DeliveryDispatcher(
+            sinkProvider = { pluginManager.getMessageSinkPlugins() },
+            configProvider = { configStore.current().delivery },
+        )
+        registerDeliveryDispatchTask(config)
+        sourceUpdateProcessor = SourceUpdateProcessor(
+            configProvider = configStore::current,
+            configService = configService,
+            eventBus = eventBus,
+            broadcastMessages = false,
+            onDeliveriesQueued = {
+                deliveryDispatcher.dispatchDue()
+            },
+        )
 
         val dynamicLinkForwarder = DynamicLinkForwarder(
             resolversProvider = { pluginManager.getDynamicLinkResolvers() },
-            eventBus = eventBus,
+            sourceUpdatePublisher = sourceUpdatePublisher,
         )
 
         listenerTokens += eventBus.subscribe(
-            SourceUpdateListener(
-                configProvider = configStore::current,
-                configService = configService,
-                eventBus = eventBus,
-            ),
+            object : Listener<SourceUpdateEvent> {
+                override suspend fun onMessage(event: SourceUpdateEvent) {
+                    sourceUpdateProcessor.process(
+                        SourceUpdatePublishRequest(
+                            sourcePlugin = event.sourcePlugin,
+                            update = event.update,
+                            deliveryTarget = event.deliveryTarget,
+                            deliveryTag = event.deliveryTag,
+                        ),
+                    )
+                }
+            },
         )
         listenerTokens += eventBus.subscribe(
             CommandListener(
@@ -134,18 +170,9 @@ public object DynamicApplication : CoroutineScope {
         )
 
         listenerTokens += eventBus.subscribe(
-            object : Listener<MessageEvent> {
-                override suspend fun onMessage(event: MessageEvent) {
-                    logger.debug { "分发推送消息：messageId=${event.message.id}，目标数=${event.message.targets.size}" }
-                    pluginManager.dispatchMessageToSinks(event)
-                }
-            },
-        )
-
-        listenerTokens += eventBus.subscribe(
             object : Listener<CommandResultEvent> {
                 override suspend fun onMessage(event: CommandResultEvent) {
-                    pluginManager.dispatchCommandResultToSinks(event)
+                    deliveryDispatcher.dispatchCommandResult(event)
                 }
             },
         )
@@ -206,6 +233,21 @@ public object DynamicApplication : CoroutineScope {
                             logger.debug { "渲染图缓存无需清理" }
                         }
                     }
+                },
+            ),
+        )
+    }
+
+    private fun registerDeliveryDispatchTask(config: MainDynamicConfig) {
+        taskScheduler.start(
+            TaskDefinition(
+                id = "main-delivery-dispatch",
+                schedule = TaskSchedule.FixedDelay(
+                    delay = config.delivery.retryDelayMs.coerceAtLeast(1).milliseconds,
+                    runImmediately = true,
+                ),
+                action = {
+                    deliveryDispatcher.dispatchDue()
                 },
             ),
         )

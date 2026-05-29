@@ -38,15 +38,15 @@ public class AdminLoginService(
         val platform = platformId.trim().lowercase()
         val plugin = resolvePlugin(platform)
         require(plugin.supportedLoginMethods.contains(PublisherLoginMethod.COOKIE)) {
-            "cookie login is unsupported on $platform"
+            "$platform 不支持 Cookie 登录"
         }
-        require(cookie.isNotBlank()) { "cookie must not be blank" }
+        require(cookie.isNotBlank()) { "Cookie 不能为空" }
 
         val result = runCatching { plugin.loginByCookie(cookie) }
             .getOrElse { error ->
                 PublisherLoginResult(
                     status = PublisherLoginStatus.FAILED,
-                    message = error.message ?: "cookie login failed",
+                    message = error.message ?: "Cookie 登录失败",
                 )
             }
         return result.toDto()
@@ -56,7 +56,7 @@ public class AdminLoginService(
         val platform = platformId.trim().lowercase()
         val plugin = resolvePlugin(platform)
         require(plugin.supportedLoginMethods.contains(PublisherLoginMethod.QR_CODE)) {
-            "QR code login is unsupported on $platform"
+            "$platform 不支持二维码登录"
         }
 
         val loginId = UUID.randomUUID().toString()
@@ -65,7 +65,7 @@ public class AdminLoginService(
             loginId = loginId,
             platform = platform,
             status = PublisherLoginStatus.PENDING.name,
-            message = "QR login starting",
+            message = "二维码登录正在启动",
         )
 
         val job = loginScope.launch {
@@ -76,7 +76,7 @@ public class AdminLoginService(
                         sessions[loginId] = sessions[loginId]
                             ?.copy(
                                 status = PublisherLoginStatus.PENDING.name,
-                                message = qrChallenge.message ?: "waiting for scan",
+                                message = qrChallenge.message ?: "等待扫码",
                                 expiresAtEpochSeconds = qrChallenge.expiresAtEpochSeconds,
                                 imageBytes = imageBytes,
                             )
@@ -84,7 +84,7 @@ public class AdminLoginService(
                                 loginId = loginId,
                                 platform = platform,
                                 status = PublisherLoginStatus.PENDING.name,
-                                message = qrChallenge.message ?: "waiting for scan",
+                                message = qrChallenge.message ?: "等待扫码",
                                 expiresAtEpochSeconds = qrChallenge.expiresAtEpochSeconds,
                                 imageBytes = imageBytes,
                             )
@@ -100,12 +100,12 @@ public class AdminLoginService(
                 if (error is CancellationException) {
                     PublisherLoginResult(
                         status = PublisherLoginStatus.CANCELED,
-                        message = "QR login canceled",
+                        message = "二维码登录已取消",
                     )
                 } else {
                     PublisherLoginResult(
                         status = PublisherLoginStatus.FAILED,
-                        message = error.message ?: "QR code login failed",
+                        message = error.message ?: "二维码登录失败",
                     )
                 }
             }
@@ -122,7 +122,7 @@ public class AdminLoginService(
         }
 
         val qrChallenge = withTimeoutOrNull(QR_CHALLENGE_TIMEOUT_MS) { challenge.await() }
-            ?: throw IllegalStateException(sessions[loginId]?.message ?: "failed to start QR login")
+            ?: throw IllegalStateException(sessions[loginId]?.message ?: "二维码登录启动失败")
         return QrLoginStartResponse(
             loginId = loginId,
             imageUrl = "/api/login/qr/$loginId/image",
@@ -137,7 +137,7 @@ public class AdminLoginService(
     }
 
     public fun qrImageBytes(loginId: String): ByteArray {
-        return findSession(loginId).imageBytes ?: throw NoSuchElementException("QR image not found: $loginId")
+        return findSession(loginId).imageBytes ?: throw NoSuchElementException("未找到二维码图片：$loginId")
     }
 
     public suspend fun cancelQrLogin(loginId: String): ActionResultResponse {
@@ -149,9 +149,9 @@ public class AdminLoginService(
         }
         sessions[loginId] = session.copy(
             status = PublisherLoginStatus.CANCELED.name,
-            message = "QR login canceled",
+            message = "二维码登录已取消",
         )
-        return ActionResultResponse(changed = changed, message = if (changed) "QR login canceled" else "QR login already finished")
+        return ActionResultResponse(changed = changed, message = if (changed) "二维码登录已取消" else "二维码登录已结束")
     }
 
     private fun updateSession(loginId: String, result: PublisherLoginResult) {
@@ -164,13 +164,13 @@ public class AdminLoginService(
     }
 
     private fun findSession(loginId: String): QrLoginSession {
-        return sessions[loginId] ?: throw NoSuchElementException("QR login session not found: $loginId")
+        return sessions[loginId] ?: throw NoSuchElementException("未找到二维码登录会话：$loginId")
     }
 
     private fun resolvePlugin(platformId: String): PublisherLoginProvider {
-        require(platformId.isNotBlank()) { "platform must not be blank" }
+        require(platformId.isNotBlank()) { "平台不能为空" }
         return loginProviderResolver(platformId)
-            ?: throw NoSuchElementException("platform login provider not found: $platformId")
+            ?: throw NoSuchElementException("未找到平台登录插件：$platformId")
     }
 
     private companion object {

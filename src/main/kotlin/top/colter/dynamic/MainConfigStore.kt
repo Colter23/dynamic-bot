@@ -26,6 +26,9 @@ public class MainConfigStore(
         } else {
             loaded
         }
+        if (withToken != loaded) {
+            configService.save(MainDynamicConfig.CONFIG_ID, withToken)
+        }
         currentConfig = withToken
         return withToken
     }
@@ -217,6 +220,36 @@ public object MainConfigForms {
                     restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
+                    path = "delivery.maxAttempts",
+                    label = "最大投递尝试次数",
+                    type = ConfigFieldType.NUMBER,
+                    section = "消息投递",
+                    min = 1,
+                ),
+                ConfigFieldSpec(
+                    path = "delivery.retryDelayMs",
+                    label = "投递重试间隔（毫秒）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "消息投递",
+                    min = 1,
+                    restartRequired = true,
+                    restartTarget = "主程序",
+                ),
+                ConfigFieldSpec(
+                    path = "delivery.dispatchConcurrency",
+                    label = "投递并发数",
+                    type = ConfigFieldType.NUMBER,
+                    section = "消息投递",
+                    min = 1,
+                ),
+                ConfigFieldSpec(
+                    path = "delivery.lockTtlMs",
+                    label = "投递锁超时（毫秒）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "消息投递",
+                    min = 1,
+                ),
+                ConfigFieldSpec(
                     path = "draw.layout",
                     label = "布局套装",
                     type = ConfigFieldType.SELECT,
@@ -343,6 +376,10 @@ public object MainConfigForms {
         require(config.imageCache.cleanupCron.isNotBlank()) { "清理任务 Cron 不能为空" }
         require(config.imageCache.sourceCleanup.maxIdleDays >= 0) { "原图最大闲置天数不能为负数" }
         require(config.imageCache.renderedCleanup.maxIdleDays >= 0) { "渲染图片最大闲置天数不能为负数" }
+        require(config.delivery.maxAttempts >= 1) { "最大投递尝试次数至少为 1" }
+        require(config.delivery.retryDelayMs >= 1) { "投递重试间隔至少为 1 毫秒" }
+        require(config.delivery.dispatchConcurrency >= 1) { "投递并发数至少为 1" }
+        require(config.delivery.lockTtlMs >= 1) { "投递锁超时至少为 1 毫秒" }
         require(config.draw.layout.isNotBlank()) { "绘图布局不能为空" }
         require(DrawLayoutRegistry.hasSuite(config.draw.layout)) {
             "绘图布局必须是 ${DrawLayoutRegistry.options().joinToString("|") { it.value }} 之一"
@@ -367,6 +404,9 @@ public object MainConfigForms {
             targets += "Web 后台"
         }
         if (previous.imageCache != next.imageCache) {
+            targets += "主程序"
+        }
+        if (previous.delivery.retryDelayMs != next.delivery.retryDelayMs) {
             targets += "主程序"
         }
         return targets.toList()

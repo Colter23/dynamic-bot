@@ -33,7 +33,7 @@ public class FileDynamicImageRenderer(
             ),
         )
             .encodeToData(EncodedImageFormat.PNG, 100)
-            ?: error("failed to encode dynamic image")
+            ?: error("动态图片编码失败")
         val outputPath = od.resolve(safeFileName(update.key.externalId) + ".png").toAbsolutePath().normalize()
         Files.write(outputPath, data.bytes)
         return outputPath

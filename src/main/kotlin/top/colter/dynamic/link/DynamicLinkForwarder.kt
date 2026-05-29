@@ -5,7 +5,9 @@ import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.event.EventBus
-import top.colter.dynamic.core.event.SourceUpdateEvent
+import top.colter.dynamic.core.event.EventBusSourceUpdatePublisher
+import top.colter.dynamic.core.event.SourceUpdatePublishRequest
+import top.colter.dynamic.core.event.SourceUpdatePublisher
 import top.colter.dynamic.core.link.DynamicLinkResolution
 import top.colter.dynamic.core.link.DynamicLinkResolver
 import top.colter.dynamic.core.link.ParsedDynamicLink
@@ -17,8 +19,13 @@ internal const val LINK_PARSE_EVENT_SOURCE: String = "main-link-parser"
 
 public class DynamicLinkForwarder(
     private val resolversProvider: () -> List<DynamicLinkResolver>,
-    private val eventBus: EventBus = EventBus(),
+    private val sourceUpdatePublisher: SourceUpdatePublisher = EventBusSourceUpdatePublisher(EventBus()),
 ) {
+    public constructor(
+        resolversProvider: () -> List<DynamicLinkResolver>,
+        eventBus: EventBus,
+    ) : this(resolversProvider, EventBusSourceUpdatePublisher(eventBus))
+
     internal suspend fun forwardFirst(
         text: String,
         context: CommandContext,
@@ -54,7 +61,7 @@ public class DynamicLinkForwarder(
         return DynamicLinkForwardResult.NoSupportedLink
     }
 
-    private fun forward(
+    private suspend fun forward(
         update: SourceUpdate,
         parsedLink: ParsedDynamicLink,
         context: CommandContext,
@@ -71,12 +78,17 @@ public class DynamicLinkForwarder(
         )
         val normalizedUpdate = update.copy(publisher = publisher.toInfo())
 
-        SourceUpdateEvent(
+        val result = sourceUpdatePublisher.publish(
+            SourceUpdatePublishRequest(
             sourcePlugin = LINK_PARSE_EVENT_SOURCE,
             deliveryTarget = subscriber,
             deliveryTag = LINK_PARSE_EVENT_LABEL,
             update = normalizedUpdate,
-        ).let { eventBus.broadcast(it) }
+            ),
+        )
+        if (!result.accepted) {
+            return DynamicLinkForwardResult.Failed(result.message.ifBlank { "动态链接转发失败" })
+        }
 
         return DynamicLinkForwardResult.Forwarded(
             parsedLink = parsedLink,

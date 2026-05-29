@@ -8,6 +8,7 @@ public data class MainDynamicConfig(
     val subscription: SubscriptionConfig = SubscriptionConfig(),
     val linkParsing: LinkParsingConfig = LinkParsingConfig(),
     val imageCache: ImageCacheConfig = ImageCacheConfig(),
+    val delivery: DeliveryConfig = DeliveryConfig(),
     val draw: DrawSettings = DrawSettings(),
     val webAdmin: WebAdminConfig = WebAdminConfig(),
 ) {
@@ -59,6 +60,13 @@ public data class ImageCacheConfig(
 public data class ImageCleanupConfig(
     val enabled: Boolean = true,
     val maxIdleDays: Long = 30,
+)
+
+public data class DeliveryConfig(
+    val maxAttempts: Int = 3,
+    val retryDelayMs: Long = 30_000,
+    val dispatchConcurrency: Int = 4,
+    val lockTtlMs: Long = 120_000,
 )
 
 public data class DrawSettings(
