@@ -20,11 +20,9 @@ import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import top.colter.dynamic.ImageCacheConfig
-import top.colter.dynamic.core.data.Dynamic
-import top.colter.dynamic.core.data.ImageType
-import top.colter.dynamic.core.data.LazyImage
-import top.colter.dynamic.core.data.LazyImageReference
-import top.colter.dynamic.core.data.collectLazyImageReferences
+import top.colter.dynamic.core.data.MediaReference
+import top.colter.dynamic.core.data.SourceUpdate
+import top.colter.dynamic.core.data.collectMediaReferences
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.image.DynamicImageCache
 import kotlin.coroutines.resume
@@ -33,7 +31,7 @@ import kotlin.coroutines.resumeWithException
 private val logger = loggerFor<CachedDynamicImageLoader>()
 
 public fun interface DynamicImageLoader {
-    public suspend fun load(dynamic: Dynamic)
+    public suspend fun load(update: SourceUpdate)
 }
 
 public class CachedDynamicImageLoader(
@@ -46,9 +44,9 @@ public class CachedDynamicImageLoader(
         DynamicImageCache.configure(Paths.get(config.sourceRoot))
     }
 
-    override suspend fun load(dynamic: Dynamic) {
-        val references = collectLazyImageReferences(dynamic)
-            .filter { it.image.uri.isNotBlank() }
+    override suspend fun load(update: SourceUpdate) {
+        val references = collectMediaReferences(update)
+            .filter { it.media.uri.isNotBlank() }
         if (references.isEmpty()) return
 
         val semaphore = Semaphore(config.maxConcurrentDownloads.coerceAtLeast(1))
@@ -57,7 +55,7 @@ public class CachedDynamicImageLoader(
                 .map { reference ->
                     async(Dispatchers.IO) {
                         semaphore.withPermit {
-                            loadReference(dynamic.platform.id, reference)
+                            loadReference(update.platformId.value, reference)
                         }
                     }
                 }
@@ -65,9 +63,9 @@ public class CachedDynamicImageLoader(
         }
     }
 
-    private suspend fun loadReference(platformId: String, reference: LazyImageReference) {
-        val image = reference.image
-        val imageType = reference.type
+    private suspend fun loadReference(platformId: String, reference: MediaReference) {
+        val image = reference.media
+        val imageType = reference.kind
         if (DynamicImageCache.loadFromDisk(image, platformId, imageType)) return
 
         val key = DynamicImageCache.cacheKey(platformId, imageType, image.uri)

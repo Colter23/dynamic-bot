@@ -1,7 +1,8 @@
 package top.colter.dynamic.draw.layout.default
 
 import top.colter.dynamic.DrawOrnament
-import top.colter.dynamic.core.data.LazyImage
+import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.PublisherSnapshot
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.draw.layout.default.component.Author
@@ -24,7 +25,7 @@ internal fun Layout.drawPublisher(
 
     if (mode == DynamicRenderMode.FORWARD) {
         AuthorSmall(
-            face = config.image(publisher.face),
+            face = config.image(publisher.avatar),
             name = publisher.name,
             time = time,
             badge = officialImage,
@@ -41,9 +42,9 @@ internal fun Layout.drawPublisher(
         }
 
         Author(
-            face = config.image(publisher.face),
+            face = config.image(publisher.avatar),
             pendant = publisher.pendant?.let { config.image(it) },
-            head = publisher.header?.let { config.image(it) },
+            head = publisher.banner?.let { config.image(it) },
             ornament = ornamentImage,
             badge = officialImage,
             name = publisher.name,
@@ -56,8 +57,10 @@ internal fun Layout.drawPublisher(
 }
 
 private fun platformLogo(config: DrawConfig) =
-    loadResourceImage(name = "${config.platform.id.uppercase()}_A.png")
-        ?: loadResourceImage(name = "${config.platform.id.uppercase()}_LOGO.png")
-        ?: config.platform.iconUri
-            .takeIf { it.isNotBlank() }
-            ?.let { config.image(LazyImage(it)) }
+    loadResourceImage(name = "${config.platform.id.value.uppercase()}_A.png")
+        ?: loadResourceImage(name = "${config.platform.id.value.uppercase()}_LOGO.png")
+        ?: config.platform.icon
+            ?.let { config.image(it.copy(kind = MediaKind.IMAGE)) }
+        ?: config.platform.homepageUri
+            ?.takeIf { it.isNotBlank() }
+            ?.let { config.image(MediaRef(uri = it, kind = MediaKind.IMAGE)) }

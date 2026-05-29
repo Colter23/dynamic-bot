@@ -26,16 +26,21 @@ import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
 import top.colter.dynamic.core.data.DeliveryStatus
-import top.colter.dynamic.core.data.DynamicElementType
-import top.colter.dynamic.core.data.DynamicFilterMatcher
+import top.colter.dynamic.core.data.DynamicAttachmentKind
 import top.colter.dynamic.core.data.DynamicFilterRule
-import top.colter.dynamic.core.data.LazyImage
-import top.colter.dynamic.core.data.MessageChain
+import top.colter.dynamic.core.data.FilterAction
+import top.colter.dynamic.core.data.FilterCondition
+import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
+import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.Publisher
+import top.colter.dynamic.core.data.PublisherKey
+import top.colter.dynamic.core.data.PublisherKind
 import top.colter.dynamic.core.data.Subscriber
-import top.colter.dynamic.core.data.SubscriberType
 import top.colter.dynamic.core.data.Subscription
+import top.colter.dynamic.core.data.TargetAddress
+import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
 import top.colter.dynamic.core.event.Listener
@@ -142,7 +147,7 @@ public class CommandListener(
                 chatId = event.context.chatId,
                 senderId = event.context.senderId,
             ),
-            chain = result.chain ?: listOf(MessageChain(listOf(MessageContent.Text(result.message)))),
+            chain = result.chain ?: listOf(MessageBatch(listOf(MessageContent.Text(result.message)))),
             inReplyTo = event.traceId,
             status = status,
             errorMessage = if (status == CommandStatus.FAILED) result.message else null,
@@ -168,19 +173,21 @@ public class CommandListener(
     }
 }
 
-private fun ChatType.toSubscriberType(): SubscriberType {
+private fun ChatType.toTargetKind(): TargetKind {
     return when (this) {
-        ChatType.GROUP -> SubscriberType.GROUP
-        ChatType.PRIVATE -> SubscriberType.USER
-        ChatType.CHANNEL -> SubscriberType.CHANNEL
+        ChatType.GROUP -> TargetKind.GROUP
+        ChatType.PRIVATE -> TargetKind.USER
+        ChatType.CHANNEL -> TargetKind.CHANNEL
     }
 }
 
 private fun CommandInvocation.currentSubscriber(): Subscriber? {
-    return SubscriberRepository.findByPlatformAndTarget(
-        platformId = context.platform,
-        type = context.chatType.toSubscriberType(),
-        targetId = context.chatId,
+    return SubscriberRepository.findByAddress(
+        TargetAddress.of(
+            platformId = context.platform,
+            kind = context.chatType.toTargetKind(),
+            externalId = context.chatId,
+        )
     )
 }
 
@@ -192,14 +199,14 @@ private fun failed(message: String): CommandExecutionResult {
     return CommandExecutionResult(CommandExecutionStatus.FAILED, message)
 }
 
-private fun parseDynamicElementType(value: String): DynamicElementType? {
-    return DynamicElementType.entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
+private fun parseDynamicElementType(value: String): DynamicAttachmentKind? {
+    return DynamicAttachmentKind.entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
 }
 
-private fun parseContentMatcher(value: String): DynamicFilterMatcher? {
+private fun parseContentCondition(value: String, pattern: String): FilterCondition? {
     return when (value.lowercase()) {
-        "keyword" -> DynamicFilterMatcher.KEYWORD
-        "regex" -> DynamicFilterMatcher.REGEX
+        "keyword" -> FilterCondition.TextContains(pattern)
+        "regex" -> FilterCondition.TextRegex(pattern)
         else -> null
     }
 }
@@ -210,12 +217,14 @@ private fun resolveFilterTarget(
     publisherUserId: String,
 ): FilterTargetResolveResult {
     val normalizedPlatform = platform.lowercase()
-    val publisher = PublisherRepository.findByPlatformAndExternalId(normalizedPlatform, publisherUserId)
+    val publisher = PublisherRepository.findByKey(
+        PublisherKey.of(normalizedPlatform, PublisherKind.USER, publisherUserId)
+    )
         ?: return FilterTargetResolveResult.Failed(failed("publisher not found: $normalizedPlatform:$publisherUserId"))
     val subscriber = invocation.currentSubscriber()
         ?: return FilterTargetResolveResult.Failed(failed("not subscribed: $normalizedPlatform:$publisherUserId"))
     val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)
-        ?: return FilterTargetResolveResult.Failed(failed("not subscribed: ${publisher.platformId}:${publisher.externalId}"))
+        ?: return FilterTargetResolveResult.Failed(failed("not subscribed: ${publisher.platformId.value}:${publisher.externalId}"))
 
     return FilterTargetResolveResult.Found(
         ResolvedFilterTarget(
@@ -227,13 +236,8 @@ private fun resolveFilterTarget(
 }
 
 private fun formatFilterRule(rule: DynamicFilterRule, publisher: Publisher? = null): String {
-    val owner = publisher?.let { "${it.platformId}:${it.externalId}" } ?: "subscriptionId=${rule.subscriptionId}"
-    val value = if (rule.matcher == DynamicFilterMatcher.HAS_ELEMENT) {
-        rule.value.lowercase()
-    } else {
-        rule.value
-    }
-    return "#${rule.id} $owner ${rule.ruleType.name.lowercase()} ${rule.matcher.name.lowercase()} $value"
+    val owner = publisher?.let { "${it.platformId.value}:${it.externalId}" } ?: "subscriptionId=${rule.subscriptionId}"
+    return "#${rule.id} $owner ${rule.action.name.lowercase()} ${rule.condition}"
 }
 
 private data class ResolvedFilterTarget(
@@ -425,14 +429,14 @@ private class LoginCommandHandler(
 
         val contents = buildList {
             imagePath?.let { path ->
-                add(MessageContent.Image(fallbackText = "", image = LazyImage(path)))
+                add(MessageContent.Image(fallbackText = "", image = MediaRef(uri = path, kind = MediaKind.IMAGE)))
             }
             add(MessageContent.Text(message))
         }
         return CommandExecutionResult(
             status = CommandExecutionStatus.SUCCESS,
             message = message,
-            chain = listOf(MessageChain(contents)),
+            chain = listOf(MessageBatch(contents)),
             afterReply = afterReply,
         )
     }
@@ -471,7 +475,7 @@ private class LoginCommandHandler(
                 chatId = invocation.context.chatId,
                 senderId = invocation.context.senderId,
             ),
-            chain = commandResult.chain ?: listOf(MessageChain(listOf(MessageContent.Text(commandResult.message)))),
+            chain = commandResult.chain ?: listOf(MessageBatch(listOf(MessageContent.Text(commandResult.message)))),
             inReplyTo = invocation.traceId,
             status = status,
             errorMessage = if (status == CommandStatus.FAILED) commandResult.message else null,
@@ -618,12 +622,13 @@ private class SubscribeCommandHandler(
         }
 
         val publisherUpsert = PublisherRepository.upsertProfile(profile)
-        val subscriberType = invocation.context.chatType.toSubscriberType()
         val subscriber = SubscriberRepository.ensure(
-            platformId = invocation.context.platform,
-            targetId = invocation.context.chatId,
+            address = TargetAddress.of(
+                platformId = invocation.context.platform,
+                kind = invocation.context.chatType.toTargetKind(),
+                externalId = invocation.context.chatId,
+            ),
             name = invocation.context.chatId,
-            type = subscriberType,
         )
         val created = SubscriptionRepository.subscribe(subscriber.id, publisherUpsert.value.id)
 
@@ -659,14 +664,10 @@ private class UnsubscribeCommandHandler(
         }
         val platform = invocation.args[0].lowercase()
         val publisherUserId = invocation.args[1]
-        val publisher = PublisherRepository.findByPlatformAndExternalId(platform, publisherUserId)
+        val publisher = PublisherRepository.findByKey(PublisherKey.of(platform, PublisherKind.USER, publisherUserId))
             ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "publisher not found: $platform:$publisherUserId")
 
-        val subscriber = SubscriberRepository.findByPlatformAndTarget(
-            platformId = invocation.context.platform,
-            type = invocation.context.chatType.toSubscriberType(),
-            targetId = invocation.context.chatId,
-        )
+        val subscriber = invocation.currentSubscriber()
             ?: return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
         val removed = SubscriptionRepository.unsubscribe(subscriber.id, publisher.id)
         if (removed && configProvider().subscription.unfollowWhenNoSubscribers && SubscriptionRepository.countByPublisherId(publisher.id) == 0L) {
@@ -689,18 +690,14 @@ private class ListCommandHandler : CommandHandler {
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
-        val subscriber = SubscriberRepository.findByPlatformAndTarget(
-            platformId = invocation.context.platform,
-            type = invocation.context.chatType.toSubscriberType(),
-            targetId = invocation.context.chatId,
-        )
+        val subscriber = invocation.currentSubscriber()
             ?: return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
         val publisherIds = SubscriptionRepository.findPublisherIdsBySubscriberId(subscriber.id)
         if (publisherIds.isEmpty()) return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
 
         val lines = publisherIds
             .mapNotNull { PublisherRepository.findById(it) }
-            .map { "${it.platformId}:${it.externalId} (${it.name})" }
+            .map { "${it.platformId.value}:${it.externalId} (${it.name})" }
 
         if (lines.isEmpty()) return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
         return CommandExecutionResult(CommandExecutionStatus.SUCCESS, lines.joinToString("\n"))
@@ -758,7 +755,11 @@ private class FilterAddElementCommandHandler(
             is FilterTargetResolveResult.Found -> resolved.target
         }
 
-        val result = DynamicFilterRuleRepository.addElementRule(target.subscription.id, element)
+        val result = DynamicFilterRuleRepository.addRule(
+            subscriptionId = target.subscription.id,
+            action = FilterAction.BLOCK,
+            condition = FilterCondition.HasAttachmentKind(element),
+        )
         val state = if (result.created) "created" else "existing"
         return success("filter rule $state: ${formatFilterRule(result.value, target.publisher)}")
     }
@@ -784,19 +785,23 @@ private class FilterAddContentCommandHandler(
 
         val platform = invocation.args[0]
         val publisherUserId = invocation.args[1]
-        val matcher = parseContentMatcher(invocation.args[2])
-            ?: return failed("unknown content matcher: ${invocation.args[2]}")
         val pattern = invocation.args.drop(3).joinToString(" ").trim()
         if (pattern.isBlank()) {
             return failed("filter pattern must not be blank")
         }
+        val condition = parseContentCondition(invocation.args[2], pattern)
+            ?: return failed("unknown content matcher: ${invocation.args[2]}")
         val target = when (val resolved = resolveFilterTarget(invocation, platform, publisherUserId)) {
             is FilterTargetResolveResult.Failed -> return resolved.result
             is FilterTargetResolveResult.Found -> resolved.target
         }
 
         val result = try {
-            DynamicFilterRuleRepository.addContentRule(target.subscription.id, matcher, pattern)
+            DynamicFilterRuleRepository.addRule(
+                subscriptionId = target.subscription.id,
+                action = FilterAction.BLOCK,
+                condition = condition,
+            )
         } catch (e: IllegalArgumentException) {
             return failed("filter rule rejected: ${e.message}")
         }
@@ -836,7 +841,7 @@ private class FilterListCommandHandler(
                     ?: return@mapNotNull null
                 ResolvedFilterTarget(publisher, subscriber, subscription)
             }
-            .sortedWith(compareBy<ResolvedFilterTarget> { it.publisher.platformId }.thenBy { it.publisher.externalId })
+            .sortedWith(compareBy<ResolvedFilterTarget> { it.publisher.platformId.value }.thenBy { it.publisher.externalId })
 
         if (targets.isEmpty()) return success("filters: (none)")
 

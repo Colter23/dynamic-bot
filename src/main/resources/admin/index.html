@@ -1044,13 +1044,17 @@
     }
 
     function targetOptionHtml(target, selected) {
-      const text = label(target.type) + " · " + target.targetId + " · " + (target.name || target.targetId);
-      return "<option value='" + esc(target.targetId) + "' data-name='" + esc(target.name || target.targetId) + "'" + (selected ? " selected" : "") + ">" + esc(text) + "</option>";
+      const externalId = target.externalId || target.targetId || "";
+      const targetKind = target.targetKind || target.type || "";
+      const text = label(targetKind) + " · " + externalId + " · " + (target.name || externalId);
+      return "<option value='" + esc(externalId) + "' data-name='" + esc(target.name || externalId) + "'" + (selected ? " selected" : "") + ">" + esc(text) + "</option>";
     }
 
     function subscriberLabel(subscriber) {
       if (!subscriber) return "未知目标";
-      return "#" + subscriber.id + " · " + subscriber.platformId + " · " + label(subscriber.type) + " · " + subscriber.targetId + (subscriber.name ? " · " + subscriber.name : "");
+      const targetKind = subscriber.targetKind || subscriber.type || "";
+      const externalId = subscriber.externalId || subscriber.targetId || "";
+      return "#" + subscriber.id + " · " + subscriber.platformId + " · " + label(targetKind) + " · " + externalId + (subscriber.name ? " · " + subscriber.name : "");
     }
 
     function publisherLabel(publisher) {
@@ -1065,7 +1069,38 @@
     }
 
     function subscriptionAtAllTypes(subscription) {
-      return Array.isArray(subscription.atAllTypes) ? subscription.atAllTypes : [];
+      const rules = subscription && subscription.policy && Array.isArray(subscription.policy.mentionRules)
+        ? subscription.policy.mentionRules
+        : [];
+      return rules
+        .filter(rule => rule.mode === "MENTION_ALL")
+        .map(rule => mentionRuleKey(rule.selector || {}))
+        .filter(Boolean);
+    }
+
+    function mentionRuleKey(selector) {
+      if (selector.operation === "STATE_CHANGED") return "LIVE";
+      if (Array.isArray(selector.attachmentKinds) && selector.attachmentKinds.includes("VIDEO")) return "VIDEO";
+      if (selector.updateType === "dynamic" || selector.operation === "CREATED") return "DYNAMIC";
+      return "";
+    }
+
+    function buildSubscriptionPolicy(basePolicy, atAllTypes) {
+      const policy = Object.assign({
+        updateSelectors: [{ operation: "CREATED", attachmentKinds: [] }],
+        mentionRules: [],
+        templateId: null,
+        filtersEnabled: true
+      }, basePolicy || {});
+      const selectors = {
+        DYNAMIC: { updateType: "dynamic", operation: "CREATED", attachmentKinds: [] },
+        LIVE: { operation: "STATE_CHANGED", attachmentKinds: [] },
+        VIDEO: { operation: "CREATED", attachmentKinds: ["VIDEO"] }
+      };
+      policy.mentionRules = (atAllTypes || [])
+        .filter(type => selectors[type])
+        .map(type => ({ selector: selectors[type], mode: "MENTION_ALL" }));
+      return policy;
     }
 
     function atAllSummary(subscription) {
@@ -1345,7 +1380,7 @@
         { label: "平台", key: "platformId" },
         { label: "外部 ID", key: "externalId" },
         { label: "名称", key: "name" },
-        { label: "头图", render: r => headerImageCell(r.headerUri) },
+        { label: "头图", render: r => headerImageCell(r.bannerUri || r.headerUri) },
         { label: "目标数", render: r => esc(countBy(state.cache.subscriptions, "publisherId", r.id)) },
         { label: "状态", render: r => badge(r.state) },
         { label: "操作", render: r => "<div class='table-actions'><button data-action='edit-publisher' data-id='" + r.id + "'>修改</button><button class='danger' data-action='delete-publisher' data-id='" + r.id + "'>删除</button></div>" }
@@ -1353,8 +1388,8 @@
       renderTable("subscribers", [
         { label: "ID", key: "id" },
         { label: "平台", key: "platformId" },
-        { label: "类型", render: r => esc(label(r.type)) },
-        { label: "目标", key: "targetId" },
+        { label: "类型", render: r => esc(label(r.targetKind || r.type)) },
+        { label: "目标", render: r => esc(r.externalId || r.targetId || "") },
         { label: "名称", key: "name" },
         { label: "发布者数", render: r => esc(countBy(state.cache.subscriptions, "subscriberId", r.id)) },
         { label: "状态", render: r => badge(r.state) },
@@ -1366,7 +1401,7 @@
       await ensureSubscriptions(force);
       renderTable("subscriptions", [
         { label: "ID", key: "id" },
-        { label: "目标", render: r => esc((r.subscriber && r.subscriber.platformId + ":" + label(r.subscriber.type) + ":" + r.subscriber.targetId) || r.subscriberId) },
+        { label: "目标", render: r => esc((r.subscriber && r.subscriber.platformId + ":" + label(r.subscriber.targetKind || r.subscriber.type) + ":" + (r.subscriber.externalId || r.subscriber.targetId)) || r.subscriberId) },
         { label: "发布者", render: r => esc((r.publisher && r.publisher.platformId + ":" + r.publisher.externalId + " " + r.publisher.name) || r.publisherId) },
         { label: "@全体", render: r => atAllSummary(r) },
         { label: "创建时间", render: r => esc(formatTime(r.createdAtEpochSeconds)) },
@@ -1382,12 +1417,20 @@
       renderTable("filters", [
         { label: "ID", key: "id" },
         { label: "订阅", key: "subscriptionId" },
-        { label: "类型", render: r => esc(label(r.ruleType)) },
-        { label: "匹配方式", render: r => esc(label(r.matcher)) },
-        { label: "值", key: "value" },
+        { label: "动作", render: r => esc(label(r.action)) },
+        { label: "条件", render: r => esc((r.condition && r.condition.type) || "") },
+        { label: "值", render: r => esc(filterConditionValue(r.condition)) },
         { label: "启用", render: r => badge(r.enabled ? "ACTIVE" : "DISABLED") },
         { label: "操作", render: r => "<div class='table-actions'><button class='danger' data-action='delete-filter' data-id='" + r.id + "'>删除</button></div>" }
       ], state.cache.filters);
+    }
+
+    function filterConditionValue(condition) {
+      if (!condition) return "";
+      if (condition.kind) return condition.kind;
+      if (condition.value) return condition.value;
+      if (condition.pattern) return condition.pattern;
+      return JSON.stringify(condition);
     }
 
     function updateFilterScopeOptions(selectedValue) {
@@ -1996,7 +2039,7 @@
         .join("");
       els("actionBody").innerHTML = isPublisher
         ? "<div class='forms'>"
-          + "<div class='form-field full-width'><label for='actionEntityHeaderUri'>头图 URL</label><input id='actionEntityHeaderUri' value='" + esc(entity.headerUri || "") + "' placeholder='留空表示清除头图'></div>"
+          + "<div class='form-field full-width'><label for='actionEntityHeaderUri'>头图 URL</label><input id='actionEntityHeaderUri' value='" + esc(entity.bannerUri || entity.headerUri || "") + "' placeholder='留空表示清除头图'></div>"
           + "<div class='form-field full-width'><label for='actionEntityState'>状态</label><select id='actionEntityState'>" + stateOptions + "</select></div>"
           + "</div>"
         : "<div class='forms'>"
@@ -2025,7 +2068,7 @@
         + "<div class='form-field full-width'><label>订阅</label><div class='config-table-text'>" + esc(subscriptionLabel(subscription)) + "</div></div>"
         + renderAtAllControls(subscriptionAtAllTypes(subscription))
         + "</div>";
-      bindAtAllControls(() => subscription.subscriber ? subscription.subscriber.type : "");
+      bindAtAllControls(() => subscription.subscriber ? (subscription.subscriber.targetKind || subscription.subscriber.type) : "");
       els("actionModal").hidden = false;
     }
 
@@ -2076,7 +2119,7 @@
     function currentSubscriptionActionTargetType() {
       const selectedValue = els("actionSubscriberSelect") ? els("actionSubscriberSelect").value : "";
       const selectedSubscriber = state.cache.subscribers.find(item => String(item.id) === selectedValue);
-      if (selectedSubscriber) return selectedSubscriber.type;
+      if (selectedSubscriber) return selectedSubscriber.targetKind || selectedSubscriber.type;
       return els("actionSubscriberType") ? els("actionSubscriberType").value : "";
     }
 
@@ -2166,7 +2209,7 @@
         + optionHtml("KEYWORD", "关键词", true) + optionHtml("REGEX", "正则表达式", false)
         + "</select></div>"
         + "<div class='form-field' id='actionFilterElementWrap'><label for='actionFilterElement'>元素</label><select id='actionFilterElement'>"
-        + ["TEXT", "IMAGE", "VIDEO", "CARD", "ORIGIN"].map((item, index) => optionHtml(item, label(item), index === 1)).join("")
+        + ["IMAGE", "VIDEO", "AUDIO", "CARD", "POLL", "TAG", "FILE", "ORIGIN"].map((item, index) => optionHtml(item, label(item), index === 0)).join("")
         + "</select></div>"
         + "<div class='form-field full-width' id='actionFilterValueWrap'><label for='actionFilterValue'>匹配内容</label><input id='actionFilterValue' placeholder='关键词或正则表达式'></div>"
         + "</div>";
@@ -2209,19 +2252,19 @@
       const selectedTargetOption = selectedTarget && selectedTarget.selectedIndex >= 0 ? selectedTarget.options[selectedTarget.selectedIndex] : null;
       const payload = selectedSubscriber ? {
         subscriberPlatform: selectedSubscriber.platformId,
-        subscriberType: selectedSubscriber.type,
-        subscriberTargetId: selectedSubscriber.targetId,
+        targetKind: selectedSubscriber.targetKind || selectedSubscriber.type,
+        subscriberTargetId: selectedSubscriber.externalId || selectedSubscriber.targetId,
         subscriberName: selectedSubscriber.name
       } : {
         subscriberPlatform: els("actionSubscriberPlatform").value,
-        subscriberType: els("actionSubscriberType").value,
+        targetKind: els("actionSubscriberType").value,
         subscriberTargetId: selectedTarget ? selectedTarget.value : "",
         subscriberName: selectedTargetOption ? (selectedTargetOption.dataset.name || selectedTargetOption.textContent || selectedTargetOption.value) : ""
       };
       payload.publisherPlatform = els("actionPublisherPlatform").value;
       payload.publisherExternalId = els("actionPublisherExternalId").value;
       payload.autoFollow = true;
-      payload.atAllTypes = collectAtAllTypes();
+      payload.policy = buildSubscriptionPolicy(null, collectAtAllTypes());
       if (!payload.publisherPlatform.trim()) return setActionMessage("请选择发布者平台", true);
       if (!payload.publisherExternalId.trim()) return setActionMessage("请填写发布者外部 ID", true);
       if (!selectedSubscriber && !payload.subscriberTargetId.trim()) return setActionMessage("请选择消息目标", true);
@@ -2235,9 +2278,10 @@
     async function submitSubscriptionAtAllAction() {
       const modal = state.actionModal;
       if (!modal || modal.kind !== "subscription-atall") return;
+      const subscription = state.cache.subscriptions.find(item => Number(item.id) === Number(modal.id));
       await api("/subscriptions/" + encodeURIComponent(modal.id), {
         method: "PATCH",
-        body: JSON.stringify({ atAllTypes: collectAtAllTypes() })
+        body: JSON.stringify({ policy: buildSubscriptionPolicy(subscription && subscription.policy, collectAtAllTypes()) })
       });
       closeActionModal();
       invalidate("overview", "subscriptions");
@@ -2247,14 +2291,22 @@
 
     async function submitFilterAction() {
       const ruleType = els("actionFilterRuleType").value;
+      const matcher = els("actionFilterMatcher").value;
+      const value = ruleType === "ELEMENT" ? els("actionFilterElement").value : els("actionFilterValue").value;
+      const condition = ruleType === "ELEMENT"
+        ? (value === "ORIGIN"
+          ? { type: "HAS_REFERENCE", kind: "ORIGIN" }
+          : { type: "HAS_ATTACHMENT_KIND", kind: value })
+        : (matcher === "REGEX"
+          ? { type: "TEXT_REGEX", pattern: value }
+          : { type: "TEXT_CONTAINS", value: value, ignoreCase: true });
       const payload = {
         subscriptionId: Number(els("actionFilterSubscriptionId").value),
-        ruleType: ruleType,
-        matcher: ruleType === "ELEMENT" ? "HAS_ELEMENT" : els("actionFilterMatcher").value,
-        value: ruleType === "ELEMENT" ? els("actionFilterElement").value : els("actionFilterValue").value
+        action: "BLOCK",
+        condition: condition
       };
       if (!payload.subscriptionId) return setActionMessage("请选择订阅", true);
-      if (!payload.value.trim()) return setActionMessage("请填写匹配内容", true);
+      if (!value.trim()) return setActionMessage("请填写匹配内容", true);
       await api("/filter-rules", { method: "POST", body: JSON.stringify(payload) });
       closeActionModal();
       await loadFilters(true);

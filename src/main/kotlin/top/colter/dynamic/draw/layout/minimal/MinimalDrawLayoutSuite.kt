@@ -11,7 +11,7 @@ internal object MinimalDrawLayoutSuite : DrawLayoutSuite {
 
     override fun render(scene: DrawScene, config: DrawConfig): Image {
         return when (scene) {
-            is DrawScene.DynamicScene -> renderMinimalDynamic(scene.dynamic, config)
+            is DrawScene.DynamicScene -> renderMinimalDynamic(scene.update, config)
         }
     }
 }

@@ -1,8 +1,8 @@
 package top.colter.dynamic.draw
 
 import org.jetbrains.skia.Image
-import top.colter.dynamic.core.data.Dynamic
+import top.colter.dynamic.core.data.SourceUpdate
 
-public fun renderDynamicImage(dynamic: Dynamic, config: DrawConfig): Image {
-    return DrawLayoutRegistry.render(DrawScene.DynamicScene(dynamic), config)
+public fun renderDynamicImage(update: SourceUpdate, config: DrawConfig): Image {
+    return DrawLayoutRegistry.render(DrawScene.DynamicScene(update), config)
 }

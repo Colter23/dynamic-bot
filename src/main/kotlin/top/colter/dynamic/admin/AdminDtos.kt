@@ -3,6 +3,8 @@ package top.colter.dynamic.admin
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import top.colter.dynamic.core.config.ConfigFormSpec
+import top.colter.dynamic.core.data.FilterCondition
+import top.colter.dynamic.core.data.SubscriptionPolicy
 
 @Serializable
 public data class ErrorResponse(
@@ -63,14 +65,14 @@ public data class PlatformLoginDto(
 public data class PublisherDto(
     val id: Int,
     val platformId: String,
-    val type: String,
+    val kind: String,
     val externalId: String,
     val name: String,
     val official: String? = null,
     val state: String,
-    val faceUri: String,
+    val avatarUri: String,
     val pendantUri: String? = null,
-    val headerUri: String? = null,
+    val bannerUri: String? = null,
     val createTime: Long,
     val createUser: Int,
 )
@@ -79,8 +81,11 @@ public data class PublisherDto(
 public data class SubscriberDto(
     val id: Int,
     val platformId: String,
-    val type: String,
-    val targetId: String,
+    val targetKind: String,
+    val externalId: String,
+    val scopeId: String? = null,
+    val threadId: String? = null,
+    val accountId: String? = null,
     val name: String,
     val state: String,
     val createTime: Long,
@@ -99,8 +104,8 @@ public data class SubscriberTargetPlatformDto(
 @Serializable
 public data class SubscriberTargetDto(
     val platformId: String,
-    val type: String,
-    val targetId: String,
+    val targetKind: String,
+    val externalId: String,
     val name: String,
     val sourcePluginId: String,
     val sourcePluginName: String,
@@ -112,7 +117,9 @@ public data class SubscriptionDto(
     val subscriberId: Int,
     val publisherId: Int,
     val createdAtEpochSeconds: Long,
-    val atAllTypes: List<String> = emptyList(),
+    val updatedAtEpochSeconds: Long,
+    val state: String,
+    val policy: SubscriptionPolicy,
     val subscriber: SubscriberDto? = null,
     val publisher: PublisherDto? = null,
 )
@@ -121,9 +128,9 @@ public data class SubscriptionDto(
 public data class DynamicFilterRuleDto(
     val id: Int,
     val subscriptionId: Int,
-    val ruleType: String,
-    val matcher: String,
-    val value: String,
+    val action: String,
+    val condition: FilterCondition,
+    val priority: Int,
     val enabled: Boolean,
     val createdAtEpochSeconds: Long,
 )
@@ -185,13 +192,13 @@ public data class UpdateSubscriberRequest(
 @Serializable
 public data class CreateSubscriptionRequest(
     val subscriberPlatform: String,
-    val subscriberType: String,
+    val targetKind: String,
     val subscriberTargetId: String,
     val subscriberName: String? = null,
     val publisherPlatform: String,
     val publisherExternalId: String,
     val autoFollow: Boolean = true,
-    val atAllTypes: List<String> = emptyList(),
+    val policy: SubscriptionPolicy = SubscriptionPolicy.default(),
 )
 
 @Serializable
@@ -207,15 +214,15 @@ public data class CreateSubscriptionResponse(
 
 @Serializable
 public data class UpdateSubscriptionRequest(
-    val atAllTypes: List<String> = emptyList(),
+    val policy: SubscriptionPolicy = SubscriptionPolicy.default(),
 )
 
 @Serializable
 public data class CreateFilterRuleRequest(
     val subscriptionId: Int,
-    val ruleType: String,
-    val matcher: String,
-    val value: String,
+    val action: String = "BLOCK",
+    val condition: FilterCondition,
+    val priority: Int = 0,
 )
 
 @Serializable

@@ -3,7 +3,7 @@ package top.colter.dynamic.draw
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
 import top.colter.dynamic.DrawSettings
-import top.colter.dynamic.core.data.LazyImage
+import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.dynamic.draw.resource.DrawFonts
@@ -12,7 +12,7 @@ import top.colter.skiko.Fonts
 import top.colter.skiko.withAlpha
 
 public fun interface DynamicImageResolver {
-    public fun image(image: LazyImage): Image
+    public fun image(image: MediaRef): Image
 }
 
 data class DrawConfig(
@@ -26,7 +26,7 @@ data class DrawConfig(
         DrawFonts.ensureDefaultFonts(fontRegistry, settings.font)
     }
 
-    fun image(image: LazyImage): Image = imageResolver.image(image)
+    fun image(image: MediaRef): Image = imageResolver.image(image)
 }
 
 data class DrawTheme(

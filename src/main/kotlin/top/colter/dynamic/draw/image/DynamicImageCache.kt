@@ -15,8 +15,8 @@ import java.nio.file.attribute.FileTime
 import java.util.concurrent.ConcurrentHashMap
 import javax.imageio.ImageIO
 import org.jetbrains.skia.Image
-import top.colter.dynamic.core.data.ImageType
-import top.colter.dynamic.core.data.LazyImage
+import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.draw.DynamicImageResolver
 
 public object DynamicImageCache : DynamicImageResolver {
@@ -32,19 +32,19 @@ public object DynamicImageCache : DynamicImageResolver {
         this.sourceRoot = sourceRoot.toAbsolutePath().normalize()
     }
 
-    public fun contains(image: LazyImage): Boolean {
+    public fun contains(image: MediaRef): Boolean {
         return images.containsKey(image.uri) || imageFiles[image.uri]?.existsAndTouch() == true
     }
 
-    public fun put(image: LazyImage, bytes: ByteArray) {
+    public fun put(image: MediaRef, bytes: ByteArray) {
         images[image.uri] = bytes
     }
 
-    public fun putPlaceholder(image: LazyImage) {
+    public fun putPlaceholder(image: MediaRef) {
         images[image.uri] = placeholderBytes
     }
 
-    public fun bytes(image: LazyImage): ByteArray {
+    public fun bytes(image: MediaRef): ByteArray {
         images[image.uri]?.let { return it }
 
         imageFiles[image.uri]?.readAndTouch()?.let { bytes ->
@@ -60,11 +60,11 @@ public object DynamicImageCache : DynamicImageResolver {
         return placeholderBytes
     }
 
-    override fun image(image: LazyImage): Image {
+    override fun image(image: MediaRef): Image {
         return decode(bytes(image)) ?: placeholderImage()
     }
 
-    public fun loadFromDisk(image: LazyImage, platformId: String, imageType: ImageType): Boolean {
+    public fun loadFromDisk(image: MediaRef, platformId: String, imageType: MediaKind): Boolean {
         val path = pathFor(platformId, imageType, image.uri)
         val bytes = path.readAndTouch() ?: return false
         imageFiles[image.uri] = path
@@ -72,7 +72,7 @@ public object DynamicImageCache : DynamicImageResolver {
         return true
     }
 
-    public fun store(image: LazyImage, platformId: String, imageType: ImageType, bytes: ByteArray): Path {
+    public fun store(image: MediaRef, platformId: String, imageType: MediaKind, bytes: ByteArray): Path {
         val path = pathFor(platformId, imageType, image.uri)
         Files.createDirectories(path.parent)
 
@@ -99,7 +99,7 @@ public object DynamicImageCache : DynamicImageResolver {
         return path
     }
 
-    public fun pathFor(platformId: String, imageType: ImageType, uri: String): Path {
+    public fun pathFor(platformId: String, imageType: MediaKind, uri: String): Path {
         return sourceRoot
             .resolve(safePathSegment(platformId.ifBlank { "unknown" }))
             .resolve(imageType.name)
@@ -108,7 +108,7 @@ public object DynamicImageCache : DynamicImageResolver {
             .normalize()
     }
 
-    public fun cacheKey(platformId: String, imageType: ImageType, uri: String): String {
+    public fun cacheKey(platformId: String, imageType: MediaKind, uri: String): String {
         return listOf(
             safePathSegment(platformId.ifBlank { "unknown" }),
             imageType.name,

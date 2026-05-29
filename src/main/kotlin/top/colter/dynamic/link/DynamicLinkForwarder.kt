@@ -3,11 +3,10 @@ package top.colter.dynamic.link
 import java.util.concurrent.ConcurrentHashMap
 import top.colter.dynamic.core.data.ChatType
 import top.colter.dynamic.core.data.CommandContext
-import top.colter.dynamic.core.data.Dynamic
-import top.colter.dynamic.core.data.PublisherProfile
-import top.colter.dynamic.core.data.PublisherSnapshot
+import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
-import top.colter.dynamic.core.data.SubscriberType
+import top.colter.dynamic.core.data.TargetAddress
+import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.event.SourceUpdateEvent
 import top.colter.dynamic.core.event.broadcast
 import top.colter.dynamic.core.link.DynamicLinkResolution
@@ -48,7 +47,7 @@ public class DynamicLinkForwarder(
                 }
 
                 return when (val resolution = resolver.resolveDynamicLink(parsedLink)) {
-                    is DynamicLinkResolution.Success -> forward(resolution.dynamic, parsedLink, context)
+                    is DynamicLinkResolution.Success -> forward(resolution.update, parsedLink, context)
                     is DynamicLinkResolution.Failed -> DynamicLinkForwardResult.Failed(resolution.reason)
                 }
             }
@@ -58,34 +57,36 @@ public class DynamicLinkForwarder(
     }
 
     private fun forward(
-        dynamic: Dynamic,
+        update: SourceUpdate,
         parsedLink: ParsedDynamicLink,
         context: CommandContext,
     ): DynamicLinkForwardResult {
-        val sourcePublisher = dynamic.publisher
+        val sourcePublisher = update.publisher
         if (sourcePublisher.externalId.isBlank()) {
             return DynamicLinkForwardResult.Failed("dynamic publisher id is missing")
         }
 
         val publisher = PublisherRepository.upsertProfile(sourcePublisher.toProfile()).value
         val subscriber = SubscriberRepository.ensure(
-            platformId = context.platform,
-            targetId = context.chatId,
+            address = TargetAddress.of(
+                platformId = context.platform,
+                kind = context.chatType.toTargetKind(),
+                externalId = context.chatId,
+            ),
             name = context.chatId,
-            type = context.chatType.toSubscriberType(),
         )
-        val normalizedDynamic = dynamic.copy(publisher = publisher.toSnapshot())
+        val normalizedUpdate = update.copy(publisher = publisher.toSnapshot())
 
         SourceUpdateEvent(
             source = LINK_PARSE_EVENT_SOURCE,
-            target = subscriber,
+            targetOverride = subscriber,
             label = LINK_PARSE_EVENT_LABEL,
-            update = normalizedDynamic,
+            update = normalizedUpdate,
         ).broadcast()
 
         return DynamicLinkForwardResult.Forwarded(
             parsedLink = parsedLink,
-            dynamic = normalizedDynamic,
+            update = normalizedUpdate,
             subscriber = subscriber,
         )
     }
@@ -96,29 +97,15 @@ public class DynamicLinkForwarder(
             context.chatType.name,
             context.chatId,
             parsedLink.platformId,
-            parsedLink.dynamicId,
+            parsedLink.updateId,
         ).joinToString(":")
     }
 
-    private fun PublisherSnapshot.toProfile(): PublisherProfile {
-        return PublisherProfile(
-            platformId = platformId,
-            externalId = externalId,
-            type = type,
-            name = name.ifBlank { externalId },
-            official = official,
-            state = state,
-            face = face,
-            header = header,
-            pendant = pendant,
-        )
-    }
-
-    private fun ChatType.toSubscriberType(): SubscriberType {
+    private fun ChatType.toTargetKind(): TargetKind {
         return when (this) {
-            ChatType.GROUP -> SubscriberType.GROUP
-            ChatType.PRIVATE -> SubscriberType.USER
-            ChatType.CHANNEL -> SubscriberType.CHANNEL
+            ChatType.GROUP -> TargetKind.GROUP
+            ChatType.PRIVATE -> TargetKind.USER
+            ChatType.CHANNEL -> TargetKind.CHANNEL
         }
     }
 }
@@ -126,7 +113,7 @@ public class DynamicLinkForwarder(
 internal sealed interface DynamicLinkForwardResult {
     data class Forwarded(
         val parsedLink: ParsedDynamicLink,
-        val dynamic: Dynamic,
+        val update: SourceUpdate,
         val subscriber: Subscriber,
     ) : DynamicLinkForwardResult
 

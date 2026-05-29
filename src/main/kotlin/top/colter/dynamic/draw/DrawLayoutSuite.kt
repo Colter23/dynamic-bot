@@ -2,12 +2,12 @@ package top.colter.dynamic.draw
 
 import org.jetbrains.skia.Image
 import top.colter.dynamic.core.config.ConfigFieldOption
-import top.colter.dynamic.core.data.Dynamic
+import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.draw.layout.default.DefaultDrawLayoutSuite
 import top.colter.dynamic.draw.layout.minimal.MinimalDrawLayoutSuite
 
 public sealed interface DrawScene {
-    data class DynamicScene(val dynamic: Dynamic) : DrawScene
+    data class DynamicScene(val update: SourceUpdate) : DrawScene
 }
 
 public interface DrawLayoutSuite {

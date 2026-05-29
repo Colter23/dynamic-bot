@@ -8,18 +8,21 @@ import top.colter.dynamic.core.config.ConfigurablePlugin
 import top.colter.dynamic.core.config.DefaultConfigService
 import top.colter.dynamic.core.command.CommandRegistry
 import top.colter.dynamic.core.data.DeliveryStatus
-import top.colter.dynamic.core.data.DynamicElementType
-import top.colter.dynamic.core.data.DynamicFilterMatcher
+import top.colter.dynamic.core.data.DynamicAttachmentKind
 import top.colter.dynamic.core.data.DynamicFilterRule
-import top.colter.dynamic.core.data.DynamicFilterRuleType
 import top.colter.dynamic.core.data.EntityState
-import top.colter.dynamic.core.data.LazyImage
+import top.colter.dynamic.core.data.FilterAction
+import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
+import top.colter.dynamic.core.data.MentionMode
 import top.colter.dynamic.core.data.Publisher
+import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.PublisherProfile
 import top.colter.dynamic.core.data.Subscriber
-import top.colter.dynamic.core.data.SubscriberType
 import top.colter.dynamic.core.data.Subscription
-import top.colter.dynamic.core.data.SubscriptionAtAllType
+import top.colter.dynamic.core.data.SubscriptionPolicy
+import top.colter.dynamic.core.data.TargetAddress
+import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
@@ -33,10 +36,10 @@ import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
-import top.colter.dynamic.core.repository.PublisherCursorRepository
 import top.colter.dynamic.core.repository.PublisherLiveStatusRepository
 import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
+import top.colter.dynamic.core.repository.SourceCursorRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
 
 public class AdminService(
@@ -124,7 +127,7 @@ public class AdminService(
 
     public fun publishers(): List<PublisherDto> {
         return PublisherRepository.findAll()
-            .sortedWith(compareBy<Publisher> { it.platformId }.thenBy { it.externalId })
+            .sortedWith(compareBy<Publisher> { it.platformId.value }.thenBy { it.externalId })
             .map { it.toDto() }
     }
 
@@ -132,8 +135,8 @@ public class AdminService(
         val publisher = PublisherRepository.findById(id) ?: throw NoSuchElementException("publisher not found: $id")
         val updated = publisher.copy(
             name = request.name?.trim()?.takeIf { it.isNotBlank() } ?: publisher.name,
-            header = request.headerUri?.trim()?.takeIf { it.isNotBlank() }?.let(::LazyImage)
-                ?: if (request.headerUri != null) null else publisher.header,
+            banner = request.headerUri?.trim()?.takeIf { it.isNotBlank() }?.let { MediaRef(uri = it, kind = MediaKind.COVER) }
+                ?: if (request.headerUri != null) null else publisher.banner,
             state = request.state?.let { parseEnum<EntityState>(it, "state") } ?: publisher.state,
         )
         PublisherRepository.replace(updated)
@@ -145,7 +148,7 @@ public class AdminService(
         val removedSubscriptions = SubscriptionRepository.findAll()
             .filter { it.publisherId == publisher.id }
             .count { subscription -> SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId) }
-        PublisherCursorRepository.deleteByPublisherId(publisher.id)
+        SourceCursorRepository.deleteByPublisherId(publisher.id)
         PublisherLiveStatusRepository.deleteByPublisherId(publisher.id)
         val removed = PublisherRepository.deleteById(publisher.id)
         return ActionResultResponse(
@@ -160,7 +163,7 @@ public class AdminService(
 
     public fun subscribers(): List<SubscriberDto> {
         return SubscriberRepository.findAll()
-            .sortedWith(compareBy<Subscriber> { it.platformId }.thenBy { it.type.name }.thenBy { it.targetId })
+            .sortedWith(compareBy<Subscriber> { it.platformId.value }.thenBy { it.kind.name }.thenBy { it.externalId })
             .map { it.toDto() }
     }
 
@@ -183,7 +186,7 @@ public class AdminService(
 
     public suspend fun subscriberTargets(platformId: String?, type: String?): List<SubscriberTargetDto> {
         val normalizedPlatform = platformId?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
-        val targetType = type?.trim()?.takeIf { it.isNotBlank() }?.let { parseEnum<SubscriberType>(it, "type") }
+        val targetType = type?.trim()?.takeIf { it.isNotBlank() }?.let { parseEnum<TargetKind>(it, "type") }
         val targets = mutableListOf<SubscriberTargetDto>()
         pluginProvider()
             .filter { it.state == PluginState.ACTIVE }
@@ -204,7 +207,7 @@ public class AdminService(
                     .map { target -> target.toDto(info) }
             }
         return targets
-            .sortedWith(compareBy<SubscriberTargetDto> { it.platformId }.thenBy { it.type }.thenBy { it.name }.thenBy { it.targetId })
+            .sortedWith(compareBy<SubscriberTargetDto> { it.platformId }.thenBy { it.targetKind }.thenBy { it.name }.thenBy { it.externalId })
     }
 
     public fun updateSubscriber(id: Int, request: UpdateSubscriberRequest): SubscriberDto {
@@ -244,7 +247,6 @@ public class AdminService(
     public suspend fun createSubscription(request: CreateSubscriptionRequest): CreateSubscriptionResponse {
         val platform = request.publisherPlatform.trim().lowercase()
         val externalId = request.publisherExternalId.trim()
-        val atAllTypes = parseAtAllTypes(request.atAllTypes)
         require(platform.isNotBlank()) { "publisherPlatform must not be blank" }
         require(externalId.isNotBlank()) { "publisherExternalId must not be blank" }
 
@@ -255,28 +257,33 @@ public class AdminService(
 
         val autoFollowed = if (request.autoFollow) ensureFollowed(plugin, platform, externalId) else false
         val publisherUpsert = PublisherRepository.upsertProfile(profile.normalized())
-        val subscriberUpsert = SubscriberRepository.upsert(
-            platformId = request.subscriberPlatform.trim().lowercase().also {
-                require(it.isNotBlank()) { "subscriberPlatform must not be blank" }
-            },
-            targetId = request.subscriberTargetId.trim().also {
-                require(it.isNotBlank()) { "subscriberTargetId must not be blank" }
-            },
-            name = request.subscriberName?.trim()?.takeIf { it.isNotBlank() } ?: request.subscriberTargetId.trim(),
-            type = parseEnum<SubscriberType>(request.subscriberType, "subscriberType"),
+        val subscriberPlatform = request.subscriberPlatform.trim().lowercase().also {
+            require(it.isNotBlank()) { "subscriberPlatform must not be blank" }
+        }
+        val subscriberExternalId = request.subscriberTargetId.trim().also {
+            require(it.isNotBlank()) { "subscriberTargetId must not be blank" }
+        }
+        val subscriberAddress = TargetAddress.of(
+            platformId = subscriberPlatform,
+            kind = parseEnum<TargetKind>(request.targetKind, "targetKind"),
+            externalId = subscriberExternalId,
         )
-        requireAtAllTargetAllowed(subscriberUpsert.value, atAllTypes)
+        val subscriberUpsert = SubscriberRepository.upsert(
+            address = subscriberAddress,
+            name = request.subscriberName?.trim()?.takeIf { it.isNotBlank() } ?: subscriberExternalId,
+        )
+        requireMentionRulesTargetAllowed(subscriberUpsert.value, request.policy)
         val subscriptionCreated = SubscriptionRepository.subscribe(
             subscriberId = subscriberUpsert.value.id,
             publisherId = publisherUpsert.value.id,
-            atAllTypes = atAllTypes,
+            policy = request.policy,
         )
-        if (!subscriptionCreated && atAllTypes.isNotEmpty()) {
+        if (!subscriptionCreated) {
             val existing = SubscriptionRepository.findBySubscriberAndPublisher(
                 subscriberId = subscriberUpsert.value.id,
                 publisherId = publisherUpsert.value.id,
             ) ?: throw IllegalStateException("subscription was not found")
-            SubscriptionRepository.updateAtAllTypes(existing.id, atAllTypes)
+            SubscriptionRepository.updatePolicy(existing.id, request.policy)
         }
         val subscription = SubscriptionRepository.findBySubscriberAndPublisher(
             subscriberId = subscriberUpsert.value.id,
@@ -299,11 +306,10 @@ public class AdminService(
 
     public fun updateSubscription(id: Int, request: UpdateSubscriptionRequest): SubscriptionDto {
         val subscription = SubscriptionRepository.findById(id) ?: throw NoSuchElementException("subscription not found: $id")
-        val atAllTypes = parseAtAllTypes(request.atAllTypes)
         val subscriber = SubscriberRepository.findById(subscription.subscriberId)
             ?: throw NoSuchElementException("subscriber not found: ${subscription.subscriberId}")
-        requireAtAllTargetAllowed(subscriber, atAllTypes)
-        val updated = SubscriptionRepository.updateAtAllTypes(subscription.id, atAllTypes)
+        requireMentionRulesTargetAllowed(subscriber, request.policy)
+        val updated = SubscriptionRepository.updatePolicy(subscription.id, request.policy)
         return updated.toDto(
             publishers = PublisherRepository.findById(updated.publisherId)?.let { mapOf(it.id to it) }.orEmpty(),
             subscribers = mapOf(subscriber.id to subscriber),
@@ -317,7 +323,7 @@ public class AdminService(
         val removed = SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId)
         if (removed && publisher != null && configProvider().subscription.unfollowWhenNoSubscribers) {
             if (SubscriptionRepository.countByPublisherId(publisher.id) == 0L) {
-                platformPluginResolver(publisher.platformId)?.unfollowPublisher(publisher.externalId)
+                platformPluginResolver(publisher.platformId.value)?.unfollowPublisher(publisher.externalId)
             }
         }
         return ActionResultResponse(removed, if (removed) "subscription removed" else "subscription unchanged")
@@ -336,20 +342,12 @@ public class AdminService(
     }
 
     public fun createFilterRule(request: CreateFilterRuleRequest): DynamicFilterRuleDto {
-        val ruleType = parseEnum<DynamicFilterRuleType>(request.ruleType, "ruleType")
-        val result = when (ruleType) {
-            DynamicFilterRuleType.ELEMENT -> {
-                val element = parseEnum<DynamicElementType>(request.value, "value")
-                DynamicFilterRuleRepository.addElementRule(request.subscriptionId, element)
-            }
-            DynamicFilterRuleType.CONTENT -> {
-                val matcher = parseEnum<DynamicFilterMatcher>(request.matcher, "matcher")
-                require(matcher == DynamicFilterMatcher.KEYWORD || matcher == DynamicFilterMatcher.REGEX) {
-                    "content matcher must be KEYWORD or REGEX"
-                }
-                DynamicFilterRuleRepository.addContentRule(request.subscriptionId, matcher, request.value)
-            }
-        }
+        val result = DynamicFilterRuleRepository.addRule(
+            subscriptionId = request.subscriptionId,
+            action = parseEnum<FilterAction>(request.action, "action"),
+            condition = request.condition,
+            priority = request.priority,
+        )
         return result.value.toDto()
     }
 
@@ -559,24 +557,27 @@ private fun top.colter.dynamic.core.plugin.PublisherLoginAccount.toDto(): LoginA
 
 private fun Publisher.toDto(): PublisherDto = PublisherDto(
     id = id,
-    platformId = platformId,
-    type = type.name,
+    platformId = platformId.value,
+    kind = kind.name,
     externalId = externalId,
     name = name,
     official = official,
     state = state.name,
-    faceUri = face.uri,
+    avatarUri = avatar.uri,
     pendantUri = pendant?.uri,
-    headerUri = header?.uri,
+    bannerUri = banner?.uri,
     createTime = createTime,
     createUser = createUser,
 )
 
 private fun Subscriber.toDto(): SubscriberDto = SubscriberDto(
     id = id,
-    platformId = platformId,
-    type = type.name,
-    targetId = targetId,
+    platformId = platformId.value,
+    targetKind = kind.name,
+    externalId = externalId,
+    scopeId = address.scopeId,
+    threadId = address.threadId,
+    accountId = address.accountId,
     name = name,
     state = state.name,
     createTime = createTime,
@@ -585,8 +586,8 @@ private fun Subscriber.toDto(): SubscriberDto = SubscriberDto(
 
 private fun MessageTargetCandidate.toDto(info: PluginInfo): SubscriberTargetDto = SubscriberTargetDto(
     platformId = platformId,
-    type = type.name,
-    targetId = targetId,
+    targetKind = type.name,
+    externalId = targetId,
     name = name,
     sourcePluginId = info.descriptor.id,
     sourcePluginName = info.descriptor.name,
@@ -600,7 +601,9 @@ private fun Subscription.toDto(
     subscriberId = subscriberId,
     publisherId = publisherId,
     createdAtEpochSeconds = createdAtEpochSeconds,
-    atAllTypes = atAllTypes.map { it.name }.sorted(),
+    updatedAtEpochSeconds = updatedAtEpochSeconds,
+    state = state.name,
+    policy = policy,
     subscriber = subscribers[subscriberId]?.toDto(),
     publisher = publishers[publisherId]?.toDto(),
 )
@@ -608,9 +611,9 @@ private fun Subscription.toDto(
 private fun DynamicFilterRule.toDto(): DynamicFilterRuleDto = DynamicFilterRuleDto(
     id = id,
     subscriptionId = subscriptionId,
-    ruleType = ruleType.name,
-    matcher = matcher.name,
-    value = value,
+    action = action.name,
+    condition = condition,
+    priority = priority,
     enabled = enabled,
     createdAtEpochSeconds = createdAtEpochSeconds,
 )
@@ -623,17 +626,14 @@ private inline fun <reified T : Enum<T>> parseEnum(value: String, fieldName: Str
         )
 }
 
-private fun parseAtAllTypes(values: Iterable<String>): Set<SubscriptionAtAllType> {
-    return values.map { parseEnum<SubscriptionAtAllType>(it, "atAllTypes") }.toSet()
-}
-
-private fun requireAtAllTargetAllowed(subscriber: Subscriber, atAllTypes: Set<SubscriptionAtAllType>) {
-    if (atAllTypes.isEmpty()) return
-    require(subscriber.type == SubscriberType.GROUP) {
-        "atAllTypes can only be enabled for GROUP subscribers"
+private fun requireMentionRulesTargetAllowed(subscriber: Subscriber, policy: SubscriptionPolicy) {
+    val mentionsAll = policy.mentionRules.any { it.mode == MentionMode.MENTION_ALL }
+    if (!mentionsAll) return
+    require(subscriber.kind == TargetKind.GROUP) {
+        "MENTION_ALL can only be enabled for GROUP targets"
     }
 }
 
 private fun PublisherProfile.normalized(): PublisherProfile = copy(
-    platformId = platformId.lowercase(),
+    key = PublisherKey.of(platformId.value, kind, externalId),
 )

@@ -1,19 +1,25 @@
 package top.colter.dynamic.draw.layout.default
 
-import org.jetbrains.skia.Color
-import org.jetbrains.skia.FontStyle
 import org.jetbrains.skia.paragraph.TextStyle
-import top.colter.dynamic.core.data.*
+import top.colter.dynamic.core.data.DynamicContent
+import top.colter.dynamic.core.data.DynamicContentNodeEmoji
+import top.colter.dynamic.core.data.DynamicContentNodeLink
+import top.colter.dynamic.core.data.DynamicContentNodeMention
+import top.colter.dynamic.core.data.DynamicContentNodeTag
+import top.colter.dynamic.core.data.DynamicContentNodeText
 import top.colter.dynamic.draw.DrawConfig
-import top.colter.dynamic.draw.parseHexColor
-import top.colter.skiko.*
-import top.colter.skiko.data.RichParagraphBuilder
+import top.colter.skiko.Modifier
+import top.colter.skiko.dp
+import top.colter.skiko.fillMaxWidth
 import top.colter.skiko.layout.Layout
 import top.colter.skiko.layout.RichText
-
+import top.colter.skiko.margin
+import top.colter.skiko.px
+import top.colter.skiko.withDefaultFontFamily
+import top.colter.skiko.data.RichParagraphBuilder
 
 internal fun Layout.drawDynamicContent(content: DynamicContent, config: DrawConfig) {
-    if (content.contentNodes.isEmpty()) return
+    if (content.nodes.isEmpty()) return
 
     val style = TextStyle()
         .setColor(config.theme.textColor)
@@ -25,51 +31,25 @@ internal fun Layout.drawDynamicContent(content: DynamicContent, config: DrawConf
         .withDefaultFontFamily(config.fontRegistry)
     val paragraph = RichParagraphBuilder(style)
 
-    content.contentNodes.forEach {
+    content.nodes.forEach {
         when (it) {
-            is DynamicContentNodeText -> paragraph.addText(it.text, it.style?.toTextStyle(style, config) ?: style)
-            is DynamicContentNodeLink -> paragraph.addText(it.text, it.style?.toTextStyle(linkStyle, config) ?: linkStyle)
-            is DynamicContentNodeMention -> paragraph.addText(it.text, it.style?.toTextStyle(linkStyle, config) ?: linkStyle)
-            is DynamicContentNodeTag -> paragraph.addText(it.text, it.style?.toTextStyle(linkStyle, config) ?: linkStyle)
-            is DynamicContentNodeEmoji -> paragraph.addEmoji(
-                it.text,
-                config.image(it.image),
-                it.style?.toTextStyle(linkStyle, config) ?: linkStyle,
-            )
+            is DynamicContentNodeText -> paragraph.addText(it.text, style)
+            is DynamicContentNodeLink -> paragraph.addText(it.text, linkStyle)
+            is DynamicContentNodeMention -> paragraph.addText(it.text, linkStyle)
+            is DynamicContentNodeTag -> paragraph.addText(it.text, linkStyle)
+            is DynamicContentNodeEmoji -> {
+                val image = it.image
+                if (image == null) {
+                    paragraph.addText(it.text, style)
+                } else {
+                    paragraph.addEmoji(it.text, config.image(image), linkStyle)
+                }
+            }
         }
     }
 
     RichText(
         paragraph = paragraph.build(),
-        modifier = Modifier().margin(bottom = 20.dp).fillMaxWidth()
+        modifier = Modifier().margin(bottom = 20.dp).fillMaxWidth(),
     )
-
-}
-
-private fun DynamicContentStyle.toTextStyle(textStyle: TextStyle = TextStyle(), config: DrawConfig): TextStyle {
-    val result = textStyle.copyStyle()
-
-    if (sizeNum != null) {
-        result.fontSize = sizeNum!!.px
-    } else if (size != null) {
-        result.fontSize = when (size!!) {
-            DynamicContentStyle.DynamicContentSize.SMALL -> 25.px
-            DynamicContentStyle.DynamicContentSize.NORMAL -> 30.px
-            DynamicContentStyle.DynamicContentSize.LARGE -> 35.px
-        }
-    }
-
-    if (color != null) {
-        result.color = parseHexColor(color!!)
-    }
-
-    if (fontFamily != null && config.fontRegistry.matchFamily(fontFamily!!).count() != 0) {
-        result.setFontFamily(fontFamily!!)
-    }
-
-    if (isBold && isItalic) result.fontStyle = FontStyle.BOLD_ITALIC
-    else if (isBold) result.fontStyle = FontStyle.BOLD
-    else if (isItalic) result.fontStyle = FontStyle.ITALIC
-
-    return result
 }

@@ -21,20 +21,16 @@ internal fun Layout.drawDynamicAttachments(
 ) {
     attachments.forEach { attachment ->
         when (attachment) {
-            is DynamicImageAttachment -> drawDynamicImages(attachment.images, config)
-            is DynamicVideoAttachment -> drawDynamicVideo(attachment, config, mode)
-            is DynamicCardAttachment -> when (attachment.display) {
-                DynamicAttachmentDisplay.MINI_CARD -> drawDynamicMiniCard(attachment, config)
-                DynamicAttachmentDisplay.SMALL_CARD -> drawDynamicSmallCard(attachment, config)
-                else -> drawDynamicCard(attachment, config)
-            }
+            is ImageAttachment -> drawDynamicImages(attachment.images, config)
+            is VideoAttachment -> drawDynamicVideo(attachment, config, mode)
+            is CardAttachment -> drawDynamicCard(attachment, config)
             else -> Unit
         }
     }
 }
 
 
-private fun Layout.drawDynamicImages(pics: List<DynamicImageItem>, config: DrawConfig) {
+private fun Layout.drawDynamicImages(pics: List<ImageItem>, config: DrawConfig) {
     val imgList = pics.map { it to config.image(it.image) }
     val imgModifier = Modifier().background(config.theme.cardColor).border(2.dp, 10.dp, config.theme.borderColor).shadows(Shadow.ELEVATION_1)
     if (imgList.size == 1) imgModifier.fillMaxWidth()
@@ -93,14 +89,14 @@ private fun Layout.DynamicImageTile(
 }
 
 
-private fun Layout.drawDynamicVideo(video: DynamicVideoAttachment, config: DrawConfig, mode: DynamicRenderMode) {
+private fun Layout.drawDynamicVideo(video: VideoAttachment, config: DrawConfig, mode: DynamicRenderMode) {
     val cover = video.cover ?: return
     if (mode == DynamicRenderMode.FORWARD) {
         MediaSmall(
             cover = config.image(cover),
             title = video.title,
             desc = video.description,
-            duration = video.duration.orEmpty(),
+            duration = video.durationSeconds?.toDurationText().orEmpty(),
             badge = video.badge.orEmpty(),
             accentColor = config.theme.primaryColor,
             cardColor = config.theme.cardColor,
@@ -112,7 +108,7 @@ private fun Layout.drawDynamicVideo(video: DynamicVideoAttachment, config: DrawC
             cover = config.image(cover),
             title = video.title,
             desc = video.description,
-            duration = video.duration.orEmpty(),
+            duration = video.durationSeconds?.toDurationText().orEmpty(),
             badge = video.badge.orEmpty(),
             info = video.metricText("play", "播放") + " " + video.metricText("danmaku", "弹幕"),
             accentColor = config.theme.primaryColor,
@@ -124,7 +120,7 @@ private fun Layout.drawDynamicVideo(video: DynamicVideoAttachment, config: DrawC
 }
 
 
-private fun Layout.drawDynamicCard(card: DynamicCardAttachment, config: DrawConfig) {
+private fun Layout.drawDynamicCard(card: CardAttachment, config: DrawConfig) {
     val cover = card.cover ?: return
     Media(
         cover = config.image(cover),
@@ -139,7 +135,7 @@ private fun Layout.drawDynamicCard(card: DynamicCardAttachment, config: DrawConf
     )
 }
 
-private fun Layout.drawDynamicSmallCard(card: DynamicCardAttachment, config: DrawConfig) {
+private fun Layout.drawDynamicSmallCard(card: CardAttachment, config: DrawConfig) {
     val cover = card.cover ?: return
     MediaSmall(
         cover = config.image(cover),
@@ -154,7 +150,7 @@ private fun Layout.drawDynamicSmallCard(card: DynamicCardAttachment, config: Dra
     )
 }
 
-private fun Layout.drawDynamicMiniCard(card: DynamicCardAttachment, config: DrawConfig) {
+private fun Layout.drawDynamicMiniCard(card: CardAttachment, config: DrawConfig) {
     val cover = card.cover ?: return
     MediaMini(
         cover = config.image(cover),
@@ -169,7 +165,13 @@ private fun Layout.drawDynamicMiniCard(card: DynamicCardAttachment, config: Draw
     )
 }
 
-private fun DynamicVideoAttachment.metricText(key: String, suffix: String): String {
+private fun VideoAttachment.metricText(key: String, suffix: String): String {
     val value = metrics.firstOrNull { it.key == key }?.display.orEmpty()
     return if (value.isBlank()) "" else "$value$suffix"
+}
+
+private fun Long.toDurationText(): String {
+    val minutes = this / 60
+    val seconds = this % 60
+    return "%02d:%02d".format(minutes, seconds)
 }

@@ -1,42 +1,39 @@
 package top.colter.dynamic.listener
 
-import top.colter.dynamic.core.data.Dynamic
 import top.colter.dynamic.core.data.DynamicContentNodeLink
 import top.colter.dynamic.core.data.DynamicContentNodeMention
 import top.colter.dynamic.core.data.DynamicContentNodeTag
-import top.colter.dynamic.core.data.DynamicImageAttachment
-import top.colter.dynamic.core.data.LazyImage
+import top.colter.dynamic.core.data.DynamicPayload
+import top.colter.dynamic.core.data.ImageAttachment
 import top.colter.dynamic.core.data.LiveChange
-import top.colter.dynamic.core.data.LiveStatusUpdate
-import top.colter.dynamic.core.data.MessageChain
+import top.colter.dynamic.core.data.LivePayload
+import top.colter.dynamic.core.data.MediaRef
+import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.util.formatTime
 
 public class PushTemplateRenderer {
-    public fun requiresDraw(template: String, dynamic: Dynamic): Boolean {
-        return DRAW_PLACEHOLDER in template
+    public fun requiresDraw(template: String, update: SourceUpdate): Boolean {
+        val payload = update.payload
+        return when (payload) {
+            is DynamicPayload -> DRAW_PLACEHOLDER in template
+            is LivePayload -> payload.change == LiveChange.STARTED && DRAW_PLACEHOLDER in template
+            else -> false
+        }
     }
 
-    public fun requiresDraw(template: String, live: LiveStatusUpdate): Boolean {
-        return live.change == LiveChange.STARTED && DRAW_PLACEHOLDER in template
-    }
-
-    public fun render(template: String, dynamic: Dynamic, drawImage: LazyImage?): List<MessageChain> {
+    public fun render(template: String, update: SourceUpdate, drawImage: MediaRef?): List<MessageBatch> {
+        val splitConversation = (update.payload as? LivePayload)?.change != LiveChange.ENDED
         return renderTemplate(
             template = template,
-            splitConversation = true,
+            splitConversation = splitConversation,
             appendPlaceholder = { contents, placeholder, key ->
-                appendDynamicPlaceholder(contents, placeholder, key, dynamic, drawImage)
-            },
-        )
-    }
-
-    public fun render(template: String, live: LiveStatusUpdate, drawImage: LazyImage?): List<MessageChain> {
-        return renderTemplate(
-            template = template,
-            splitConversation = live.change == LiveChange.STARTED,
-            appendPlaceholder = { contents, placeholder, key ->
-                appendLivePlaceholder(contents, placeholder, key, live, drawImage)
+                when (val payload = update.payload) {
+                    is DynamicPayload -> appendDynamicPlaceholder(contents, placeholder, key, update, payload, drawImage)
+                    is LivePayload -> appendLivePlaceholder(contents, placeholder, key, update, payload, drawImage)
+                    else -> appendText(contents, placeholder)
+                }
             },
         )
     }
@@ -45,17 +42,17 @@ public class PushTemplateRenderer {
         template: String,
         splitConversation: Boolean,
         appendPlaceholder: (MutableList<MessageContent>, String, String) -> Unit,
-    ): List<MessageChain> {
+    ): List<MessageBatch> {
         val fragments = if (splitConversation) template.split(CHAIN_SEPARATOR) else listOf(template)
         return fragments
-            .map { renderChain(it.replace(LINE_BREAK, "\n"), appendPlaceholder) }
+            .map { renderBatch(it.replace(LINE_BREAK, "\n"), appendPlaceholder) }
             .mapNotNull { it.normalizedOrNull() }
     }
 
-    private fun renderChain(
+    private fun renderBatch(
         template: String,
         appendPlaceholder: (MutableList<MessageContent>, String, String) -> Unit,
-    ): MessageChain {
+    ): MessageBatch {
         val contents = mutableListOf<MessageContent>()
         var currentIndex = 0
 
@@ -66,36 +63,37 @@ public class PushTemplateRenderer {
         }
         appendText(contents, template.substring(currentIndex))
 
-        return MessageChain(contents)
+        return MessageBatch(contents)
     }
 
     private fun appendDynamicPlaceholder(
         contents: MutableList<MessageContent>,
         placeholder: String,
         key: String,
-        dynamic: Dynamic,
-        drawImage: LazyImage?,
+        update: SourceUpdate,
+        dynamic: DynamicPayload,
+        drawImage: MediaRef?,
     ) {
         when (key) {
             "draw" -> drawImage?.let { contents += MessageContent.Image(fallbackText = "", image = it) }
-            "images" -> dynamic.attachments.filterIsInstance<DynamicImageAttachment>().forEach { attachment ->
+            "images" -> dynamic.attachments.filterIsInstance<ImageAttachment>().forEach { attachment ->
                 attachment.images.forEach {
                     contents += MessageContent.Image(fallbackText = "", image = it.image, altText = it.alt)
                 }
             }
-            "links" -> appendText(contents, collectAdditionalLinks(dynamic).joinToString("\n"))
-            else -> appendText(contents, dynamicTextValue(key, dynamic) ?: placeholder)
+            "links" -> appendText(contents, collectAdditionalLinks(update, dynamic).joinToString("\n"))
+            else -> appendText(contents, dynamicTextValue(key, update, dynamic) ?: placeholder)
         }
     }
 
-    private fun dynamicTextValue(key: String, dynamic: Dynamic): String? {
+    private fun dynamicTextValue(key: String, update: SourceUpdate, dynamic: DynamicPayload): String? {
         return when (key) {
-            "name" -> dynamic.publisher.name
-            "uid" -> dynamic.publisher.externalId
-            "did" -> dynamic.dynamicId
-            "time" -> dynamic.time.formatTime()
-            "content" -> dynamic.content?.text.orEmpty()
-            "link" -> dynamic.link
+            "name" -> update.publisher.name
+            "uid" -> update.publisher.externalId
+            "did" -> update.key.externalId
+            "time" -> update.occurredAtEpochSeconds.formatTime()
+            "content" -> dynamic.content?.plainText.orEmpty()
+            "link" -> update.link
             else -> null
         }
     }
@@ -104,8 +102,9 @@ public class PushTemplateRenderer {
         contents: MutableList<MessageContent>,
         placeholder: String,
         key: String,
-        live: LiveStatusUpdate,
-        drawImage: LazyImage?,
+        update: SourceUpdate,
+        live: LivePayload,
+        drawImage: MediaRef?,
     ) {
         when (key) {
             "draw" -> if (live.change == LiveChange.STARTED) {
@@ -118,64 +117,72 @@ public class PushTemplateRenderer {
             } else {
                 appendText(contents, placeholder)
             }
-            else -> appendText(contents, liveTextValue(key, live) ?: placeholder)
+            else -> appendText(contents, liveTextValue(key, update, live) ?: placeholder)
         }
     }
 
-    private fun liveTextValue(key: String, live: LiveStatusUpdate): String? {
+    private fun liveTextValue(key: String, update: SourceUpdate, live: LivePayload): String? {
         return when (key) {
-            "name" -> live.publisher.name
-            "uid" -> live.publisher.externalId
+            "name" -> update.publisher.name
+            "uid" -> update.publisher.externalId
             "rid" -> live.roomId
-            "time" -> if (live.change == LiveChange.STARTED) (live.startedAt ?: live.time).formatTime() else null
+            "time" -> if (live.change == LiveChange.STARTED) {
+                (live.startedAtEpochSeconds ?: update.occurredAtEpochSeconds).formatTime()
+            } else {
+                null
+            }
             "title" -> live.title
             "area" -> live.area.orEmpty()
-            "link" -> live.link
-            "startTime" -> if (live.change == LiveChange.ENDED) live.startedAt?.formatTime().orEmpty() else null
-            "endTime" -> if (live.change == LiveChange.ENDED) (live.endedAt ?: live.time).formatTime() else null
-            "duration" -> if (live.change == LiveChange.ENDED) live.durationText() else null
+            "link" -> update.link
+            "startTime" -> if (live.change == LiveChange.ENDED) live.startedAtEpochSeconds?.formatTime().orEmpty() else null
+            "endTime" -> if (live.change == LiveChange.ENDED) {
+                (live.endedAtEpochSeconds ?: update.occurredAtEpochSeconds).formatTime()
+            } else {
+                null
+            }
+            "duration" -> if (live.change == LiveChange.ENDED) durationText(update, live) else null
             else -> null
         }
     }
 
-    private fun collectAdditionalLinks(dynamic: Dynamic): List<String> {
+    private fun collectAdditionalLinks(update: SourceUpdate, dynamic: DynamicPayload): List<String> {
         val links = linkedSetOf<String>()
         dynamic.attachments.forEach { attachment ->
-            attachment.link.addIfUseful(links, dynamic.link)
+            attachment.link.addIfUseful(links, update.link)
         }
-        dynamic.content?.contentNodes
+        dynamic.content?.nodes
             .orEmpty()
             .forEach {
                 when (it) {
-                    is DynamicContentNodeLink -> it.url.addIfUseful(links, dynamic.link)
-                    is DynamicContentNodeMention -> it.url.addIfUseful(links, dynamic.link)
-                    is DynamicContentNodeTag -> it.url.addIfUseful(links, dynamic.link)
+                    is DynamicContentNodeLink -> it.url.addIfUseful(links, update.link)
+                    is DynamicContentNodeMention -> it.url.addIfUseful(links, update.link)
+                    is DynamicContentNodeTag -> it.url.addIfUseful(links, update.link)
                     else -> Unit
                 }
             }
         return links.toList()
     }
 
-    private fun String?.addIfUseful(links: MutableSet<String>, mainLink: String) {
+    private fun String?.addIfUseful(links: MutableSet<String>, mainLink: String?) {
         val value = this?.trim().orEmpty()
         if (value.isNotBlank() && value != mainLink) {
             links += value
         }
     }
 
-    private fun LiveStatusUpdate.durationText(): String {
-        val start = startedAt ?: return ""
-        val end = endedAt ?: time
+    private fun durationText(update: SourceUpdate, live: LivePayload): String {
+        val start = live.startedAtEpochSeconds ?: return ""
+        val end = live.endedAtEpochSeconds ?: update.occurredAtEpochSeconds
         val totalSeconds = (end - start).coerceAtLeast(0)
         val days = totalSeconds / SECONDS_PER_DAY
         val hours = (totalSeconds % SECONDS_PER_DAY) / SECONDS_PER_HOUR
         val minutes = (totalSeconds % SECONDS_PER_HOUR) / SECONDS_PER_MINUTE
         val seconds = totalSeconds % SECONDS_PER_MINUTE
         return buildList {
-            if (days > 0) add("${days}天")
-            if (hours > 0) add("${hours}小时")
-            if (minutes > 0) add("${minutes}分")
-            if (seconds > 0 || isEmpty()) add("${seconds}秒")
+            if (days > 0) add("${days}d")
+            if (hours > 0) add("${hours}h")
+            if (minutes > 0) add("${minutes}m")
+            if (seconds > 0 || isEmpty()) add("${seconds}s")
         }.joinToString(" ")
     }
 
@@ -189,11 +196,11 @@ public class PushTemplateRenderer {
         }
     }
 
-    private fun MessageChain.normalizedOrNull(): MessageChain? {
+    private fun MessageBatch.normalizedOrNull(): MessageBatch? {
         val normalized = content
             .trimBoundaryText()
             .filterNot { it is MessageContent.Text && it.fallbackText.isEmpty() }
-        return if (normalized.isEmpty()) null else MessageChain(normalized)
+        return if (normalized.isEmpty()) null else MessageBatch(normalized)
     }
 
     private fun List<MessageContent>.trimBoundaryText(): List<MessageContent> {

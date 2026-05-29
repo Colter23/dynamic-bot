@@ -4,7 +4,7 @@ import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.command.CommandParser
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
-import top.colter.dynamic.core.data.MessageChain
+import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
@@ -48,7 +48,7 @@ internal class DynamicLinkAutoParseListener(
                 chatId = event.context.chatId,
                 senderId = event.context.senderId,
             ),
-            chain = listOf(MessageChain(listOf(MessageContent.Text(message)))),
+            chain = listOf(MessageBatch(listOf(MessageContent.Text(message)))),
             inReplyTo = event.traceId,
             status = status,
             errorMessage = if (status == CommandStatus.FAILED) message else null,
