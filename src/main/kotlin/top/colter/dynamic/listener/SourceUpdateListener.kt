@@ -3,7 +3,7 @@ package top.colter.dynamic.listener
 import java.nio.file.Paths
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.config.ConfigService
-import top.colter.dynamic.core.config.DefaultConfigService
+import top.colter.dynamic.core.config.YamlConfigService
 import top.colter.dynamic.core.config.loadOrCreate
 import top.colter.dynamic.core.data.CardAttachment
 import top.colter.dynamic.core.data.DynamicContent
@@ -22,10 +22,10 @@ import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdateEvent
-import top.colter.dynamic.core.event.broadcast
 import top.colter.dynamic.core.filter.DynamicFilterEvaluator
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
@@ -39,7 +39,8 @@ private val logger = loggerFor<SourceUpdateListener>()
 public class SourceUpdateListener(
     config: MainDynamicConfig? = null,
     configProvider: (() -> MainDynamicConfig)? = null,
-    private val configService: ConfigService = DefaultConfigService,
+    private val configService: ConfigService = YamlConfigService(),
+    private val eventBus: EventBus = EventBus(),
     private val templateRenderer: PushTemplateRenderer = PushTemplateRenderer(),
     imageLoader: DynamicImageLoader? = null,
     imageRenderer: DynamicImageRenderer? = null,
@@ -68,10 +69,10 @@ public class SourceUpdateListener(
 
     private suspend fun handleDynamic(event: SourceUpdateEvent, update: SourceUpdate) {
         val (normalizedUpdate, storedPublisher) = normalizePublisher(update)
-        val targets = resolveTargets(event.targetOverride, storedPublisher)
+        val targets = resolveTargets(event.deliveryTarget, storedPublisher)
         if (targets.isEmpty()) return
 
-        val deliverableTargets = if (event.label == LINK_PARSE_EVENT_LABEL) {
+        val deliverableTargets = if (event.deliveryTag == LINK_PARSE_EVENT_LABEL) {
             targets
         } else {
             applyFilters(normalizedUpdate, targets.filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds))
@@ -89,7 +90,7 @@ public class SourceUpdateListener(
 
     private suspend fun handleLive(event: SourceUpdateEvent, update: SourceUpdate) {
         val (normalizedUpdate, storedPublisher) = normalizePublisher(update)
-        val targets = resolveTargets(event.targetOverride, storedPublisher)
+        val targets = resolveTargets(event.deliveryTarget, storedPublisher)
             .filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds)
         if (targets.isEmpty()) return
 
@@ -129,7 +130,7 @@ public class SourceUpdateListener(
                     subscription = publisher?.let { stored ->
                         SubscriptionRepository.findBySubscriberAndPublisher(it.id, stored.id)
                     },
-                )
+                ),
             )
         }
         if (publisher == null) return emptyList()
@@ -175,7 +176,7 @@ public class SourceUpdateListener(
             runtimeImageLoader.load(drawableUpdate)
             MediaRef(uri = runtimeImageRenderer.render(drawableUpdate).toString(), kind = MediaKind.IMAGE)
         }.onFailure {
-            logger.warn(it) { "draw failed, fallback to text: update=${update.key.stableValue()}" }
+            logger.warn(it) { "绘图失败，回退为文本消息：update=${update.key.stableValue()}" }
         }.getOrNull()
     }
 
@@ -184,7 +185,7 @@ public class SourceUpdateListener(
     }
 
     private fun resolveLiveTemplate(update: SourceUpdate): String {
-        val live = update.payload as? LivePayload ?: return runtimeConfigProvider().templates.dynamic
+        update.payload as? LivePayload ?: return runtimeConfigProvider().templates.dynamic
         val templates = runtimeConfigProvider().templates
         return when (update.eventType) {
             SourceEventType.LIVE_STARTED -> templates.liveStarted
@@ -200,7 +201,7 @@ public class SourceUpdateListener(
         skipReason: String,
     ) {
         if (batches.isEmpty()) {
-            logger.warn { "skip source update: $skipReason, rendered message is empty" }
+            logger.warn { "跳过来源更新：$skipReason，渲染后的消息为空" }
             return
         }
 
@@ -226,7 +227,7 @@ public class SourceUpdateListener(
             batches = batches,
         )
         MessageDeliveryRepository.createPending(message)
-        MessageEvent(source = "main", message = message).broadcast()
+        MessageEvent(sourcePlugin = "main", message = message).let { eventBus.broadcast(it) }
     }
 
     private fun DeliveryTarget.shouldMentionAll(update: SourceUpdate): Boolean {

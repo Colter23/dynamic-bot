@@ -1542,9 +1542,9 @@
       const value = configValue(detail, field.path);
       const hint = field.description ? "<span class='field-hint'>" + esc(field.description) + "</span>" : "";
       const labelHtml = configLabelHtml(field, id);
-      if (field.type === "COMMAND_PERMISSIONS") {
+      if (isCommandPermissionsField(field)) {
         return "<div class='form-field full-width'>" + labelHtml
-          + "<div class='config-table-wrap' data-config-permissions='" + esc(field.path) + "'><table><thead><tr><th>平台</th><th>会话类型</th><th>会话 ID</th><th>发送者 ID</th><th>角色</th><th>操作</th></tr></thead><tbody>"
+          + "<div class='config-table-wrap' data-config-permissions='" + esc(field.path) + "'><table><thead><tr><th>平台</th><th>目标类型</th><th>目标 ID</th><th>作用域</th><th>线程</th><th>账号</th><th>发送者</th><th>角色</th><th>操作</th></tr></thead><tbody>"
           + renderPermissionRows(value || [])
           + "</tbody></table></div><div class='form-actions'><button type='button' class='secondary' data-action='open-permission-modal'>添加规则</button></div>"
           + hint + "</div>";
@@ -1558,6 +1558,9 @@
           + "</select>";
       } else if (field.type === "NUMBER") {
         control = "<input id='" + id + "' type='number' data-config-input='" + esc(field.path) + "' value='" + esc(value ?? "") + "'>";
+      } else if (field.type === "JSON") {
+        const jsonValue = value == null ? "" : JSON.stringify(value, null, 2);
+        control = "<textarea id='" + id + "' data-config-input='" + esc(field.path) + "' data-config-json='true'>" + esc(jsonValue) + "</textarea>";
       } else if (field.type === "TEXTAREA") {
         control = "<textarea id='" + id + "' data-config-input='" + esc(field.path) + "'>" + esc(value ?? "") + "</textarea>";
       } else if (field.type === "SECRET") {
@@ -1567,6 +1570,10 @@
         control = "<input id='" + id + "' data-config-input='" + esc(field.path) + "' value='" + esc(value ?? "") + "'>";
       }
       return "<div class='form-field'>" + labelHtml + control + hint + "</div>";
+    }
+
+    function isCommandPermissionsField(field) {
+      return field.path === "command.permissions" && field.type === "JSON";
     }
 
     function configRowDataAttr(value) {
@@ -1583,25 +1590,31 @@
     }
 
     function renderPermissionRows(permissions) {
-      if (!permissions.length) return "<tr data-empty-row><td colspan='6'><div class='empty'>暂无权限规则</div></td></tr>";
+      if (!permissions.length) return "<tr data-empty-row><td colspan='9'><div class='empty'>暂无权限规则</div></td></tr>";
       return permissions.map(permissionConfigRow).join("");
     }
 
     function permissionConfigRow(rule) {
       const value = rule || {};
-      const chatType = value.chatType || "";
+      const targetKind = value.targetKind || "";
       const role = value.role || "ADMIN";
       const normalized = {
-        platform: value.platform || "*",
-        chatType: chatType || null,
-        chatId: value.chatId || "*",
+        platformId: value.platformId || "*",
+        targetKind: targetKind || null,
+        targetId: value.targetId || "*",
+        scopeId: value.scopeId || "*",
+        threadId: value.threadId || "*",
+        accountId: value.accountId || "*",
         senderId: value.senderId || "*",
         role: role
       };
       return "<tr data-permission-row data-config-json='" + configRowDataAttr(normalized) + "'>"
-        + "<td><div class='config-table-text'>" + esc(normalized.platform) + "</div></td>"
-        + "<td><div class='config-table-text'>" + esc(permissionChatTypeLabel(normalized.chatType)) + "</div></td>"
-        + "<td><div class='config-table-text'>" + esc(normalized.chatId) + "</div></td>"
+        + "<td><div class='config-table-text'>" + esc(normalized.platformId) + "</div></td>"
+        + "<td><div class='config-table-text'>" + esc(permissionTargetKindLabel(normalized.targetKind)) + "</div></td>"
+        + "<td><div class='config-table-text'>" + esc(normalized.targetId) + "</div></td>"
+        + "<td><div class='config-table-text'>" + esc(normalized.scopeId) + "</div></td>"
+        + "<td><div class='config-table-text'>" + esc(normalized.threadId) + "</div></td>"
+        + "<td><div class='config-table-text'>" + esc(normalized.accountId) + "</div></td>"
         + "<td><div class='config-table-text'>" + esc(normalized.senderId) + "</div></td>"
         + "<td><div class='config-table-text'>" + esc(permissionRoleLabel(normalized.role)) + "</div></td>"
         + "<td><div class='table-actions'><button type='button' class='secondary' data-action='edit-permission-row'>修改</button><button type='button' class='secondary' data-action='remove-permission-row'>移除</button></div></td>"
@@ -1611,19 +1624,22 @@
     function permissionValueFromRow(row) {
       const data = readConfigRowData(row);
       return {
-        platform: String(data.platform || "*"),
-        chatType: data.chatType || null,
-        chatId: String(data.chatId || "*"),
+        platformId: String(data.platformId || "*"),
+        targetKind: data.targetKind || null,
+        targetId: String(data.targetId || "*"),
+        scopeId: String(data.scopeId || "*"),
+        threadId: String(data.threadId || "*"),
+        accountId: String(data.accountId || "*"),
         senderId: String(data.senderId || "*"),
         role: String(data.role || "ADMIN")
       };
     }
 
-    function permissionChatTypeLabel(value) {
+    function permissionTargetKindLabel(value) {
       return value === "GROUP" ? "群聊"
-        : value === "PRIVATE" ? "私聊"
+        : value === "USER" ? "用户"
         : value === "CHANNEL" ? "频道"
-        : "全部会话类型";
+        : "全部目标类型";
     }
 
     function permissionRoleLabel(value) {
@@ -1641,18 +1657,24 @@
       els("configItemTitle").textContent = isEdit ? "修改权限规则" : "添加权限规则";
       els("confirmConfigItem").textContent = isEdit ? "保存" : "添加";
       const value = isEdit ? permissionValueFromRow(row) : {
-        platform: "*",
-        chatType: null,
-        chatId: "*",
+        platformId: "*",
+        targetKind: null,
+        targetId: "*",
+        scopeId: "*",
+        threadId: "*",
+        accountId: "*",
         senderId: "*",
         role: "ADMIN"
       };
       els("configItemBody").innerHTML = "<div class='forms'>"
-        + "<div class='form-field'><label for='configPermissionPlatform'>平台</label><input id='configPermissionPlatform' value='" + esc(value.platform) + "'></div>"
-        + "<div class='form-field'><label for='configPermissionChatType'>会话类型</label><select id='configPermissionChatType'>"
-        + optionHtml("", "全部会话类型", !value.chatType) + optionHtml("GROUP", "群聊", value.chatType === "GROUP") + optionHtml("PRIVATE", "私聊", value.chatType === "PRIVATE") + optionHtml("CHANNEL", "频道", value.chatType === "CHANNEL")
+        + "<div class='form-field'><label for='configPermissionPlatform'>平台</label><input id='configPermissionPlatform' value='" + esc(value.platformId) + "'></div>"
+        + "<div class='form-field'><label for='configPermissionTargetKind'>目标类型</label><select id='configPermissionTargetKind'>"
+        + optionHtml("", "全部目标类型", !value.targetKind) + optionHtml("GROUP", "群聊", value.targetKind === "GROUP") + optionHtml("USER", "用户", value.targetKind === "USER") + optionHtml("CHANNEL", "频道", value.targetKind === "CHANNEL")
         + "</select></div>"
-        + "<div class='form-field'><label for='configPermissionChatId'>会话 ID</label><input id='configPermissionChatId' value='" + esc(value.chatId) + "'></div>"
+        + "<div class='form-field'><label for='configPermissionTargetId'>目标 ID</label><input id='configPermissionTargetId' value='" + esc(value.targetId) + "'></div>"
+        + "<div class='form-field'><label for='configPermissionScopeId'>作用域 ID</label><input id='configPermissionScopeId' value='" + esc(value.scopeId) + "'></div>"
+        + "<div class='form-field'><label for='configPermissionThreadId'>线程 ID</label><input id='configPermissionThreadId' value='" + esc(value.threadId) + "'></div>"
+        + "<div class='form-field'><label for='configPermissionAccountId'>账号 ID</label><input id='configPermissionAccountId' value='" + esc(value.accountId) + "'></div>"
         + "<div class='form-field'><label for='configPermissionSenderId'>发送者 ID</label><input id='configPermissionSenderId' value='" + esc(value.senderId) + "'></div>"
         + "<div class='form-field'><label for='configPermissionRole'>角色</label><select id='configPermissionRole'>"
         + optionHtml("ADMIN", "管理员", value.role === "ADMIN") + optionHtml("USER", "普通用户", value.role === "USER")
@@ -1673,7 +1695,7 @@
     function refreshConfigTableEmptyRows() {
       const permissionBody = document.querySelector("[data-config-permissions] tbody");
       if (permissionBody && !permissionBody.querySelector("[data-permission-row]") && !permissionBody.querySelector("[data-empty-row]")) {
-        permissionBody.insertAdjacentHTML("beforeend", "<tr data-empty-row><td colspan='6'><div class='empty'>暂无权限规则</div></td></tr>");
+        permissionBody.insertAdjacentHTML("beforeend", "<tr data-empty-row><td colspan='9'><div class='empty'>暂无权限规则</div></td></tr>");
       }
     }
 
@@ -1683,9 +1705,12 @@
       const tbody = document.querySelector("[data-config-permissions] tbody");
       if (!tbody) return;
       const next = {
-        platform: els("configPermissionPlatform").value.trim() || "*",
-        chatType: els("configPermissionChatType").value || null,
-        chatId: els("configPermissionChatId").value.trim() || "*",
+        platformId: els("configPermissionPlatform").value.trim() || "*",
+        targetKind: els("configPermissionTargetKind").value || null,
+        targetId: els("configPermissionTargetId").value.trim() || "*",
+        scopeId: els("configPermissionScopeId").value.trim() || "*",
+        threadId: els("configPermissionThreadId").value.trim() || "*",
+        accountId: els("configPermissionAccountId").value.trim() || "*",
         senderId: els("configPermissionSenderId").value.trim() || "*",
         role: els("configPermissionRole").value || "ADMIN"
       };
@@ -1702,7 +1727,7 @@
     function collectConfigValues(detail) {
       const values = {};
       (detail.schema.fields || []).forEach(field => {
-        if (field.type === "COMMAND_PERMISSIONS") {
+        if (isCommandPermissionsField(field)) {
           values[field.path] = Array.from(document.querySelectorAll("[data-permission-row]")).map(permissionValueFromRow);
         } else {
           const input = document.querySelector("[data-config-input='" + field.path + "']");
@@ -1711,6 +1736,8 @@
             values[field.path] = input.checked;
           } else if (field.type === "NUMBER") {
             values[field.path] = input.value === "" ? null : Number(input.value);
+          } else if (field.type === "JSON") {
+            values[field.path] = input.value.trim() ? JSON.parse(input.value) : null;
           } else {
             values[field.path] = input.value;
           }

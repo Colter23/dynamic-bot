@@ -29,7 +29,11 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.WebAdminConfig
+import top.colter.dynamic.core.command.CommandRegistry
 import top.colter.dynamic.core.config.ConfigApplyResult
+import top.colter.dynamic.core.config.ConfigService
+import top.colter.dynamic.core.config.YamlConfigService
+import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.plugin.PluginManager
 
 public class AdminServer(
@@ -37,6 +41,9 @@ public class AdminServer(
     private val pluginManager: PluginManager,
     private val configProvider: () -> MainDynamicConfig,
     private val mainConfigUpdater: (MainDynamicConfig) -> ConfigApplyResult,
+    private val configService: ConfigService = YamlConfigService(),
+    private val commandRegistry: CommandRegistry = CommandRegistry(),
+    private val eventBus: EventBus = EventBus(),
     private val stopRequester: ((String) -> Unit)? = null,
 ) {
     private var engine: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
@@ -46,7 +53,14 @@ public class AdminServer(
         val context = AdminServerContext(
             token = config.token,
             tokenProvider = { configProvider().webAdmin.token },
-            service = AdminService(pluginManager, configProvider, mainConfigUpdater),
+            service = AdminService(
+                pluginManager = pluginManager,
+                configProvider = configProvider,
+                mainConfigUpdater = mainConfigUpdater,
+                configService = configService,
+                commandRegistry = commandRegistry,
+                eventBus = eventBus,
+            ),
             loginService = AdminLoginService(
                 loginProviderResolver = { platformId -> pluginManager.findPublisherLoginProvider(platformId) },
             ),

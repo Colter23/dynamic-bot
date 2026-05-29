@@ -1,7 +1,6 @@
 package top.colter.dynamic.command
 
 import kotlin.io.path.createTempDirectory
-import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -25,7 +24,6 @@ import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
 import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.event.Listener
-import top.colter.dynamic.core.event.register
 import top.colter.dynamic.core.plugin.FollowActionResult
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
@@ -38,25 +36,22 @@ import top.colter.dynamic.core.repository.SubscriptionRepository
 import top.colter.dynamic.testPublisherInfo
 
 class CommandListenerTest {
-    @AfterTest
-    fun cleanup() {
-        EventBus.global.shutdown()
-        CommandRegistry.clear()
-    }
-
     @Test
     fun subscribeShouldCreatePublisherSubscriberAndSubscription() = runBlocking {
         initDb("command-subscribe")
+        val eventBus = EventBus()
         val plugin = FakePublisherFollowPlugin()
         val listener = CommandListener(
             publisherLookupResolver = { id -> plugin.takeIf { id == "bilibili" } },
             config = MainDynamicConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
         )
 
-        val result = dispatch(listener, commandEvent("/db subscribe bilibili 123"))
+        val result = dispatch(eventBus, listener, commandEvent("/db subscribe bilibili 123"))
 
         assertEquals(CommandStatus.SUCCESS, result.status)
-        assertTrue(renderMessage(result).contains("subscribed: demo-up"))
+        assertTrue(renderMessage(result).contains("已订阅：demo-up"))
         val publisher = assertNotNull(PublisherRepository.findByKey(PublisherKey.of("bilibili", externalId = "123")))
         val subscriber = assertNotNull(
             SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")),
@@ -69,9 +64,15 @@ class CommandListenerTest {
     fun filterAddElementShouldUseAttachmentKindCondition() = runBlocking {
         initDb("command-filter")
         seedSubscription()
-        val listener = CommandListener(publisherLookupResolver = { null }, config = MainDynamicConfig())
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = MainDynamicConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
 
-        val result = dispatch(listener, commandEvent("/db filter add element bilibili 123 video"))
+        val result = dispatch(eventBus, listener, commandEvent("/db filter add element bilibili 123 video"))
 
         assertEquals(CommandStatus.SUCCESS, result.status)
         val rule = DynamicFilterRuleRepository.findAll().single()
@@ -82,29 +83,37 @@ class CommandListenerTest {
     fun unsubscribeShouldRemoveSubscription() = runBlocking {
         initDb("command-unsubscribe")
         seedSubscription()
+        val eventBus = EventBus()
         val listener = CommandListener(
             publisherLookupResolver = { null },
             config = MainDynamicConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
         )
 
-        val result = dispatch(listener, commandEvent("/db unsubscribe bilibili 123"))
+        val result = dispatch(eventBus, listener, commandEvent("/db unsubscribe bilibili 123"))
 
         assertEquals(CommandStatus.SUCCESS, result.status)
-        assertTrue(renderMessage(result).contains("unsubscribed"))
+        assertTrue(renderMessage(result).contains("已取消订阅"))
         val subscriber = assertNotNull(
             SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")),
         )
         assertTrue(SubscriptionRepository.findPublisherIdsBySubscriberId(subscriber.id).isEmpty())
     }
 
-    private suspend fun dispatch(listener: CommandListener, event: CommandEvent): CommandResultEvent {
-        EventBus.global.shutdown()
+    private suspend fun dispatch(
+        eventBus: EventBus,
+        listener: CommandListener,
+        event: CommandEvent,
+    ): CommandResultEvent {
         val result = CompletableDeferred<CommandResultEvent>()
-        object : Listener<CommandResultEvent> {
-            override suspend fun onMessage(event: CommandResultEvent) {
-                result.complete(event)
-            }
-        }.register<CommandResultEvent>()
+        eventBus.subscribe(
+            object : Listener<CommandResultEvent> {
+                override suspend fun onMessage(event: CommandResultEvent) {
+                    result.complete(event)
+                }
+            },
+        )
 
         listener.onMessage(event)
         return withTimeout(3_000) { result.await() }

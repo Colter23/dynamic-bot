@@ -1,7 +1,6 @@
 package top.colter.dynamic.link
 
 import kotlin.io.path.createTempDirectory
-import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -14,7 +13,6 @@ import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.core.command.CommandRegistry
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandStatus
-import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.TargetAddress
@@ -24,7 +22,6 @@ import top.colter.dynamic.core.event.CommandResultEvent
 import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.SourceUpdateEvent
-import top.colter.dynamic.core.event.register
 import top.colter.dynamic.core.link.DynamicLinkResolution
 import top.colter.dynamic.core.link.DynamicLinkResolver
 import top.colter.dynamic.core.link.ParsedDynamicLink
@@ -36,32 +33,33 @@ import top.colter.dynamic.testPublisherInfo
 import top.colter.dynamic.testPublisherKey
 
 class DynamicLinkForwarderTest {
-    @AfterTest
-    fun cleanup() {
-        EventBus.global.shutdown()
-        CommandRegistry.clear()
-    }
-
     @Test
     fun `parse command should resolve and forward dynamic to current chat`() = runBlocking {
         initDb("parse-command")
-        CommandRegistry.clear()
+        val eventBus = EventBus()
         val resolver = FakeDynamicLinkResolver()
         val listener = CommandListener(
             publisherLookupResolver = { null },
-            dynamicLinkForwarder = DynamicLinkForwarder { listOf(resolver) },
+            config = MainDynamicConfig(),
+            dynamicLinkForwarder = DynamicLinkForwarder(
+                resolversProvider = { listOf(resolver) },
+                eventBus = eventBus,
+            ),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
         )
 
         val (commandResult, dynamicEvent) = dispatchCommandAndDynamic(
+            eventBus,
             listener,
             commandEvent("/db parse https://t.bilibili.com/1"),
         )
 
         assertEquals(CommandStatus.SUCCESS, commandResult.status)
-        assertTrue(renderMessage(commandResult).contains("submitted"))
-        assertEquals(LINK_PARSE_EVENT_LABEL, dynamicEvent.label)
+        assertTrue(renderMessage(commandResult).contains("已提交转发"))
+        assertEquals(LINK_PARSE_EVENT_LABEL, dynamicEvent.deliveryTag)
         assertEquals("1", dynamicEvent.update.key.externalId)
-        assertEquals("100", dynamicEvent.targetOverride?.externalId)
+        assertEquals("100", dynamicEvent.deliveryTarget?.externalId)
         assertNotNull(PublisherRepository.findByKey(PublisherKey.of("bilibili", externalId = "123")))
         assertNotNull(
             SubscriberRepository.findByAddress(
@@ -73,13 +71,19 @@ class DynamicLinkForwarderTest {
     @Test
     fun `parse command should report unsupported links`() = runBlocking {
         initDb("parse-unsupported")
-        CommandRegistry.clear()
+        val eventBus = EventBus()
         val listener = CommandListener(
             publisherLookupResolver = { null },
-            dynamicLinkForwarder = DynamicLinkForwarder { listOf(FakeDynamicLinkResolver()) },
+            config = MainDynamicConfig(),
+            dynamicLinkForwarder = DynamicLinkForwarder(
+                resolversProvider = { listOf(FakeDynamicLinkResolver()) },
+                eventBus = eventBus,
+            ),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
         )
 
-        val commandResult = dispatchCommand(listener, commandEvent("/db parse https://example.com/post/1"))
+        val commandResult = dispatchCommand(eventBus, listener, commandEvent("/db parse https://example.com/post/1"))
 
         assertEquals(CommandStatus.FAILED, commandResult.status)
     }
@@ -87,17 +91,24 @@ class DynamicLinkForwarderTest {
     @Test
     fun `auto parser should forward non command dynamic links`() = runBlocking {
         initDb("auto-forward")
+        val eventBus = EventBus()
         val resolver = FakeDynamicLinkResolver()
         val listener = DynamicLinkAutoParseListener(
             configProvider = { MainDynamicConfig() },
-            forwarder = DynamicLinkForwarder { listOf(resolver) },
+            forwarder = DynamicLinkForwarder(
+                resolversProvider = { listOf(resolver) },
+                eventBus = eventBus,
+            ),
+            eventBus = eventBus,
         )
         val dynamic = CompletableDeferred<SourceUpdateEvent>()
-        object : Listener<SourceUpdateEvent> {
-            override suspend fun onMessage(event: SourceUpdateEvent) {
-                dynamic.complete(event)
-            }
-        }.register<SourceUpdateEvent>()
+        eventBus.subscribe(
+            object : Listener<SourceUpdateEvent> {
+                override suspend fun onMessage(event: SourceUpdateEvent) {
+                    dynamic.complete(event)
+                }
+            },
+        )
 
         listener.onMessage(commandEvent("look https://t.bilibili.com/1"))
 
@@ -109,10 +120,15 @@ class DynamicLinkForwarderTest {
     @Test
     fun `auto parser should ignore command messages dedupe and respect max one link`() = runBlocking {
         initDb("auto-dedupe")
+        val eventBus = EventBus()
         val resolver = FakeDynamicLinkResolver()
         val listener = DynamicLinkAutoParseListener(
             configProvider = { MainDynamicConfig() },
-            forwarder = DynamicLinkForwarder { listOf(resolver) },
+            forwarder = DynamicLinkForwarder(
+                resolversProvider = { listOf(resolver) },
+                eventBus = eventBus,
+            ),
+            eventBus = eventBus,
         )
 
         listener.onMessage(commandEvent("/db parse https://t.bilibili.com/1"))
@@ -127,38 +143,44 @@ class DynamicLinkForwarderTest {
     }
 
     private suspend fun dispatchCommand(
+        eventBus: EventBus,
         listener: CommandListener,
         event: CommandEvent,
     ): CommandResultEvent {
-        EventBus.global.shutdown()
         val result = CompletableDeferred<CommandResultEvent>()
-        object : Listener<CommandResultEvent> {
-            override suspend fun onMessage(event: CommandResultEvent) {
-                result.complete(event)
-            }
-        }.register<CommandResultEvent>()
+        eventBus.subscribe(
+            object : Listener<CommandResultEvent> {
+                override suspend fun onMessage(event: CommandResultEvent) {
+                    result.complete(event)
+                }
+            },
+        )
 
         listener.onMessage(event)
         return withTimeout(3_000) { result.await() }
     }
 
     private suspend fun dispatchCommandAndDynamic(
+        eventBus: EventBus,
         listener: CommandListener,
         event: CommandEvent,
     ): Pair<CommandResultEvent, SourceUpdateEvent> {
-        EventBus.global.shutdown()
         val commandResult = CompletableDeferred<CommandResultEvent>()
         val dynamic = CompletableDeferred<SourceUpdateEvent>()
-        object : Listener<CommandResultEvent> {
-            override suspend fun onMessage(event: CommandResultEvent) {
-                commandResult.complete(event)
-            }
-        }.register<CommandResultEvent>()
-        object : Listener<SourceUpdateEvent> {
-            override suspend fun onMessage(event: SourceUpdateEvent) {
-                dynamic.complete(event)
-            }
-        }.register<SourceUpdateEvent>()
+        eventBus.subscribe(
+            object : Listener<CommandResultEvent> {
+                override suspend fun onMessage(event: CommandResultEvent) {
+                    commandResult.complete(event)
+                }
+            },
+        )
+        eventBus.subscribe(
+            object : Listener<SourceUpdateEvent> {
+                override suspend fun onMessage(event: SourceUpdateEvent) {
+                    dynamic.complete(event)
+                }
+            },
+        )
 
         listener.onMessage(event)
         return Pair(
@@ -202,7 +224,7 @@ class DynamicLinkForwarderTest {
                 .takeIf { it.isNotBlank() }
                 ?: return null
             return ParsedDynamicLink(
-                platformId = platformId.value,
+                platformId = platformId,
                 updateId = updateId,
                 normalizedUrl = "https://t.bilibili.com/$updateId",
                 sourceUrl = inputUrl,

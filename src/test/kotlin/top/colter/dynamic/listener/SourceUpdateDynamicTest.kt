@@ -2,7 +2,6 @@ package top.colter.dynamic.listener
 
 import java.nio.file.Paths
 import kotlin.io.path.createTempDirectory
-import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -39,7 +38,6 @@ import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdateEvent
-import top.colter.dynamic.core.event.register
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.repository.PersistenceManager
@@ -52,26 +50,22 @@ import top.colter.dynamic.testPublisher
 import top.colter.dynamic.testTargetAddress
 
 class SourceUpdateDynamicTest {
-
-    @AfterTest
-    fun cleanup() {
-        EventBus.global.shutdown()
-    }
-
     @Test
     fun shouldConvertDynamicUpdateToMessageEventWithGlobalTemplateAndImage() = runBlocking {
         initDb("dynamic-listener-global-template")
+        val eventBus = EventBus()
         val publisher = createPublisher()
         val subscriber = createSubscriber()
         SubscriptionRepository.subscribe(subscriber.id, publisher.id)
         val listener = SourceUpdateListener(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "{draw}\nvideo {name} {content}")),
+            eventBus = eventBus,
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/dynamic.png") },
         )
 
-        val received = captureMessageEvent()
-        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(publisher)))
+        val received = captureMessageEvent(eventBus)
+        listener.onMessage(SourceUpdateEvent(sourcePlugin = "test", update = demoDynamic(publisher)))
         val event = withTimeout(3_000) { received.await() }
 
         assertEquals(listOf(subscriber.address), event.message.targets)
@@ -84,6 +78,7 @@ class SourceUpdateDynamicTest {
     @Test
     fun shouldSyncPublisherInfoAndFillMissingBannerFromLocalRecord() = runBlocking {
         initDb("dynamic-listener-sync-publisher")
+        val eventBus = EventBus()
         val publisher = createPublisher()
         val subscriber = createSubscriber()
         SubscriptionRepository.subscribe(subscriber.id, publisher.id)
@@ -103,6 +98,7 @@ class SourceUpdateDynamicTest {
         var renderedBanner: String? = null
         val listener = SourceUpdateListener(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "{draw}\n{name}")),
+            eventBus = eventBus,
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { update ->
                 renderedBanner = update.publisher.banner?.uri
@@ -110,8 +106,8 @@ class SourceUpdateDynamicTest {
             },
         )
 
-        val received = captureMessageEvent()
-        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(incoming)))
+        val received = captureMessageEvent(eventBus)
+        listener.onMessage(SourceUpdateEvent(sourcePlugin = "test", update = demoDynamic(incoming)))
         val event = withTimeout(3_000) { received.await() }
 
         val updated = assertNotNull(PublisherRepository.findById(publisher.id))
@@ -125,6 +121,7 @@ class SourceUpdateDynamicTest {
     @Test
     fun shouldAppendMentionAllByEventTypeAndAttachmentSelector() = runBlocking {
         initDb("dynamic-listener-at-all")
+        val eventBus = EventBus()
         val publisher = createPublisher()
         val atAllSubscriber = createSubscriber(id = 10, targetId = "100")
         val normalSubscriber = createSubscriber(id = 11, targetId = "200")
@@ -147,12 +144,13 @@ class SourceUpdateDynamicTest {
         SubscriptionRepository.subscribe(normalSubscriber.id, publisher.id)
         val listener = SourceUpdateListener(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "tail {name}")),
+            eventBus = eventBus,
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/not-used.png") },
         )
 
-        val received = captureMessageEvents()
-        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(publisher, withVideo = true)))
+        val received = captureMessageEvents(eventBus)
+        listener.onMessage(SourceUpdateEvent(sourcePlugin = "test", update = demoDynamic(publisher, withVideo = true)))
 
         val events = listOf(
             withTimeout(3_000) { received.receive() },
@@ -168,6 +166,7 @@ class SourceUpdateDynamicTest {
     @Test
     fun shouldDeliverOnlyUnfilteredTargetsAndSkipDrawWhenAllFiltered() = runBlocking {
         initDb("dynamic-listener-filter")
+        val eventBus = EventBus()
         val publisher = createPublisher()
         val filteredSubscriber = createSubscriber(id = 10, targetId = "100")
         val allowedSubscriber = createSubscriber(id = 11, targetId = "200")
@@ -182,6 +181,7 @@ class SourceUpdateDynamicTest {
         var renderCalls = 0
         val listener = SourceUpdateListener(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "allowed {name}")),
+            eventBus = eventBus,
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer {
                 renderCalls += 1
@@ -189,36 +189,46 @@ class SourceUpdateDynamicTest {
             },
         )
 
-        val received = captureMessageEvent()
-        listener.onMessage(SourceUpdateEvent(source = "test", update = demoDynamic(publisher)))
+        val received = captureMessageEvent(eventBus)
+        listener.onMessage(SourceUpdateEvent(sourcePlugin = "test", update = demoDynamic(publisher)))
         val event = withTimeout(3_000) { received.await() }
 
         assertEquals(listOf(allowedSubscriber.address), event.message.targets)
         assertEquals(0, renderCalls)
         assertEquals(1, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
 
-        val targetReceived = captureMessageEvent()
-        listener.onMessage(SourceUpdateEvent(source = "test", targetOverride = filteredSubscriber, update = demoDynamic(publisher)))
+        val targetReceived = captureMessageEvent(eventBus)
+        listener.onMessage(
+            SourceUpdateEvent(
+                sourcePlugin = "test",
+                deliveryTarget = filteredSubscriber,
+                update = demoDynamic(publisher),
+            ),
+        )
         assertNull(withTimeoutOrNull(300) { targetReceived.await() })
     }
 
-    private fun captureMessageEvent(): CompletableDeferred<MessageEvent> {
+    private fun captureMessageEvent(eventBus: EventBus): CompletableDeferred<MessageEvent> {
         val received = CompletableDeferred<MessageEvent>()
-        object : Listener<MessageEvent> {
-            override suspend fun onMessage(event: MessageEvent) {
-                if (!received.isCompleted) received.complete(event)
-            }
-        }.register<MessageEvent>()
+        eventBus.subscribe(
+            object : Listener<MessageEvent> {
+                override suspend fun onMessage(event: MessageEvent) {
+                    if (!received.isCompleted) received.complete(event)
+                }
+            },
+        )
         return received
     }
 
-    private fun captureMessageEvents(): Channel<MessageEvent> {
+    private fun captureMessageEvents(eventBus: EventBus): Channel<MessageEvent> {
         val received = Channel<MessageEvent>(Channel.UNLIMITED)
-        object : Listener<MessageEvent> {
-            override suspend fun onMessage(event: MessageEvent) {
-                received.send(event)
-            }
-        }.register<MessageEvent>()
+        eventBus.subscribe(
+            object : Listener<MessageEvent> {
+                override suspend fun onMessage(event: MessageEvent) {
+                    received.send(event)
+                }
+            },
+        )
         return received
     }
 

@@ -12,14 +12,14 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.command.CommandExecutionResult
-import top.colter.dynamic.core.command.CommandExecutionStatus
 import top.colter.dynamic.core.command.CommandHandler
 import top.colter.dynamic.core.command.CommandInvocation
 import top.colter.dynamic.core.command.CommandParser
+import top.colter.dynamic.core.command.CommandPermissionResolver
 import top.colter.dynamic.core.command.CommandRegistry
 import top.colter.dynamic.core.command.CommandSpec
 import top.colter.dynamic.core.config.ConfigService
-import top.colter.dynamic.core.config.DefaultConfigService
+import top.colter.dynamic.core.config.YamlConfigService
 import top.colter.dynamic.core.config.loadOrCreate
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
@@ -38,19 +38,18 @@ import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.PublisherKind
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.Subscription
-import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
+import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.event.Listener
-import top.colter.dynamic.core.event.broadcast
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
-import top.colter.dynamic.core.plugin.PublisherLookupPlugin
-import top.colter.dynamic.core.plugin.PublisherLoginProvider
 import top.colter.dynamic.core.plugin.PublisherLoginMethod
+import top.colter.dynamic.core.plugin.PublisherLoginProvider
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
+import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
 import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.core.repository.MessageDeliveryRepository
@@ -74,11 +73,13 @@ public class CommandListener(
     private val publisherLoginResolver: (String) -> PublisherLoginProvider? = { platform ->
         publisherLookupResolver(platform) as? PublisherLoginProvider
     },
-    private val dynamicLinkForwarder: DynamicLinkForwarder = DynamicLinkForwarder { emptyList() },
+    private val dynamicLinkForwarder: DynamicLinkForwarder = DynamicLinkForwarder(resolversProvider = { emptyList() }),
     config: MainDynamicConfig? = null,
     configProvider: (() -> MainDynamicConfig)? = null,
     private val stopRequester: ((String) -> Unit)? = null,
-    private val configService: ConfigService = DefaultConfigService,
+    private val configService: ConfigService = YamlConfigService(),
+    private val commandRegistry: CommandRegistry = CommandRegistry(),
+    private val eventBus: EventBus = EventBus(),
 ) : Listener<CommandEvent> {
     private companion object {
         private const val MAIN_OWNER: String = "main"
@@ -103,21 +104,15 @@ public class CommandListener(
         val parsed = CommandParser.parse(event.rawText, commandPrefix) ?: return
         val tokens = parsed.tokens
 
-        val match = CommandRegistry.match(tokens)
+        val match = commandRegistry.match(tokens)
         if (match == null) {
-            reply(
-                event,
-                CommandExecutionResult(
-                    CommandExecutionStatus.FAILED,
-                    "unknown command: ${tokens.joinToString(" ")}",
-                )
-            )
+            reply(event, CommandExecutionResult.failed("未知命令：${tokens.joinToString(" ")}"))
             return
         }
 
         val role = CommandPermissionResolver(runtimeConfig.command.permissions).resolve(event.context)
         if (!role.satisfies(match.spec.requiredRole)) {
-            reply(event, CommandExecutionResult(CommandExecutionStatus.REJECTED, "permission denied"))
+            reply(event, CommandExecutionResult.rejected("权限不足"))
             return
         }
 
@@ -133,47 +128,48 @@ public class CommandListener(
         )
 
         val result = runCatching { match.handler.handle(invocation) }
-            .getOrElse { CommandExecutionResult(CommandExecutionStatus.FAILED, "command failed: ${it.message}") }
+            .getOrElse { CommandExecutionResult.failed("命令执行失败：${it.message}") }
 
         reply(event, result)
         runCatching { result.afterReply?.invoke() }
     }
 
     private fun reply(event: CommandEvent, result: CommandExecutionResult) {
-        val status = when (result.status) {
-            CommandExecutionStatus.SUCCESS -> CommandStatus.SUCCESS
-            CommandExecutionStatus.REJECTED -> CommandStatus.REJECTED
-            CommandExecutionStatus.FAILED -> CommandStatus.FAILED
-        }
         CommandResultEvent(
             sourcePlugin = MAIN_OWNER,
             target = CommandTarget(
                 address = event.context.target,
                 senderId = event.context.senderId,
             ),
-            chain = result.chain ?: listOf(MessageBatch(listOf(MessageContent.Text(result.message)))),
+            chain = result.reply,
             inReplyTo = event.traceId,
-            status = status,
-            errorMessage = if (status == CommandStatus.FAILED) result.message else null,
-        ).broadcast()
+            status = result.status,
+            errorMessage = result.errorMessage,
+        ).let { eventBus.broadcast(it) }
     }
 
     private fun registerBuiltins() {
-        CommandRegistry.unregisterByOwner(MAIN_OWNER)
-        CommandRegistry.register(HelpCommandHandler(commandPrefixProvider), MAIN_OWNER)
-        CommandRegistry.register(StatusCommandHandler(), MAIN_OWNER)
-        stopRequester?.let { CommandRegistry.register(StopApplicationCommandHandler(it), MAIN_OWNER) }
-        CommandRegistry.register(ParseDynamicLinkCommandHandler(dynamicLinkForwarder, commandPrefixProvider), MAIN_OWNER)
-        CommandRegistry.register(SubscribeCommandHandler(publisherLookupResolver, publisherFollowResolver, commandPrefixProvider), MAIN_OWNER)
-        CommandRegistry.register(LoginCommandHandler(publisherLoginResolver, commandPrefixProvider), MAIN_OWNER)
-        CommandRegistry.register(UnsubscribeCommandHandler(publisherFollowResolver, { runtimeConfig }, commandPrefixProvider), MAIN_OWNER)
-        CommandRegistry.register(ListCommandHandler(), MAIN_OWNER)
-        CommandRegistry.register(TemplateListCommandHandler { runtimeConfig }, MAIN_OWNER)
-        CommandRegistry.register(FilterAddElementCommandHandler(commandPrefixProvider), MAIN_OWNER)
-        CommandRegistry.register(FilterAddContentCommandHandler(commandPrefixProvider), MAIN_OWNER)
-        CommandRegistry.register(FilterListCommandHandler(commandPrefixProvider), MAIN_OWNER)
-        CommandRegistry.register(FilterRemoveCommandHandler(commandPrefixProvider), MAIN_OWNER)
-        CommandRegistry.register(FilterClearCommandHandler(commandPrefixProvider), MAIN_OWNER)
+        commandRegistry.unregisterByOwner(MAIN_OWNER)
+        commandRegistry.register(HelpCommandHandler(commandPrefixProvider, commandRegistry), MAIN_OWNER)
+        commandRegistry.register(StatusCommandHandler(commandRegistry), MAIN_OWNER)
+        stopRequester?.let { commandRegistry.register(StopApplicationCommandHandler(it), MAIN_OWNER) }
+        commandRegistry.register(ParseDynamicLinkCommandHandler(dynamicLinkForwarder, commandPrefixProvider), MAIN_OWNER)
+        commandRegistry.register(
+            SubscribeCommandHandler(publisherLookupResolver, publisherFollowResolver, commandPrefixProvider, eventBus),
+            MAIN_OWNER,
+        )
+        commandRegistry.register(LoginCommandHandler(publisherLoginResolver, commandPrefixProvider, eventBus), MAIN_OWNER)
+        commandRegistry.register(
+            UnsubscribeCommandHandler(publisherFollowResolver, { runtimeConfig }, commandPrefixProvider, eventBus),
+            MAIN_OWNER,
+        )
+        commandRegistry.register(ListCommandHandler(), MAIN_OWNER)
+        commandRegistry.register(TemplateListCommandHandler { runtimeConfig }, MAIN_OWNER)
+        commandRegistry.register(FilterAddElementCommandHandler(commandPrefixProvider), MAIN_OWNER)
+        commandRegistry.register(FilterAddContentCommandHandler(commandPrefixProvider), MAIN_OWNER)
+        commandRegistry.register(FilterListCommandHandler(commandPrefixProvider), MAIN_OWNER)
+        commandRegistry.register(FilterRemoveCommandHandler(commandPrefixProvider), MAIN_OWNER)
+        commandRegistry.register(FilterClearCommandHandler(commandPrefixProvider), MAIN_OWNER)
     }
 }
 
@@ -182,11 +178,11 @@ private fun CommandInvocation.currentSubscriber(): Subscriber? {
 }
 
 private fun success(message: String): CommandExecutionResult {
-    return CommandExecutionResult(CommandExecutionStatus.SUCCESS, message)
+    return CommandExecutionResult.success(message)
 }
 
 private fun failed(message: String): CommandExecutionResult {
-    return CommandExecutionResult(CommandExecutionStatus.FAILED, message)
+    return CommandExecutionResult.failed(message)
 }
 
 private fun parseDynamicElementType(value: String): DynamicAttachmentKind? {
@@ -208,20 +204,21 @@ private fun resolveFilterTarget(
 ): FilterTargetResolveResult {
     val normalizedPlatform = platform.lowercase()
     val publisher = PublisherRepository.findByKey(
-        PublisherKey.of(normalizedPlatform, PublisherKind.USER, publisherUserId)
-    )
-        ?: return FilterTargetResolveResult.Failed(failed("publisher not found: $normalizedPlatform:$publisherUserId"))
+        PublisherKey.of(normalizedPlatform, PublisherKind.USER, publisherUserId),
+    ) ?: return FilterTargetResolveResult.Failed(failed("未找到发布者：$normalizedPlatform:$publisherUserId"))
     val subscriber = invocation.currentSubscriber()
-        ?: return FilterTargetResolveResult.Failed(failed("not subscribed: $normalizedPlatform:$publisherUserId"))
+        ?: return FilterTargetResolveResult.Failed(failed("未订阅：$normalizedPlatform:$publisherUserId"))
     val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)
-        ?: return FilterTargetResolveResult.Failed(failed("not subscribed: ${publisher.platformId.value}:${publisher.externalId}"))
+        ?: return FilterTargetResolveResult.Failed(
+            failed("未订阅：${publisher.platformId.value}:${publisher.externalId}"),
+        )
 
     return FilterTargetResolveResult.Found(
         ResolvedFilterTarget(
             publisher = publisher,
             subscriber = subscriber,
             subscription = subscription,
-        )
+        ),
     )
 }
 
@@ -243,34 +240,36 @@ private sealed interface FilterTargetResolveResult {
 
 private class HelpCommandHandler(
     private val commandPrefixProvider: () -> String,
+    private val commandRegistry: CommandRegistry,
 ) : CommandHandler {
     private val commandPrefix: String
         get() = commandPrefixProvider()
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("help"),
-        description = "show available commands",
+        description = "显示可用命令",
         usage = "help",
         requiredRole = CommandRole.USER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
-        val visibleCommands = CommandRegistry.visibleCommandsFor(invocation.role)
+        val visibleCommands = commandRegistry.visibleCommandsFor(invocation.role)
         if (visibleCommands.isEmpty()) {
-            return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no commands available")
+            return CommandExecutionResult.success("没有可用命令")
         }
 
         val content = visibleCommands.joinToString("\n") { command ->
             val usage = "$commandPrefix ${command.usage}".trim()
             if (command.description.isBlank()) usage else "$usage - ${command.description}"
         }
-        return CommandExecutionResult(CommandExecutionStatus.SUCCESS, content)
+        return CommandExecutionResult.success(content)
     }
 }
 
 private class LoginCommandHandler(
     private val loginProviderResolver: (String) -> PublisherLoginProvider?,
     private val commandPrefixProvider: () -> String,
+    private val eventBus: EventBus,
     private val qrCodeRenderer: LoginQrCodeRenderer = LoginQrCodeRenderer(),
     private val loginScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
 ) : CommandHandler {
@@ -283,7 +282,7 @@ private class LoginCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("login"),
-        description = "login a publisher platform account",
+        description = "登录来源平台账号",
         usage = "login <platform> <cookie|qr> [cookie]",
         requiredRole = CommandRole.ADMIN,
     )
@@ -296,7 +295,7 @@ private class LoginCommandHandler(
         val platform = invocation.args[0].lowercase()
         val method = invocation.args[1].lowercase()
         val plugin = loginProviderResolver(platform)
-            ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "platform login provider not found: $platform")
+            ?: return CommandExecutionResult.failed("未找到平台登录插件：$platform")
 
         return when (method) {
             "cookie" -> handleCookieLogin(plugin, platform, invocation.args.drop(2).joinToString(" ").trim())
@@ -311,20 +310,17 @@ private class LoginCommandHandler(
         cookie: String,
     ): CommandExecutionResult {
         if (!plugin.supportedLoginMethods.contains(PublisherLoginMethod.COOKIE)) {
-            return CommandExecutionResult(CommandExecutionStatus.FAILED, "cookie login is unsupported on $platform")
+            return CommandExecutionResult.failed("$platform 不支持 cookie 登录")
         }
         if (cookie.isBlank()) {
-            return CommandExecutionResult(
-                CommandExecutionStatus.FAILED,
-                "usage: $commandPrefix login $platform cookie <cookie>",
-            )
+            return CommandExecutionResult.failed("用法：$commandPrefix login $platform cookie <cookie>")
         }
 
         val result = runCatching { plugin.loginByCookie(cookie) }
             .getOrElse { throwable ->
                 PublisherLoginResult(
                     status = PublisherLoginStatus.FAILED,
-                    message = throwable.message ?: "cookie login failed",
+                    message = throwable.message ?: "cookie 登录失败",
                 )
             }
         return toCommandResult(platform, result)
@@ -336,7 +332,7 @@ private class LoginCommandHandler(
         invocation: CommandInvocation,
     ): CommandExecutionResult {
         if (!plugin.supportedLoginMethods.contains(PublisherLoginMethod.QR_CODE)) {
-            return CommandExecutionResult(CommandExecutionStatus.FAILED, "QR code login is unsupported on $platform")
+            return CommandExecutionResult.failed("$platform 不支持二维码登录")
         }
         if (invocation.args.size > 2) {
             return failedUsage()
@@ -362,7 +358,7 @@ private class LoginCommandHandler(
                 }
                 PublisherLoginResult(
                     status = PublisherLoginStatus.FAILED,
-                    message = throwable.message ?: "QR code login failed",
+                    message = throwable.message ?: "二维码登录失败",
                 )
             }
 
@@ -383,7 +379,7 @@ private class LoginCommandHandler(
             } else {
                 PublisherLoginResult(
                     status = PublisherLoginStatus.FAILED,
-                    message = "failed to start QR code login",
+                    message = "二维码登录启动失败",
                 )
             }
             return toCommandResult(platform, result)
@@ -405,10 +401,10 @@ private class LoginCommandHandler(
         challenge: PublisherQrLoginChallenge,
         afterReply: suspend () -> Unit,
     ): CommandExecutionResult {
-        val expiresText = challenge.expiresAtEpochSeconds?.let { "expiresAt=$it" } ?: "expiresAt=unknown"
+        val expiresText = challenge.expiresAtEpochSeconds?.let { "过期时间=$it" } ?: "过期时间=未知"
         val message = buildString {
-            appendLine("$platform QR login started.")
-            appendLine("scan the QR code in Bilibili app; the login result will be sent automatically.")
+            appendLine("$platform 二维码登录已启动。")
+            appendLine("请使用对应平台 App 扫描二维码，登录结果会自动发送。")
             append(expiresText)
             challenge.message?.takeIf { it.isNotBlank() }?.let { appendLine().append(it) }
         }
@@ -424,9 +420,9 @@ private class LoginCommandHandler(
             add(MessageContent.Text(message))
         }
         return CommandExecutionResult(
-            status = CommandExecutionStatus.SUCCESS,
-            message = message,
-            chain = listOf(MessageBatch(contents)),
+            status = CommandStatus.SUCCESS,
+            reply = listOf(MessageBatch(contents)),
+            errorMessage = null,
             afterReply = afterReply,
         )
     }
@@ -434,47 +430,39 @@ private class LoginCommandHandler(
     private fun toCommandResult(platform: String, result: PublisherLoginResult): CommandExecutionResult {
         val status = when (result.status) {
             PublisherLoginStatus.SUCCESS,
-            PublisherLoginStatus.PENDING -> CommandExecutionStatus.SUCCESS
+            PublisherLoginStatus.PENDING -> CommandStatus.SUCCESS
             PublisherLoginStatus.CANCELED,
             PublisherLoginStatus.EXPIRED,
             PublisherLoginStatus.FAILED,
-            PublisherLoginStatus.UNSUPPORTED -> CommandExecutionStatus.FAILED
+            PublisherLoginStatus.UNSUPPORTED -> CommandStatus.FAILED
         }
         val account = result.account?.let { account ->
             listOfNotNull(account.name, account.userId?.let { "($it)" }).joinToString(" ")
         }?.takeIf { it.isNotBlank() }
         val message = buildString {
-            append("$platform login ${result.status.name.lowercase()}: ${result.message}")
+            append("$platform 登录 ${result.status.name.lowercase()}：${result.message}")
             account?.let { append(" $it") }
         }
-        return CommandExecutionResult(status, message)
+        return CommandExecutionResult.text(status, message)
     }
 
     private fun broadcastLoginResult(invocation: CommandInvocation, platform: String, result: PublisherLoginResult) {
         val commandResult = toCommandResult(platform, result)
-        val status = when (commandResult.status) {
-            CommandExecutionStatus.SUCCESS -> CommandStatus.SUCCESS
-            CommandExecutionStatus.REJECTED -> CommandStatus.REJECTED
-            CommandExecutionStatus.FAILED -> CommandStatus.FAILED
-        }
         CommandResultEvent(
             sourcePlugin = "main",
             target = CommandTarget(
                 address = invocation.context.target,
                 senderId = invocation.context.senderId,
             ),
-            chain = commandResult.chain ?: listOf(MessageBatch(listOf(MessageContent.Text(commandResult.message)))),
+            chain = commandResult.reply,
             inReplyTo = invocation.traceId,
-            status = status,
-            errorMessage = if (status == CommandStatus.FAILED) commandResult.message else null,
-        ).broadcast()
+            status = commandResult.status,
+            errorMessage = commandResult.errorMessage,
+        ).let { eventBus.broadcast(it) }
     }
 
     private fun failedUsage(): CommandExecutionResult {
-        return CommandExecutionResult(
-            CommandExecutionStatus.FAILED,
-            "usage: $commandPrefix ${spec.usage}",
-        )
+        return CommandExecutionResult.failed("用法：$commandPrefix ${spec.usage}")
     }
 }
 
@@ -501,25 +489,25 @@ private class LoginQrCodeRenderer(
         ImageIO.write(image, "png", outputPath.toFile())
         return outputPath.toString()
     }
-
 }
 
-private class StatusCommandHandler : CommandHandler {
+private class StatusCommandHandler(
+    private val commandRegistry: CommandRegistry,
+) : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("status"),
-        description = "show runtime status",
+        description = "显示运行状态",
         usage = "status",
         requiredRole = CommandRole.ADMIN,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
-        val commandCount = CommandRegistry.listCommands().size
+        val commandCount = commandRegistry.listCommands().size
         val subscriptionCount = SubscriptionRepository.countAll()
         val pendingDeliveries = MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING)
         val failedDeliveries = MessageDeliveryRepository.countByStatus(DeliveryStatus.FAILED)
-        return CommandExecutionResult(
-            CommandExecutionStatus.SUCCESS,
-            "ok, commands=$commandCount, subscriptions=$subscriptionCount, deliveryPending=$pendingDeliveries, deliveryFailed=$failedDeliveries",
+        return CommandExecutionResult.success(
+            "运行正常，命令数=$commandCount，订阅数=$subscriptionCount，待发送=$pendingDeliveries，发送失败=$failedDeliveries",
         )
     }
 }
@@ -530,20 +518,19 @@ private class StopApplicationCommandHandler(
     override val spec: CommandSpec = CommandSpec(
         path = listOf("stop"),
         aliases = listOf(listOf("shutdown")),
-        description = "stop the main application",
+        description = "停止主程序",
         usage = "stop",
         requiredRole = CommandRole.ADMIN,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
         if (invocation.args.isNotEmpty()) {
-            return failed("usage: ${invocation.matchedPath.joinToString(" ")}")
+            return failed("用法：${invocation.matchedPath.joinToString(" ")}")
         }
-        return CommandExecutionResult(
-            status = CommandExecutionStatus.SUCCESS,
-            message = "stop requested; application is shutting down",
+        return CommandExecutionResult.success(
+            message = "已请求停止，程序正在关闭",
             afterReply = {
-                stopRequester("command:${invocation.context.platform}:${invocation.context.chatId}")
+                stopRequester("command:${invocation.context.target.stableValue()}")
             },
         )
     }
@@ -553,34 +540,32 @@ private class SubscribeCommandHandler(
     private val lookupResolver: (String) -> PublisherLookupPlugin?,
     private val followResolver: (String) -> PublisherFollowPlugin?,
     private val commandPrefixProvider: () -> String,
+    private val eventBus: EventBus,
 ) : CommandHandler {
     private val commandPrefix: String
         get() = commandPrefixProvider()
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("subscribe"),
-        description = "subscribe to a publisher on a supported platform",
+        description = "订阅来源平台发布者",
         usage = "subscribe <platform> <publisherUserId>",
         requiredRole = CommandRole.USER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
         if (invocation.args.size < 2) {
-            return CommandExecutionResult(CommandExecutionStatus.FAILED, "usage: $commandPrefix ${spec.usage}")
+            return CommandExecutionResult.failed("用法：$commandPrefix ${spec.usage}")
         }
 
         val platform = invocation.args[0].lowercase()
         val publisherUserId = invocation.args[1]
         val lookupPlugin = lookupResolver(platform)
-            ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "publisher lookup plugin not found: $platform")
+            ?: return CommandExecutionResult.failed("未找到发布者查询插件：$platform")
         val followPlugin = followResolver(platform)
-            ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "publisher follow plugin not found: $platform")
+            ?: return CommandExecutionResult.failed("未找到发布者关注插件：$platform")
 
         val publisherInfo = lookupPlugin.fetchPublisherInfo(publisherUserId)
-            ?: return CommandExecutionResult(
-                CommandExecutionStatus.FAILED,
-                "publisher not found on $platform: $publisherUserId",
-            )
+            ?: return CommandExecutionResult.failed("未找到发布者：$platform:$publisherUserId")
 
         val followState = followPlugin.queryFollowState(publisherUserId)
         val autoFollowed = when (followState) {
@@ -591,24 +576,15 @@ private class SubscribeCommandHandler(
                     FollowActionStatus.FOLLOWED -> true
                     FollowActionStatus.ALREADY_FOLLOWING -> false
                     FollowActionStatus.FAILED -> {
-                        return CommandExecutionResult(
-                            CommandExecutionStatus.FAILED,
-                            followResult.message ?: "failed to follow publisher on $platform",
-                        )
+                        return CommandExecutionResult.failed(followResult.message ?: "关注发布者失败：$platform")
                     }
                     FollowActionStatus.UNSUPPORTED -> {
-                        return CommandExecutionResult(
-                            CommandExecutionStatus.FAILED,
-                            "follow action is unsupported on $platform",
-                        )
+                        return CommandExecutionResult.failed("$platform 不支持自动关注")
                     }
                 }
             }
             FollowState.UNSUPPORTED -> {
-                return CommandExecutionResult(
-                    CommandExecutionStatus.FAILED,
-                    "follow check is unsupported on $platform",
-                )
+                return CommandExecutionResult.failed("$platform 不支持关注状态检查")
             }
         }
 
@@ -617,15 +593,14 @@ private class SubscribeCommandHandler(
             address = invocation.context.target,
             name = invocation.context.chatId,
         )
-        val created = SubscriptionRepository.subscribe(subscriber.id, publisherUpsert.value.id)
+        val mutation = SubscriptionRepository.subscribe(subscriber.id, publisherUpsert.value.id)
+        mutation.event?.let { eventBus.broadcast(it) }
 
-        val publisherState = if (publisherUpsert.created) "new" else "existing"
-        val subscriptionState = if (created) "new" else "existing"
-        val followStateText = if (autoFollowed) "yes" else "no"
-        return CommandExecutionResult(
-            CommandExecutionStatus.SUCCESS,
-            "subscribed: ${publisherUpsert.value.name} " +
-                "(auto-followed=$followStateText, publisher=$publisherState, subscription=$subscriptionState)",
+        val publisherState = if (publisherUpsert.created) "新建" else "已存在"
+        val subscriptionState = if (mutation.changed) "新建" else "已存在"
+        val followStateText = if (autoFollowed) "是" else "否"
+        return CommandExecutionResult.success(
+            "已订阅：${publisherUpsert.value.name}（自动关注=$followStateText，发布者=$publisherState，订阅=$subscriptionState）",
         )
     }
 }
@@ -634,36 +609,39 @@ private class UnsubscribeCommandHandler(
     private val followResolver: (String) -> PublisherFollowPlugin?,
     private val configProvider: () -> MainDynamicConfig,
     private val commandPrefixProvider: () -> String,
+    private val eventBus: EventBus,
 ) : CommandHandler {
     private val commandPrefix: String
         get() = commandPrefixProvider()
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("unsubscribe"),
-        description = "unsubscribe from a publisher",
+        description = "取消订阅发布者",
         usage = "unsubscribe <platform> <publisherUserId>",
         requiredRole = CommandRole.USER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
         if (invocation.args.size < 2) {
-            return CommandExecutionResult(CommandExecutionStatus.FAILED, "usage: $commandPrefix ${spec.usage}")
+            return CommandExecutionResult.failed("用法：$commandPrefix ${spec.usage}")
         }
         val platform = invocation.args[0].lowercase()
         val publisherUserId = invocation.args[1]
         val publisher = PublisherRepository.findByKey(PublisherKey.of(platform, PublisherKind.USER, publisherUserId))
-            ?: return CommandExecutionResult(CommandExecutionStatus.FAILED, "publisher not found: $platform:$publisherUserId")
+            ?: return CommandExecutionResult.failed("未找到发布者：$platform:$publisherUserId")
 
         val subscriber = invocation.currentSubscriber()
-            ?: return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
-        val removed = SubscriptionRepository.unsubscribe(subscriber.id, publisher.id)
+            ?: return CommandExecutionResult.success("当前会话没有订阅")
+        val mutation = SubscriptionRepository.unsubscribe(subscriber.id, publisher.id)
+        mutation.event?.let { eventBus.broadcast(it) }
+        val removed = mutation.changed
         if (removed && configProvider().subscription.unfollowWhenNoSubscribers && SubscriptionRepository.countByPublisherId(publisher.id) == 0L) {
             followResolver(platform)?.unfollowPublisher(publisher.externalId)
         }
         return if (removed) {
-            CommandExecutionResult(CommandExecutionStatus.SUCCESS, "unsubscribed: ${publisher.name}")
+            CommandExecutionResult.success("已取消订阅：${publisher.name}")
         } else {
-            CommandExecutionResult(CommandExecutionStatus.SUCCESS, "not subscribed: ${publisher.name}")
+            CommandExecutionResult.success("未订阅：${publisher.name}")
         }
     }
 }
@@ -671,23 +649,23 @@ private class UnsubscribeCommandHandler(
 private class ListCommandHandler : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("list"),
-        description = "list subscriptions for the current sender",
+        description = "列出当前会话订阅",
         usage = "list",
         requiredRole = CommandRole.USER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
         val subscriber = invocation.currentSubscriber()
-            ?: return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
+            ?: return CommandExecutionResult.success("当前会话没有订阅")
         val publisherIds = SubscriptionRepository.findPublisherIdsBySubscriberId(subscriber.id)
-        if (publisherIds.isEmpty()) return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
+        if (publisherIds.isEmpty()) return CommandExecutionResult.success("当前会话没有订阅")
 
         val lines = publisherIds
             .mapNotNull { PublisherRepository.findById(it) }
             .map { "${it.platformId.value}:${it.externalId} (${it.name})" }
 
-        if (lines.isEmpty()) return CommandExecutionResult(CommandExecutionStatus.SUCCESS, "no subscriptions")
-        return CommandExecutionResult(CommandExecutionStatus.SUCCESS, lines.joinToString("\n"))
+        if (lines.isEmpty()) return CommandExecutionResult.success("当前会话没有订阅")
+        return CommandExecutionResult.success(lines.joinToString("\n"))
     }
 }
 
@@ -696,7 +674,7 @@ private class TemplateListCommandHandler(
 ) : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("template", "list"),
-        description = "list message templates",
+        description = "列出消息模板",
         usage = "template list",
         requiredRole = CommandRole.USER,
     )
@@ -711,7 +689,7 @@ private class TemplateListCommandHandler(
             "liveEnded:",
             templates.liveEnded,
         )
-        return CommandExecutionResult(CommandExecutionStatus.SUCCESS, lines.joinToString("\n"))
+        return CommandExecutionResult.success(lines.joinToString("\n"))
     }
 }
 
@@ -723,20 +701,20 @@ private class FilterAddElementCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "add", "element"),
-        description = "add an element block filter for a subscription",
+        description = "为订阅添加动态元素屏蔽规则",
         usage = "filter add element <platform> <publisherUserId> <image|video|card|poll>",
         requiredRole = CommandRole.USER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
         if (invocation.args.size != 3) {
-            return failed("usage: $commandPrefix ${spec.usage}")
+            return failed("用法：$commandPrefix ${spec.usage}")
         }
 
         val platform = invocation.args[0]
         val publisherUserId = invocation.args[1]
         val element = parseDynamicElementType(invocation.args[2])
-            ?: return failed("unknown dynamic element: ${invocation.args[2]}")
+            ?: return failed("未知动态元素：${invocation.args[2]}")
         val target = when (val resolved = resolveFilterTarget(invocation, platform, publisherUserId)) {
             is FilterTargetResolveResult.Failed -> return resolved.result
             is FilterTargetResolveResult.Found -> resolved.target
@@ -747,8 +725,8 @@ private class FilterAddElementCommandHandler(
             action = FilterAction.BLOCK,
             condition = FilterCondition.HasAttachmentKind(element),
         )
-        val state = if (result.created) "created" else "existing"
-        return success("filter rule $state: ${formatFilterRule(result.value, target.publisher)}")
+        val state = if (result.created) "已创建" else "已存在"
+        return success("过滤规则$state：${formatFilterRule(result.value, target.publisher)}")
     }
 }
 
@@ -760,24 +738,24 @@ private class FilterAddContentCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "add", "content"),
-        description = "add a content block filter for a subscription",
+        description = "为订阅添加内容屏蔽规则",
         usage = "filter add content <platform> <publisherUserId> <keyword|regex> <pattern...>",
         requiredRole = CommandRole.USER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
         if (invocation.args.size < 4) {
-            return failed("usage: $commandPrefix ${spec.usage}")
+            return failed("用法：$commandPrefix ${spec.usage}")
         }
 
         val platform = invocation.args[0]
         val publisherUserId = invocation.args[1]
         val pattern = invocation.args.drop(3).joinToString(" ").trim()
         if (pattern.isBlank()) {
-            return failed("filter pattern must not be blank")
+            return failed("过滤内容不能为空")
         }
         val condition = parseContentCondition(invocation.args[2], pattern)
-            ?: return failed("unknown content matcher: ${invocation.args[2]}")
+            ?: return failed("未知内容匹配器：${invocation.args[2]}")
         val target = when (val resolved = resolveFilterTarget(invocation, platform, publisherUserId)) {
             is FilterTargetResolveResult.Failed -> return resolved.result
             is FilterTargetResolveResult.Found -> resolved.target
@@ -790,10 +768,10 @@ private class FilterAddContentCommandHandler(
                 condition = condition,
             )
         } catch (e: IllegalArgumentException) {
-            return failed("filter rule rejected: ${e.message}")
+            return failed("过滤规则被拒绝：${e.message}")
         }
-        val state = if (result.created) "created" else "existing"
-        return success("filter rule $state: ${formatFilterRule(result.value, target.publisher)}")
+        val state = if (result.created) "已创建" else "已存在"
+        return success("过滤规则$state：${formatFilterRule(result.value, target.publisher)}")
     }
 }
 
@@ -805,7 +783,7 @@ private class FilterListCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "list"),
-        description = "list subscription filters for the current target",
+        description = "列出当前会话订阅过滤规则",
         usage = "filter list [platform] [publisherUserId]",
         requiredRole = CommandRole.USER,
     )
@@ -814,12 +792,12 @@ private class FilterListCommandHandler(
         return when (invocation.args.size) {
             0 -> listAll(invocation)
             2 -> listOne(invocation, invocation.args[0], invocation.args[1])
-            else -> failed("usage: $commandPrefix ${spec.usage}")
+            else -> failed("用法：$commandPrefix ${spec.usage}")
         }
     }
 
     private fun listAll(invocation: CommandInvocation): CommandExecutionResult {
-        val subscriber = invocation.currentSubscriber() ?: return success("filters: (none)")
+        val subscriber = invocation.currentSubscriber() ?: return success("过滤规则：（无）")
         val targets = SubscriptionRepository
             .findPublisherIdsBySubscriberId(subscriber.id)
             .mapNotNull { publisherId ->
@@ -830,7 +808,7 @@ private class FilterListCommandHandler(
             }
             .sortedWith(compareBy<ResolvedFilterTarget> { it.publisher.platformId.value }.thenBy { it.publisher.externalId })
 
-        if (targets.isEmpty()) return success("filters: (none)")
+        if (targets.isEmpty()) return success("过滤规则：（无）")
 
         val rulesBySubscriptionId = DynamicFilterRuleRepository.findBySubscriptionIds(targets.map { it.subscription.id })
         val lines = targets.flatMap { target ->
@@ -840,7 +818,7 @@ private class FilterListCommandHandler(
                 .map { rule -> formatFilterRule(rule, target.publisher) }
         }
 
-        return success(lines.ifEmpty { listOf("filters: (none)") }.joinToString("\n"))
+        return success(lines.ifEmpty { listOf("过滤规则：（无）") }.joinToString("\n"))
     }
 
     private fun listOne(
@@ -857,7 +835,7 @@ private class FilterListCommandHandler(
             .sortedBy { it.id }
             .map { rule -> formatFilterRule(rule, target.publisher) }
 
-        return success(lines.ifEmpty { listOf("filters: (none)") }.joinToString("\n"))
+        return success(lines.ifEmpty { listOf("过滤规则：（无）") }.joinToString("\n"))
     }
 }
 
@@ -869,28 +847,28 @@ private class FilterRemoveCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "remove"),
-        description = "remove a subscription filter",
+        description = "删除订阅过滤规则",
         usage = "filter remove <ruleId>",
         requiredRole = CommandRole.USER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
         if (invocation.args.size != 1) {
-            return failed("usage: $commandPrefix ${spec.usage}")
+            return failed("用法：$commandPrefix ${spec.usage}")
         }
         val ruleId = invocation.args.single().toIntOrNull()
-            ?: return failed("invalid filter rule id: ${invocation.args.single()}")
+            ?: return failed("过滤规则 ID 无效：${invocation.args.single()}")
         val rule = DynamicFilterRuleRepository.findById(ruleId)
-            ?: return failed("filter rule not found: #$ruleId")
+            ?: return failed("未找到过滤规则：#$ruleId")
         if (!rule.belongsToCurrentSubscriber(invocation)) {
-            return failed("filter rule not found: #$ruleId")
+            return failed("未找到过滤规则：#$ruleId")
         }
 
         val removed = DynamicFilterRuleRepository.removeById(ruleId)
         return if (removed) {
-            success("filter rule removed: #$ruleId")
+            success("已删除过滤规则：#$ruleId")
         } else {
-            failed("filter rule not found: #$ruleId")
+            failed("未找到过滤规则：#$ruleId")
         }
     }
 }
@@ -903,21 +881,21 @@ private class FilterClearCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "clear"),
-        description = "clear subscription filters",
+        description = "清空订阅过滤规则",
         usage = "filter clear <platform> <publisherUserId>",
         requiredRole = CommandRole.USER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
         if (invocation.args.size != 2) {
-            return failed("usage: $commandPrefix ${spec.usage}")
+            return failed("用法：$commandPrefix ${spec.usage}")
         }
         val target = when (val resolved = resolveFilterTarget(invocation, invocation.args[0], invocation.args[1])) {
             is FilterTargetResolveResult.Failed -> return resolved.result
             is FilterTargetResolveResult.Found -> resolved.target
         }
         val removed = DynamicFilterRuleRepository.clearBySubscriptionId(target.subscription.id)
-        return success("filter rules cleared: count=$removed")
+        return success("已清空过滤规则：数量=$removed")
     }
 }
 

@@ -1,7 +1,6 @@
 package top.colter.dynamic
 
-import top.colter.dynamic.core.data.CommandRole
-import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.command.CommandPermissionRule
 
 public data class MainDynamicConfig(
     val templates: PushTemplates = PushTemplates(),
@@ -88,12 +87,4 @@ public enum class DrawOrnament {
 public data class CommandConfig(
     val prefix: String = "/db",
     val permissions: List<CommandPermissionRule> = emptyList(),
-)
-
-public data class CommandPermissionRule(
-    val platform: String = "*",
-    val chatType: TargetKind? = null,
-    val chatId: String = "*",
-    val senderId: String = "*",
-    val role: CommandRole = CommandRole.ADMIN,
 )

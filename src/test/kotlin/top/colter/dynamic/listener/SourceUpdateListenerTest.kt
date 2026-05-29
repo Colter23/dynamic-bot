@@ -2,7 +2,6 @@ package top.colter.dynamic.listener
 
 import java.nio.file.Paths
 import kotlin.io.path.createTempDirectory
-import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -30,7 +29,6 @@ import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdateEvent
-import top.colter.dynamic.core.event.register
 import top.colter.dynamic.core.repository.PersistenceManager
 import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
@@ -41,13 +39,9 @@ import top.colter.dynamic.testPublisher
 import top.colter.dynamic.testTargetAddress
 
 class SourceUpdateListenerTest {
-    @AfterTest
-    fun cleanup() {
-        EventBus.global.shutdown()
-    }
-
     @Test
     fun shouldRenderLiveStartedTemplateWithDrawCoverAndSplitBatches() = runBlocking {
+        val eventBus = EventBus()
         val (publisher, subscriber) = seededSubscription("live-started")
         val listener = SourceUpdateListener(
             config = MainDynamicConfig(
@@ -55,13 +49,19 @@ class SourceUpdateListenerTest {
                     liveStarted = "{draw}\\n{name}|{uid}|{rid}|{title}|{area}\\n{cover}\\n{link}\\rnext",
                 ),
             ),
+            eventBus = eventBus,
             imageLoader = DynamicImageLoader { },
             imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/live-started.png") },
         )
-        val received = captureMessageEvent()
+        val received = captureMessageEvent(eventBus)
         val startedAt = System.currentTimeMillis() / 1000 + 60
 
-        listener.onMessage(SourceUpdateEvent(source = "test", update = liveUpdate(publisher, SourceEventType.LIVE_STARTED, startedAt)))
+        listener.onMessage(
+            SourceUpdateEvent(
+                sourcePlugin = "test",
+                update = liveUpdate(publisher, SourceEventType.LIVE_STARTED, startedAt),
+            ),
+        )
         val event = withTimeout(3_000) { received.await() }
 
         assertEquals(listOf(subscriber.address), event.message.targets)
@@ -77,6 +77,7 @@ class SourceUpdateListenerTest {
 
     @Test
     fun shouldRenderLiveEndedDurationPlaceholders() = runBlocking {
+        val eventBus = EventBus()
         val (publisher, subscriber) = seededSubscription("live-ended")
         val listener = SourceUpdateListener(
             config = MainDynamicConfig(
@@ -84,12 +85,18 @@ class SourceUpdateListenerTest {
                     liveEnded = "{name}|{uid}|{rid}|{title}|{area}|{startTime}|{endTime}|{duration}|{link}",
                 ),
             ),
+            eventBus = eventBus,
         )
-        val received = captureMessageEvent()
+        val received = captureMessageEvent(eventBus)
         val start = System.currentTimeMillis() / 1000 + 60
         val end = start + 3_661
 
-        listener.onMessage(SourceUpdateEvent(source = "test", update = liveUpdate(publisher, SourceEventType.LIVE_ENDED, end, start)))
+        listener.onMessage(
+            SourceUpdateEvent(
+                sourcePlugin = "test",
+                update = liveUpdate(publisher, SourceEventType.LIVE_ENDED, end, start),
+            ),
+        )
         val event = withTimeout(3_000) { received.await() }
 
         assertEquals(listOf(subscriber.address), event.message.targets)
@@ -101,6 +108,7 @@ class SourceUpdateListenerTest {
 
     @Test
     fun shouldAppendMentionAllForLiveStartedButNotLiveEnded() = runBlocking {
+        val eventBus = EventBus()
         val (publisher, _) = seededSubscription(
             "live-at-all",
             policy = SubscriptionPolicy(
@@ -120,18 +128,29 @@ class SourceUpdateListenerTest {
                     liveEnded = "ended {title}",
                 ),
             ),
+            eventBus = eventBus,
         )
         val startedAt = System.currentTimeMillis() / 1000 + 60
 
-        val startedReceived = captureMessageEvent()
-        listener.onMessage(SourceUpdateEvent(source = "test", update = liveUpdate(publisher, SourceEventType.LIVE_STARTED, startedAt)))
+        val startedReceived = captureMessageEvent(eventBus)
+        listener.onMessage(
+            SourceUpdateEvent(
+                sourcePlugin = "test",
+                update = liveUpdate(publisher, SourceEventType.LIVE_STARTED, startedAt),
+            ),
+        )
         val started = withTimeout(3_000) { startedReceived.await() }
         val startedContents = started.message.batches.single().content
         assertEquals("started Live title", startedContents.first().fallbackText)
         assertTrue(startedContents.last() is MessageContent.MentionAll)
 
-        val endedReceived = captureMessageEvent()
-        listener.onMessage(SourceUpdateEvent(source = "test", update = liveUpdate(publisher, SourceEventType.LIVE_ENDED, startedAt + 60, startedAt)))
+        val endedReceived = captureMessageEvent(eventBus)
+        listener.onMessage(
+            SourceUpdateEvent(
+                sourcePlugin = "test",
+                update = liveUpdate(publisher, SourceEventType.LIVE_ENDED, startedAt + 60, startedAt),
+            ),
+        )
         val ended = withTimeout(3_000) { endedReceived.await() }
         assertEquals("ended Live title", ended.message.batches.single().content.single().fallbackText)
     }
@@ -185,13 +204,15 @@ class SourceUpdateListenerTest {
         )
     }
 
-    private fun captureMessageEvent(): CompletableDeferred<MessageEvent> {
+    private fun captureMessageEvent(eventBus: EventBus): CompletableDeferred<MessageEvent> {
         val received = CompletableDeferred<MessageEvent>()
-        object : Listener<MessageEvent> {
-            override suspend fun onMessage(event: MessageEvent) {
-                if (!received.isCompleted) received.complete(event)
-            }
-        }.register<MessageEvent>()
+        eventBus.subscribe(
+            object : Listener<MessageEvent> {
+                override suspend fun onMessage(event: MessageEvent) {
+                    if (!received.isCompleted) received.complete(event)
+                }
+            },
+        )
         return received
     }
 }

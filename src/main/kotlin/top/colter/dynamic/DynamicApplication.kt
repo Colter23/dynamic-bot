@@ -7,9 +7,13 @@ import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.admin.AdminServer
 import top.colter.dynamic.command.CommandListener
+import top.colter.dynamic.core.command.CommandRegistry
+import top.colter.dynamic.core.config.ConfigService
+import top.colter.dynamic.core.config.YamlConfigService
 import top.colter.dynamic.core.event.CommandEvent
 import top.colter.dynamic.core.event.CommandResultEvent
 import top.colter.dynamic.core.event.EventBus
@@ -17,7 +21,6 @@ import top.colter.dynamic.core.event.Listener
 import top.colter.dynamic.core.event.ListenerToken
 import top.colter.dynamic.core.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdateEvent
-import top.colter.dynamic.core.event.register
 import top.colter.dynamic.core.plugin.PluginManager
 import top.colter.dynamic.core.plugin.PluginState
 import top.colter.dynamic.core.repository.PersistenceManager
@@ -37,12 +40,21 @@ public object DynamicApplication : CoroutineScope {
     private val job: Job = Job()
     override val coroutineContext = Dispatchers.Default + job
 
-    private val eventBus: EventBus = EventBus.global
-    private val pluginManager: PluginManager = PluginManager(pluginDirPath = "plugins", eventBus = eventBus)
+    private val eventBus: EventBus = EventBus()
+    private val configService: ConfigService = YamlConfigService()
+    private val commandRegistry: CommandRegistry = CommandRegistry()
+    private val pluginManager: PluginManager = PluginManager(
+        pluginDirPath = "plugins",
+        scope = this,
+        eventBus = eventBus,
+        configService = configService,
+        commandRegistry = commandRegistry,
+    )
     private val listenerTokens: MutableList<ListenerToken> = mutableListOf()
     private val taskScheduler: TaskScheduler = TaskScheduler(scope = this)
-    private val configStore: MainConfigStore = MainConfigStore()
+    private val configStore: MainConfigStore = MainConfigStore(configService)
     private val shutdownStarted: AtomicBoolean = AtomicBoolean(false)
+
     @Volatile
     private var shutdownCallback: (() -> Unit)? = null
     private var adminServer: AdminServer? = null
@@ -88,36 +100,55 @@ public object DynamicApplication : CoroutineScope {
         DynamicImageCache.configure(Paths.get(config.imageCache.sourceRoot))
         registerImageCleanupTask(config)
 
-        val dynamicLinkForwarder = DynamicLinkForwarder {
-            pluginManager.getDynamicLinkResolvers()
-        }
+        val dynamicLinkForwarder = DynamicLinkForwarder(
+            resolversProvider = { pluginManager.getDynamicLinkResolvers() },
+            eventBus = eventBus,
+        )
 
-        listenerTokens += SourceUpdateListener(configProvider = configStore::current).register<SourceUpdateEvent>(eventBus)
-        listenerTokens += CommandListener(
-            configProvider = configStore::current,
-            dynamicLinkForwarder = dynamicLinkForwarder,
-            publisherLookupResolver = { platformId -> pluginManager.findPublisherLookupPlugin(platformId) },
-            publisherFollowResolver = { platformId -> pluginManager.findPublisherFollowPlugin(platformId) },
-            publisherLoginResolver = { platformId -> pluginManager.findPublisherLoginProvider(platformId) },
-            stopRequester = { reason -> requestStop(reason) },
-        ).register<CommandEvent>(eventBus)
-        listenerTokens += DynamicLinkAutoParseListener(
-            configProvider = configStore::current,
-            forwarder = dynamicLinkForwarder,
-        ).register<CommandEvent>(eventBus)
+        listenerTokens += eventBus.subscribe(
+            SourceUpdateListener(
+                configProvider = configStore::current,
+                configService = configService,
+                eventBus = eventBus,
+            ),
+        )
+        listenerTokens += eventBus.subscribe(
+            CommandListener(
+                configProvider = configStore::current,
+                dynamicLinkForwarder = dynamicLinkForwarder,
+                publisherLookupResolver = { platformId -> pluginManager.findPublisherLookupPlugin(platformId) },
+                publisherFollowResolver = { platformId -> pluginManager.findPublisherFollowPlugin(platformId) },
+                publisherLoginResolver = { platformId -> pluginManager.findPublisherLoginProvider(platformId) },
+                stopRequester = { reason -> requestStop(reason) },
+                configService = configService,
+                commandRegistry = commandRegistry,
+                eventBus = eventBus,
+            ),
+        )
+        listenerTokens += eventBus.subscribe(
+            DynamicLinkAutoParseListener(
+                configProvider = configStore::current,
+                forwarder = dynamicLinkForwarder,
+                eventBus = eventBus,
+            ),
+        )
 
-        listenerTokens += object : Listener<MessageEvent> {
-            override suspend fun onMessage(event: MessageEvent) {
-                logger.debug { "分发推送消息：messageId=${event.message.id}，目标数=${event.message.targets.size}" }
-                pluginManager.dispatchMessageToSinks(event)
-            }
-        }.register<MessageEvent>(eventBus)
+        listenerTokens += eventBus.subscribe(
+            object : Listener<MessageEvent> {
+                override suspend fun onMessage(event: MessageEvent) {
+                    logger.debug { "分发推送消息：messageId=${event.message.id}，目标数=${event.message.targets.size}" }
+                    pluginManager.dispatchMessageToSinks(event)
+                }
+            },
+        )
 
-        listenerTokens += object : Listener<CommandResultEvent> {
-            override suspend fun onMessage(event: CommandResultEvent) {
-                pluginManager.dispatchCommandResultToSinks(event)
-            }
-        }.register<CommandResultEvent>(eventBus)
+        listenerTokens += eventBus.subscribe(
+            object : Listener<CommandResultEvent> {
+                override suspend fun onMessage(event: CommandResultEvent) {
+                    pluginManager.dispatchCommandResultToSinks(event)
+                }
+            },
+        )
     }
 
     private fun startAdminServer(config: MainDynamicConfig) {
@@ -127,6 +158,9 @@ public object DynamicApplication : CoroutineScope {
             pluginManager = pluginManager,
             configProvider = configStore::current,
             mainConfigUpdater = configStore::save,
+            configService = configService,
+            commandRegistry = commandRegistry,
+            eventBus = eventBus,
             stopRequester = { reason -> requestStop(reason) },
         )
         server.start()
@@ -173,7 +207,7 @@ public object DynamicApplication : CoroutineScope {
                         }
                     }
                 },
-            )
+            ),
         )
     }
 
@@ -193,14 +227,14 @@ public object DynamicApplication : CoroutineScope {
         try {
             adminServer?.stop()
             adminServer = null
-            listenerTokens.forEach { eventBus.removeListener(it) }
+            listenerTokens.forEach { eventBus.unsubscribe(it) }
             listenerTokens.clear()
             runBlocking {
-                taskScheduler.stopAll()
+                taskScheduler.shutdown()
             }
             pluginManager.shutdown()
             eventBus.shutdown()
-            job.cancel()
+            job.cancel("应用关闭")
             logger.info { "应用已关闭" }
         } finally {
             shutdownCallback?.invoke()

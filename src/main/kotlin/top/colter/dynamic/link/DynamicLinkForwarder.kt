@@ -4,8 +4,8 @@ import java.util.concurrent.ConcurrentHashMap
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
+import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.event.SourceUpdateEvent
-import top.colter.dynamic.core.event.broadcast
 import top.colter.dynamic.core.link.DynamicLinkResolution
 import top.colter.dynamic.core.link.DynamicLinkResolver
 import top.colter.dynamic.core.link.ParsedDynamicLink
@@ -17,6 +17,7 @@ internal const val LINK_PARSE_EVENT_SOURCE: String = "main-link-parser"
 
 public class DynamicLinkForwarder(
     private val resolversProvider: () -> List<DynamicLinkResolver>,
+    private val eventBus: EventBus = EventBus(),
 ) {
     internal suspend fun forwardFirst(
         text: String,
@@ -25,18 +26,18 @@ public class DynamicLinkForwarder(
         dedupe: DynamicLinkDedupe? = null,
         dedupeTtlMs: Long = 0,
     ): DynamicLinkForwardResult {
-        if (maxLinks <= 0) return DynamicLinkForwardResult.Failed("link parsing is disabled")
+        if (maxLinks <= 0) return DynamicLinkForwardResult.Failed("链接解析已禁用")
 
         val urls = DynamicUrlExtractor.extract(text)
         if (urls.isEmpty()) return DynamicLinkForwardResult.NoSupportedLink
 
         val resolvers = resolversProvider()
-        if (resolvers.isEmpty()) return DynamicLinkForwardResult.Failed("no link resolver plugins are active")
+        if (resolvers.isEmpty()) return DynamicLinkForwardResult.Failed("没有可用的链接解析插件")
 
         urls.forEach { url ->
             resolvers.forEach { resolver ->
                 val parsedLink = runCatching { resolver.parseDynamicLink(url) }
-                    .getOrElse { return DynamicLinkForwardResult.Failed(it.message ?: "failed to parse dynamic link") }
+                    .getOrElse { return DynamicLinkForwardResult.Failed(it.message ?: "动态链接解析失败") }
                     ?: return@forEach
 
                 if (dedupe != null && dedupeTtlMs > 0 && !dedupe.markIfNew(dedupeKey(context, parsedLink), dedupeTtlMs)) {
@@ -60,7 +61,7 @@ public class DynamicLinkForwarder(
     ): DynamicLinkForwardResult {
         val sourcePublisher = update.publisher
         if (sourcePublisher.externalId.isBlank()) {
-            return DynamicLinkForwardResult.Failed("dynamic publisher id is missing")
+            return DynamicLinkForwardResult.Failed("动态发布者 ID 缺失")
         }
 
         val publisher = PublisherRepository.upsertInfo(sourcePublisher).value
@@ -71,11 +72,11 @@ public class DynamicLinkForwarder(
         val normalizedUpdate = update.copy(publisher = publisher.toInfo())
 
         SourceUpdateEvent(
-            source = LINK_PARSE_EVENT_SOURCE,
-            targetOverride = subscriber,
-            label = LINK_PARSE_EVENT_LABEL,
+            sourcePlugin = LINK_PARSE_EVENT_SOURCE,
+            deliveryTarget = subscriber,
+            deliveryTag = LINK_PARSE_EVENT_LABEL,
             update = normalizedUpdate,
-        ).broadcast()
+        ).let { eventBus.broadcast(it) }
 
         return DynamicLinkForwardResult.Forwarded(
             parsedLink = parsedLink,
@@ -89,7 +90,7 @@ public class DynamicLinkForwarder(
             context.platform,
             context.chatType.name,
             context.chatId,
-            parsedLink.platformId,
+            parsedLink.platformId.value,
             parsedLink.updateId,
         ).joinToString(":")
     }

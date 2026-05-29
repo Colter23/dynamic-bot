@@ -5,7 +5,7 @@ import top.colter.dynamic.MainConfigForms
 import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.config.ConfigurablePlugin
-import top.colter.dynamic.core.config.DefaultConfigService
+import top.colter.dynamic.core.config.YamlConfigService
 import top.colter.dynamic.core.command.CommandRegistry
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicAttachmentKind
@@ -23,6 +23,7 @@ import top.colter.dynamic.core.data.Subscription
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.event.EventBus
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
@@ -43,6 +44,7 @@ import top.colter.dynamic.core.repository.PublisherRepository
 import top.colter.dynamic.core.repository.SubscriberRepository
 import top.colter.dynamic.core.repository.SourceCursorRepository
 import top.colter.dynamic.core.repository.SubscriptionRepository
+import top.colter.dynamic.core.repository.SubscriptionMutationResult
 
 public class AdminService(
     private val pluginProvider: () -> List<PluginInfo>,
@@ -55,7 +57,9 @@ public class AdminService(
     private val mainConfigUpdater: (MainDynamicConfig) -> ConfigApplyResult = {
         throw IllegalStateException("main config editing is not configured")
     },
-    private val configService: ConfigService = DefaultConfigService,
+    private val configService: ConfigService = YamlConfigService(),
+    private val commandRegistry: CommandRegistry = CommandRegistry(),
+    private val eventBus: EventBus = EventBus(),
     private val pluginReloader: (String) -> PluginReloadResult = {
         throw IllegalStateException("plugin reload is not configured")
     },
@@ -66,7 +70,9 @@ public class AdminService(
         mainConfigUpdater: (MainDynamicConfig) -> ConfigApplyResult = {
             throw IllegalStateException("main config editing is not configured")
         },
-        configService: ConfigService = DefaultConfigService,
+        configService: ConfigService = YamlConfigService(),
+        commandRegistry: CommandRegistry = CommandRegistry(),
+        eventBus: EventBus = EventBus(),
     ) : this(
         pluginProvider = { pluginManager.getAllPlugins() },
         messageSinkProvider = { pluginManager.getMessageSinkPlugins() },
@@ -77,12 +83,14 @@ public class AdminService(
         configProvider = configProvider,
         mainConfigUpdater = mainConfigUpdater,
         configService = configService,
+        commandRegistry = commandRegistry,
+        eventBus = eventBus,
         pluginReloader = pluginManager::reloadPlugin,
     )
 
     public fun overview(): OverviewResponse {
         return OverviewResponse(
-            commandCount = CommandRegistry.listCommands().size,
+            commandCount = commandRegistry.listCommands().size,
             subscriptionCount = SubscriptionRepository.countAll(),
             deliveryPending = MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING),
             deliveryFailed = MessageDeliveryRepository.countByStatus(DeliveryStatus.FAILED),
@@ -157,7 +165,11 @@ public class AdminService(
         val publisher = PublisherRepository.findById(id) ?: throw NoSuchElementException("publisher not found: $id")
         val removedSubscriptions = SubscriptionRepository.findAll()
             .filter { it.publisherId == publisher.id }
-            .count { subscription -> SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId) }
+            .count { subscription ->
+                applySubscriptionMutation(
+                    SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId),
+                )
+            }
         SourceCursorRepository.deleteByPublisherId(publisher.id)
         PublisherLiveStatusRepository.deleteByPublisherId(publisher.id)
         val removed = PublisherRepository.deleteById(publisher.id)
@@ -234,7 +246,11 @@ public class AdminService(
         val subscriber = SubscriberRepository.findById(id) ?: throw NoSuchElementException("subscriber not found: $id")
         val removedSubscriptions = SubscriptionRepository.findAll()
             .filter { it.subscriberId == subscriber.id }
-            .count { subscription -> SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId) }
+            .count { subscription ->
+                applySubscriptionMutation(
+                    SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId),
+                )
+            }
         val removed = SubscriberRepository.deleteById(subscriber.id)
         return ActionResultResponse(
             changed = removed,
@@ -289,12 +305,13 @@ public class AdminService(
             name = request.subscriberName?.trim()?.takeIf { it.isNotBlank() } ?: subscriberExternalId,
         )
         requireMentionRulesTargetAllowed(subscriberUpsert.value, request.policy)
-        val subscriptionCreated = SubscriptionRepository.subscribe(
+        val subscriptionResult = SubscriptionRepository.subscribe(
             subscriberId = subscriberUpsert.value.id,
             publisherId = publisherUpsert.value.id,
             policy = request.policy,
         )
-        if (!subscriptionCreated) {
+        applySubscriptionMutation(subscriptionResult)
+        if (!subscriptionResult.changed) {
             val existing = SubscriptionRepository.findBySubscriberAndPublisher(
                 subscriberId = subscriberUpsert.value.id,
                 publisherId = publisherUpsert.value.id,
@@ -315,7 +332,7 @@ public class AdminService(
             publisherUpdated = publisherUpsert.updated,
             subscriberCreated = subscriberUpsert.created,
             subscriberUpdated = subscriberUpsert.updated,
-            subscriptionCreated = subscriptionCreated,
+            subscriptionCreated = subscriptionResult.changed,
             autoFollowed = autoFollowed,
         )
     }
@@ -336,7 +353,9 @@ public class AdminService(
         val subscription = SubscriptionRepository.findById(id)
             ?: throw NoSuchElementException("subscription not found: $id")
         val publisher = PublisherRepository.findById(subscription.publisherId)
-        val removed = SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId)
+        val removed = applySubscriptionMutation(
+            SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId),
+        )
         if (removed && publisher != null && configProvider().subscription.unfollowWhenNoSubscribers) {
             if (SubscriptionRepository.countByPublisherId(publisher.id) == 0L) {
                 publisherFollowResolver(publisher.platformId.value)?.unfollowPublisher(publisher.externalId)
@@ -493,7 +512,7 @@ public class AdminService(
         val changed = current != next
         val result = if (changed) {
             plugin.applyConfig(next).also {
-                configService.save(plugin.configId, next, plugin.configClass)
+                configService.save(plugin.configId, next)
             }
         } else {
             ConfigApplyResult(changed = false, message = "${plugin.configName}配置未变化")
@@ -514,6 +533,11 @@ public class AdminService(
         return configurablePluginProvider()
             .map { it.info to it.instance }
             .sortedBy { (_, plugin) -> plugin.configId }
+    }
+
+    private fun applySubscriptionMutation(result: SubscriptionMutationResult): Boolean {
+        result.event?.let { eventBus.broadcast(it) }
+        return result.changed
     }
 
     private suspend fun ensureFollowed(
