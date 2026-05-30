@@ -52,13 +52,15 @@ private fun Layout.DefaultDynamicView(
 ) {
     val payload = update.payload as? DynamicPayload ?: return
     Column(modifier = Modifier().fillMaxWidth()) {
-        drawPublisher(
-            publisher = update.publisher,
-            time = update.occurredAtEpochSeconds.formatTime,
-            link = update.link.orEmpty(),
-            config = config,
-            mode = mode,
-        )
+        if (mode == DynamicRenderMode.ROOT) {
+            drawPublisher(
+                publisher = update.publisher,
+                time = update.occurredAtEpochSeconds.formatTime,
+                link = update.link.orEmpty(),
+                config = config,
+                mode = mode,
+            )
+        }
 
         Column(
             modifier = Modifier()
@@ -68,6 +70,16 @@ private fun Layout.DefaultDynamicView(
                 .background(config.theme.cardColor)
                 .border(3.dp, 15.dp, config.theme.borderColor)
         ) {
+            if (mode == DynamicRenderMode.FORWARD) {
+                drawPublisher(
+                    publisher = update.publisher,
+                    time = update.occurredAtEpochSeconds.formatTime,
+                    link = update.link.orEmpty(),
+                    config = config,
+                    mode = mode,
+                )
+            }
+
             payload.title?.let { title ->
                 Text(
                     text = title,

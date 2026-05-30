@@ -507,6 +507,23 @@
     .permission-advanced {
       margin-top: 10px;
     }
+    .secret-control {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 36px;
+      gap: 8px;
+      align-items: center;
+    }
+    .secret-eye {
+      width: 36px;
+      min-height: 36px;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      background: #fff;
+      color: var(--text);
+      border-color: var(--line-strong);
+      font-size: 15px;
+    }
     .log-row {
       font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
       font-size: 12px;
@@ -1281,11 +1298,12 @@
           ${hasRestartFields ? `<div class="restart-note">⚠️ 标记的配置项保存后需要重启才会生效</div>` : ""}
         </section>
         ${Object.entries(sections).map(([name, fields]) => `
-          <section class="panel config-section">
+          <section class="panel config-section" data-config-section>
             <div class="panel-head"><h2>${esc(name)}</h2></div>
             <div class="form-grid">${fields.map(field => configFieldHtml(detail, field)).join("")}</div>
           </section>`).join("")}`;
       wireConfigRestartWatcher(detail);
+      wireConfigFieldVisibility(detail);
     }
     function configSections(detail) {
       const sections = {};
@@ -1314,6 +1332,7 @@
       if (field.type === "BOOLEAN") return node.checked;
       if (field.type === "NUMBER") return Number(node.value || 0);
       if (field.type === "JSON") return node.value.trim();
+      if (field.type === "SECRET" && node.dataset.secretOriginal !== undefined && node.value === node.dataset.secretOriginal) return "";
       return node.value;
     }
     function configRestartChanged(detail) {
@@ -1333,6 +1352,44 @@
         node.addEventListener("change", () => updateConfigRestartButton(detail));
       });
       updateConfigRestartButton(detail);
+    }
+    function wireConfigFieldVisibility(detail) {
+      const fields = detail.schema.fields || [];
+      const refresh = () => {
+        fields.forEach(field => {
+          const wrapper = configFieldWrapperFor(field.path);
+          if (!wrapper) return;
+          const rule = field.visibleWhen;
+          if (!rule || !rule.path) {
+            wrapper.hidden = false;
+            return;
+          }
+          const values = Array.isArray(rule.values) ? rule.values.map(String) : [];
+          const current = currentConfigValueForPath(rule.path);
+          wrapper.hidden = values.length > 0 ? !values.includes(current) : !current;
+        });
+        document.querySelectorAll("[data-config-section]").forEach(section => {
+          const wrappers = Array.from(section.querySelectorAll("[data-config-field-path]"));
+          section.hidden = wrappers.length > 0 && wrappers.every(item => item.hidden);
+        });
+      };
+      Array.from(new Set(fields.map(field => field.visibleWhen && field.visibleWhen.path).filter(Boolean))).forEach(path => {
+        const input = configInputFor({ path });
+        if (!input) return;
+        input.addEventListener("input", refresh);
+        input.addEventListener("change", refresh);
+      });
+      refresh();
+    }
+    function configFieldWrapperFor(path) {
+      return Array.from(document.querySelectorAll("[data-config-field-path]"))
+        .find(item => item.dataset.configFieldPath === path);
+    }
+    function currentConfigValueForPath(path) {
+      const input = configInputFor({ path });
+      if (!input) return "";
+      if (input.type === "checkbox") return input.checked ? "true" : "false";
+      return String(input.value || "");
     }
     async function saveCurrentConfig(options = {}) {
       const detail = state.currentConfigDetail;
@@ -1360,6 +1417,29 @@
       state.selectedConfigId = detail.id;
       await loadConfigs(true);
       notify(result.message || "插件已重启", false);
+    }
+    async function toggleConfigSecret(button) {
+      const detail = state.currentConfigDetail;
+      if (!detail) throw new Error("请选择配置文件");
+      const path = button.dataset.path;
+      const input = configInputFor({ path });
+      if (!input) throw new Error("未找到密钥输入框");
+      if (button.dataset.revealed === "true") {
+        input.type = "password";
+        button.dataset.revealed = "false";
+        button.title = "查看真实值";
+        return;
+      }
+      const result = await api(`/configs/${encodeURIComponent(detail.id)}/secrets/${encodeURIComponent(path)}`);
+      const value = result.value === null || result.value === undefined
+        ? ""
+        : (typeof result.value === "object" ? JSON.stringify(result.value) : String(result.value));
+      input.value = value;
+      input.dataset.secretOriginal = value;
+      input.type = "text";
+      button.dataset.revealed = "true";
+      button.title = "隐藏真实值";
+      updateConfigRestartButton(detail);
     }
 
     async function loadSystem(force) {
@@ -1682,23 +1762,37 @@
       const labelHtml = `<label for="cfg-${attr(field.path)}">${fieldLabel}</label>`;
       const descriptionHtml = configFieldDescriptionHtml(field);
       if (field.type === "BOOLEAN") {
-        return `<div class="field"><label class="check"><input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="checkbox"${raw === true ? " checked" : ""}>${fieldLabel}</label>${descriptionHtml}</div>`;
+        return `<div class="field" data-config-field-path="${attr(field.path)}"><label class="check"><input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="checkbox"${raw === true ? " checked" : ""}>${fieldLabel}</label>${descriptionHtml}</div>`;
       }
       if (field.type === "SELECT") {
-        return `<div class="field">${labelHtml}<select id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}">${(field.options || []).map(opt => `<option value="${attr(opt.value)}"${String(raw) === String(opt.value) ? " selected" : ""}>${esc(opt.label)}</option>`).join("")}</select>${descriptionHtml}</div>`;
+        return `<div class="field" data-config-field-path="${attr(field.path)}">${labelHtml}<select id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}">${(field.options || []).map(opt => `<option value="${attr(opt.value)}"${String(raw) === String(opt.value) ? " selected" : ""}>${esc(opt.label)}</option>`).join("")}</select>${descriptionHtml}</div>`;
       }
       if (field.type === "TEXTAREA" || field.type === "JSON") {
-        return `<div class="field full">${labelHtml}<textarea id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}">${esc(value)}</textarea>${descriptionHtml}</div>`;
+        return `<div class="field full" data-config-field-path="${attr(field.path)}">${labelHtml}<textarea id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}">${esc(value)}</textarea>${descriptionHtml}</div>`;
+      }
+      if (field.type === "SECRET") {
+        return secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml);
       }
       const inputType = field.type === "NUMBER" ? "number" : (field.type === "SECRET" ? "password" : "text");
-      return `<div class="field">${labelHtml}<input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="${inputType}" value="${attr(value)}">${descriptionHtml}</div>`;
+      return `<div class="field" data-config-field-path="${attr(field.path)}">${labelHtml}<input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="${inputType}" value="${attr(value)}">${descriptionHtml}</div>`;
+    }
+    function secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml) {
+      const hasSecret = !!(detail.secretStates && detail.secretStates[field.path]);
+      return `<div class="field" data-config-field-path="${attr(field.path)}">
+        ${labelHtml}
+        <div class="secret-control">
+          <input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-secret-input="true" type="password" value="" placeholder="${hasSecret ? "********" : ""}" autocomplete="off">
+          <button type="button" class="secret-eye" data-action="toggle-config-secret" data-path="${attr(field.path)}" title="查看真实值"${hasSecret ? "" : " disabled"}>👁</button>
+        </div>
+        ${descriptionHtml}
+      </div>`;
     }
     function configFieldDescriptionHtml(field) {
       return field.description ? `<span class="inline-note">${esc(field.description)}</span>` : "";
     }
     function commandPermissionsFieldHtml(detail, field) {
       const rules = Array.isArray(detail.values[field.path]) ? detail.values[field.path] : [];
-      return `<div class="field command-permission-field">
+      return `<div class="field command-permission-field" data-config-field-path="${attr(field.path)}">
         <label for="cfg-command-permissions">${esc(field.label)}</label>
         ${configFieldDescriptionHtml(field)}
         <input id="cfg-command-permissions" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="hidden" value="${attr(JSON.stringify(rules))}">
@@ -2034,6 +2128,8 @@
           await restartCurrentConfigPlugin();
         } else if (action === "save-config") {
           await saveCurrentConfig();
+        } else if (action === "toggle-config-secret") {
+          await toggleConfigSecret(button);
         } else if (action === "add-command-permission") {
           await openCommandPermissionModal();
         } else if (action === "delete-command-permission") {

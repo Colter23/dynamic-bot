@@ -4,6 +4,7 @@ import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.MainConfigForms
 import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.config.ConfigService
+import top.colter.dynamic.core.config.ConfigFormSpec
 import top.colter.dynamic.core.config.ConfigurablePlugin
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.command.CommandRegistry
@@ -48,6 +49,7 @@ import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SourceCursorRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.repository.SubscriptionMutationResult
+import kotlinx.serialization.json.JsonNull
 
 public class AdminService(
     private val pluginProvider: () -> List<PluginInfo>,
@@ -616,11 +618,30 @@ public class AdminService(
         )
     }
 
+    public fun configSecret(id: String, path: String): ConfigSecretValueResponse {
+        if (id == MainDynamicConfig.CONFIG_ID) {
+            return secretValue(path, configProvider(), MainConfigForms.formSpec)
+        }
+        val (_, plugin) = configurablePlugins().firstOrNull { (_, plugin) -> plugin.configId == id }
+            ?: throw NoSuchElementException("未找到配置：$id")
+        return secretValue(path, plugin.currentConfig(), plugin.configFormSpec)
+    }
+
     public fun updateConfig(id: String, request: UpdateConfigRequest): UpdateConfigResponse {
         if (id == MainDynamicConfig.CONFIG_ID) return updateMainConfig(request)
         val (info, plugin) = configurablePlugins().firstOrNull { (_, plugin) -> plugin.configId == id }
             ?: throw NoSuchElementException("未找到配置：$id")
         return updatePluginConfig(info, plugin, request)
+    }
+
+    private fun secretValue(path: String, current: Any, spec: ConfigFormSpec): ConfigSecretValueResponse {
+        val field = spec.fields.firstOrNull { it.path == path }
+            ?: throw NoSuchElementException("未找到配置项：$path")
+        require(field.secret) { "配置项不是密钥字段：$path" }
+        return ConfigSecretValueResponse(
+            path = path,
+            value = AdminConfigJson.valuesFor(current, spec, maskSecrets = false)[path] ?: JsonNull,
+        )
     }
 
     private fun mainConfigDetail(): ConfigDetailDto {

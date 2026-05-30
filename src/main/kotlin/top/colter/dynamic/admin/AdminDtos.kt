@@ -1,6 +1,7 @@
 ﻿package top.colter.dynamic.admin
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import top.colter.dynamic.core.config.ConfigFormSpec
 import top.colter.dynamic.core.data.FilterCondition
@@ -273,6 +274,12 @@ public data class ConfigDetailDto(
     val schema: ConfigFormSpec,
     val values: JsonObject,
     val secretStates: Map<String, Boolean> = emptyMap(),
+)
+
+@Serializable
+public data class ConfigSecretValueResponse(
+    val path: String,
+    val value: JsonElement,
 )
 
 @Serializable

@@ -28,7 +28,7 @@ internal fun Layout.AuthorSmall(
     Avatar(
         face = face,
         badge = badge,
-        modifier = Modifier().fillMaxHeight().margin(15.dp)
+        modifier = Modifier().fillMaxHeight().margin(right = 15.dp)
     )
     Row(
         modifier = Modifier().fillMaxWidth().fillHeight(), // .background(Color.GREEN),

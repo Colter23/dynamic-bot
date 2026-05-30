@@ -277,6 +277,12 @@ public fun Application.adminModule(context: AdminServerContext) {
                 val id = call.pathString("id")
                 call.respondApi { context.service.config(id) }
             }
+            get("/configs/{id}/secrets/{path}") {
+                if (!call.ensureAuthorized(context)) return@get
+                val id = call.pathString("id")
+                val path = call.pathString("path")
+                call.respondApi { context.service.configSecret(id, path) }
+            }
             put("/configs/{id}") {
                 if (!call.ensureAuthorized(context)) return@put
                 val id = call.pathString("id")
