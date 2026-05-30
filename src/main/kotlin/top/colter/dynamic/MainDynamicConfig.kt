@@ -80,10 +80,8 @@ public data class DrawSettings(
 )
 
 public data class DrawFontSettings(
-    val textFamily: String = "",
-    val emojiFamily: String = "",
-    val textFontFile: String = "",
-    val emojiFontFile: String = "",
+    val text: String = "",
+    val emoji: String = "",
 )
 
 public enum class DrawOrnament {

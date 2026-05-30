@@ -14,14 +14,14 @@ internal object DrawFonts {
 
     fun ensureDefaultFonts(fontRegistry: FontRegistry, settings: DrawFontSettings) {
         if (fontRegistry.defaultFont == null) {
-            loadConfiguredFont(fontRegistry, settings.textFontFile, settings.textFamily, emoji = false)
-                || loadConfiguredFamily(fontRegistry, settings.textFamily, emoji = false)
+            loadConfiguredFont(fontRegistry, settings.text, emoji = false)
+                || loadConfiguredFamily(fontRegistry, settings.text, emoji = false)
                 || loadBundledTextFont(fontRegistry)
         }
 
         if (fontRegistry.emojiFont == null) {
-            loadConfiguredFont(fontRegistry, settings.emojiFontFile, settings.emojiFamily, emoji = true)
-                || loadConfiguredFamily(fontRegistry, settings.emojiFamily, emoji = true)
+            loadConfiguredFont(fontRegistry, settings.emoji, emoji = true)
+                || loadConfiguredFamily(fontRegistry, settings.emoji, emoji = true)
                 || loadBundledEmojiFont(fontRegistry)
         }
 
@@ -31,7 +31,6 @@ internal object DrawFonts {
     private fun loadConfiguredFont(
         fontRegistry: FontRegistry,
         path: String,
-        alias: String,
         emoji: Boolean,
     ): Boolean {
         if (path.isBlank()) return false
@@ -41,9 +40,9 @@ internal object DrawFonts {
         return runCatching {
             val previousDefault = fontRegistry.defaultFont
             val face = if (emoji) {
-                fontRegistry.loadEmojiTypeface(normalized.toString(), alias.takeIf { it.isNotBlank() })
+                fontRegistry.loadEmojiTypeface(normalized.toString(), null)
             } else {
-                fontRegistry.loadTypeface(normalized.toString(), alias.takeIf { it.isNotBlank() })
+                fontRegistry.loadTypeface(normalized.toString(), null)
             } ?: return@runCatching false
 
             if (emoji) {

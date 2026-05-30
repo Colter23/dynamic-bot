@@ -106,7 +106,7 @@ public object MainConfigForms {
                     label = "权限规则",
                     type = ConfigFieldType.JSON,
                     section = "命令",
-                    description = "JSON 数组，字段为 platformId、targetKind、targetId、scopeId、threadId、accountId、senderId、role；用 * 表示通配。",
+                    description = "未命中规则时为普通用户；命中多条规则时取最高权限。平台、目标、发送者等字段支持 * 通配。",
                 ),
                 ConfigFieldSpec(
                     path = "subscription.unfollowWhenNoSubscribers",
@@ -294,28 +294,22 @@ public object MainConfigForms {
                     min = 320,
                 ),
                 ConfigFieldSpec(
-                    path = "draw.font.textFamily",
-                    label = "正文字体名",
+                    path = "draw.font.text",
+                    label = "正文字体",
                     type = ConfigFieldType.TEXT,
                     section = "绘图字体",
+                    description = "填写系统字体名称或字体文件路径。启动时会先按本地文件检测，找不到文件时再按字体名称匹配；留空使用内置字体。",
+                    restartRequired = true,
+                    restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
-                    path = "draw.font.emojiFamily",
-                    label = "Emoji 字体名",
+                    path = "draw.font.emoji",
+                    label = "Emoji 字体",
                     type = ConfigFieldType.TEXT,
                     section = "绘图字体",
-                ),
-                ConfigFieldSpec(
-                    path = "draw.font.textFontFile",
-                    label = "正文字体文件",
-                    type = ConfigFieldType.TEXT,
-                    section = "绘图字体",
-                ),
-                ConfigFieldSpec(
-                    path = "draw.font.emojiFontFile",
-                    label = "Emoji 字体文件",
-                    type = ConfigFieldType.TEXT,
-                    section = "绘图字体",
+                    description = "填写系统 Emoji 字体名称或字体文件路径。启动时会先按本地文件检测，找不到文件时再按字体名称匹配；留空使用内置 Emoji 字体。",
+                    restartRequired = true,
+                    restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
                     path = "webAdmin.enabled",
@@ -407,6 +401,9 @@ public object MainConfigForms {
             targets += "主程序"
         }
         if (previous.delivery.retryDelayMs != next.delivery.retryDelayMs) {
+            targets += "主程序"
+        }
+        if (previous.draw.font != next.draw.font) {
             targets += "主程序"
         }
         return targets.toList()
