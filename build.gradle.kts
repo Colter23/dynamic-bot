@@ -12,9 +12,14 @@ repositories {
     maven(url = "https://maven.pkg.jetbrains.space/public/p/compose/dev")
 }
 
+configurations.configureEach {
+    resolutionStrategy.force("org.slf4j:slf4j-api:2.0.16")
+}
+
 dependencies {
     val skikoVersion = "0.8.23"
     val ktorVersion = "3.0.3"
+    val log4jVersion = "2.25.4"
 
     implementation("top.colter.skiko:skiko-layout:0.0.4")
     implementation("org.jetbrains.skiko:skiko-awt:$skikoVersion")
@@ -27,6 +32,8 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
     implementation("io.github.oshai:kotlin-logging-jvm:7.0.0")
     implementation("ch.qos.logback:logback-classic:1.5.16")
+    implementation("org.apache.logging.log4j:log4j-to-slf4j:$log4jVersion")
+    implementation("org.slf4j:jul-to-slf4j:2.0.16")
     implementation("com.google.zxing:core:3.5.3")
     implementation("com.fasterxml.jackson.core:jackson-databind:2.20.0")
     implementation("com.fasterxml.jackson.dataformat:jackson-dataformat-yaml:2.20.0")

@@ -44,7 +44,10 @@ public class DeliveryDispatcher(
         )
         if (requests.isEmpty()) return@coroutineScope DeliveryDispatchStats(0, 0, 0, 0)
 
-        val semaphore = Semaphore(config.dispatchConcurrency.coerceAtLeast(1))
+        val concurrency = config.dispatchConcurrency.coerceAtLeast(1)
+        logger.info { "开始投递消息：领取=${requests.size}，并发=$concurrency" }
+
+        val semaphore = Semaphore(concurrency)
         val results = requests.map { request ->
             async {
                 semaphore.withPermit {
@@ -53,12 +56,14 @@ public class DeliveryDispatcher(
             }
         }.awaitAll()
 
-        DeliveryDispatchStats(
+        val stats = DeliveryDispatchStats(
             claimed = requests.size,
             sent = results.count { it == DeliveryOutcome.SENT },
             retried = results.count { it == DeliveryOutcome.RETRIED },
             failed = results.count { it == DeliveryOutcome.FAILED },
         )
+        logger.info { "投递批次完成：领取=${stats.claimed}，成功=${stats.sent}，重试=${stats.retried}，失败=${stats.failed}" }
+        stats
     }
 
     public suspend fun dispatchCommandResult(event: CommandResultEvent) {
@@ -96,6 +101,9 @@ public class DeliveryDispatcher(
         return when (val resolved = resolveSink(request.target)) {
             is SinkResolveResult.Found -> sendWithSink(request, resolved.sink, config)
             is SinkResolveResult.NotFound -> {
+                logger.warn {
+                    "消息投递失败：未找到消息出口插件，deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}"
+                }
                 MessageDeliveryRepository.markFailed(
                     request.delivery.id,
                     "未找到消息出口插件：platform=${request.target.platformId.value}，kind=${request.target.kind.name}",
@@ -103,6 +111,9 @@ public class DeliveryDispatcher(
                 DeliveryOutcome.FAILED
             }
             is SinkResolveResult.Ambiguous -> {
+                logger.warn {
+                    "消息投递失败：消息出口插件不唯一，deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，plugins=${resolved.pluginIds}"
+                }
                 MessageDeliveryRepository.markFailed(
                     request.delivery.id,
                     "消息出口插件不唯一：platform=${request.target.platformId.value}，kind=${request.target.kind.name}，plugins=${resolved.pluginIds.joinToString(",")}",
@@ -117,6 +128,9 @@ public class DeliveryDispatcher(
         sink: MessageSinkPlugin,
         config: DeliveryConfig,
     ): DeliveryOutcome {
+        logger.info {
+            "正在发送消息：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，attempt=${request.delivery.attempts}"
+        }
         val result = runCatching { sink.sendMessage(request) }
             .getOrElse { error ->
                 MessageSendResult.failed(error.message ?: "消息发送失败", retryable = true)
@@ -124,6 +138,9 @@ public class DeliveryDispatcher(
         return when (result) {
             is MessageSendResult.Sent -> {
                 MessageDeliveryRepository.markSent(request.delivery.id, result.sinkMessageId)
+                logger.info {
+                    "消息发送成功：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，sinkMessageId=${result.sinkMessageId ?: "-"}"
+                }
                 DeliveryOutcome.SENT
             }
             is MessageSendResult.Failed -> handleSendFailure(request, result, config)
@@ -137,14 +154,21 @@ public class DeliveryDispatcher(
     ): DeliveryOutcome {
         val shouldRetry = result.retryable && request.delivery.attempts < config.maxAttempts.coerceAtLeast(1)
         return if (shouldRetry) {
+            val nextAttemptAt = nowEpochSeconds() + ((config.retryDelayMs.coerceAtLeast(1) + 999) / 1000)
             MessageDeliveryRepository.markRetry(
                 deliveryId = request.delivery.id,
                 error = result.reason,
-                nextAttemptAtEpochSeconds = nowEpochSeconds() + ((config.retryDelayMs.coerceAtLeast(1) + 999) / 1000),
+                nextAttemptAtEpochSeconds = nextAttemptAt,
             )
+            logger.warn {
+                "消息发送失败，已安排重试：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，nextAttemptAt=$nextAttemptAt，原因=${result.reason}"
+            }
             DeliveryOutcome.RETRIED
         } else {
             MessageDeliveryRepository.markFailed(request.delivery.id, result.reason)
+            logger.warn {
+                "消息发送失败，已标记失败：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，原因=${result.reason}"
+            }
             DeliveryOutcome.FAILED
         }
     }

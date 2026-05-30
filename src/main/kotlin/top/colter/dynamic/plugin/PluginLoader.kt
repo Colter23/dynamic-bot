@@ -11,7 +11,10 @@ private val logger = loggerFor<PluginLoader>()
 public class PluginLoader {
 
     public fun load(descriptor: PluginDescriptor, jarPath: String): LoadedPlugin {
-        val classLoader = URLClassLoader(arrayOf(File(jarPath).toURI().toURL()), this::class.java.classLoader)
+        val classLoader = PluginClassLoader(
+            urls = arrayOf(File(jarPath).toURI().toURL()),
+            hostClassLoader = this::class.java.classLoader,
+        )
 
         try {
             val pluginClass = classLoader.loadClass(descriptor.mainClass)

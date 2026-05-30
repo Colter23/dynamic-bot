@@ -7,6 +7,7 @@ import ch.qos.logback.classic.spi.ThrowableProxyUtil
 import ch.qos.logback.core.AppenderBase
 import java.util.ArrayDeque
 import java.util.concurrent.atomic.AtomicLong
+import org.slf4j.bridge.SLF4JBridgeHandler
 import org.slf4j.LoggerFactory
 
 public data class AdminLogRecord(
@@ -114,7 +115,14 @@ public object AdminLogging {
                 }
                 rootLogger.addAppender(appender)
             }
+            installJavaUtilLoggingBridge()
             installed = true
         }
+    }
+
+    private fun installJavaUtilLoggingBridge() {
+        if (SLF4JBridgeHandler.isInstalled()) return
+        SLF4JBridgeHandler.removeHandlersForRootLogger()
+        SLF4JBridgeHandler.install()
     }
 }

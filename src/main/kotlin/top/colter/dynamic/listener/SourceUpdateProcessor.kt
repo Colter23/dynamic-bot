@@ -64,6 +64,9 @@ public class SourceUpdateProcessor(
 
     public suspend fun process(request: SourceUpdatePublishRequest): SourceUpdatePublishResult {
         return runCatching {
+            logger.info {
+                "开始处理来源更新：source=${request.sourcePlugin}，event=${request.update.eventType.value}，update=${request.update.key.stableValue()}"
+            }
             when (request.update.payload) {
                 is DynamicPayload -> handleDynamic(request, request.update)
                 is LivePayload -> handleLive(request, request.update)
@@ -77,14 +80,23 @@ public class SourceUpdateProcessor(
     private suspend fun handleDynamic(request: SourceUpdatePublishRequest, update: SourceUpdate): SourceUpdatePublishResult {
         val (normalizedUpdate, storedPublisher) = normalizePublisher(update)
         val targets = resolveTargets(request.deliveryTarget, storedPublisher)
-        if (targets.isEmpty()) return SourceUpdatePublishResult.ignored("没有可投递目标")
+        if (targets.isEmpty()) {
+            logger.info { "来源更新无可投递目标：update=${normalizedUpdate.key.stableValue()}" }
+            return SourceUpdatePublishResult.ignored("没有可投递目标")
+        }
 
         val deliverableTargets = if (request.deliveryTag == LINK_PARSE_EVENT_LABEL) {
             targets
         } else {
             applySubscriptionRules(normalizedUpdate, targets.filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds))
         }
-        if (deliverableTargets.isEmpty()) return SourceUpdatePublishResult.ignored("所有目标均未订阅该事件、被过滤或订阅时间晚于动态时间")
+        logger.info {
+            "来源更新订阅匹配完成：update=${normalizedUpdate.key.stableValue()}，候选目标=${targets.size}，可投递=${deliverableTargets.size}"
+        }
+        if (deliverableTargets.isEmpty()) {
+            logger.info { "来源更新被订阅规则或过滤规则拦截：update=${normalizedUpdate.key.stableValue()}" }
+            return SourceUpdatePublishResult.ignored("所有目标均未订阅该事件、被过滤或订阅时间晚于动态时间")
+        }
 
         val chain = buildMessageBatches(resolveDynamicTemplate(), normalizedUpdate)
         return publishMessage(
@@ -100,7 +112,13 @@ public class SourceUpdateProcessor(
         val targets = resolveTargets(request.deliveryTarget, storedPublisher)
             .filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds)
             .let { applySubscriptionRules(normalizedUpdate, it) }
-        if (targets.isEmpty()) return SourceUpdatePublishResult.ignored("没有可投递目标")
+        logger.info {
+            "直播来源更新订阅匹配完成：update=${normalizedUpdate.key.stableValue()}，可投递=${targets.size}"
+        }
+        if (targets.isEmpty()) {
+            logger.info { "直播来源更新无可投递目标：update=${normalizedUpdate.key.stableValue()}" }
+            return SourceUpdatePublishResult.ignored("没有可投递目标")
+        }
 
         val chain = buildMessageBatches(resolveLiveTemplate(normalizedUpdate), normalizedUpdate)
         return publishMessage(
@@ -220,10 +238,16 @@ public class SourceUpdateProcessor(
         val newDeliveryCount = results.sumOf { it.newDeliveries.size }
         return when {
             newDeliveryCount > 0 -> {
+                logger.info {
+                    "来源更新已创建投递任务：update=${update.key.stableValue()}，消息变体=${results.size}，新增投递=$newDeliveryCount"
+                }
                 onDeliveriesQueued()
                 SourceUpdatePublishResult.enqueued(newDeliveryCount)
             }
-            results.isNotEmpty() -> SourceUpdatePublishResult.duplicate()
+            results.isNotEmpty() -> {
+                logger.info { "来源更新投递任务已存在：update=${update.key.stableValue()}" }
+                SourceUpdatePublishResult.duplicate()
+            }
             else -> SourceUpdatePublishResult.ignored("没有可投递目标")
         }
     }
@@ -245,6 +269,15 @@ public class SourceUpdateProcessor(
             batches = batches,
         )
         val result = MessageDeliveryRepository.enqueue(message)
+        if (result.newDeliveries.isNotEmpty()) {
+            logger.info {
+                "消息已入队：messageId=${message.id}，variant=$renderVariant，新增投递=${result.newDeliveries.size}，已存在=${result.existingDeliveries.size}，目标=${message.targets.targetSummary()}"
+            }
+        } else {
+            logger.debug {
+                "消息入队跳过重复投递：messageId=${message.id}，variant=$renderVariant，已存在=${result.existingDeliveries.size}"
+            }
+        }
         if (broadcastMessages && result.newDeliveries.isNotEmpty()) {
             val broadcastMessage = message.copy(targets = result.newDeliveries.map { it.target })
             MessageEvent(sourcePlugin = "main", message = broadcastMessage).let { eventBus.broadcast(it) }
@@ -266,6 +299,11 @@ public class SourceUpdateProcessor(
             content = last.content + MessageContent.MentionAll(fallbackText = ""),
         )
         return result
+    }
+
+    private fun List<top.colter.dynamic.core.data.TargetAddress>.targetSummary(): String {
+        val visible = take(5).joinToString(",") { it.stableValue() }
+        return if (size > 5) "$visible...+${size - 5}" else visible
     }
 
     private fun SourceUpdate.toDrawableDynamicUpdate(): SourceUpdate {
