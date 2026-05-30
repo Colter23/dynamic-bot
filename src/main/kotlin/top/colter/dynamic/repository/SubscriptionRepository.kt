@@ -60,13 +60,17 @@ public object SubscriptionRepository {
         val subscriptions = transaction {
             SubscriptionTable
                 .selectAll()
-                .where { SubscriptionTable.publisherId eq EntityID(publisherId, PublisherTable) }
+                .where {
+                    (SubscriptionTable.publisherId eq EntityID(publisherId, PublisherTable)) and
+                        (SubscriptionTable.state eq EntityState.ACTIVE)
+                }
                 .map { it.toSubscription() }
         }
         if (subscriptions.isEmpty()) return emptyList()
 
         val subscribersById = SubscriberRepository
             .findByIds(subscriptions.map { it.subscriberId }.distinct())
+            .filter { it.state == EntityState.ACTIVE }
             .associateBy { it.id }
         return subscriptions.mapNotNull { subscription ->
             subscribersById[subscription.subscriberId]?.let { subscriber ->
@@ -182,10 +186,10 @@ public object SubscriptionRepository {
     }
 
     public fun findActivePublishersBySourcePlatform(platformId: String): List<Publisher> {
-        return findActivePublishersWithSubscribersBySourcePlatform(platformId).keys.toList()
+        return findActivePublishersWithSubscribersBySourcePlatform(platformId).map { it.publisher }
     }
 
-    public fun findActivePublishersWithSubscribersBySourcePlatform(platformId: String): Map<Publisher, List<Subscriber>> {
+    public fun findActivePublishersWithSubscribersBySourcePlatform(platformId: String): List<PublisherSubscribers> {
         val normalizedPlatformId = platformId.trim().lowercase()
         return transaction {
             val publishers = PublisherTable
@@ -196,15 +200,18 @@ public object SubscriptionRepository {
                 }
                 .map { it.toPublisher() }
 
-            if (publishers.isEmpty()) return@transaction emptyMap()
+            if (publishers.isEmpty()) return@transaction emptyList()
 
             val publisherIds = publishers.map { EntityID(it.id, PublisherTable) }
             val subscriptionRows = SubscriptionTable
                 .selectAll()
-                .where { SubscriptionTable.publisherId inList publisherIds }
+                .where {
+                    (SubscriptionTable.publisherId inList publisherIds) and
+                        (SubscriptionTable.state eq EntityState.ACTIVE)
+                }
                 .toList()
 
-            if (subscriptionRows.isEmpty()) return@transaction emptyMap()
+            if (subscriptionRows.isEmpty()) return@transaction emptyList()
 
             val subscriberIds = subscriptionRows
                 .map { row -> row[SubscriptionTable.subscriberId].value }
@@ -217,17 +224,21 @@ public object SubscriptionRepository {
                 .filter { it.state == EntityState.ACTIVE }
                 .associateBy { it.id }
 
-            val subscribersByPublisherId = subscriptionRows
+            val subscriptionsByPublisherId = subscriptionRows
+                .mapNotNull { row ->
+                    val subscription = row.toSubscription()
+                    val subscriber = subscribersById[subscription.subscriberId] ?: return@mapNotNull null
+                    subscription.publisherId to SubscriptionSubscriber(subscription, subscriber)
+                }
                 .groupBy(
-                    keySelector = { row -> row[SubscriptionTable.publisherId].value },
-                    valueTransform = { row -> row[SubscriptionTable.subscriberId].value },
+                    keySelector = { (publisherId, _) -> publisherId },
+                    valueTransform = { (_, subscriptionSubscriber) -> subscriptionSubscriber },
                 )
 
-            publishers.associateWith { publisher ->
-                subscribersByPublisherId[publisher.id]
-                    .orEmpty()
-                    .mapNotNull(subscribersById::get)
-            }.filterValues { it.isNotEmpty() }
+            publishers.mapNotNull { publisher ->
+                val subscriptions = subscriptionsByPublisherId[publisher.id].orEmpty()
+                if (subscriptions.isEmpty()) null else PublisherSubscribers(publisher, subscriptions)
+            }
         }
     }
 
@@ -235,11 +246,10 @@ public object SubscriptionRepository {
         val publisher = PublisherRepository.findById(publisherId) ?: return null
         if (publisher.state != EntityState.ACTIVE) return null
 
-        val subscribers = findSubscribersByPublisherId(publisherId)
-            .filter { it.state == EntityState.ACTIVE }
-        if (subscribers.isEmpty()) return null
+        val subscriptions = findSubscriptionsWithSubscribersByPublisherId(publisherId)
+        if (subscriptions.isEmpty()) return null
 
-        return PublisherSubscribers(publisher, subscribers)
+        return PublisherSubscribers(publisher, subscriptions)
     }
 
     public fun findAll(): List<Subscription> {

@@ -1,11 +1,9 @@
 ﻿package top.colter.dynamic.plugin
 
-import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.PublisherLiveStatus
 import top.colter.dynamic.core.data.PublisherSubscribers
 import top.colter.dynamic.core.data.SourceCursor
 import top.colter.dynamic.core.data.SourceEventType
-import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.plugin.SourceStateStore
 import top.colter.dynamic.core.plugin.SubscriptionQueryService
 import top.colter.dynamic.repository.PublisherLiveStatusRepository
@@ -56,7 +54,7 @@ public object RepositorySubscriptionQueryService : SubscriptionQueryService {
         return SubscriptionRepository.findActivePublisherWithSubscribersById(publisherId)
     }
 
-    override fun findActivePublishersWithSubscribersBySourcePlatform(platformId: String): Map<Publisher, List<Subscriber>> {
+    override fun findActivePublishersWithSubscribersBySourcePlatform(platformId: String): List<PublisherSubscribers> {
         return SubscriptionRepository.findActivePublishersWithSubscribersBySourcePlatform(platformId)
     }
 }

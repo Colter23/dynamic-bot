@@ -48,7 +48,8 @@ class SubscriptionRepositoryTest {
 
         assertEquals(listOf(onebotGroup.id, discordChannel.id).sorted(), subscriberIds.sorted())
         assertEquals(2, subscribers.size)
-        assertEquals("bilibili", bilibiliPublishers.keys.single().platformId.value)
+        assertEquals("bilibili", bilibiliPublishers.single().publisher.platformId.value)
+        assertEquals(2, bilibiliPublishers.single().subscriptions.size)
         assertTrue(xPublishers.isEmpty())
     }
 

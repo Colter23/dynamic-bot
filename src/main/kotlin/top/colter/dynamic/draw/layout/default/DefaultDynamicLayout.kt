@@ -32,7 +32,7 @@ internal fun renderDefaultDynamic(update: SourceUpdate, config: DrawConfig): Ima
         fontRegistry = config.fontRegistry,
         modifier = Modifier()
             .width(config.settings.width.dp)
-            .padding(30.dp)
+            .padding(20.dp)
             .background(
                 gradient = Gradient(
                     LayoutAlignment.LEFT_TOP,
@@ -65,8 +65,8 @@ private fun Layout.DefaultDynamicView(
         Column(
             modifier = Modifier()
                 .fillMaxWidth()
-                .margin(top = 30.dp, bottom = 30.dp)
-                .padding(30.dp)
+                .margin(top = 20.dp, bottom = 20.dp)
+                .padding(20.dp)
                 .background(config.theme.cardColor)
                 .border(3.dp, 15.dp, config.theme.borderColor)
         ) {

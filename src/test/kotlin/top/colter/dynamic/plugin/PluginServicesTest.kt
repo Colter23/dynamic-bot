@@ -75,6 +75,7 @@ class PluginServicesTest {
 
         assertEquals("123", byId.publisher.externalId)
         assertEquals(listOf("100"), byId.subscribers.map { it.externalId })
-        assertEquals(listOf("123"), byPlatform.keys.map { it.externalId })
+        assertEquals(listOf("123"), byPlatform.map { it.publisher.externalId })
+        assertEquals(byId.subscriptions.map { it.subscription.id }, byPlatform.single().subscriptions.map { it.subscription.id })
     }
 }
