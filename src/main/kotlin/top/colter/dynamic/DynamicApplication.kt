@@ -1,4 +1,4 @@
-package top.colter.dynamic
+﻿package top.colter.dynamic
 
 import java.nio.file.Paths
 import java.security.SecureRandom
@@ -12,24 +12,24 @@ import kotlinx.coroutines.runBlocking
 import kotlin.time.Duration.Companion.milliseconds
 import top.colter.dynamic.admin.AdminServer
 import top.colter.dynamic.command.CommandListener
-import top.colter.dynamic.core.command.CommandRegistry
+import top.colter.dynamic.command.CommandRegistry
+import top.colter.dynamic.core.command.CommandPublisher
 import top.colter.dynamic.core.config.ConfigService
-import top.colter.dynamic.core.config.YamlConfigService
-import top.colter.dynamic.core.event.CommandEvent
-import top.colter.dynamic.core.event.CommandResultEvent
-import top.colter.dynamic.core.event.EventBus
-import top.colter.dynamic.core.event.Listener
-import top.colter.dynamic.core.event.ListenerToken
-import top.colter.dynamic.core.event.SourceUpdateEvent
+import top.colter.dynamic.config.YamlConfigService
+import top.colter.dynamic.event.CommandEvent
+import top.colter.dynamic.event.CommandResultEvent
+import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.event.Listener
+import top.colter.dynamic.event.ListenerToken
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.core.event.SourceUpdatePublisher
-import top.colter.dynamic.core.plugin.PluginManager
-import top.colter.dynamic.core.plugin.PluginState
-import top.colter.dynamic.core.repository.PersistenceManager
+import top.colter.dynamic.plugin.PluginManager
+import top.colter.dynamic.plugin.PluginState
+import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.core.task.TaskDefinition
 import top.colter.dynamic.core.task.TaskSchedule
-import top.colter.dynamic.core.task.TaskScheduler
+import top.colter.dynamic.task.DefaultTaskScheduler
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.dynamic.listener.DeliveryDispatcher
@@ -49,6 +49,16 @@ public object DynamicApplication : CoroutineScope {
     private val commandRegistry: CommandRegistry = CommandRegistry()
     private lateinit var sourceUpdateProcessor: SourceUpdateProcessor
     private lateinit var deliveryDispatcher: DeliveryDispatcher
+    private val commandPublisher: CommandPublisher = CommandPublisher { request ->
+        eventBus.broadcast(
+            CommandEvent(
+                sourcePlugin = request.sourcePlugin,
+                context = request.context,
+                rawText = request.rawText,
+                traceId = request.traceId,
+            ),
+        )
+    }
     private val sourceUpdatePublisher: SourceUpdatePublisher = SourceUpdatePublisher { request ->
         if (::sourceUpdateProcessor.isInitialized) {
             sourceUpdateProcessor.process(request)
@@ -62,10 +72,11 @@ public object DynamicApplication : CoroutineScope {
         eventBus = eventBus,
         configService = configService,
         commandRegistry = commandRegistry,
+        commandPublisher = commandPublisher,
         sourceUpdatePublisher = sourceUpdatePublisher,
     )
     private val listenerTokens: MutableList<ListenerToken> = mutableListOf()
-    private val taskScheduler: TaskScheduler = TaskScheduler(scope = this)
+    private val taskScheduler: DefaultTaskScheduler = DefaultTaskScheduler(scope = this)
     private val configStore: MainConfigStore = MainConfigStore(configService)
     private val shutdownStarted: AtomicBoolean = AtomicBoolean(false)
 
@@ -134,20 +145,6 @@ public object DynamicApplication : CoroutineScope {
             sourceUpdatePublisher = sourceUpdatePublisher,
         )
 
-        listenerTokens += eventBus.subscribe(
-            object : Listener<SourceUpdateEvent> {
-                override suspend fun onMessage(event: SourceUpdateEvent) {
-                    sourceUpdateProcessor.process(
-                        SourceUpdatePublishRequest(
-                            sourcePlugin = event.sourcePlugin,
-                            update = event.update,
-                            deliveryTarget = event.deliveryTarget,
-                            deliveryTag = event.deliveryTag,
-                        ),
-                    )
-                }
-            },
-        )
         listenerTokens += eventBus.subscribe(
             CommandListener(
                 configProvider = configStore::current,

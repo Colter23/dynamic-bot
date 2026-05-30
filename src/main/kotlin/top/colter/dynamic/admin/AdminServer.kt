@@ -1,4 +1,4 @@
-package top.colter.dynamic.admin
+﻿package top.colter.dynamic.admin
 
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -29,12 +29,12 @@ import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.WebAdminConfig
-import top.colter.dynamic.core.command.CommandRegistry
+import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.config.ConfigService
-import top.colter.dynamic.core.config.YamlConfigService
-import top.colter.dynamic.core.event.EventBus
-import top.colter.dynamic.core.plugin.PluginManager
+import top.colter.dynamic.config.YamlConfigService
+import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.plugin.PluginManager
 
 public class AdminServer(
     private val config: WebAdminConfig,
@@ -257,7 +257,7 @@ public fun Application.adminModule(context: AdminServerContext) {
                         contentType = ContentType.Image.PNG,
                     )
                 } catch (e: NoSuchElementException) {
-                    call.respond(HttpStatusCode.NotFound, ErrorResponse(e.message ?: "not found"))
+                    call.respond(HttpStatusCode.NotFound, ErrorResponse(e.message ?: "未找到资源"))
                 }
             }
         }

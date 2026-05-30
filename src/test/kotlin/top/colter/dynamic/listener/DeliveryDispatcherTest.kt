@@ -1,4 +1,4 @@
-package top.colter.dynamic.listener
+﻿package top.colter.dynamic.listener
 
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -15,13 +15,13 @@ import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
-import top.colter.dynamic.core.plugin.PluginCapability
+import top.colter.dynamic.plugin.PluginCapability
 import top.colter.dynamic.core.plugin.PluginDescriptor
-import top.colter.dynamic.core.plugin.PluginHandle
-import top.colter.dynamic.core.plugin.PluginInfo
-import top.colter.dynamic.core.plugin.PluginState
-import top.colter.dynamic.core.repository.MessageDeliveryRepository
-import top.colter.dynamic.core.repository.PersistenceManager
+import top.colter.dynamic.plugin.PluginHandle
+import top.colter.dynamic.plugin.PluginInfo
+import top.colter.dynamic.plugin.PluginState
+import top.colter.dynamic.repository.MessageDeliveryRepository
+import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.testTargetAddress
 
 class DeliveryDispatcherTest {

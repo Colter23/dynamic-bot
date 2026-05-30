@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw
+﻿package top.colter.dynamic.draw
 
 import java.awt.Color
 import java.awt.image.BufferedImage

@@ -1,4 +1,4 @@
-package top.colter.dynamic.admin
+﻿package top.colter.dynamic.admin
 
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -26,11 +26,11 @@ import top.colter.dynamic.core.plugin.FollowActionResult
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
-import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
-import top.colter.dynamic.core.repository.PersistenceManager
-import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.SubscriberRepository
-import top.colter.dynamic.core.repository.SubscriptionRepository
+import top.colter.dynamic.repository.DynamicFilterRuleRepository
+import top.colter.dynamic.repository.PersistenceManager
+import top.colter.dynamic.repository.PublisherRepository
+import top.colter.dynamic.repository.SubscriberRepository
+import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.testPublisherInfo
 
 class AdminServerTest {

@@ -1,4 +1,4 @@
-package top.colter.dynamic.listener
+﻿package top.colter.dynamic.listener
 
 import java.nio.file.Paths
 import kotlin.io.path.createTempDirectory
@@ -34,16 +34,16 @@ import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.data.UpdateSelector
 import top.colter.dynamic.core.data.VideoAttachment
-import top.colter.dynamic.core.event.EventBus
-import top.colter.dynamic.core.event.Listener
-import top.colter.dynamic.core.event.MessageEvent
-import top.colter.dynamic.core.event.SourceUpdateEvent
-import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
-import top.colter.dynamic.core.repository.MessageDeliveryRepository
-import top.colter.dynamic.core.repository.PersistenceManager
-import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.SubscriberRepository
-import top.colter.dynamic.core.repository.SubscriptionRepository
+import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.event.Listener
+import top.colter.dynamic.event.MessageEvent
+import top.colter.dynamic.core.event.SourceUpdatePublishRequest
+import top.colter.dynamic.repository.DynamicFilterRuleRepository
+import top.colter.dynamic.repository.MessageDeliveryRepository
+import top.colter.dynamic.repository.PersistenceManager
+import top.colter.dynamic.repository.PublisherRepository
+import top.colter.dynamic.repository.SubscriberRepository
+import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testMedia
 import top.colter.dynamic.testPublisher
@@ -57,7 +57,7 @@ class SourceUpdateDynamicTest {
         val publisher = createPublisher()
         val subscriber = createSubscriber()
         SubscriptionRepository.subscribe(subscriber.id, publisher.id)
-        val listener = SourceUpdateListener(
+        val listener = SourceUpdateProcessor(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "{draw}\nvideo {name} {content}")),
             eventBus = eventBus,
             imageLoader = DynamicImageLoader { },
@@ -65,7 +65,7 @@ class SourceUpdateDynamicTest {
         )
 
         val received = captureMessageEvent(eventBus)
-        listener.onMessage(SourceUpdateEvent(sourcePlugin = "test", update = demoDynamic(publisher)))
+        listener.process(SourceUpdatePublishRequest(sourcePlugin = "test", update = demoDynamic(publisher)))
         val event = withTimeout(3_000) { received.await() }
 
         assertEquals(listOf(subscriber.address), event.message.targets)
@@ -97,7 +97,7 @@ class SourceUpdateDynamicTest {
             banner = null,
         )
         var renderedBanner: String? = null
-        val listener = SourceUpdateListener(
+        val listener = SourceUpdateProcessor(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "{draw}\n{name}")),
             eventBus = eventBus,
             imageLoader = DynamicImageLoader { },
@@ -108,7 +108,7 @@ class SourceUpdateDynamicTest {
         )
 
         val received = captureMessageEvent(eventBus)
-        listener.onMessage(SourceUpdateEvent(sourcePlugin = "test", update = demoDynamic(incoming)))
+        listener.process(SourceUpdatePublishRequest(sourcePlugin = "test", update = demoDynamic(incoming)))
         val event = withTimeout(3_000) { received.await() }
 
         val updated = assertNotNull(PublisherRepository.findById(publisher.id))
@@ -144,7 +144,7 @@ class SourceUpdateDynamicTest {
             ),
         )
         SubscriptionRepository.subscribe(normalSubscriber.id, publisher.id)
-        val listener = SourceUpdateListener(
+        val listener = SourceUpdateProcessor(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "tail {name}")),
             eventBus = eventBus,
             imageLoader = DynamicImageLoader { },
@@ -152,7 +152,7 @@ class SourceUpdateDynamicTest {
         )
 
         val received = captureMessageEvents(eventBus)
-        listener.onMessage(SourceUpdateEvent(sourcePlugin = "test", update = demoDynamic(publisher, withVideo = true)))
+        listener.process(SourceUpdatePublishRequest(sourcePlugin = "test", update = demoDynamic(publisher, withVideo = true)))
 
         val events = listOf(
             withTimeout(3_000) { received.receive() },
@@ -181,7 +181,7 @@ class SourceUpdateDynamicTest {
             FilterCondition.TextContains("Demo content"),
         )
         var renderCalls = 0
-        val listener = SourceUpdateListener(
+        val listener = SourceUpdateProcessor(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "allowed {name}")),
             eventBus = eventBus,
             imageLoader = DynamicImageLoader { },
@@ -192,7 +192,7 @@ class SourceUpdateDynamicTest {
         )
 
         val received = captureMessageEvent(eventBus)
-        listener.onMessage(SourceUpdateEvent(sourcePlugin = "test", update = demoDynamic(publisher)))
+        listener.process(SourceUpdatePublishRequest(sourcePlugin = "test", update = demoDynamic(publisher)))
         val event = withTimeout(3_000) { received.await() }
 
         assertEquals(listOf(allowedSubscriber.address), event.message.targets)
@@ -200,8 +200,8 @@ class SourceUpdateDynamicTest {
         assertEquals(1, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
 
         val targetReceived = captureMessageEvent(eventBus)
-        listener.onMessage(
-            SourceUpdateEvent(
+        listener.process(
+            SourceUpdatePublishRequest(
                 sourcePlugin = "test",
                 deliveryTarget = filteredSubscriber,
                 update = demoDynamic(publisher),

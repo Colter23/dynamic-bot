@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw
+﻿package top.colter.dynamic.draw
 
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image

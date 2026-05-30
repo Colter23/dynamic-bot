@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw.layout.default
+﻿package top.colter.dynamic.draw.layout.default
 
 import top.colter.dynamic.DrawOrnament
 import top.colter.dynamic.core.data.MediaKind

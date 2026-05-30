@@ -1,4 +1,4 @@
-package top.colter.dynamic.listener
+﻿package top.colter.dynamic.listener
 
 import top.colter.dynamic.core.data.DynamicContentNodeLink
 import top.colter.dynamic.core.data.DynamicContentNodeMention

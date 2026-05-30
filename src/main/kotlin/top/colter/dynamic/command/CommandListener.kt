@@ -1,4 +1,4 @@
-package top.colter.dynamic.command
+﻿package top.colter.dynamic.command
 
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
@@ -14,12 +14,12 @@ import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.command.CommandExecutionResult
 import top.colter.dynamic.core.command.CommandHandler
 import top.colter.dynamic.core.command.CommandInvocation
-import top.colter.dynamic.core.command.CommandParser
+import top.colter.dynamic.command.CommandParser
 import top.colter.dynamic.core.command.CommandPermissionResolver
-import top.colter.dynamic.core.command.CommandRegistry
+import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.command.CommandSpec
 import top.colter.dynamic.core.config.ConfigService
-import top.colter.dynamic.core.config.YamlConfigService
+import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.config.loadOrCreate
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
@@ -38,10 +38,10 @@ import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.PublisherKind
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.Subscription
-import top.colter.dynamic.core.event.CommandEvent
-import top.colter.dynamic.core.event.CommandResultEvent
-import top.colter.dynamic.core.event.EventBus
-import top.colter.dynamic.core.event.Listener
+import top.colter.dynamic.event.CommandEvent
+import top.colter.dynamic.event.CommandResultEvent
+import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.event.Listener
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
@@ -51,11 +51,11 @@ import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
-import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
-import top.colter.dynamic.core.repository.MessageDeliveryRepository
-import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.SubscriberRepository
-import top.colter.dynamic.core.repository.SubscriptionRepository
+import top.colter.dynamic.repository.DynamicFilterRuleRepository
+import top.colter.dynamic.repository.MessageDeliveryRepository
+import top.colter.dynamic.repository.PublisherRepository
+import top.colter.dynamic.repository.SubscriberRepository
+import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.link.DynamicLinkForwarder
 import top.colter.dynamic.link.ParseDynamicLinkCommandHandler
 import java.awt.Color

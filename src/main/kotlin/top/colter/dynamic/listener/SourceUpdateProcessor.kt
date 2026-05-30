@@ -1,9 +1,9 @@
-package top.colter.dynamic.listener
+﻿package top.colter.dynamic.listener
 
 import java.nio.file.Paths
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.config.ConfigService
-import top.colter.dynamic.core.config.YamlConfigService
+import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.config.loadOrCreate
 import top.colter.dynamic.core.data.CardAttachment
 import top.colter.dynamic.core.data.DynamicContent
@@ -22,24 +22,22 @@ import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.TargetKind
-import top.colter.dynamic.core.event.EventBus
-import top.colter.dynamic.core.event.Listener
-import top.colter.dynamic.core.event.MessageEvent
-import top.colter.dynamic.core.event.SourceUpdateEvent
+import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
-import top.colter.dynamic.core.filter.DynamicFilterEvaluator
-import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
-import top.colter.dynamic.core.repository.MessageEnqueueResult
-import top.colter.dynamic.core.repository.MessageDeliveryRepository
-import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.SubscriptionRepository
+import top.colter.dynamic.filter.DynamicFilterEvaluator
+import top.colter.dynamic.repository.DynamicFilterRuleRepository
+import top.colter.dynamic.repository.MessageEnqueueResult
+import top.colter.dynamic.repository.MessageDeliveryRepository
+import top.colter.dynamic.repository.PublisherRepository
+import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.link.LINK_PARSE_EVENT_LABEL
 
-private val logger = loggerFor<SourceUpdateListener>()
+private val logger = loggerFor<SourceUpdateProcessor>()
 
-public class SourceUpdateListener(
+public class SourceUpdateProcessor(
     config: MainDynamicConfig? = null,
     configProvider: (() -> MainDynamicConfig)? = null,
     private val configService: ConfigService = YamlConfigService(),
@@ -49,7 +47,7 @@ public class SourceUpdateListener(
     imageRenderer: DynamicImageRenderer? = null,
     private val broadcastMessages: Boolean = true,
     private val onDeliveriesQueued: suspend () -> Unit = {},
-) : Listener<SourceUpdateEvent> {
+) {
     private val fixedConfig: MainDynamicConfig by lazy {
         config ?: configService.loadOrCreate(MainDynamicConfig.CONFIG_ID) { MainDynamicConfig() }
     }
@@ -62,17 +60,6 @@ public class SourceUpdateListener(
         imageRenderer ?: FileDynamicImageRenderer(
             outputDir = Paths.get(startupConfig.imageCache.renderedRoot),
             drawSettingsProvider = { runtimeConfigProvider().draw },
-        )
-    }
-
-    override suspend fun onMessage(event: SourceUpdateEvent) {
-        process(
-            SourceUpdatePublishRequest(
-                sourcePlugin = event.sourcePlugin,
-                update = event.update,
-                deliveryTarget = event.deliveryTarget,
-                deliveryTag = event.deliveryTag,
-            ),
         )
     }
 
@@ -318,5 +305,3 @@ public class SourceUpdateListener(
         val subscription: top.colter.dynamic.core.data.Subscription?,
     )
 }
-
-public typealias SourceUpdateProcessor = SourceUpdateListener

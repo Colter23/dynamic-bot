@@ -44,5 +44,5 @@ bin/
 .kotlin
 **/src/test/resources/output
 **/src/test/resources/cookie.json
-config
-data
+/config/
+/data/

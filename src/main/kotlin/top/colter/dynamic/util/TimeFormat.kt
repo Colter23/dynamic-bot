@@ -1,4 +1,4 @@
-package top.colter.dynamic.util
+﻿package top.colter.dynamic.util
 
 import java.time.LocalDateTime
 import java.time.OffsetDateTime

@@ -1,4 +1,4 @@
-package top.colter.dynamic.link
+﻿package top.colter.dynamic.link
 
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -10,24 +10,26 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.command.CommandListener
-import top.colter.dynamic.core.command.CommandRegistry
+import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
-import top.colter.dynamic.core.event.CommandEvent
-import top.colter.dynamic.core.event.CommandResultEvent
-import top.colter.dynamic.core.event.EventBus
-import top.colter.dynamic.core.event.Listener
-import top.colter.dynamic.core.event.SourceUpdateEvent
+import top.colter.dynamic.event.CommandEvent
+import top.colter.dynamic.event.CommandResultEvent
+import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.event.Listener
+import top.colter.dynamic.core.event.SourceUpdatePublishRequest
+import top.colter.dynamic.core.event.SourceUpdatePublishResult
+import top.colter.dynamic.core.event.SourceUpdatePublisher
 import top.colter.dynamic.core.link.DynamicLinkResolution
 import top.colter.dynamic.core.link.DynamicLinkResolver
 import top.colter.dynamic.core.link.ParsedDynamicLink
-import top.colter.dynamic.core.repository.PersistenceManager
-import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.SubscriberRepository
+import top.colter.dynamic.repository.PersistenceManager
+import top.colter.dynamic.repository.PublisherRepository
+import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testPublisherInfo
 import top.colter.dynamic.testPublisherKey
@@ -38,12 +40,13 @@ class DynamicLinkForwarderTest {
         initDb("parse-command")
         val eventBus = EventBus()
         val resolver = FakeDynamicLinkResolver()
+        val sourceUpdates = RecordingSourceUpdatePublisher()
         val listener = CommandListener(
             publisherLookupResolver = { null },
             config = MainDynamicConfig(),
             dynamicLinkForwarder = DynamicLinkForwarder(
                 resolversProvider = { listOf(resolver) },
-                eventBus = eventBus,
+                sourceUpdatePublisher = sourceUpdates,
             ),
             commandRegistry = CommandRegistry(),
             eventBus = eventBus,
@@ -53,6 +56,7 @@ class DynamicLinkForwarderTest {
             eventBus,
             listener,
             commandEvent("/db parse https://t.bilibili.com/1"),
+            sourceUpdates,
         )
 
         assertEquals(CommandStatus.SUCCESS, commandResult.status)
@@ -77,7 +81,7 @@ class DynamicLinkForwarderTest {
             config = MainDynamicConfig(),
             dynamicLinkForwarder = DynamicLinkForwarder(
                 resolversProvider = { listOf(FakeDynamicLinkResolver()) },
-                eventBus = eventBus,
+                sourceUpdatePublisher = RecordingSourceUpdatePublisher(),
             ),
             commandRegistry = CommandRegistry(),
             eventBus = eventBus,
@@ -93,26 +97,19 @@ class DynamicLinkForwarderTest {
         initDb("auto-forward")
         val eventBus = EventBus()
         val resolver = FakeDynamicLinkResolver()
+        val sourceUpdates = RecordingSourceUpdatePublisher()
         val listener = DynamicLinkAutoParseListener(
             configProvider = { MainDynamicConfig() },
             forwarder = DynamicLinkForwarder(
                 resolversProvider = { listOf(resolver) },
-                eventBus = eventBus,
+                sourceUpdatePublisher = sourceUpdates,
             ),
             eventBus = eventBus,
-        )
-        val dynamic = CompletableDeferred<SourceUpdateEvent>()
-        eventBus.subscribe(
-            object : Listener<SourceUpdateEvent> {
-                override suspend fun onMessage(event: SourceUpdateEvent) {
-                    dynamic.complete(event)
-                }
-            },
         )
 
         listener.onMessage(commandEvent("look https://t.bilibili.com/1"))
 
-        val event = withTimeout(3_000) { dynamic.await() }
+        val event = withTimeout(3_000) { sourceUpdates.receive() }
         assertEquals("1", event.update.key.externalId)
         assertEquals(1, resolver.resolveCalls)
     }
@@ -122,11 +119,12 @@ class DynamicLinkForwarderTest {
         initDb("auto-dedupe")
         val eventBus = EventBus()
         val resolver = FakeDynamicLinkResolver()
+        val sourceUpdates = RecordingSourceUpdatePublisher()
         val listener = DynamicLinkAutoParseListener(
             configProvider = { MainDynamicConfig() },
             forwarder = DynamicLinkForwarder(
                 resolversProvider = { listOf(resolver) },
-                eventBus = eventBus,
+                sourceUpdatePublisher = sourceUpdates,
             ),
             eventBus = eventBus,
         )
@@ -164,9 +162,9 @@ class DynamicLinkForwarderTest {
         eventBus: EventBus,
         listener: CommandListener,
         event: CommandEvent,
-    ): Pair<CommandResultEvent, SourceUpdateEvent> {
+        sourceUpdates: RecordingSourceUpdatePublisher,
+    ): Pair<CommandResultEvent, SourceUpdatePublishRequest> {
         val commandResult = CompletableDeferred<CommandResultEvent>()
-        val dynamic = CompletableDeferred<SourceUpdateEvent>()
         eventBus.subscribe(
             object : Listener<CommandResultEvent> {
                 override suspend fun onMessage(event: CommandResultEvent) {
@@ -174,18 +172,11 @@ class DynamicLinkForwarderTest {
                 }
             },
         )
-        eventBus.subscribe(
-            object : Listener<SourceUpdateEvent> {
-                override suspend fun onMessage(event: SourceUpdateEvent) {
-                    dynamic.complete(event)
-                }
-            },
-        )
 
         listener.onMessage(event)
         return Pair(
             withTimeout(3_000) { commandResult.await() },
-            withTimeout(3_000) { dynamic.await() },
+            withTimeout(3_000) { sourceUpdates.receive() },
         )
     }
 
@@ -210,6 +201,17 @@ class DynamicLinkForwarderTest {
 
     private fun renderMessage(result: CommandResultEvent): String {
         return result.chain.flatMap { it.content }.joinToString("\n") { it.fallbackText }
+    }
+
+    private class RecordingSourceUpdatePublisher : SourceUpdatePublisher {
+        private val received = CompletableDeferred<SourceUpdatePublishRequest>()
+
+        override suspend fun publish(request: SourceUpdatePublishRequest): SourceUpdatePublishResult {
+            if (!received.isCompleted) received.complete(request)
+            return SourceUpdatePublishResult.enqueued(1)
+        }
+
+        suspend fun receive(): SourceUpdatePublishRequest = received.await()
     }
 
     private class FakeDynamicLinkResolver : DynamicLinkResolver {

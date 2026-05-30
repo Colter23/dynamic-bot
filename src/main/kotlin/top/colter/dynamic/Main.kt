@@ -1,4 +1,4 @@
-package top.colter.dynamic
+﻿package top.colter.dynamic
 
 import java.util.concurrent.CountDownLatch
 import top.colter.dynamic.core.tools.loggerFor

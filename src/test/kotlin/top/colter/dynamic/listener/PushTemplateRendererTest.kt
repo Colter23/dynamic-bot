@@ -1,4 +1,4 @@
-package top.colter.dynamic.listener
+﻿package top.colter.dynamic.listener
 
 import kotlin.test.Test
 import kotlin.test.assertEquals

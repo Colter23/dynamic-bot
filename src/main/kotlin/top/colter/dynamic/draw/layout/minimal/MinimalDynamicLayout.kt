@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw.layout.minimal
+﻿package top.colter.dynamic.draw.layout.minimal
 
 import org.jetbrains.skia.Image
 import top.colter.dynamic.core.data.SourceUpdate

@@ -1,0 +1,195 @@
+﻿package top.colter.dynamic.config
+
+import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.io.path.inputStream
+import kotlin.io.path.outputStream
+import kotlin.reflect.KClass
+import top.colter.dynamic.core.config.ConfigException
+import top.colter.dynamic.core.config.ConfigService
+import top.colter.dynamic.core.config.PluginDataStore
+import top.colter.dynamic.core.tools.loggerFor
+
+private val logger = loggerFor<YamlConfigService>()
+
+public class YamlConfigService(
+    baseDir: Path = Paths.get("config"),
+) : ConfigService {
+    private val store: YamlDocumentStore = YamlDocumentStore(baseDir, "配置")
+
+    override fun <T : Any> loadOrCreate(pluginId: String, clazz: KClass<T>, defaultProvider: () -> T): T {
+        return store.loadOrCreate(pluginId, clazz, defaultProvider)
+    }
+
+    override fun <T : Any> save(pluginId: String, config: T) {
+        store.save(pluginId, config)
+    }
+
+    override fun <T : Any> reload(pluginId: String, clazz: KClass<T>): T {
+        return store.reload(pluginId, clazz)
+    }
+
+    override fun exists(pluginId: String): Boolean {
+        return store.exists(pluginId)
+    }
+
+    override fun delete(pluginId: String): Boolean {
+        return store.delete(pluginId)
+    }
+
+    override fun resolvePath(pluginId: String): Path {
+        return store.resolvePath(pluginId)
+    }
+}
+
+public class YamlPluginDataStore(
+    pluginId: String,
+    baseDir: Path = Paths.get("data", "plugins"),
+) : PluginDataStore {
+    override val dataDir: Path = baseDir.resolve(validateDocumentId(pluginId))
+    private val store: YamlDocumentStore = YamlDocumentStore(dataDir, "插件数据")
+
+    init {
+        Files.createDirectories(dataDir)
+    }
+
+    override fun <T : Any> loadOrCreate(name: String, clazz: KClass<T>, defaultProvider: () -> T): T {
+        return store.loadOrCreate(name, clazz, defaultProvider)
+    }
+
+    override fun <T : Any> save(name: String, value: T) {
+        store.save(name, value)
+    }
+
+    override fun <T : Any> reload(name: String, clazz: KClass<T>): T {
+        return store.reload(name, clazz)
+    }
+
+    override fun exists(name: String): Boolean {
+        return store.exists(name)
+    }
+
+    override fun delete(name: String): Boolean {
+        return store.delete(name)
+    }
+
+    override fun resolvePath(name: String): Path {
+        return store.resolvePath(name)
+    }
+}
+
+internal class YamlDocumentStore(
+    private val baseDir: Path,
+    private val label: String,
+) {
+    private val objectMapper: ObjectMapper = ObjectMapper(YAMLFactory())
+        .registerKotlinModule()
+        .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, true)
+
+    private val lockMap: ConcurrentHashMap<String, Any> = ConcurrentHashMap()
+
+    fun <T : Any> loadOrCreate(name: String, clazz: KClass<T>, defaultProvider: () -> T): T {
+        val path = resolvePath(name)
+        val lock = lockMap.computeIfAbsent(name) { Any() }
+
+        synchronized(lock) {
+            return try {
+                if (!Files.exists(path)) {
+                    val defaultValue = defaultProvider()
+                    writeAtomically(path, defaultValue)
+                    logger.info { "$label 文件已创建：name=$name，path=${path.toAbsolutePath()}" }
+                    defaultValue
+                } else {
+                    path.inputStream().use { input ->
+                        objectMapper.readValue(input, clazz.java)
+                    }
+                }
+            } catch (e: Exception) {
+                throw ConfigException("加载或创建 $label 失败：name=$name", path, e)
+            }
+        }
+    }
+
+    fun <T : Any> save(name: String, value: T) {
+        val path = resolvePath(name)
+        val lock = lockMap.computeIfAbsent(name) { Any() }
+
+        synchronized(lock) {
+            try {
+                writeAtomically(path, value)
+            } catch (e: Exception) {
+                throw ConfigException("保存 $label 失败：name=$name", path, e)
+            }
+        }
+    }
+
+    fun <T : Any> reload(name: String, clazz: KClass<T>): T {
+        val path = resolvePath(name)
+        val lock = lockMap.computeIfAbsent(name) { Any() }
+
+        synchronized(lock) {
+            try {
+                require(Files.exists(path)) { "$label 文件不存在：name=$name" }
+                path.inputStream().use { input ->
+                    return objectMapper.readValue(input, clazz.java)
+                }
+            } catch (e: Exception) {
+                throw ConfigException("重新加载 $label 失败：name=$name", path, e)
+            }
+        }
+    }
+
+    fun exists(name: String): Boolean {
+        return Files.exists(resolvePath(name))
+    }
+
+    fun delete(name: String): Boolean {
+        val path = resolvePath(name)
+        val lock = lockMap.computeIfAbsent(name) { Any() }
+        synchronized(lock) {
+            return Files.deleteIfExists(path)
+        }
+    }
+
+    fun resolvePath(name: String): Path {
+        return baseDir.resolve("${validateDocumentId(name)}.yml")
+    }
+
+    private fun <T : Any> writeAtomically(path: Path, value: T) {
+        Files.createDirectories(path.parent)
+        val tempPath = Files.createTempFile(path.parent, "${path.fileName}.", ".tmp")
+        try {
+            tempPath.outputStream().use { output ->
+                objectMapper.writeValue(output, value)
+            }
+            runCatching {
+                Files.move(
+                    tempPath,
+                    path,
+                    StandardCopyOption.ATOMIC_MOVE,
+                    StandardCopyOption.REPLACE_EXISTING,
+                )
+            }.getOrElse {
+                Files.move(tempPath, path, StandardCopyOption.REPLACE_EXISTING)
+            }
+        } finally {
+            Files.deleteIfExists(tempPath)
+        }
+    }
+}
+
+private fun validateDocumentId(id: String): String {
+    require(id.isNotBlank()) { "名称不能为空" }
+    require(DOCUMENT_ID_REGEX.matches(id)) { "名称包含非法字符：$id" }
+    require(id != "." && id != "..") { "名称不能是路径保留段：$id" }
+    return id
+}
+
+private val DOCUMENT_ID_REGEX: Regex = Regex("^[a-zA-Z0-9._-]+$")

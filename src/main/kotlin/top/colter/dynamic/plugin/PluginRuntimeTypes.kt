@@ -1,0 +1,34 @@
+﻿package top.colter.dynamic.plugin
+
+import top.colter.dynamic.core.plugin.PluginDescriptor
+
+public enum class PluginCapability {
+    PUBLISHER_SOURCE,
+    PUBLISHER_LOOKUP,
+    PUBLISHER_FOLLOW,
+    PUBLISHER_LOGIN,
+    MESSAGE_SINK,
+    COMMAND_CONTRIBUTOR,
+    LINK_RESOLVER,
+    CONFIGURABLE,
+}
+
+public enum class PluginState {
+    LOADED,
+    ACTIVE,
+    FAILED,
+}
+
+public data class PluginInfo(
+    val descriptor: PluginDescriptor,
+    val capabilities: Set<PluginCapability>,
+    val state: PluginState,
+    val sourceJarPath: String,
+    val loadTime: Long = System.currentTimeMillis(),
+    val error: Throwable? = null,
+)
+
+public data class PluginHandle<T : Any>(
+    val info: PluginInfo,
+    val instance: T,
+)

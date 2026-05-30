@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw
+﻿package top.colter.dynamic.draw
 
 import java.io.File
 import kotlin.test.BeforeTest

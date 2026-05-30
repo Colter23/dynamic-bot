@@ -1,4 +1,4 @@
-package top.colter.dynamic
+﻿package top.colter.dynamic
 
 import org.jetbrains.skia.Image
 import java.io.File

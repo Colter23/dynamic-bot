@@ -1,12 +1,12 @@
-package top.colter.dynamic.admin
+﻿package top.colter.dynamic.admin
 
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.MainConfigForms
 import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.config.ConfigurablePlugin
-import top.colter.dynamic.core.config.YamlConfigService
-import top.colter.dynamic.core.command.CommandRegistry
+import top.colter.dynamic.config.YamlConfigService
+import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicAttachmentKind
 import top.colter.dynamic.core.data.DynamicFilterRule
@@ -23,28 +23,28 @@ import top.colter.dynamic.core.data.Subscription
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
-import top.colter.dynamic.core.event.EventBus
+import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.core.plugin.MessageTargetCandidate
-import top.colter.dynamic.core.plugin.PluginHandle
-import top.colter.dynamic.core.plugin.PluginInfo
-import top.colter.dynamic.core.plugin.PluginManager
-import top.colter.dynamic.core.plugin.PluginReloadResult
+import top.colter.dynamic.plugin.PluginHandle
+import top.colter.dynamic.plugin.PluginInfo
+import top.colter.dynamic.plugin.PluginManager
+import top.colter.dynamic.plugin.PluginReloadResult
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.plugin.PublisherLoginProvider
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
-import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
-import top.colter.dynamic.core.repository.MessageDeliveryRepository
-import top.colter.dynamic.core.repository.PublisherLiveStatusRepository
-import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.SubscriberRepository
-import top.colter.dynamic.core.repository.SourceCursorRepository
-import top.colter.dynamic.core.repository.SubscriptionRepository
-import top.colter.dynamic.core.repository.SubscriptionMutationResult
+import top.colter.dynamic.repository.DynamicFilterRuleRepository
+import top.colter.dynamic.repository.MessageDeliveryRepository
+import top.colter.dynamic.repository.PublisherLiveStatusRepository
+import top.colter.dynamic.repository.PublisherRepository
+import top.colter.dynamic.repository.SubscriberRepository
+import top.colter.dynamic.repository.SourceCursorRepository
+import top.colter.dynamic.repository.SubscriptionRepository
+import top.colter.dynamic.repository.SubscriptionMutationResult
 
 public class AdminService(
     private val pluginProvider: () -> List<PluginInfo>,
@@ -55,7 +55,7 @@ public class AdminService(
     private val configurablePluginProvider: () -> List<PluginHandle<ConfigurablePlugin<*>>> = { emptyList() },
     private val configProvider: () -> MainDynamicConfig,
     private val mainConfigUpdater: (MainDynamicConfig) -> ConfigApplyResult = {
-        throw IllegalStateException("main config editing is not configured")
+        throw IllegalStateException("主配置编辑未初始化")
     },
     private val configService: ConfigService = YamlConfigService(),
     private val commandRegistry: CommandRegistry = CommandRegistry(),
@@ -68,7 +68,7 @@ public class AdminService(
         pluginManager: PluginManager,
         configProvider: () -> MainDynamicConfig,
         mainConfigUpdater: (MainDynamicConfig) -> ConfigApplyResult = {
-            throw IllegalStateException("main config editing is not configured")
+            throw IllegalStateException("主配置编辑未初始化")
         },
         configService: ConfigService = YamlConfigService(),
         commandRegistry: CommandRegistry = CommandRegistry(),
@@ -321,7 +321,7 @@ public class AdminService(
         val subscription = SubscriptionRepository.findBySubscriberAndPublisher(
             subscriberId = subscriberUpsert.value.id,
             publisherId = publisherUpsert.value.id,
-        ) ?: throw IllegalStateException("subscription was not created")
+        ) ?: throw IllegalStateException("订阅创建失败")
 
         return CreateSubscriptionResponse(
             subscription = subscription.toDto(

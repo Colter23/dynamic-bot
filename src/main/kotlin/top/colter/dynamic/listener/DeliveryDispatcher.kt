@@ -1,4 +1,4 @@
-package top.colter.dynamic.listener
+﻿package top.colter.dynamic.listener
 
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -7,13 +7,13 @@ import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import top.colter.dynamic.DeliveryConfig
 import top.colter.dynamic.core.data.TargetAddress
-import top.colter.dynamic.core.event.CommandResultEvent
+import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.core.plugin.CommandResultSendRequest
 import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
-import top.colter.dynamic.core.plugin.PluginHandle
-import top.colter.dynamic.core.repository.MessageDeliveryRepository
+import top.colter.dynamic.plugin.PluginHandle
+import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.tools.loggerFor
 
 private val logger = loggerFor<DeliveryDispatcher>()

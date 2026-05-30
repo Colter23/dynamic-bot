@@ -1,4 +1,4 @@
-package top.colter.dynamic
+﻿package top.colter.dynamic
 
 import top.colter.dynamic.core.command.CommandPermissionRule
 

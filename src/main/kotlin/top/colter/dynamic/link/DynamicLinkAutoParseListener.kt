@@ -1,15 +1,15 @@
-package top.colter.dynamic.link
+﻿package top.colter.dynamic.link
 
 import top.colter.dynamic.MainDynamicConfig
-import top.colter.dynamic.core.command.CommandParser
+import top.colter.dynamic.command.CommandParser
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
-import top.colter.dynamic.core.event.CommandEvent
-import top.colter.dynamic.core.event.CommandResultEvent
-import top.colter.dynamic.core.event.EventBus
-import top.colter.dynamic.core.event.Listener
+import top.colter.dynamic.event.CommandEvent
+import top.colter.dynamic.event.CommandResultEvent
+import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.event.Listener
 
 internal class DynamicLinkAutoParseListener(
     private val configProvider: () -> MainDynamicConfig,

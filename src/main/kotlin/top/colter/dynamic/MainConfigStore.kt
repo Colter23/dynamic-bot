@@ -1,4 +1,4 @@
-package top.colter.dynamic
+﻿package top.colter.dynamic
 
 import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.config.ConfigFieldOption
@@ -6,7 +6,7 @@ import top.colter.dynamic.core.config.ConfigFieldSpec
 import top.colter.dynamic.core.config.ConfigFieldType
 import top.colter.dynamic.core.config.ConfigFormSpec
 import top.colter.dynamic.core.config.ConfigService
-import top.colter.dynamic.core.config.YamlConfigService
+import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.draw.DrawLayoutRegistry

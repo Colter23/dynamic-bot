@@ -1,31 +1,27 @@
-package top.colter.dynamic.link
+﻿package top.colter.dynamic.link
 
 import java.util.concurrent.ConcurrentHashMap
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
-import top.colter.dynamic.core.event.EventBus
-import top.colter.dynamic.core.event.EventBusSourceUpdatePublisher
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
+import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.core.event.SourceUpdatePublisher
 import top.colter.dynamic.core.link.DynamicLinkResolution
 import top.colter.dynamic.core.link.DynamicLinkResolver
 import top.colter.dynamic.core.link.ParsedDynamicLink
-import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.SubscriberRepository
+import top.colter.dynamic.repository.PublisherRepository
+import top.colter.dynamic.repository.SubscriberRepository
 
 internal const val LINK_PARSE_EVENT_LABEL: String = "link-parse"
 internal const val LINK_PARSE_EVENT_SOURCE: String = "main-link-parser"
 
 public class DynamicLinkForwarder(
     private val resolversProvider: () -> List<DynamicLinkResolver>,
-    private val sourceUpdatePublisher: SourceUpdatePublisher = EventBusSourceUpdatePublisher(EventBus()),
+    private val sourceUpdatePublisher: SourceUpdatePublisher = SourceUpdatePublisher {
+        SourceUpdatePublishResult.failed("来源更新发布器未配置")
+    },
 ) {
-    public constructor(
-        resolversProvider: () -> List<DynamicLinkResolver>,
-        eventBus: EventBus,
-    ) : this(resolversProvider, EventBusSourceUpdatePublisher(eventBus))
-
     internal suspend fun forwardFirst(
         text: String,
         context: CommandContext,
@@ -80,10 +76,10 @@ public class DynamicLinkForwarder(
 
         val result = sourceUpdatePublisher.publish(
             SourceUpdatePublishRequest(
-            sourcePlugin = LINK_PARSE_EVENT_SOURCE,
-            deliveryTarget = subscriber,
-            deliveryTag = LINK_PARSE_EVENT_LABEL,
-            update = normalizedUpdate,
+                sourcePlugin = LINK_PARSE_EVENT_SOURCE,
+                deliveryTarget = subscriber,
+                deliveryTag = LINK_PARSE_EVENT_LABEL,
+                update = normalizedUpdate,
             ),
         )
         if (!result.accepted) {

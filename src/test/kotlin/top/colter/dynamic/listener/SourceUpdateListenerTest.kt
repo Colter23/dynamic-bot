@@ -1,4 +1,4 @@
-package top.colter.dynamic.listener
+﻿package top.colter.dynamic.listener
 
 import java.nio.file.Paths
 import kotlin.io.path.createTempDirectory
@@ -25,25 +25,25 @@ import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.data.UpdateSelector
-import top.colter.dynamic.core.event.EventBus
-import top.colter.dynamic.core.event.Listener
-import top.colter.dynamic.core.event.MessageEvent
-import top.colter.dynamic.core.event.SourceUpdateEvent
-import top.colter.dynamic.core.repository.PersistenceManager
-import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.SubscriberRepository
-import top.colter.dynamic.core.repository.SubscriptionRepository
+import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.event.Listener
+import top.colter.dynamic.event.MessageEvent
+import top.colter.dynamic.core.event.SourceUpdatePublishRequest
+import top.colter.dynamic.repository.PersistenceManager
+import top.colter.dynamic.repository.PublisherRepository
+import top.colter.dynamic.repository.SubscriberRepository
+import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testMedia
 import top.colter.dynamic.testPublisher
 import top.colter.dynamic.testTargetAddress
 
-class SourceUpdateListenerTest {
+class SourceUpdateProcessorTest {
     @Test
     fun shouldRenderLiveStartedTemplateWithDrawCoverAndSplitBatches() = runBlocking {
         val eventBus = EventBus()
         val (publisher, subscriber) = seededSubscription("live-started")
-        val listener = SourceUpdateListener(
+        val listener = SourceUpdateProcessor(
             config = MainDynamicConfig(
                 templates = PushTemplates(
                     liveStarted = "{draw}\\n{name}|{uid}|{rid}|{title}|{area}\\n{cover}\\n{link}\\rnext",
@@ -56,8 +56,8 @@ class SourceUpdateListenerTest {
         val received = captureMessageEvent(eventBus)
         val startedAt = System.currentTimeMillis() / 1000 + 60
 
-        listener.onMessage(
-            SourceUpdateEvent(
+        listener.process(
+            SourceUpdatePublishRequest(
                 sourcePlugin = "test",
                 update = liveUpdate(publisher, SourceEventType.LIVE_STARTED, startedAt),
             ),
@@ -79,7 +79,7 @@ class SourceUpdateListenerTest {
     fun shouldRenderLiveEndedDurationPlaceholders() = runBlocking {
         val eventBus = EventBus()
         val (publisher, subscriber) = seededSubscription("live-ended")
-        val listener = SourceUpdateListener(
+        val listener = SourceUpdateProcessor(
             config = MainDynamicConfig(
                 templates = PushTemplates(
                     liveEnded = "{name}|{uid}|{rid}|{title}|{area}|{startTime}|{endTime}|{duration}|{link}",
@@ -91,8 +91,8 @@ class SourceUpdateListenerTest {
         val start = System.currentTimeMillis() / 1000 + 60
         val end = start + 3_661
 
-        listener.onMessage(
-            SourceUpdateEvent(
+        listener.process(
+            SourceUpdatePublishRequest(
                 sourcePlugin = "test",
                 update = liveUpdate(publisher, SourceEventType.LIVE_ENDED, end, start),
             ),
@@ -121,7 +121,7 @@ class SourceUpdateListenerTest {
                 ),
             ),
         )
-        val listener = SourceUpdateListener(
+        val listener = SourceUpdateProcessor(
             config = MainDynamicConfig(
                 templates = PushTemplates(
                     liveStarted = "started {title}",
@@ -133,8 +133,8 @@ class SourceUpdateListenerTest {
         val startedAt = System.currentTimeMillis() / 1000 + 60
 
         val startedReceived = captureMessageEvent(eventBus)
-        listener.onMessage(
-            SourceUpdateEvent(
+        listener.process(
+            SourceUpdatePublishRequest(
                 sourcePlugin = "test",
                 update = liveUpdate(publisher, SourceEventType.LIVE_STARTED, startedAt),
             ),
@@ -145,8 +145,8 @@ class SourceUpdateListenerTest {
         assertTrue(startedContents.last() is MessageContent.MentionAll)
 
         val endedReceived = captureMessageEvent(eventBus)
-        listener.onMessage(
-            SourceUpdateEvent(
+        listener.process(
+            SourceUpdatePublishRequest(
                 sourcePlugin = "test",
                 update = liveUpdate(publisher, SourceEventType.LIVE_ENDED, startedAt + 60, startedAt),
             ),

@@ -1,4 +1,4 @@
-package top.colter.dynamic.admin
+﻿package top.colter.dynamic.admin
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject

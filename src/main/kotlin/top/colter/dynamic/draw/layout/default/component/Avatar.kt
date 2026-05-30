@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw.layout.default.component
+﻿package top.colter.dynamic.draw.layout.default.component
 
 import org.jetbrains.skia.Image
 import top.colter.skiko.Modifier

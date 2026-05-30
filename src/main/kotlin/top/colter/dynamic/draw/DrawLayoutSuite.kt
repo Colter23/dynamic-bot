@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw
+﻿package top.colter.dynamic.draw
 
 import org.jetbrains.skia.Image
 import top.colter.dynamic.core.config.ConfigFieldOption

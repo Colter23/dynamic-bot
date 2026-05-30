@@ -1,4 +1,4 @@
-package top.colter.dynamic.listener
+﻿package top.colter.dynamic.listener
 
 import java.awt.Color
 import java.awt.image.BufferedImage

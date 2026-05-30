@@ -1,4 +1,4 @@
-import top.colter.dynamic.core.data.PlatformDescriptor
+﻿import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.skiko.FontRegistry
 import kotlin.test.Test

@@ -1,4 +1,4 @@
-package top.colter.dynamic.command
+﻿package top.colter.dynamic.command
 
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -9,7 +9,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import top.colter.dynamic.MainDynamicConfig
-import top.colter.dynamic.core.command.CommandRegistry
+import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.DynamicAttachmentKind
@@ -20,19 +20,19 @@ import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
-import top.colter.dynamic.core.event.CommandEvent
-import top.colter.dynamic.core.event.CommandResultEvent
-import top.colter.dynamic.core.event.EventBus
-import top.colter.dynamic.core.event.Listener
+import top.colter.dynamic.event.CommandEvent
+import top.colter.dynamic.event.CommandResultEvent
+import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.event.Listener
 import top.colter.dynamic.core.plugin.FollowActionResult
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
-import top.colter.dynamic.core.repository.DynamicFilterRuleRepository
-import top.colter.dynamic.core.repository.PersistenceManager
-import top.colter.dynamic.core.repository.PublisherRepository
-import top.colter.dynamic.core.repository.SubscriberRepository
-import top.colter.dynamic.core.repository.SubscriptionRepository
+import top.colter.dynamic.repository.DynamicFilterRuleRepository
+import top.colter.dynamic.repository.PersistenceManager
+import top.colter.dynamic.repository.PublisherRepository
+import top.colter.dynamic.repository.SubscriberRepository
+import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.testPublisherInfo
 
 class CommandListenerTest {

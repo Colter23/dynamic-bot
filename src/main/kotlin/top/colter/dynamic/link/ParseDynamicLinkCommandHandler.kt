@@ -1,4 +1,4 @@
-package top.colter.dynamic.link
+﻿package top.colter.dynamic.link
 
 import top.colter.dynamic.core.command.CommandExecutionResult
 import top.colter.dynamic.core.command.CommandHandler

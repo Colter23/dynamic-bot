@@ -1,4 +1,4 @@
-package top.colter.dynamic.admin
+﻿package top.colter.dynamic.admin
 
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType

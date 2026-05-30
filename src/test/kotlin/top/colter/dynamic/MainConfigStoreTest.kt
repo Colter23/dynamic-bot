@@ -1,9 +1,9 @@
-package top.colter.dynamic
+﻿package top.colter.dynamic
 
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import top.colter.dynamic.core.config.YamlConfigService
+import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.config.reload
 
 class MainConfigStoreTest {

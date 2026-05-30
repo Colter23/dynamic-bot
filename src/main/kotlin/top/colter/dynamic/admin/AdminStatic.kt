@@ -1,4 +1,4 @@
-package top.colter.dynamic.admin
+﻿package top.colter.dynamic.admin
 
 import java.nio.charset.StandardCharsets
 

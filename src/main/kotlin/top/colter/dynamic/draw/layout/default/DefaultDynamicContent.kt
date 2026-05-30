@@ -1,4 +1,4 @@
-package top.colter.dynamic.draw.layout.default
+﻿package top.colter.dynamic.draw.layout.default
 
 import org.jetbrains.skia.paragraph.TextStyle
 import top.colter.dynamic.core.data.DynamicContent
