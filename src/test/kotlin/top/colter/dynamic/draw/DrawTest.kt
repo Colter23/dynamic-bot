@@ -213,6 +213,22 @@ class DrawTest {
     }
 
     @Test
+    fun `test dynamic publisher default head`() {
+        val publisher = testPublisherInfo(
+            key = testPublisherKey(externalId = "publisher-default-head"),
+            name = "demo-default-head",
+            avatar = testMedia("https://example.com/default-head-avatar.jpg", MediaKind.AVATAR),
+            banner = null,
+        )
+        val update = testDynamicUpdate(
+            publisher = publisher,
+            payload = DynamicPayload(content = DynamicContent.text("Publisher without banner uses default head")),
+        )
+
+        renderToOutput("dynamic_publisher_default_head.png", update)
+    }
+
+    @Test
     fun `test minimal dynamic layout`() {
         val update = testDynamicUpdate(
             payload = DynamicPayload(
