@@ -130,8 +130,7 @@
       padding: 12px 10px;
     }
     .nav button {
-      display: grid;
-      grid-template-columns: 24px minmax(0, 1fr);
+      display: flex;
       align-items: center;
       min-height: 40px;
       padding: 8px 10px;
@@ -139,6 +138,7 @@
       background: transparent;
       color: var(--muted);
       text-align: left;
+      justify-content: flex-start;
     }
     .nav button.active {
       background: var(--accent-soft);
@@ -382,9 +382,23 @@
     .avatar {
       width: 34px;
       height: 34px;
+      display: block;
       border-radius: 8px;
       object-fit: cover;
       border: 1px solid var(--line);
+      background: var(--panel-soft);
+    }
+    .header-image {
+      width: 72px;
+      height: 34px;
+      display: block;
+      border-radius: 7px;
+      object-fit: cover;
+      border: 1px solid var(--line);
+      background: var(--panel-soft);
+    }
+    .media-placeholder {
+      display: block;
       background: var(--panel-soft);
     }
     .identity-cell {
@@ -544,14 +558,14 @@
         <span>本地控制台</span>
       </div>
       <nav class="nav" aria-label="运维台导航">
-        <button data-nav="dashboard" class="active"><span>仪</span><span>仪表盘</span></button>
-        <button data-nav="plugins"><span>插</span><span>插件管理</span></button>
-        <button data-nav="login"><span>登</span><span>平台登录</span></button>
-        <button data-nav="subscriptions"><span>订</span><span>订阅管理</span></button>
-        <button data-nav="entities"><span>源</span><span>发布者与目标</span></button>
-        <button data-nav="logs"><span>志</span><span>日志查看</span></button>
-        <button data-nav="configs"><span>配</span><span>配置</span></button>
-        <button data-nav="system"><span>系</span><span>系统设置</span></button>
+        <button data-nav="dashboard" class="active">仪表盘</button>
+        <button data-nav="plugins">插件管理</button>
+        <button data-nav="login">平台登录</button>
+        <button data-nav="subscriptions">订阅管理</button>
+        <button data-nav="entities">发布者与目标</button>
+        <button data-nav="logs">日志查看</button>
+        <button data-nav="configs">配置</button>
+        <button data-nav="system">系统设置</button>
       </nav>
       <div class="sidebar-footer">
         <button class="secondary" id="refreshPage">刷新</button>
@@ -613,7 +627,9 @@
       logsPaused: false,
       logTimer: null,
       logSince: 0,
-      logRows: []
+      logRows: [],
+      mediaObjectUrls: [],
+      mediaGeneration: 0
     };
 
     const eventTypes = [
@@ -686,8 +702,15 @@
     function cell(title, sub) {
       return `<span class="primary-line">${esc(title || "-")}</span><span class="sub-line">${esc(sub || "")}</span>`;
     }
-    function identity(name, sub, image) {
-      return `<div class="identity-cell"><img class="avatar" src="${attr(image || "")}" alt="" onerror="this.style.visibility='hidden'"><div>${cell(name, sub)}</div></div>`;
+    function mediaImage(uri, className = "avatar", platformId = "admin", kind = "OTHER") {
+      if (!uri) return `<span class="${attr(className)} media-placeholder" aria-hidden="true"></span>`;
+      if (/^(data|blob):/i.test(uri)) {
+        return `<img class="${attr(className)}" src="${attr(uri)}" alt="" onerror="this.style.visibility='hidden'">`;
+      }
+      return `<img class="${attr(className)}" alt="" data-media-uri="${attr(uri)}" data-media-platform="${attr(platformId || "admin")}" data-media-kind="${attr(kind || "OTHER")}" onerror="this.style.visibility='hidden'">`;
+    }
+    function identity(name, sub, image, platformId = "admin", kind = "AVATAR") {
+      return `<div class="identity-cell">${mediaImage(image, "avatar", platformId, kind)}<div>${cell(name, sub)}</div></div>`;
     }
     function renderTable(rows, columns) {
       if (!rows || rows.length === 0) return `<div class="empty">暂无数据</div>`;
@@ -735,8 +758,50 @@
     }
     async function apiBlob(path) {
       const response = await fetch("/api" + path, { headers: { Authorization: "Bearer " + state.token } });
-      if (!response.ok) throw new Error("资源加载失败");
+      if (response.status === 401) {
+        logout("认证失败");
+        throw new Error("认证失败");
+      }
+      if (!response.ok) {
+        let message = "资源加载失败";
+        try {
+          const data = await response.clone().json();
+          message = data.message || data.error || message;
+        } catch (_) {}
+        throw new Error(message);
+      }
       return response.blob();
+    }
+    function releaseMediaObjectUrls() {
+      state.mediaGeneration += 1;
+      state.mediaObjectUrls.forEach(url => URL.revokeObjectURL(url));
+      state.mediaObjectUrls = [];
+    }
+    async function hydrateMediaImages(root = document) {
+      const generation = state.mediaGeneration;
+      const images = Array.from(root.querySelectorAll("img[data-media-uri]"));
+      await Promise.all(images.map(async image => {
+        const uri = image.dataset.mediaUri;
+        if (!uri) return;
+        try {
+          const blob = await apiBlob("/media/image" + query({
+            uri,
+            platformId: image.dataset.mediaPlatform || "admin",
+            kind: image.dataset.mediaKind || "OTHER"
+          }));
+          const url = URL.createObjectURL(blob);
+          if (generation !== state.mediaGeneration || !image.isConnected) {
+            URL.revokeObjectURL(url);
+            return;
+          }
+          state.mediaObjectUrls.push(url);
+          image.src = url;
+          image.style.visibility = "";
+        } catch (_) {
+          image.style.visibility = "hidden";
+          image.title = "图片加载失败";
+        }
+      }));
     }
     function invalidate(...keys) {
       if (keys.length === 0) state.cache = {};
@@ -745,6 +810,7 @@
 
     function showLogin(message, isError) {
       stopLogPolling();
+      releaseMediaObjectUrls();
       $("appView").hidden = true;
       $("loginView").hidden = false;
       setLoginMessage(message || "", isError);
@@ -774,6 +840,7 @@
     }
     async function loadPage(page, force) {
       stopLogPolling();
+      releaseMediaObjectUrls();
       if (page === "dashboard") return loadDashboard(force);
       if (page === "plugins") return loadPlugins(force);
       if (page === "login") return loadPlatformLogins(force);
@@ -926,6 +993,7 @@
       return state.cache.subscriptions;
     }
     async function loadSubscriptions(force) {
+      releaseMediaObjectUrls();
       const rows = await ensureSubscriptions(force);
       $("content").innerHTML = `
         <section class="page">
@@ -938,7 +1006,7 @@
               </div>
             </div>
             ${renderTable(rows, [
-              { title: "发布者", render: s => identity(s.publisher && s.publisher.name, publisherKey(s.publisher), s.publisher && s.publisher.avatarUri) },
+              { title: "发布者", render: s => identity(s.publisher && s.publisher.name, publisherKey(s.publisher), s.publisher && s.publisher.avatarUri, s.publisher && s.publisher.platformId, "AVATAR") },
               { title: "消息目标", render: s => cell(s.subscriber && s.subscriber.name, targetKey(s.subscriber)) },
               { title: "接收事件", render: s => tags(policyEvents(s.policy).map(eventLabel)) },
               { title: "@全体", render: s => tags(mentionEvents(s.policy).map(eventLabel)) },
@@ -948,6 +1016,7 @@
             ])}
           </section>
         </section>`;
+      await hydrateMediaImages($("content"));
     }
     function publisherKey(p) {
       return p ? `${p.platformId}:${p.kind}:${p.externalId}` : "-";
@@ -971,6 +1040,7 @@
     }
 
     async function loadEntities(force) {
+      releaseMediaObjectUrls();
       if (force || !state.cache.publishers) state.cache.publishers = await api("/publishers");
       if (force || !state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
       const publishers = state.cache.publishers;
@@ -980,8 +1050,8 @@
           <section class="panel full">
             <div class="panel-head"><h2>发布者</h2><button class="secondary" data-action="refresh-current">刷新</button></div>
             ${renderTable(publishers, [
-              { title: "发布者", render: p => identity(p.name, publisherKey(p), p.avatarUri) },
-              { title: "头图", render: p => p.bannerUri ? `<img class="avatar" src="${attr(p.bannerUri)}" alt="" onerror="this.style.visibility='hidden'">` : `<span class="sub-line">-</span>` },
+              { title: "发布者", render: p => identity(p.name, publisherKey(p), p.avatarUri, p.platformId, "AVATAR") },
+              { title: "头图", render: p => p.bannerUri ? mediaImage(p.bannerUri, "header-image", p.platformId, "COVER") : `<span class="sub-line">-</span>` },
               { title: "订阅", render: p => `<span class="primary-line">${p.subscriptionCount || 0}</span>` },
               { title: "状态", render: p => entityStatePill(p.state) },
               { title: "创建时间", render: p => `<span class="sub-line">${fmtTime(p.createTime)}</span>` },
@@ -999,6 +1069,7 @@
             ])}
           </section>
         </section>`;
+      await hydrateMediaImages($("content"));
     }
     function liveSummary(publisher) {
       const lives = publisher.liveStatuses || [];

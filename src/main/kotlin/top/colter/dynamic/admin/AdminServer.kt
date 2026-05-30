@@ -32,6 +32,7 @@ import top.colter.dynamic.WebAdminConfig
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.config.ConfigService
+import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.plugin.PluginManager
@@ -66,6 +67,7 @@ public class AdminServer(
             loginService = AdminLoginService(
                 loginProviderResolver = { platformId -> pluginManager.findPublisherLoginProvider(platformId) },
             ),
+            mediaService = AdminMediaService(configProvider = configProvider),
             stopRequester = stopRequester,
         )
         engine = embeddedServer(Netty, host = config.host, port = config.port) {
@@ -84,6 +86,7 @@ public data class AdminServerContext(
     val tokenProvider: () -> String = { token },
     val service: AdminService,
     val loginService: AdminLoginService,
+    val mediaService: AdminMediaService = AdminMediaService(),
     val stopRequester: ((String) -> Unit)? = null,
 )
 
@@ -158,6 +161,16 @@ public fun Application.adminModule(context: AdminServerContext) {
                     context.service.deliveries(
                         status = call.request.queryParameters["status"],
                         limit = call.optionalQueryInt("limit"),
+                    )
+                }
+            }
+            get("/media/image") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondMedia {
+                    context.mediaService.image(
+                        uri = call.request.queryParameters["uri"] ?: throw IllegalArgumentException("缺少图片地址"),
+                        platformId = call.request.queryParameters["platformId"],
+                        kind = call.request.queryParameters["kind"].toMediaKind(),
                     )
                 }
             }
@@ -335,6 +348,30 @@ private suspend inline fun <reified T : Any> ApplicationCall.respondApi(crossinl
     } catch (e: IllegalStateException) {
         respond(HttpStatusCode.Conflict, ErrorResponse(e.message ?: "当前状态不允许执行该操作"))
     }
+}
+
+private suspend fun ApplicationCall.respondMedia(block: suspend () -> AdminMediaResult) {
+    try {
+        val result = block()
+        response.headers.append(HttpHeaders.CacheControl, "private, max-age=86400")
+        respondBytes(
+            bytes = result.bytes,
+            contentType = result.contentType,
+        )
+    } catch (e: IllegalArgumentException) {
+        respond(HttpStatusCode.BadRequest, ErrorResponse(e.message ?: "bad request"))
+    } catch (e: NoSuchElementException) {
+        respond(HttpStatusCode.NotFound, ErrorResponse(e.message ?: "资源不存在"))
+    } catch (e: IllegalStateException) {
+        respond(HttpStatusCode.BadGateway, ErrorResponse(e.message ?: "图片加载失败"))
+    } catch (e: Exception) {
+        respond(HttpStatusCode.BadGateway, ErrorResponse(e.message ?: "图片加载失败"))
+    }
+}
+
+private fun String?.toMediaKind(): MediaKind {
+    val raw = this?.trim()?.takeIf { it.isNotBlank() } ?: return MediaKind.OTHER
+    return enumValues<MediaKind>().firstOrNull { it.name.equals(raw, ignoreCase = true) } ?: MediaKind.OTHER
 }
 
 private fun ApplicationCall.pathInt(name: String): Int {
