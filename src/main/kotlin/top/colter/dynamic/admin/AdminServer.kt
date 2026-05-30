@@ -45,6 +45,7 @@ public class AdminServer(
     private val commandRegistry: CommandRegistry = CommandRegistry(),
     private val eventBus: EventBus = EventBus(),
     private val stopRequester: ((String) -> Unit)? = null,
+    private val startedAtEpochMillis: Long = System.currentTimeMillis(),
 ) {
     private var engine: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
 
@@ -60,6 +61,7 @@ public class AdminServer(
                 configService = configService,
                 commandRegistry = commandRegistry,
                 eventBus = eventBus,
+                startedAtEpochMillis = startedAtEpochMillis,
             ),
             loginService = AdminLoginService(
                 loginProviderResolver = { platformId -> pluginManager.findPublisherLoginProvider(platformId) },
@@ -111,14 +113,53 @@ public fun Application.adminModule(context: AdminServerContext) {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.overview() }
             }
+            get("/dashboard") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi { context.service.dashboard() }
+            }
             get("/plugins") {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.plugins() }
+            }
+            post("/plugins/{id}/start") {
+                if (!call.ensureAuthorized(context)) return@post
+                val id = call.pathString("id")
+                call.respondApi { context.service.startPlugin(id) }
+            }
+            post("/plugins/{id}/stop") {
+                if (!call.ensureAuthorized(context)) return@post
+                val id = call.pathString("id")
+                call.respondApi { context.service.stopPlugin(id) }
             }
             post("/plugins/{id}/reload") {
                 if (!call.ensureAuthorized(context)) return@post
                 val id = call.pathString("id")
                 call.respondApi { context.service.reloadPlugin(id) }
+            }
+            get("/system/status") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi { context.service.systemStatus() }
+            }
+            get("/logs") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi {
+                    context.service.logs(
+                        since = call.optionalQueryLong("since"),
+                        level = call.request.queryParameters["level"],
+                        logger = call.request.queryParameters["logger"],
+                        query = call.request.queryParameters["q"],
+                        limit = call.optionalQueryInt("limit"),
+                    )
+                }
+            }
+            get("/deliveries") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi {
+                    context.service.deliveries(
+                        status = call.request.queryParameters["status"],
+                        limit = call.optionalQueryInt("limit"),
+                    )
+                }
             }
             post("/system/stop") {
                 if (!call.ensureAuthorized(context)) return@post
@@ -199,14 +240,15 @@ public fun Application.adminModule(context: AdminServerContext) {
                     context.service.filterRules(call.optionalQueryInt("subscriptionId"))
                 }
             }
-            post("/filter-rules") {
-                if (!call.ensureAuthorized(context)) return@post
-                call.respondApi { context.service.createFilterRule(call.receive()) }
-            }
             delete("/filter-rules/{id}") {
                 if (!call.ensureAuthorized(context)) return@delete
                 val id = call.pathInt("id")
                 call.respondApi { context.service.deleteFilterRule(id) }
+            }
+            post("/subscriptions/{id}/filter-rules") {
+                if (!call.ensureAuthorized(context)) return@post
+                val id = call.pathInt("id")
+                call.respondApi { context.service.createFilterRule(id, call.receive()) }
             }
             delete("/subscriptions/{id}/filter-rules") {
                 if (!call.ensureAuthorized(context)) return@delete
@@ -306,4 +348,9 @@ private fun ApplicationCall.pathString(name: String): String {
 private fun ApplicationCall.optionalQueryInt(name: String): Int? {
     val raw = request.queryParameters[name] ?: return null
     return raw.toIntOrNull() ?: throw IllegalArgumentException("查询参数无效：$name")
+}
+
+private fun ApplicationCall.optionalQueryLong(name: String): Long? {
+    val raw = request.queryParameters[name] ?: return null
+    return raw.toLongOrNull() ?: throw IllegalArgumentException("查询参数无效：$name")
 }

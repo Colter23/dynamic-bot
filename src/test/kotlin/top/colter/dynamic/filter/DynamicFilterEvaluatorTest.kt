@@ -11,7 +11,6 @@ import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.DynamicLabel
 import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.DynamicReferenceKind
-import top.colter.dynamic.core.data.FilterAction
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.ImageAttachment
 import top.colter.dynamic.core.data.ImageItem
@@ -52,61 +51,24 @@ class DynamicFilterEvaluatorTest {
     }
 
     @Test
-    fun shouldComposeBooleanConditions() {
+    fun isBlockedShouldBlockWhenAnyRuleMatches() {
         val update = demoUpdate()
+        val missed = blockRule(FilterCondition.TextContains("missing"))
+        val attachmentBlock = blockRule(FilterCondition.HasAttachmentKind(DynamicAttachmentKind.VIDEO))
+        val textBlock = blockRule(FilterCondition.TextContains("Video Secret"))
 
-        assertTrue(
-            DynamicFilterEvaluator.matches(
-                update,
-                FilterCondition.AllOf(
-                    listOf(
-                        FilterCondition.TextContains("hello"),
-                        FilterCondition.HasAttachmentKind(DynamicAttachmentKind.CARD),
-                    ),
-                ),
-            ),
-        )
-        assertTrue(
-            DynamicFilterEvaluator.matches(
-                update,
-                FilterCondition.AnyOf(
-                    listOf(
-                        FilterCondition.TextContains("missing"),
-                        FilterCondition.HasAttachmentKind(DynamicAttachmentKind.IMAGE),
-                    ),
-                ),
-            ),
-        )
-        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.Not(FilterCondition.TextContains("missing"))))
+        assertTrue(DynamicFilterEvaluator.isBlocked(update, listOf(missed, attachmentBlock)))
+        assertTrue(DynamicFilterEvaluator.isBlocked(update, listOf(textBlock)))
+        assertFalse(DynamicFilterEvaluator.isBlocked(update, listOf(missed)))
     }
 
-    @Test
-    fun isBlockedShouldLetLaterMatchingRuleOverrideEarlierOnes() {
-        val update = demoUpdate()
-        val disabledMatch = blockRule(FilterCondition.TextContains("hello world")).copy(enabled = false)
-        val enabledMiss = blockRule(FilterCondition.TextContains("missing"))
-        val enabledBlock = blockRule(FilterCondition.HasAttachmentKind(DynamicAttachmentKind.VIDEO), priority = 10)
-        val laterAllow = allowRule(FilterCondition.TextContains("Video Secret"), priority = 20)
-
-        assertTrue(DynamicFilterEvaluator.isBlocked(update, listOf(disabledMatch, enabledMiss, enabledBlock)))
-        assertFalse(DynamicFilterEvaluator.isBlocked(update, listOf(enabledBlock, laterAllow)))
-        assertFalse(DynamicFilterEvaluator.isBlocked(update, listOf(disabledMatch, enabledMiss)))
-    }
-
-    private fun blockRule(condition: FilterCondition, priority: Int = 0): DynamicFilterRule {
+    private fun blockRule(condition: FilterCondition): DynamicFilterRule {
         return DynamicFilterRule(
             id = condition.hashCode(),
             subscriptionId = 1,
-            action = FilterAction.BLOCK,
             condition = condition,
-            priority = priority,
-            enabled = true,
             createdAtEpochSeconds = 1L,
         )
-    }
-
-    private fun allowRule(condition: FilterCondition, priority: Int = 0): DynamicFilterRule {
-        return blockRule(condition, priority).copy(action = FilterAction.ALLOW)
     }
 
     private fun demoUpdate() = testDynamicUpdate(

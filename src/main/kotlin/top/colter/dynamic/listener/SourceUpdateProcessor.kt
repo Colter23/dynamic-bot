@@ -13,7 +13,6 @@ import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
-import top.colter.dynamic.core.data.MentionMode
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
@@ -83,9 +82,9 @@ public class SourceUpdateProcessor(
         val deliverableTargets = if (request.deliveryTag == LINK_PARSE_EVENT_LABEL) {
             targets
         } else {
-            applyFilters(normalizedUpdate, targets.filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds))
+            applySubscriptionRules(normalizedUpdate, targets.filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds))
         }
-        if (deliverableTargets.isEmpty()) return SourceUpdatePublishResult.ignored("所有目标均被过滤或订阅时间晚于动态时间")
+        if (deliverableTargets.isEmpty()) return SourceUpdatePublishResult.ignored("所有目标均未订阅该事件、被过滤或订阅时间晚于动态时间")
 
         val chain = buildMessageBatches(resolveDynamicTemplate(), normalizedUpdate)
         return publishMessage(
@@ -100,6 +99,7 @@ public class SourceUpdateProcessor(
         val (normalizedUpdate, storedPublisher) = normalizePublisher(update)
         val targets = resolveTargets(request.deliveryTarget, storedPublisher)
             .filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds)
+            .let { applySubscriptionRules(normalizedUpdate, it) }
         if (targets.isEmpty()) return SourceUpdatePublishResult.ignored("没有可投递目标")
 
         val chain = buildMessageBatches(resolveLiveTemplate(normalizedUpdate), normalizedUpdate)
@@ -147,19 +147,19 @@ public class SourceUpdateProcessor(
             .map { DeliveryTarget(subscriber = it.subscriber, subscription = it.subscription) }
     }
 
-    private fun applyFilters(update: SourceUpdate, targets: List<DeliveryTarget>): List<DeliveryTarget> {
+    private fun applySubscriptionRules(update: SourceUpdate, targets: List<DeliveryTarget>): List<DeliveryTarget> {
         val policyMatchedTargets = targets.filter { target ->
-            target.subscription?.policy?.updateSelectors?.any { selector -> selector.matches(update) } ?: true
+            target.subscription?.policy?.accepts(update) ?: true
         }
+        if (update.payload !is DynamicPayload) return policyMatchedTargets
+
         val subscriptionIds = policyMatchedTargets
-            .filter { it.subscription?.policy?.filtersEnabled != false }
             .mapNotNull { it.subscription?.id }
         if (subscriptionIds.isEmpty()) return policyMatchedTargets
 
         val rulesBySubscriptionId = DynamicFilterRuleRepository.findBySubscriptionIds(subscriptionIds)
         return policyMatchedTargets.filter { target ->
             val subscription = target.subscription ?: return@filter true
-            if (!subscription.policy.filtersEnabled) return@filter true
             val rules = rulesBySubscriptionId[subscription.id].orEmpty()
             rules.isEmpty() || !DynamicFilterEvaluator.isBlocked(update, rules)
         }
@@ -255,9 +255,7 @@ public class SourceUpdateProcessor(
     private fun DeliveryTarget.shouldMentionAll(update: SourceUpdate): Boolean {
         if (subscriber.kind != TargetKind.GROUP) return false
         val policy = subscription?.policy ?: return false
-        return policy.mentionRules.any { rule ->
-            rule.mode == MentionMode.MENTION_ALL && rule.selector.matches(update)
-        }
+        return policy.shouldMentionAll(update)
     }
 
     private fun List<MessageBatch>.withMentionAllAtTail(): List<MessageBatch> {

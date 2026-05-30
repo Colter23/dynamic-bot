@@ -5,26 +5,26 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.PushTemplates
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.LiveStatus
 import top.colter.dynamic.core.data.MediaKind
-import top.colter.dynamic.core.data.MentionMode
-import top.colter.dynamic.core.data.MentionRule
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
+import top.colter.dynamic.core.data.SubscriptionEventKind
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetKind
-import top.colter.dynamic.core.data.UpdateSelector
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.event.MessageEvent
@@ -112,13 +112,8 @@ class SourceUpdateProcessorTest {
         val (publisher, _) = seededSubscription(
             "live-at-all",
             policy = SubscriptionPolicy(
-                updateSelectors = listOf(UpdateSelector.any()),
-                mentionRules = listOf(
-                    MentionRule(
-                        selector = UpdateSelector(eventTypes = setOf(SourceEventType.LIVE_STARTED)),
-                        mode = MentionMode.MENTION_ALL,
-                    ),
-                ),
+                enabledEvents = setOf(SubscriptionEventKind.LIVE_STARTED, SubscriptionEventKind.LIVE_ENDED),
+                mentionAllEvents = setOf(SubscriptionEventKind.LIVE_STARTED),
             ),
         )
         val listener = SourceUpdateProcessor(
@@ -155,9 +150,39 @@ class SourceUpdateProcessorTest {
         assertEquals("ended Live title", ended.message.batches.single().content.single().fallbackText)
     }
 
+    @Test
+    fun shouldSkipLiveEventWhenSubscriptionRuleDoesNotEnableIt() = runBlocking {
+        val eventBus = EventBus()
+        val (publisher, _) = seededSubscription(
+            "live-disabled",
+            policy = SubscriptionPolicy(enabledEvents = setOf(SubscriptionEventKind.LIVE_STARTED)),
+        )
+        val listener = SourceUpdateProcessor(
+            config = MainDynamicConfig(templates = PushTemplates(liveEnded = "ended {title}")),
+            eventBus = eventBus,
+        )
+        val received = captureMessageEvent(eventBus)
+        val startedAt = System.currentTimeMillis() / 1000 + 60
+
+        listener.process(
+            SourceUpdatePublishRequest(
+                sourcePlugin = "test",
+                update = liveUpdate(publisher, SourceEventType.LIVE_ENDED, startedAt + 60, startedAt),
+            ),
+        )
+
+        assertNull(withTimeoutOrNull(300) { received.await() })
+    }
+
     private fun seededSubscription(
         suffix: String,
-        policy: SubscriptionPolicy = SubscriptionPolicy(updateSelectors = listOf(UpdateSelector.any())),
+        policy: SubscriptionPolicy = SubscriptionPolicy(
+            enabledEvents = setOf(
+                SubscriptionEventKind.DYNAMIC,
+                SubscriptionEventKind.LIVE_STARTED,
+                SubscriptionEventKind.LIVE_ENDED,
+            ),
+        ),
     ): Pair<Publisher, Subscriber> {
         val tempDir = createTempDirectory("dynamic-bot-main-$suffix").toFile()
         PersistenceManager.init(tempDir.resolve("test.db").path)

@@ -15,24 +15,19 @@ import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.PushTemplates
 import top.colter.dynamic.core.data.DeliveryStatus
-import top.colter.dynamic.core.data.DynamicAttachmentKind
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicMetric
 import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.EntityState
-import top.colter.dynamic.core.data.FilterAction
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.MediaKind
-import top.colter.dynamic.core.data.MentionMode
-import top.colter.dynamic.core.data.MentionRule
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.Publisher
-import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
+import top.colter.dynamic.core.data.SubscriptionEventKind
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetKind
-import top.colter.dynamic.core.data.UpdateSelector
 import top.colter.dynamic.core.data.VideoAttachment
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
@@ -121,7 +116,7 @@ class SourceUpdateDynamicTest {
     }
 
     @Test
-    fun shouldAppendMentionAllByEventTypeAndAttachmentSelector() = runBlocking {
+    fun shouldAppendMentionAllByEventType() = runBlocking {
         initDb("dynamic-listener-at-all")
         val eventBus = EventBus()
         val publisher = createPublisher()
@@ -131,16 +126,8 @@ class SourceUpdateDynamicTest {
             atAllSubscriber.id,
             publisher.id,
             SubscriptionPolicy(
-                updateSelectors = listOf(UpdateSelector.default()),
-                mentionRules = listOf(
-                    MentionRule(
-                        selector = UpdateSelector(
-                            eventTypes = setOf(SourceEventType.DYNAMIC_CREATED),
-                            attachmentKinds = setOf(DynamicAttachmentKind.VIDEO),
-                        ),
-                        mode = MentionMode.MENTION_ALL,
-                    ),
-                ),
+                enabledEvents = setOf(SubscriptionEventKind.DYNAMIC),
+                mentionAllEvents = setOf(SubscriptionEventKind.DYNAMIC),
             ),
         )
         SubscriptionRepository.subscribe(normalSubscriber.id, publisher.id)
@@ -177,7 +164,6 @@ class SourceUpdateDynamicTest {
         val filteredSubscription = SubscriptionRepository.findBySubscriberAndPublisher(filteredSubscriber.id, publisher.id)!!
         DynamicFilterRuleRepository.addRule(
             filteredSubscription.id,
-            FilterAction.BLOCK,
             FilterCondition.TextContains("Demo content"),
         )
         var renderCalls = 0

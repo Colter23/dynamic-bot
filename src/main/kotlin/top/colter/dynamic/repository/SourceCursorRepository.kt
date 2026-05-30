@@ -123,6 +123,14 @@ public object SourceCursorRepository {
         }
     }
 
+    public fun findAll(): List<SourceCursor> {
+        return transaction {
+            SourceCursorTable
+                .selectAll()
+                .map { it.toSourceCursor() }
+        }
+    }
+
     private fun updateRecentUpdateKeys(previous: SourceCursor?, updateKey: String): List<String> {
         val dedupe = LinkedHashSet(previous?.recentUpdateKeys ?: emptyList())
         dedupe.add(updateKey)

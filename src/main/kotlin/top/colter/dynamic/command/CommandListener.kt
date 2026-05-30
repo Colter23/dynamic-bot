@@ -27,7 +27,6 @@ import top.colter.dynamic.core.data.CommandTarget
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicAttachmentKind
 import top.colter.dynamic.core.data.DynamicFilterRule
-import top.colter.dynamic.core.data.FilterAction
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
@@ -224,7 +223,7 @@ private fun resolveFilterTarget(
 
 private fun formatFilterRule(rule: DynamicFilterRule, publisher: Publisher? = null): String {
     val owner = publisher?.let { "${it.platformId.value}:${it.externalId}" } ?: "subscriptionId=${rule.subscriptionId}"
-    return "#${rule.id} $owner ${rule.action.name.lowercase()} ${rule.condition}"
+    return "#${rule.id} $owner block ${rule.condition}"
 }
 
 private data class ResolvedFilterTarget(
@@ -722,7 +721,6 @@ private class FilterAddElementCommandHandler(
 
         val result = DynamicFilterRuleRepository.addRule(
             subscriptionId = target.subscription.id,
-            action = FilterAction.BLOCK,
             condition = FilterCondition.HasAttachmentKind(element),
         )
         val state = if (result.created) "已创建" else "已存在"
@@ -764,7 +762,6 @@ private class FilterAddContentCommandHandler(
         val result = try {
             DynamicFilterRuleRepository.addRule(
                 subscriptionId = target.subscription.id,
-                action = FilterAction.BLOCK,
                 condition = condition,
             )
         } catch (e: IllegalArgumentException) {

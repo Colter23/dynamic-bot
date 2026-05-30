@@ -10,6 +10,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import kotlin.time.Duration.Companion.milliseconds
+import top.colter.dynamic.admin.AdminLogging
 import top.colter.dynamic.admin.AdminServer
 import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.command.CommandRegistry
@@ -79,6 +80,7 @@ public object DynamicApplication : CoroutineScope {
     private val taskScheduler: DefaultTaskScheduler = DefaultTaskScheduler(scope = this)
     private val configStore: MainConfigStore = MainConfigStore(configService)
     private val shutdownStarted: AtomicBoolean = AtomicBoolean(false)
+    private val startedAtEpochMillis: Long = System.currentTimeMillis()
 
     @Volatile
     private var shutdownCallback: (() -> Unit)? = null
@@ -89,6 +91,7 @@ public object DynamicApplication : CoroutineScope {
     }
 
     public fun run() {
+        AdminLogging.install()
         val dbPath = "data/dynamic.db"
         try {
             PersistenceManager.init(dbPath)
@@ -186,10 +189,11 @@ public object DynamicApplication : CoroutineScope {
             commandRegistry = commandRegistry,
             eventBus = eventBus,
             stopRequester = { reason -> requestStop(reason) },
+            startedAtEpochMillis = startedAtEpochMillis,
         )
         server.start()
         adminServer = server
-        logger.info { "管理后台已启动：http://${config.webAdmin.host}:${config.webAdmin.port}/admin" }
+        logger.info { "管理后台已启动：http://${config.webAdmin.host}:${config.webAdmin.port}" }
     }
 
     private fun generateAdminToken(): String {

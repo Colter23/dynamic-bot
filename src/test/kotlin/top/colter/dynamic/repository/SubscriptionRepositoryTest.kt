@@ -9,13 +9,9 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import top.colter.dynamic.core.data.DynamicAttachmentKind
-import top.colter.dynamic.core.data.MentionMode
-import top.colter.dynamic.core.data.MentionRule
-import top.colter.dynamic.core.data.SourceEventType
+import top.colter.dynamic.core.data.SubscriptionEventKind
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetKind
-import top.colter.dynamic.core.data.UpdateSelector
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.core.event.SubscriptionChangedEvent
@@ -66,7 +62,7 @@ class SubscriptionRepositoryTest {
     }
 
     @Test
-    fun shouldStoreUpdateSelectorsAndMentionRulesInPolicy() {
+    fun shouldStoreEventAndMentionAllRulesInPolicy() {
         initTestDatabase("dynamic-bot-core-subscription-policy-db")
         seedPublisher(id = 1, platformId = "bilibili", externalId = "10001")
         val subscriber = SubscriberRepository.upsert(
@@ -74,25 +70,15 @@ class SubscriptionRepositoryTest {
             name = "group-1",
         ).value
         val policy = SubscriptionPolicy(
-            updateSelectors = listOf(
-                UpdateSelector(
-                    eventTypes = setOf(SourceEventType.DYNAMIC_CREATED),
-                    attachmentKinds = setOf(DynamicAttachmentKind.VIDEO),
-                ),
-            ),
-            mentionRules = listOf(
-                MentionRule(
-                    selector = UpdateSelector(eventTypes = setOf(SourceEventType.LIVE_STARTED)),
-                    mode = MentionMode.MENTION_ALL,
-                ),
-            ),
+            enabledEvents = setOf(SubscriptionEventKind.DYNAMIC, SubscriptionEventKind.LIVE_STARTED),
+            mentionAllEvents = setOf(SubscriptionEventKind.LIVE_STARTED),
         )
 
         assertTrue(SubscriptionRepository.subscribe(subscriberId = subscriber.id, publisherId = 1, policy = policy).changed)
         val created = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, 1)!!
         assertEquals(policy, created.policy)
 
-        val updatedPolicy = policy.copy(filtersEnabled = false)
+        val updatedPolicy = policy.copy(enabledEvents = setOf(SubscriptionEventKind.LIVE_ENDED), mentionAllEvents = emptySet())
         val updated = SubscriptionRepository.updatePolicy(created.id, updatedPolicy)
         assertEquals(updatedPolicy, updated.policy)
         assertEquals(updatedPolicy, SubscriptionRepository.findAll().single().policy)

@@ -22,6 +22,8 @@ public object PersistenceManager {
     @Volatile
     private var currentPath: String? = null
 
+    public fun currentPath(): String? = currentPath
+
     public fun init(dbPath: String = DEFAULT_DB_PATH) {
         if (initialized && currentPath == dbPath) return
 

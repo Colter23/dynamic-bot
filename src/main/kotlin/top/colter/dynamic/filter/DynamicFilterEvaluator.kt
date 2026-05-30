@@ -2,29 +2,21 @@
 
 import top.colter.dynamic.core.data.CardAttachment
 import top.colter.dynamic.core.data.DynamicAttachmentKind
+import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.DynamicPayload
-import top.colter.dynamic.core.data.FilterAction
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.ImageAttachment
 import top.colter.dynamic.core.data.PollAttachment
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.VideoAttachment
-import top.colter.dynamic.core.data.DynamicFilterRule
 
 public object DynamicFilterEvaluator {
     public fun isBlocked(update: SourceUpdate, rules: Iterable<DynamicFilterRule>): Boolean {
-        val sortedRules = rules.filter { it.enabled }.sortedBy { it.priority }
-        var blocked = false
-        sortedRules.forEach { rule ->
-            if (matches(update, rule.condition)) {
-                blocked = rule.action == FilterAction.BLOCK
-            }
-        }
-        return blocked
+        return rules.any { matches(update, it.condition) }
     }
 
     public fun matches(update: SourceUpdate, rule: DynamicFilterRule): Boolean {
-        return rule.enabled && matches(update, rule.condition)
+        return matches(update, rule.condition)
     }
 
     public fun matches(update: SourceUpdate, condition: FilterCondition): Boolean {
@@ -41,9 +33,6 @@ public object DynamicFilterEvaluator {
                 val payload = update.payload as? DynamicPayload ?: return false
                 payload.references.any { reference -> condition.kind == null || reference.kind == condition.kind }
             }
-            is FilterCondition.AnyOf -> condition.conditions.any { matches(update, it) }
-            is FilterCondition.AllOf -> condition.conditions.all { matches(update, it) }
-            is FilterCondition.Not -> !matches(update, condition.condition)
         }
     }
 

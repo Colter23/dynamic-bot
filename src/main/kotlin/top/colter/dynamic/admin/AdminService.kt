@@ -11,13 +11,14 @@ import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicAttachmentKind
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.EntityState
-import top.colter.dynamic.core.data.FilterAction
+import top.colter.dynamic.core.data.MessageDelivery
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
-import top.colter.dynamic.core.data.MentionMode
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.PublisherKey
+import top.colter.dynamic.core.data.PublisherLiveStatus
+import top.colter.dynamic.core.data.SourceCursor
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.Subscription
 import top.colter.dynamic.core.data.SubscriptionPolicy
@@ -32,6 +33,7 @@ import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.plugin.PluginInfo
 import top.colter.dynamic.plugin.PluginManager
 import top.colter.dynamic.plugin.PluginReloadResult
+import top.colter.dynamic.plugin.PluginState
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.plugin.PublisherLoginProvider
@@ -39,6 +41,7 @@ import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.MessageDeliveryRepository
+import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.repository.PublisherLiveStatusRepository
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
@@ -63,6 +66,14 @@ public class AdminService(
     private val pluginReloader: (String) -> PluginReloadResult = {
         throw IllegalStateException("插件重载功能未配置")
     },
+    private val pluginStarter: (String) -> Unit = {
+        throw IllegalStateException("插件启动功能未配置")
+    },
+    private val pluginStopper: (String) -> Unit = {
+        throw IllegalStateException("插件停止功能未配置")
+    },
+    private val startedAtEpochMillis: Long = System.currentTimeMillis(),
+    private val databasePathProvider: () -> String? = { PersistenceManager.currentPath() },
 ) {
     public constructor(
         pluginManager: PluginManager,
@@ -73,6 +84,7 @@ public class AdminService(
         configService: ConfigService = YamlConfigService(),
         commandRegistry: CommandRegistry = CommandRegistry(),
         eventBus: EventBus = EventBus(),
+        startedAtEpochMillis: Long = System.currentTimeMillis(),
     ) : this(
         pluginProvider = { pluginManager.getAllPlugins() },
         messageSinkProvider = { pluginManager.getMessageSinkPlugins() },
@@ -86,6 +98,9 @@ public class AdminService(
         commandRegistry = commandRegistry,
         eventBus = eventBus,
         pluginReloader = pluginManager::reloadPlugin,
+        pluginStarter = pluginManager::startPlugin,
+        pluginStopper = pluginManager::stopPlugin,
+        startedAtEpochMillis = startedAtEpochMillis,
     )
 
     public fun overview(): OverviewResponse {
@@ -96,6 +111,84 @@ public class AdminService(
             deliveryFailed = MessageDeliveryRepository.countByStatus(DeliveryStatus.FAILED),
             plugins = plugins(),
         )
+    }
+
+    public suspend fun dashboard(): DashboardResponse {
+        val pluginDtos = plugins()
+        return DashboardResponse(
+            generatedAtEpochMillis = System.currentTimeMillis(),
+            system = systemStatus(),
+            commandCount = commandRegistry.listCommands().size,
+            publisherCount = PublisherRepository.findAll().size,
+            subscriberCount = SubscriberRepository.findAll().size,
+            subscriptionCount = SubscriptionRepository.countAll(),
+            pluginStateCounts = pluginDtos
+                .groupingBy { it.state }
+                .eachCount()
+                .toStateCounts(pluginDtos.size.toLong()),
+            deliveryStatusCounts = MessageDeliveryRepository.countsByStatus()
+                .map { (status, count) -> StateCountDto(status.name, count) },
+            plugins = pluginDtos,
+            platformLogins = platformLogins(),
+            recentLogs = logs(limit = 40).entries
+                .filter { it.level == "WARN" || it.level == "ERROR" }
+                .takeLast(8),
+            recentDeliveries = deliveries(status = "FAILED", limit = 8),
+        )
+    }
+
+    public fun systemStatus(): SystemStatusDto {
+        val runtime = Runtime.getRuntime()
+        val totalMemory = runtime.totalMemory()
+        val freeMemory = runtime.freeMemory()
+        val config = configProvider()
+        return SystemStatusDto(
+            startedAtEpochMillis = startedAtEpochMillis,
+            uptimeMs = (System.currentTimeMillis() - startedAtEpochMillis).coerceAtLeast(0),
+            javaVersion = System.getProperty("java.version") ?: "",
+            osName = System.getProperty("os.name") ?: "",
+            availableProcessors = runtime.availableProcessors(),
+            usedMemoryBytes = totalMemory - freeMemory,
+            freeMemoryBytes = freeMemory,
+            totalMemoryBytes = totalMemory,
+            maxMemoryBytes = runtime.maxMemory(),
+            databasePath = databasePathProvider(),
+            mainConfigPath = configService.resolvePath(MainDynamicConfig.CONFIG_ID).toString(),
+            webAdminEnabled = config.webAdmin.enabled,
+            webAdminHost = config.webAdmin.host,
+            webAdminPort = config.webAdmin.port,
+        )
+    }
+
+    public fun logs(
+        since: Long? = null,
+        level: String? = null,
+        logger: String? = null,
+        query: String? = null,
+        limit: Int? = null,
+    ): AdminLogResponse {
+        val snapshot = AdminLogBuffer.snapshot(
+            since = since,
+            level = level,
+            logger = logger,
+            query = query,
+            limit = limit ?: 300,
+        )
+        return AdminLogResponse(
+            entries = snapshot.entries.map { it.toDto() },
+            nextSince = snapshot.nextSince,
+            capacity = snapshot.capacity,
+        )
+    }
+
+    public fun deliveries(status: String? = null, limit: Int? = null): List<MessageDeliveryDto> {
+        val deliveryStatus = status
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { parseEnum<DeliveryStatus>(it, "status") }
+        return MessageDeliveryRepository
+            .findRecent(status = deliveryStatus, limit = limit ?: 50)
+            .map { it.toDto() }
     }
 
     public fun plugins(): List<PluginDto> {
@@ -114,6 +207,66 @@ public class AdminService(
         val response = result.toResponse()
         if (!result.success) throw PluginReloadFailedException(response)
         return response
+    }
+
+    public fun startPlugin(id: String): PluginLifecycleResponse {
+        val pluginId = id.trim()
+        require(pluginId.isNotBlank()) { "插件 ID 不能为空" }
+        val before = pluginInfoOrThrow(pluginId)
+        return when (before.state) {
+            PluginState.ACTIVE -> PluginLifecycleResponse(
+                changed = false,
+                success = true,
+                pluginId = pluginId,
+                pluginState = before.state.name,
+                message = "插件已在运行：$pluginId",
+            )
+            PluginState.FAILED -> throw IllegalStateException("失败插件需要重载后再启动：$pluginId")
+            PluginState.LOADED -> {
+                pluginStarter(pluginId)
+                val after = pluginInfoOrThrow(pluginId)
+                if (after.state != PluginState.ACTIVE) {
+                    throw IllegalStateException(after.errorText() ?: "插件启动后状态异常：${after.state.name}")
+                }
+                PluginLifecycleResponse(
+                    changed = true,
+                    success = true,
+                    pluginId = pluginId,
+                    pluginState = after.state.name,
+                    message = "插件已启动：$pluginId",
+                )
+            }
+        }
+    }
+
+    public fun stopPlugin(id: String): PluginLifecycleResponse {
+        val pluginId = id.trim()
+        require(pluginId.isNotBlank()) { "插件 ID 不能为空" }
+        val before = pluginInfoOrThrow(pluginId)
+        return when (before.state) {
+            PluginState.LOADED -> PluginLifecycleResponse(
+                changed = false,
+                success = true,
+                pluginId = pluginId,
+                pluginState = before.state.name,
+                message = "插件已停止：$pluginId",
+            )
+            PluginState.FAILED -> throw IllegalStateException("失败插件无法执行停止操作：$pluginId")
+            PluginState.ACTIVE -> {
+                pluginStopper(pluginId)
+                val after = pluginInfoOrThrow(pluginId)
+                if (after.state == PluginState.FAILED) {
+                    throw IllegalStateException(after.errorText() ?: "插件停止失败：$pluginId")
+                }
+                PluginLifecycleResponse(
+                    changed = true,
+                    success = true,
+                    pluginId = pluginId,
+                    pluginState = after.state.name,
+                    message = "插件已停止：$pluginId",
+                )
+            }
+        }
     }
 
     public suspend fun platformLogins(): List<PlatformLoginDto> {
@@ -144,9 +297,19 @@ public class AdminService(
     }
 
     public fun publishers(): List<PublisherDto> {
+        val subscriptions = SubscriptionRepository.findAll()
+        val subscriptionCounts = subscriptions.groupingBy { it.publisherId }.eachCount()
+        val liveStatuses = PublisherLiveStatusRepository.findAll().groupBy { it.publisherId }
+        val cursors = SourceCursorRepository.findAll().groupBy { it.publisherId }
         return PublisherRepository.findAll()
             .sortedWith(compareBy<Publisher> { it.platformId.value }.thenBy { it.externalId })
-            .map { it.toDto() }
+            .map { publisher ->
+                publisher.toDto(
+                    subscriptionCount = subscriptionCounts[publisher.id]?.toLong() ?: 0,
+                    liveStatuses = liveStatuses[publisher.id].orEmpty(),
+                    cursors = cursors[publisher.id].orEmpty(),
+                )
+            }
     }
 
     public fun updatePublisher(id: Int, request: UpdatePublisherRequest): PublisherDto {
@@ -184,9 +347,13 @@ public class AdminService(
     }
 
     public fun subscribers(): List<SubscriberDto> {
+        val subscriptions = SubscriptionRepository.findAll()
+        val subscriptionCounts = subscriptions.groupingBy { it.subscriberId }.eachCount()
         return SubscriberRepository.findAll()
             .sortedWith(compareBy<Subscriber> { it.platformId.value }.thenBy { it.kind.name }.thenBy { it.externalId })
-            .map { it.toDto() }
+            .map { subscriber ->
+                subscriber.toDto(subscriptionCount = subscriptionCounts[subscriber.id]?.toLong() ?: 0)
+            }
     }
 
     public fun subscriberTargetPlatforms(): List<SubscriberTargetPlatformDto> {
@@ -265,9 +432,11 @@ public class AdminService(
     public fun subscriptions(): List<SubscriptionDto> {
         val publishers = PublisherRepository.findAll().associateBy { it.id }
         val subscribers = SubscriberRepository.findAll().associateBy { it.id }
-        return SubscriptionRepository.findAll()
+        val subscriptions = SubscriptionRepository.findAll()
+        val rules = DynamicFilterRuleRepository.findBySubscriptionIds(subscriptions.map { it.id })
+        return subscriptions
             .sortedBy { it.id }
-            .map { it.toDto(publishers, subscribers) }
+            .map { it.toDto(publishers, subscribers, rules[it.id].orEmpty()) }
     }
 
     public suspend fun createSubscription(request: CreateSubscriptionRequest): CreateSubscriptionResponse {
@@ -302,9 +471,9 @@ public class AdminService(
         )
         val subscriberUpsert = SubscriberRepository.upsert(
             address = subscriberAddress,
-            name = request.subscriberName?.trim()?.takeIf { it.isNotBlank() } ?: subscriberExternalId,
+            name = resolveSubscriberDisplayName(subscriberAddress),
         )
-        requireMentionRulesTargetAllowed(subscriberUpsert.value, request.policy)
+        requireSubscriptionPolicyAllowed(subscriberUpsert.value, request.policy)
         val subscriptionResult = SubscriptionRepository.subscribe(
             subscriberId = subscriberUpsert.value.id,
             publisherId = publisherUpsert.value.id,
@@ -327,6 +496,7 @@ public class AdminService(
             subscription = subscription.toDto(
                 mapOf(publisherUpsert.value.id to publisherUpsert.value),
                 mapOf(subscriberUpsert.value.id to subscriberUpsert.value),
+                DynamicFilterRuleRepository.findBySubscriptionId(subscription.id),
             ),
             publisherCreated = publisherUpsert.created,
             publisherUpdated = publisherUpsert.updated,
@@ -341,11 +511,12 @@ public class AdminService(
         val subscription = SubscriptionRepository.findById(id) ?: throw NoSuchElementException("未找到订阅：$id")
         val subscriber = SubscriberRepository.findById(subscription.subscriberId)
             ?: throw NoSuchElementException("未找到消息目标：${subscription.subscriberId}")
-        requireMentionRulesTargetAllowed(subscriber, request.policy)
+        requireSubscriptionPolicyAllowed(subscriber, request.policy)
         val updated = SubscriptionRepository.updatePolicy(subscription.id, request.policy)
         return updated.toDto(
             publishers = PublisherRepository.findById(updated.publisherId)?.let { mapOf(it.id to it) }.orEmpty(),
             subscribers = mapOf(subscriber.id to subscriber),
+            filterRules = DynamicFilterRuleRepository.findBySubscriptionId(updated.id),
         )
     }
 
@@ -376,12 +547,10 @@ public class AdminService(
         return rules.sortedBy { it.id }.map { it.toDto() }
     }
 
-    public fun createFilterRule(request: CreateFilterRuleRequest): DynamicFilterRuleDto {
+    public fun createFilterRule(subscriptionId: Int, request: CreateFilterRuleRequest): DynamicFilterRuleDto {
         val result = DynamicFilterRuleRepository.addRule(
-            subscriptionId = request.subscriptionId,
-            action = parseEnum<FilterAction>(request.action, "action"),
+            subscriptionId = subscriptionId,
             condition = request.condition,
-            priority = request.priority,
         )
         return result.value.toDto()
     }
@@ -535,6 +704,11 @@ public class AdminService(
             .sortedBy { (_, plugin) -> plugin.configId }
     }
 
+    private fun pluginInfoOrThrow(pluginId: String): PluginInfo {
+        return pluginProvider().firstOrNull { it.descriptor.id == pluginId }
+            ?: throw NoSuchElementException("未找到插件：$pluginId")
+    }
+
     private fun applySubscriptionMutation(result: SubscriptionMutationResult): Boolean {
         result.event?.let { eventBus.broadcast(it) }
         return result.changed
@@ -561,6 +735,22 @@ public class AdminService(
             FollowState.UNSUPPORTED -> throw IllegalStateException("平台不支持关注状态检查：$platform")
         }
     }
+
+    private suspend fun resolveSubscriberDisplayName(address: TargetAddress): String {
+        for (handle in messageSinkProvider()) {
+            val sink = handle.instance
+            if (!sink.platformId.value.equals(address.platformId.value, ignoreCase = true)) continue
+            if (sink.supportedTargetKinds.isNotEmpty() && address.kind !in sink.supportedTargetKinds) continue
+            val candidate = sink.listMessageTargets(address.kind).firstOrNull { target ->
+                target.address.platformId.value.equals(address.platformId.value, ignoreCase = true) &&
+                    target.address.kind == address.kind &&
+                    target.address.externalId == address.externalId
+            }
+            val name = candidate?.name?.trim()?.takeIf { it.isNotBlank() }
+            if (name != null) return name
+        }
+        return address.externalId
+    }
 }
 
 public class PluginReloadFailedException(
@@ -578,6 +768,8 @@ private fun PluginInfo.toDto(): PluginDto = PluginDto(
     loadTime = loadTime,
 )
 
+private fun PluginInfo.errorText(): String? = error?.message ?: error?.javaClass?.name
+
 private fun PluginReloadResult.toResponse(): PluginReloadResponse = PluginReloadResponse(
     changed = changed,
     success = success,
@@ -592,7 +784,11 @@ private fun top.colter.dynamic.core.plugin.PublisherLoginAccount.toDto(): LoginA
     name = name,
 )
 
-private fun Publisher.toDto(): PublisherDto = PublisherDto(
+private fun Publisher.toDto(
+    subscriptionCount: Long = 0,
+    liveStatuses: List<PublisherLiveStatus> = emptyList(),
+    cursors: List<SourceCursor> = emptyList(),
+): PublisherDto = PublisherDto(
     id = id,
     platformId = platformId.value,
     kind = kind.name,
@@ -605,9 +801,12 @@ private fun Publisher.toDto(): PublisherDto = PublisherDto(
     bannerUri = banner?.uri,
     createTime = createTime,
     createUser = createUser,
+    subscriptionCount = subscriptionCount,
+    liveStatuses = liveStatuses.sortedBy { it.roomId }.map { it.toDto() },
+    cursors = cursors.sortedWith(compareBy<SourceCursor> { it.sourceKey }.thenBy { it.eventType.value }).map { it.toDto() },
 )
 
-private fun Subscriber.toDto(): SubscriberDto = SubscriberDto(
+private fun Subscriber.toDto(subscriptionCount: Long = 0): SubscriberDto = SubscriberDto(
     id = id,
     platformId = platformId.value,
     targetKind = kind.name,
@@ -619,6 +818,7 @@ private fun Subscriber.toDto(): SubscriberDto = SubscriberDto(
     state = state.name,
     createTime = createTime,
     createUser = createUser,
+    subscriptionCount = subscriptionCount,
 )
 
 private fun MessageTargetCandidate.toDto(info: PluginInfo): SubscriberTargetDto = SubscriberTargetDto(
@@ -633,6 +833,7 @@ private fun MessageTargetCandidate.toDto(info: PluginInfo): SubscriberTargetDto 
 private fun Subscription.toDto(
     publishers: Map<Int, Publisher>,
     subscribers: Map<Int, Subscriber>,
+    filterRules: List<DynamicFilterRule> = emptyList(),
 ): SubscriptionDto = SubscriptionDto(
     id = id,
     subscriberId = subscriberId,
@@ -643,17 +844,70 @@ private fun Subscription.toDto(
     policy = policy,
     subscriber = subscribers[subscriberId]?.toDto(),
     publisher = publishers[publisherId]?.toDto(),
+    filterRuleCount = filterRules.size,
+    filterRules = filterRules.sortedBy { it.id }.map { it.toDto() },
 )
 
 private fun DynamicFilterRule.toDto(): DynamicFilterRuleDto = DynamicFilterRuleDto(
     id = id,
     subscriptionId = subscriptionId,
-    action = action.name,
     condition = condition,
-    priority = priority,
-    enabled = enabled,
     createdAtEpochSeconds = createdAtEpochSeconds,
 )
+
+private fun SourceCursor.toDto(): SourceCursorDto = SourceCursorDto(
+    publisherId = publisherId,
+    sourceKey = sourceKey,
+    eventType = eventType.value,
+    lastSeenUpdateKey = lastSeenUpdateKey,
+    lastSeenAtEpochSeconds = lastSeenAtEpochSeconds,
+)
+
+private fun PublisherLiveStatus.toDto(): PublisherLiveStatusDto = PublisherLiveStatusDto(
+    publisherId = publisherId,
+    roomId = roomId,
+    status = status.name,
+    title = title,
+    coverUri = cover?.uri,
+    area = area,
+    startedAtEpochSeconds = startedAtEpochSeconds,
+    lastObservedAtEpochSeconds = lastObservedAtEpochSeconds,
+)
+
+private fun MessageDelivery.toDto(): MessageDeliveryDto = MessageDeliveryDto(
+    id = id,
+    messageId = messageId,
+    sourceUpdateKey = sourceUpdateKey?.stableValue(),
+    renderVariant = renderVariant,
+    platformId = target.platformId.value,
+    targetKind = target.kind.name,
+    targetId = target.externalId,
+    targetKey = target.stableValue(),
+    status = status.name,
+    attempts = attempts,
+    sinkMessageId = sinkMessageId,
+    lastError = lastError,
+    nextAttemptAtEpochSeconds = nextAttemptAtEpochSeconds,
+    lockedUntilEpochSeconds = lockedUntilEpochSeconds,
+    createdAtEpochSeconds = createdAtEpochSeconds,
+    updatedAtEpochSeconds = updatedAtEpochSeconds,
+)
+
+private fun AdminLogRecord.toDto(): AdminLogEntryDto = AdminLogEntryDto(
+    seq = seq,
+    timestampEpochMillis = timestampEpochMillis,
+    level = level,
+    loggerName = loggerName,
+    threadName = threadName,
+    message = message,
+    throwable = throwable,
+)
+
+private fun Map<String, Int>.toStateCounts(total: Long): List<StateCountDto> {
+    val counts = map { (state, count) -> StateCountDto(state, count.toLong()) }
+        .sortedBy { it.state }
+    return listOf(StateCountDto("TOTAL", total)) + counts
+}
 
 private inline fun <reified T : Enum<T>> parseEnum(value: String, fieldName: String): T {
     val normalized = value.trim()
@@ -663,11 +917,16 @@ private inline fun <reified T : Enum<T>> parseEnum(value: String, fieldName: Str
         )
 }
 
-private fun requireMentionRulesTargetAllowed(subscriber: Subscriber, policy: SubscriptionPolicy) {
-    val mentionsAll = policy.mentionRules.any { it.mode == MentionMode.MENTION_ALL }
-    if (!mentionsAll) return
+private fun requireSubscriptionPolicyAllowed(subscriber: Subscriber, policy: SubscriptionPolicy) {
+    require(policy.enabledEvents.isNotEmpty()) {
+        "订阅规则至少需要启用一个事件"
+    }
+    require(policy.mentionAllEvents.all { it in policy.enabledEvents }) {
+        "@全体事件必须先启用接收"
+    }
+    if (policy.mentionAllEvents.isEmpty()) return
     require(subscriber.kind == TargetKind.GROUP) {
-        "只有 GROUP 消息目标可以启用 MENTION_ALL"
+        "只有 GROUP 消息目标可以启用 @全体"
     }
 }
 

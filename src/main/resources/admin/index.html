@@ -3,102 +3,108 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>动态转发后台</title>
+  <title>动态转发运维台</title>
   <style>
     :root {
       --bg: #f4f6f8;
-      --surface: #ffffff;
-      --surface-2: #f9fbfc;
+      --panel: #ffffff;
+      --panel-soft: #f9fbfc;
       --text: #18212d;
-      --muted: #677489;
-      --line: #dde4ea;
-      --line-strong: #c8d2db;
+      --muted: #667085;
+      --line: #d9e1e8;
+      --line-strong: #b8c4cf;
       --accent: #0f766e;
-      --accent-2: #d97706;
-      --danger: #b42318;
-      --success: #147d4f;
+      --accent-soft: #e6f4f1;
+      --blue: #2563eb;
+      --amber: #b45309;
+      --red: #b42318;
+      --green: #147d4f;
+      --shadow: 0 16px 44px rgba(24, 33, 45, 0.12);
       --focus: #9edbd4;
-      --shadow: 0 18px 45px rgba(24, 33, 45, 0.09);
     }
     * { box-sizing: border-box; }
     [hidden] { display: none !important; }
     body {
       margin: 0;
-      color: var(--text);
       background: var(--bg);
+      color: var(--text);
       font: 14px/1.45 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
     }
-    button, input, select, textarea {
-      font: inherit;
-    }
+    h1, h2, h3, p { margin: 0; }
+    h1 { font-size: 21px; line-height: 1.18; }
+    h2 { font-size: 16px; line-height: 1.25; }
+    h3 { font-size: 14px; line-height: 1.25; }
+    button, input, select, textarea { font: inherit; }
     button {
       min-height: 34px;
       border: 1px solid transparent;
       border-radius: 7px;
       padding: 7px 11px;
-      cursor: pointer;
-      font-weight: 650;
       background: var(--accent);
       color: #fff;
+      font-weight: 700;
+      cursor: pointer;
       white-space: nowrap;
     }
     button:hover { filter: brightness(0.96); }
-    button:disabled { cursor: progress; opacity: 0.65; }
+    button:disabled { cursor: progress; opacity: 0.62; }
     button.secondary {
-      background: var(--surface);
-      border-color: var(--line-strong);
+      background: #fff;
       color: var(--text);
+      border-color: var(--line-strong);
     }
-    button.danger {
-      background: var(--danger);
-      color: #fff;
+    button.ghost {
+      background: transparent;
+      color: var(--text);
+      border-color: transparent;
     }
+    button.danger { background: var(--red); color: #fff; }
     input, select, textarea {
       width: 100%;
       min-height: 36px;
       border: 1px solid var(--line-strong);
       border-radius: 7px;
       padding: 8px 10px;
-      background: #fff;
       color: var(--text);
+      background: #fff;
     }
-    textarea { min-height: 92px; resize: vertical; }
+    textarea { min-height: 96px; resize: vertical; }
     input:focus, select:focus, textarea:focus, button:focus-visible {
       outline: 3px solid var(--focus);
       outline-offset: 1px;
     }
-    h1, h2, h3, p { margin: 0; }
-    h1 { font-size: 22px; line-height: 1.15; }
-    h2 { font-size: 16px; line-height: 1.2; }
-    h3 { font-size: 14px; line-height: 1.25; }
     .login-shell {
       min-height: 100vh;
       display: grid;
       place-items: center;
       padding: 24px;
-      background:
-        linear-gradient(135deg, rgba(15, 118, 110, 0.11), transparent 42%),
-        linear-gradient(315deg, rgba(217, 119, 6, 0.12), transparent 48%),
-        var(--bg);
     }
     .login-panel {
-      width: min(430px, 100%);
-      background: rgba(255, 255, 255, 0.92);
-      border: 1px solid var(--line);
-      border-radius: 10px;
+      width: min(420px, 100%);
+      display: grid;
+      gap: 14px;
       padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.95);
       box-shadow: var(--shadow);
-      backdrop-filter: blur(10px);
     }
-    .login-panel p {
-      margin: 8px 0 18px;
-      color: var(--muted);
+    .brand-mark {
+      width: 36px;
+      height: 36px;
+      display: grid;
+      place-items: center;
+      border-radius: 8px;
+      background: var(--accent);
+      color: #fff;
+      font-weight: 900;
     }
-    .login-form { display: grid; gap: 12px; }
+    .login-form { display: grid; gap: 10px; }
     .app-shell {
       min-height: 100vh;
       display: grid;
-      grid-template-columns: 256px minmax(0, 1fr);
+      grid-template-columns: 246px minmax(0, 1fr);
     }
     .sidebar {
       position: sticky;
@@ -107,70 +113,43 @@
       display: flex;
       flex-direction: column;
       border-right: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.94);
-      backdrop-filter: blur(10px);
-      z-index: 4;
+      background: rgba(255, 255, 255, 0.96);
+      z-index: 5;
     }
     .brand {
-      padding: 20px 18px 16px;
+      display: grid;
+      gap: 9px;
+      padding: 18px;
       border-bottom: 1px solid var(--line);
     }
-    .brand-mark {
-      width: 34px;
-      height: 34px;
-      display: inline-grid;
-      place-items: center;
-      margin-bottom: 12px;
-      border-radius: 8px;
-      background: var(--accent);
-      color: #fff;
-      font-weight: 800;
-      letter-spacing: 0;
-    }
-    .brand strong { display: block; font-size: 16px; }
+    .brand strong { font-size: 16px; }
     .brand span { color: var(--muted); font-size: 12px; }
     .nav {
       display: grid;
       gap: 4px;
-      padding: 14px 10px;
+      padding: 12px 10px;
     }
     .nav button {
       display: grid;
-      grid-template-columns: 28px 1fr;
+      grid-template-columns: 24px minmax(0, 1fr);
       align-items: center;
-      min-height: 42px;
+      min-height: 40px;
       padding: 8px 10px;
       border-color: transparent;
       background: transparent;
       color: var(--muted);
       text-align: left;
-      font-weight: 650;
-    }
-    .nav button:hover {
-      background: var(--surface-2);
-      color: var(--text);
-      filter: none;
     }
     .nav button.active {
-      background: #e8f5f3;
+      background: var(--accent-soft);
       color: var(--accent);
-    }
-    .nav-icon {
-      width: 22px;
-      height: 22px;
-      display: inline-grid;
-      place-items: center;
-      border-radius: 6px;
-      border: 1px solid currentColor;
-      font-size: 11px;
-      line-height: 1;
     }
     .sidebar-footer {
       margin-top: auto;
-      padding: 12px 10px 16px;
-      border-top: 1px solid var(--line);
       display: grid;
       gap: 8px;
+      padding: 12px 10px 16px;
+      border-top: 1px solid var(--line);
     }
     .workspace {
       min-width: 0;
@@ -180,163 +159,200 @@
     .topbar {
       position: sticky;
       top: 0;
-      z-index: 3;
+      z-index: 4;
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 16px;
-      padding: 16px 22px;
+      gap: 12px;
+      padding: 15px 20px;
       border-bottom: 1px solid var(--line);
-      background: rgba(244, 246, 248, 0.88);
+      background: rgba(244, 246, 248, 0.92);
       backdrop-filter: blur(10px);
     }
     .topbar-title {
       display: grid;
-      gap: 3px;
+      gap: 2px;
       min-width: 0;
     }
     .topbar-title span {
       color: var(--muted);
       font-size: 13px;
+      overflow-wrap: anywhere;
     }
     .top-actions {
       display: flex;
-      align-items: center;
       gap: 8px;
+      align-items: center;
       flex-wrap: wrap;
     }
     .menu-button { display: none; }
     main {
       min-width: 0;
-      padding: 22px;
+      padding: 18px;
     }
-    .message {
-      min-height: 20px;
-      margin-bottom: 12px;
-      color: var(--muted);
-    }
-    .message.error { color: var(--danger); }
     .page {
       display: grid;
-      gap: 16px;
+      gap: 14px;
     }
-    .page[hidden] { display: none !important; }
-    .page-grid {
+    .grid {
       display: grid;
       grid-template-columns: repeat(12, minmax(0, 1fr));
-      gap: 16px;
+      gap: 14px;
     }
     .panel {
       min-width: 0;
-      background: var(--surface);
+      padding: 14px;
       border: 1px solid var(--line);
-      border-radius: 10px;
-      padding: 16px;
-      box-shadow: 0 8px 28px rgba(24, 33, 45, 0.045);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 8px 26px rgba(24, 33, 45, 0.045);
     }
     .panel.full { grid-column: span 12; }
     .panel.half { grid-column: span 6; }
     .panel.third { grid-column: span 4; }
     .panel-head {
       display: flex;
-      align-items: flex-start;
       justify-content: space-between;
+      align-items: flex-start;
       gap: 12px;
       margin-bottom: 12px;
     }
-    .panel-head p {
-      margin-top: 4px;
-      color: var(--muted);
-      font-size: 13px;
-    }
+    .panel-head p { color: var(--muted); font-size: 12px; margin-top: 3px; }
     .stats {
       display: grid;
-      grid-template-columns: repeat(4, minmax(120px, 1fr));
-      gap: 12px;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      gap: 10px;
     }
     .stat {
-      padding: 14px;
+      min-width: 0;
+      padding: 13px;
       border: 1px solid var(--line);
-      border-radius: 10px;
-      background: var(--surface-2);
+      border-radius: 8px;
+      background: var(--panel);
     }
     .stat b {
       display: block;
-      margin-bottom: 3px;
-      font-size: 26px;
+      font-size: 25px;
       line-height: 1.05;
+      margin-bottom: 4px;
     }
     .stat span { color: var(--muted); font-size: 12px; }
-    .forms {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      gap: 11px;
-    }
-    .form-field {
-      display: grid;
-      gap: 5px;
-    }
-    .form-field label {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 650;
-    }
-    .full-width { grid-column: 1 / -1; }
-    .form-actions {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      align-self: end;
-    }
     .toolbar {
       display: flex;
-      align-items: end;
       justify-content: space-between;
-      gap: 12px;
+      align-items: end;
+      gap: 10px;
       flex-wrap: wrap;
-      margin-bottom: 12px;
-    }
-    .toolbar .form-field {
-      min-width: min(360px, 100%);
-      flex: 1 1 320px;
+      margin-bottom: 10px;
     }
     .toolbar-actions {
       display: flex;
-      align-items: center;
       gap: 8px;
+      align-items: center;
       flex-wrap: wrap;
     }
-    .field-hint {
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      align-items: end;
+      margin-bottom: 10px;
+    }
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+    .field {
+      display: grid;
+      gap: 5px;
+      min-width: 0;
+    }
+    .field.full { grid-column: 1 / -1; }
+    .field label {
       color: var(--muted);
       font-size: 12px;
+      font-weight: 700;
+    }
+    .checks {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .check {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 34px;
+      font-weight: 650;
+    }
+    .check input {
+      width: 16px;
+      height: 16px;
+      min-height: 0;
+      padding: 0;
+    }
+    .rule-matrix {
+      display: grid;
+      gap: 8px;
+    }
+    .rule-row {
+      display: grid;
+      grid-template-columns: minmax(96px, 1fr) auto auto;
+      align-items: center;
+      gap: 12px;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+    }
+    .rule-row .check {
+      min-height: 24px;
+    }
+    .inline-note {
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
     }
     .table-wrap {
       overflow: auto;
       border: 1px solid var(--line);
-      border-radius: 9px;
+      border-radius: 8px;
       background: #fff;
     }
     table {
       width: 100%;
-      min-width: 760px;
+      min-width: 820px;
       border-collapse: collapse;
     }
     th, td {
-      padding: 10px 12px;
+      padding: 10px 11px;
       border-bottom: 1px solid var(--line);
       text-align: left;
       vertical-align: middle;
     }
     th {
-      background: var(--surface-2);
+      background: var(--panel-soft);
       color: var(--muted);
       font-size: 12px;
-      font-weight: 750;
-      text-transform: uppercase;
+      font-weight: 800;
     }
     tr:last-child td { border-bottom: 0; }
-    .table-actions {
+    .primary-line {
+      display: block;
+      max-width: 340px;
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+    .sub-line {
+      display: block;
+      max-width: 380px;
+      color: var(--muted);
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+    .row-actions {
       display: flex;
       align-items: center;
       gap: 6px;
@@ -351,305 +367,140 @@
       background: #edf1f5;
       color: #405064;
       font-size: 12px;
-      font-weight: 700;
+      font-weight: 800;
+      white-space: nowrap;
     }
-    .pill.ok { background: #e7f7ef; color: var(--success); }
-    .pill.bad { background: #fdeceb; color: var(--danger); }
-    .pill.warn { background: #fff3df; color: var(--accent-2); }
-    .muted { color: var(--muted); }
-    .image-cell {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      min-width: 0;
+    .pill.ok { background: #e7f7ef; color: var(--green); }
+    .pill.bad { background: #fdeceb; color: var(--red); }
+    .pill.warn { background: #fff3df; color: var(--amber); }
+    .pill.info { background: #eaf1ff; color: var(--blue); }
+    .tag-list {
+      display: flex;
+      gap: 5px;
+      flex-wrap: wrap;
     }
-    .thumb {
-      width: 44px;
-      height: 28px;
+    .avatar {
+      width: 34px;
+      height: 34px;
+      border-radius: 8px;
       object-fit: cover;
       border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--surface-2);
+      background: var(--panel-soft);
     }
-    .platform-list {
+    .identity-cell {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 14px;
-      align-items: stretch;
-    }
-    .platform-card {
-      min-width: 0;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-      padding: 15px;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: #fff;
-      box-shadow: 0 8px 24px rgba(24, 33, 45, 0.045);
-    }
-    .platform-card-head {
-      display: flex;
-      align-items: flex-start;
-      justify-content: space-between;
-      gap: 12px;
-    }
-    .platform-title {
-      display: grid;
-      gap: 5px;
-      min-width: 0;
-    }
-    .platform-title h3 {
-      font-size: 16px;
-      overflow-wrap: anywhere;
-    }
-    .platform-meta {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
-    .platform-account {
-      display: grid;
-      gap: 4px;
-      padding: 10px;
-      border-radius: 8px;
-      background: var(--surface-2);
-    }
-    .platform-account strong {
-      overflow-wrap: anywhere;
-    }
-    .platform-actions {
-      margin-top: auto;
-      display: flex;
+      grid-template-columns: 38px minmax(0, 1fr);
       align-items: center;
       gap: 8px;
-      flex-wrap: wrap;
+      min-width: 0;
     }
-    .platform-actions button {
-      flex: 1 1 94px;
-    }
-    .platform-message {
-      min-height: 20px;
-      color: var(--muted);
-    }
-    .platform-message.error { color: var(--danger); }
-    .qr-box {
-      margin-top: 12px;
-      display: flex;
-      align-items: center;
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
       gap: 12px;
-      flex-wrap: wrap;
     }
-    .qr-box img {
-      width: 220px;
-      height: 220px;
+    .card {
+      display: grid;
+      gap: 10px;
+      padding: 13px;
       border: 1px solid var(--line);
-      border-radius: 10px;
+      border-radius: 8px;
       background: #fff;
+    }
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: flex-start;
+    }
+    .log-row {
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
     }
     .empty {
       padding: 18px;
       color: var(--muted);
       text-align: center;
     }
-    .config-shell {
-      display: grid;
-      grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-      gap: 16px;
-      align-items: start;
-    }
-    .config-list {
-      display: grid;
-      gap: 8px;
-    }
-    .config-list button {
-      display: grid;
-      gap: 3px;
-      width: 100%;
-      min-width: 0;
-      min-height: 48px;
-      text-align: left;
-      white-space: normal;
-      background: var(--surface);
-      color: var(--text);
-      border-color: var(--line-strong);
-    }
-    .config-list button.active {
-      border-color: var(--accent);
-      background: #e8f5f3;
-      color: var(--accent);
-    }
-    .config-list small {
-      color: var(--muted);
-      font-weight: 500;
-      overflow-wrap: anywhere;
-    }
-    .config-list strong {
-      min-width: 0;
-      overflow-wrap: anywhere;
-    }
-    .config-section {
-      display: grid;
-      gap: 12px;
-      padding-top: 12px;
-      border-top: 1px solid var(--line);
-    }
-    .config-section:first-child {
-      padding-top: 0;
-      border-top: 0;
-    }
-    .config-section h3 {
-      color: var(--text);
-      font-size: 15px;
-    }
-    .config-form {
-      display: grid;
-      gap: 16px;
-    }
-    .check-control {
-      width: fit-content;
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      min-height: 36px;
-      color: var(--text);
-      font-weight: 650;
-    }
-    .check-control input {
-      width: 17px;
-      height: 17px;
-      min-height: 0;
-      padding: 0;
-    }
-    .restart-note {
-      margin-bottom: 12px;
-      padding: 10px 12px;
-      border: 1px solid #f1d29b;
-      border-radius: 8px;
-      background: #fff8eb;
-      color: #7a4b00;
-    }
-    .restart-mark {
-      margin-left: 5px;
-      color: var(--accent-2);
-      font-weight: 900;
-    }
-    .config-table-wrap {
-      overflow: auto;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-    }
-    .config-table-wrap table {
-      min-width: 0;
-      table-layout: fixed;
-    }
-    .config-table-wrap td {
-      vertical-align: top;
-    }
-    .config-table-wrap th:last-child,
-    .config-table-wrap td:last-child {
-      width: 136px;
-    }
-    .config-table-text {
-      min-height: 22px;
-      white-space: pre-wrap;
-      overflow-wrap: anywhere;
-      color: var(--text);
-    }
-    .config-table-wrap .table-actions {
-      justify-content: flex-end;
-    }
-    .config-array {
-      display: grid;
-      gap: 8px;
-    }
-    .config-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)) auto;
-      gap: 8px;
-      align-items: end;
-    }
-    .config-row button {
-      min-width: 78px;
-    }
-    .config-message {
+    .message {
       min-height: 20px;
       color: var(--muted);
+      overflow-wrap: anywhere;
     }
-    .config-message.error {
-      color: var(--danger);
-    }
+    .message.error { color: var(--red); }
     .modal-backdrop {
       position: fixed;
       inset: 0;
+      z-index: 20;
       display: grid;
       place-items: center;
       padding: 22px;
-      background: rgba(24, 33, 45, 0.36);
-      z-index: 10;
+      background: rgba(24, 33, 45, 0.38);
     }
     .modal {
-      width: min(420px, 100%);
-      background: var(--surface);
-      border-radius: 10px;
+      width: min(760px, 100%);
+      max-height: min(86vh, 900px);
+      display: grid;
+      grid-template-rows: auto minmax(0, 1fr) auto;
       border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
       box-shadow: var(--shadow);
-      padding: 18px;
     }
-    .modal h2 { margin-bottom: 12px; }
-    .modal.login-modal {
-      width: min(460px, 100%);
+    .modal.small { width: min(460px, 100%); }
+    .modal.wide { width: min(980px, 100%); }
+    .modal-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--line);
     }
-    .modal.action-modal {
-      width: min(560px, 100%);
-    }
-    .modal.config-item-modal {
-      width: min(600px, 100%);
+    .modal-body {
+      min-width: 0;
+      overflow: auto;
+      padding: 16px;
     }
     .modal-actions {
       display: flex;
       justify-content: flex-end;
+      align-items: center;
       gap: 8px;
-      margin-top: 14px;
+      padding: 12px 16px;
+      border-top: 1px solid var(--line);
+      background: var(--panel-soft);
     }
     .toast-stack {
       position: fixed;
-      right: 18px;
-      top: 18px;
-      width: min(360px, calc(100vw - 36px));
+      top: 16px;
+      right: 16px;
+      z-index: 40;
+      width: min(360px, calc(100vw - 32px));
       display: grid;
-      gap: 10px;
-      z-index: 30;
+      gap: 8px;
       pointer-events: none;
     }
     .toast {
-      display: grid;
-      gap: 4px;
-      padding: 12px 13px;
+      padding: 11px 12px;
       border: 1px solid #b7d9d4;
-      border-radius: 9px;
-      background: rgba(255, 255, 255, 0.96);
-      color: var(--text);
+      border-radius: 8px;
+      background: rgba(255,255,255,0.96);
       box-shadow: var(--shadow);
       pointer-events: auto;
       cursor: pointer;
     }
-    .toast strong {
-      color: var(--accent);
-      font-size: 13px;
+    .toast.error { border-color: #f1b8b2; }
+    .toast strong { display: block; color: var(--accent); font-size: 13px; }
+    .toast.error strong { color: var(--red); }
+    .toast span { color: var(--muted); overflow-wrap: anywhere; }
+    @media (max-width: 1180px) {
+      .stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .panel.half, .panel.third { grid-column: span 12; }
     }
-    .toast span {
-      color: var(--muted);
-      overflow-wrap: anywhere;
-    }
-    .toast.error {
-      border-color: #f1b8b2;
-    }
-    .toast.error strong {
-      color: var(--danger);
-    }
-    @media (max-width: 1080px) {
+    @media (max-width: 880px) {
       .app-shell { grid-template-columns: 1fr; }
       .sidebar {
         position: fixed;
@@ -660,16 +511,12 @@
       }
       body.sidebar-open .sidebar { transform: translateX(0); }
       .menu-button { display: inline-flex; }
-      .topbar { align-items: flex-start; }
-    }
-    @media (max-width: 820px) {
-      main { padding: 14px; }
-      .topbar { padding: 14px; flex-direction: column; }
+      .topbar { align-items: flex-start; flex-direction: column; }
       .top-actions { width: 100%; }
-      .panel.half, .panel.third { grid-column: span 12; }
+      main { padding: 14px; }
       .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .config-shell { grid-template-columns: 1fr; }
-      table { min-width: 640px; }
+      .form-grid { grid-template-columns: 1fr; }
+      table { min-width: 720px; }
     }
   </style>
 </head>
@@ -677,10 +524,12 @@
   <section id="loginView" class="login-shell">
     <div class="login-panel">
       <div class="brand-mark">动</div>
-      <h1>动态转发后台</h1>
-      <p>输入本机管理 token 后进入控制台。</p>
+      <div>
+        <h1>动态转发运维台</h1>
+        <p class="sub-line">本地管理入口</p>
+      </div>
       <form id="loginForm" class="login-form">
-        <input id="loginToken" type="password" placeholder="管理 token" autocomplete="current-password" autofocus>
+        <input id="loginToken" type="password" placeholder="管理 Token" autocomplete="current-password" autofocus>
         <button id="loginButton" type="submit">登录</button>
         <div id="loginMessage" class="message"></div>
       </form>
@@ -691,19 +540,21 @@
     <aside class="sidebar" id="sidebar">
       <div class="brand">
         <div class="brand-mark">动</div>
-        <strong>动态转发后台</strong>
-        <span>本机管理控制台</span>
+        <strong>动态转发运维台</strong>
+        <span>本地控制台</span>
       </div>
-      <nav class="nav" aria-label="后台功能">
-        <button class="active" data-nav="overview"><span class="nav-icon">览</span><span>概览</span></button>
-        <button data-nav="login"><span class="nav-icon">登</span><span>平台登录</span></button>
-        <button data-nav="subscriptions"><span class="nav-icon">订</span><span>订阅管理</span></button>
-        <button data-nav="entities"><span class="nav-icon">源</span><span>发布者与目标</span></button>
-        <button data-nav="filters"><span class="nav-icon">滤</span><span>过滤规则</span></button>
-        <button data-nav="configs"><span class="nav-icon">Cfg</span><span>配置</span></button>
+      <nav class="nav" aria-label="运维台导航">
+        <button data-nav="dashboard" class="active"><span>仪</span><span>仪表盘</span></button>
+        <button data-nav="plugins"><span>插</span><span>插件管理</span></button>
+        <button data-nav="login"><span>登</span><span>平台登录</span></button>
+        <button data-nav="subscriptions"><span>订</span><span>订阅管理</span></button>
+        <button data-nav="entities"><span>源</span><span>发布者与目标</span></button>
+        <button data-nav="logs"><span>志</span><span>日志查看</span></button>
+        <button data-nav="configs"><span>配</span><span>配置</span></button>
+        <button data-nav="system"><span>系</span><span>系统设置</span></button>
       </nav>
       <div class="sidebar-footer">
-        <button class="secondary" id="refresh">刷新</button>
+        <button class="secondary" id="refreshPage">刷新</button>
         <button class="secondary" id="logout">退出登录</button>
       </div>
     </aside>
@@ -712,1831 +563,1060 @@
       <header class="topbar">
         <button class="secondary menu-button" id="mobileMenu">菜单</button>
         <div class="topbar-title">
-          <h1 id="pageTitle">概览</h1>
-          <span id="pageSubtitle">运行状态与插件健康情况。</span>
+          <h1 id="pageTitle">仪表盘</h1>
+          <span id="pageSubtitle">运行状态</span>
         </div>
         <div class="top-actions">
-          <span class="pill" id="connectionState">本机</span>
+          <span class="pill info" id="connectionState">本地</span>
           <button class="danger" id="stopApplication">停止主项目</button>
         </div>
       </header>
-
-      <main>
-        <section class="page" data-page="overview">
-          <div class="stats" id="stats"></div>
-          <div class="page-grid">
-            <section class="panel full">
-              <div class="panel-head">
-                <div>
-                  <h2>插件</h2>
-                  <p>查看已加载插件的状态与能力。</p>
-                </div>
-              </div>
-              <div class="table-wrap"><table id="plugins"></table></div>
-            </section>
-          </div>
-        </section>
-
-        <section class="page" data-page="login" hidden>
-          <div class="page-grid">
-            <section class="panel full">
-              <div class="panel-head">
-                <div>
-                  <h2>平台登录</h2>
-                  <p>按动态源平台查看登录状态，并选择对应登录方式。</p>
-                </div>
-                <button class="secondary" id="refreshPlatformLogins">刷新登录状态</button>
-              </div>
-              <div id="platformLoginList" class="platform-list"></div>
-            </section>
-          </div>
-        </section>
-
-        <section class="page" data-page="subscriptions" hidden>
-          <div class="page-grid">
-            <section class="panel full">
-              <div class="panel-head">
-                <div>
-                  <h2>订阅关系</h2>
-                  <p>当前发布者到消息目标的转发关系。</p>
-                </div>
-                <button id="openCreateSubscription">创建订阅</button>
-              </div>
-              <div class="table-wrap"><table id="subscriptions"></table></div>
-            </section>
-          </div>
-        </section>
-
-        <section class="page" data-page="entities" hidden>
-          <div class="page-grid">
-            <section class="panel full">
-              <div class="panel-head">
-                <div>
-                  <h2>发布者</h2>
-                  <p>动态源账号，只读查看当前名称和状态。</p>
-                </div>
-              </div>
-              <div class="table-wrap"><table id="publishers"></table></div>
-            </section>
-            <section class="panel full">
-              <div class="panel-head">
-                <div>
-                  <h2>消息目标</h2>
-                  <p>接收渲染消息的群、用户和频道，只读查看当前名称和状态。</p>
-                </div>
-              </div>
-              <div class="table-wrap"><table id="subscribers"></table></div>
-            </section>
-          </div>
-        </section>
-
-        <section class="page" data-page="filters" hidden>
-          <div class="page-grid">
-            <section class="panel full">
-              <div class="panel-head">
-                <div>
-                  <h2>过滤规则</h2>
-                  <p>选择订阅查看规则，或查看全部规则。</p>
-                </div>
-                <button id="openAddFilter">添加过滤规则</button>
-              </div>
-              <div class="toolbar">
-                <div class="form-field">
-                  <label for="filterScopeSubscriptionId">订阅范围</label>
-                  <select id="filterScopeSubscriptionId">
-                    <option value="">全部订阅</option>
-                  </select>
-                </div>
-                <div class="toolbar-actions">
-                  <button class="secondary" id="loadFilters">加载</button>
-                  <button class="danger" id="clearFilters">清空当前订阅</button>
-                </div>
-              </div>
-              <div class="table-wrap"><table id="filters"></table></div>
-            </section>
-          </div>
-        </section>
-
-        <section class="page" data-page="configs" hidden>
-          <div class="config-shell">
-            <section class="panel">
-              <div class="panel-head">
-                <div>
-                  <h2>配置文件</h2>
-                  <p>选择主项目或支持表单配置的插件。</p>
-                </div>
-              </div>
-              <div id="configList" class="config-list"></div>
-            </section>
-            <section class="panel">
-              <div class="panel-head">
-                <div>
-                  <h2 id="configTitle">配置</h2>
-                  <p id="configSubtitle">表单保存后会写回 YAML。</p>
-                </div>
-                <button id="saveConfig">保存配置</button>
-              </div>
-              <div id="configRestartHint" class="restart-note" hidden>带 <span class="restart-mark">⚠️</span> 标记的配置保存后需要重启对应组件。</div>
-              <div id="configMessage" class="config-message"></div>
-              <div id="configReloadActions" class="form-actions" hidden>
-                <button type="button" id="reloadConfigPlugin">热重启插件</button>
-              </div>
-              <form id="configForm" class="config-form"></form>
-            </section>
-          </div>
-        </section>
-      </main>
+      <main id="content"></main>
     </div>
   </section>
 
-  <div id="platformLoginModal" class="modal-backdrop" hidden>
-    <div class="modal login-modal" role="dialog" aria-modal="true" aria-labelledby="platformLoginTitle">
-      <h2 id="platformLoginTitle">平台登录</h2>
-      <div id="platformLoginBody"></div>
-      <div id="platformLoginMessage" class="message"></div>
+  <div id="modalBackdrop" class="modal-backdrop" hidden>
+    <div id="modalBox" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+      <div class="modal-head">
+        <h2 id="modalTitle"></h2>
+        <button class="ghost" id="modalClose" title="关闭">×</button>
+      </div>
+      <div id="modalBody" class="modal-body"></div>
       <div class="modal-actions">
-        <button class="secondary" id="cancelPlatformLogin">关闭</button>
-        <button id="confirmPlatformLogin">提交</button>
+        <span id="modalMessage" class="message"></span>
+        <button class="secondary" id="modalCancel">取消</button>
+        <button id="modalConfirm">保存</button>
       </div>
     </div>
   </div>
-
-  <div id="actionModal" class="modal-backdrop" hidden>
-    <div class="modal action-modal" role="dialog" aria-modal="true" aria-labelledby="actionTitle">
-      <h2 id="actionTitle">操作</h2>
-      <div id="actionBody"></div>
-      <div id="actionMessage" class="message"></div>
-      <div class="modal-actions">
-        <button class="secondary" id="cancelAction">取消</button>
-        <button id="confirmAction">保存</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="configItemModal" class="modal-backdrop" hidden>
-    <div class="modal config-item-modal" role="dialog" aria-modal="true" aria-labelledby="configItemTitle">
-      <h2 id="configItemTitle">添加配置项</h2>
-      <div id="configItemBody"></div>
-      <div id="configItemMessage" class="message"></div>
-      <div class="modal-actions">
-        <button class="secondary" id="cancelConfigItem">取消</button>
-        <button id="confirmConfigItem">添加</button>
-      </div>
-    </div>
-  </div>
-
-  <div id="toastStack" class="toast-stack" aria-live="polite"></div>
+  <div id="toastStack" class="toast-stack"></div>
 
   <script>
+    const $ = id => document.getElementById(id);
+    const tokenKey = "dynamicBotAdminToken";
+    const pages = {
+      dashboard: ["仪表盘", "运行状态"],
+      plugins: ["插件管理", "生命周期与能力"],
+      login: ["平台登录", "动态源账号状态"],
+      subscriptions: ["订阅管理", "订阅策略与过滤规则"],
+      entities: ["发布者与目标", "来源与消息出口"],
+      logs: ["日志查看", "进程内实时日志"],
+      configs: ["配置", "主项目与插件配置"],
+      system: ["系统设置", "运行信息与操作"]
+    };
     const state = {
-      token: localStorage.getItem("dynamicBotAdminToken") || "",
-      page: "overview",
-      initialPage: "overview",
-      qrSessions: {},
-      platformLoginModal: null,
-      actionModal: null,
-      configItemModal: null,
-      selectedConfigId: "main",
-      pendingConfigReloadPluginId: null,
-      cache: {
-        overview: null,
-        platformLogins: null,
-        publishers: [],
-        subscribers: [],
-        subscriptions: [],
-        filters: [],
-        subscriberTargetPlatforms: null,
-        configs: null,
-        configDetails: {}
-      }
+      token: localStorage.getItem(tokenKey) || "",
+      page: "dashboard",
+      cache: {},
+      modalSubmit: null,
+      modalCleanup: null,
+      logsPaused: false,
+      logTimer: null,
+      logSince: 0,
+      logRows: []
     };
-    const els = id => document.getElementById(id);
-    const esc = value => String(value ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c]));
-    const labels = {
-      ACTIVE: "启用",
-      DISABLED: "禁用",
-      SUCCESS: "成功",
-      FAILED: "失败",
-      PENDING: "等待中",
-      CANCELED: "已取消",
-      GROUP: "群",
-      USER: "用户",
-      CHANNEL: "频道",
-      OTHER: "其他",
-      ELEMENT: "元素",
-      CONTENT: "内容",
-      HAS_ELEMENT: "包含元素",
-      KEYWORD: "关键词",
-      REGEX: "正则表达式",
-      EXPIRED: "已过期",
-      UNSUPPORTED: "不支持",
-      COOKIE: "Cookie",
-      QR_CODE: "二维码",
-      TEXT: "文本",
-      IMAGE: "图片",
-      VIDEO: "视频",
-      CARD: "卡片",
-      ORIGIN: "转发源动态",
-      DYNAMIC: "动态",
-      LIVE: "直播",
-      template: "模板"
-    };
-    const label = value => labels[value] || value;
-    const atAllTypeValues = ["DYNAMIC", "LIVE", "VIDEO"];
-    const pageMeta = {
-      overview: ["概览", "运行状态与插件健康情况。"],
-      login: ["平台登录", "动态源账号认证。"],
-      subscriptions: ["订阅管理", "创建和管理发布者转发关系。"],
-      entities: ["发布者与目标", "管理动态发布者和消息接收目标。"],
-      filters: ["过滤规则", "管理每个订阅的动态屏蔽规则。"],
-      configs: ["配置", "在线编辑主项目和插件配置。"]
-    };
-    state.initialPage = pageFromLocation();
 
-    function pageFromLocation() {
-      const hashPage = location.hash.replace("#", "");
-      if (pageMeta[hashPage]) return hashPage;
-      const pathPage = location.pathname.split("/").filter(Boolean).pop() || "";
-      return pageMeta[pathPage] ? pathPage : "overview";
+    const eventTypes = [
+      ["DYNAMIC", "动态"],
+      ["LIVE_STARTED", "开播"],
+      ["LIVE_ENDED", "下播"]
+    ];
+    const attachmentKinds = [
+      ["IMAGE", "图片"],
+      ["VIDEO", "视频"],
+      ["CARD", "卡片"],
+      ["POLL", "投票"]
+    ];
+
+    function esc(value) {
+      return String(value ?? "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;"
+      }[char]));
     }
-
-    function showInitialPage() {
-      const page = pageFromLocation();
-      if (!location.hash) {
-        history.replaceState(null, "", "#" + page);
-      }
-      setPage(page);
+    function attr(value) { return esc(value).replace(/`/g, "&#96;"); }
+    function fmtTime(value, millis) {
+      if (!value) return "-";
+      const date = new Date(millis ? Number(value) : Number(value) * 1000);
+      return Number.isNaN(date.getTime()) ? "-" : date.toLocaleString("zh-CN", { hour12: false });
     }
-
-    function setMessage(target, text, isError) {
-      const node = els(target);
-      if (!node) return;
-      node.textContent = text || "";
-      node.classList.toggle("error", Boolean(isError));
+    function fmtBytes(bytes) {
+      const n = Number(bytes || 0);
+      if (n < 1024) return n + " B";
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
+      if (n < 1024 * 1024 * 1024) return (n / 1024 / 1024).toFixed(1) + " MB";
+      return (n / 1024 / 1024 / 1024).toFixed(2) + " GB";
     }
-
-    function notify(text, isError) {
-      if (!text) return;
-      const stack = els("toastStack");
-      if (!stack) return;
+    function fmtDuration(ms) {
+      let seconds = Math.floor(Number(ms || 0) / 1000);
+      const days = Math.floor(seconds / 86400); seconds %= 86400;
+      const hours = Math.floor(seconds / 3600); seconds %= 3600;
+      const minutes = Math.floor(seconds / 60);
+      if (days) return `${days}天 ${hours}小时`;
+      if (hours) return `${hours}小时 ${minutes}分钟`;
+      return `${minutes}分钟`;
+    }
+    function label(value) {
+      const map = {
+        ACTIVE: "运行中", LOADED: "已加载", FAILED: "失败", DISABLED: "停用",
+        PENDING: "等待", SENDING: "发送中", SENT: "已发送",
+        SUCCESS: "已登录", CANCELED: "已取消", EXPIRED: "已过期", UNSUPPORTED: "不支持",
+        COOKIE: "Cookie", QR_CODE: "二维码",
+        GROUP: "群组", USER: "用户", CHANNEL: "频道", OTHER: "其他",
+        DYNAMIC: "动态", LIVE_STARTED: "开播", LIVE_ENDED: "下播",
+        BLOCK: "阻止", ALLOW: "允许", MENTION_ALL: "@全体", NONE: "无",
+        IMAGE: "图片", VIDEO: "视频", CARD: "卡片", POLL: "投票", ORIGIN: "转发",
+        OPEN: "直播中", CLOSE: "未开播", ROUND: "轮播"
+      };
+      return map[value] || value || "-";
+    }
+    function eventLabel(value) {
+      return Object.fromEntries(eventTypes)[value] || value || "-";
+    }
+    function pill(value) {
+      const text = label(value);
+      const cls = ["ACTIVE", "SUCCESS", "SENT", "OPEN"].includes(value) ? "ok"
+        : ["FAILED", "EXPIRED", "ERROR"].includes(value) ? "bad"
+        : ["PENDING", "SENDING", "LOADED", "CANCELED", "WARN"].includes(value) ? "warn" : "info";
+      return `<span class="pill ${cls}">${esc(text)}</span>`;
+    }
+    function tags(items) {
+      const values = (items || []).filter(Boolean);
+      return values.length ? `<span class="tag-list">${values.map(item => `<span class="pill">${esc(item)}</span>`).join("")}</span>` : `<span class="sub-line">-</span>`;
+    }
+    function cell(title, sub) {
+      return `<span class="primary-line">${esc(title || "-")}</span><span class="sub-line">${esc(sub || "")}</span>`;
+    }
+    function identity(name, sub, image) {
+      return `<div class="identity-cell"><img class="avatar" src="${attr(image || "")}" alt="" onerror="this.style.visibility='hidden'"><div>${cell(name, sub)}</div></div>`;
+    }
+    function renderTable(rows, columns) {
+      if (!rows || rows.length === 0) return `<div class="empty">暂无数据</div>`;
+      return `<div class="table-wrap"><table><thead><tr>${columns.map(col => `<th>${esc(col.title)}</th>`).join("")}</tr></thead><tbody>${
+        rows.map(row => `<tr>${columns.map(col => `<td>${col.render(row)}</td>`).join("")}</tr>`).join("")
+      }</tbody></table></div>`;
+    }
+    function notify(message, isError) {
       const node = document.createElement("div");
       node.className = "toast" + (isError ? " error" : "");
-      node.innerHTML = "<strong>" + (isError ? "操作失败" : "操作完成") + "</strong><span>" + esc(text) + "</span>";
-      const remove = () => {
-        if (node.parentNode) node.parentNode.removeChild(node);
-      };
-      node.addEventListener("click", remove);
-      stack.appendChild(node);
-      setTimeout(remove, isError ? 5200 : 3600);
+      node.innerHTML = `<strong>${isError ? "操作失败" : "操作完成"}</strong><span>${esc(message)}</span>`;
+      node.onclick = () => node.remove();
+      $("toastStack").appendChild(node);
+      setTimeout(() => node.remove(), isError ? 7000 : 3600);
     }
-
-    function showLogin(text, isError) {
-      els("appView").hidden = true;
-      els("loginView").hidden = false;
-      els("loginToken").value = state.token;
-      setMessage("loginMessage", text || "", isError);
-      setTimeout(() => els("loginToken").focus(), 0);
+    function setLoginMessage(text, isError) {
+      $("loginMessage").textContent = text || "";
+      $("loginMessage").classList.toggle("error", !!isError);
     }
-
-    function showApp() {
-      els("loginView").hidden = true;
-      els("appView").hidden = false;
+    function setModalMessage(text, isError) {
+      $("modalMessage").textContent = text || "";
+      $("modalMessage").classList.toggle("error", !!isError);
     }
-
-    async function api(path, options) {
-      const init = options || {};
-      init.headers = Object.assign({}, init.headers || {}, { "Authorization": "Bearer " + state.token });
-      if (init.body && !(init.body instanceof FormData)) init.headers["Content-Type"] = "application/json";
-      const res = await fetch("/api" + path, init);
-      if (!res.ok) {
-        let detail = res.statusText;
-        try { detail = (await res.json()).message || detail; } catch (_) {}
-        throw new Error(detail);
-      }
-      return res.json();
-    }
-
-    async function apiBlob(path) {
-      const resolvedPath = path.startsWith("/api/") ? path : "/api" + path;
-      const res = await fetch(resolvedPath, { headers: { "Authorization": "Bearer " + state.token } });
-      if (!res.ok) throw new Error(res.statusText);
-      return res.blob();
-    }
-
-    async function verifyToken(token) {
-      state.token = token.trim();
-      if (!state.token) throw new Error("请输入管理 token");
-      return api("/overview");
-    }
-
-    function badge(value) {
-      const text = esc(label(value));
-      const cls = value === "ACTIVE" || value === "SUCCESS" ? "ok" : value === "FAILED" || value === "DISABLED" ? "bad" : value === "PENDING" ? "warn" : "";
-      return "<span class='pill " + cls + "'>" + text + "</span>";
-    }
-
-    function platformKey(platformId) {
-      return String(platformId || "").replace(/[^A-Za-z0-9_-]/g, "_");
-    }
-
-    function optionHtml(value, text, selected) {
-      return "<option value='" + esc(value) + "'" + (selected ? " selected" : "") + ">" + esc(text) + "</option>";
-    }
-
-    function targetOptionHtml(target, selected) {
-      const externalId = target.externalId || target.targetId || "";
-      const targetKind = target.targetKind || target.type || "";
-      const text = label(targetKind) + " · " + externalId + " · " + (target.name || externalId);
-      return "<option value='" + esc(externalId) + "' data-name='" + esc(target.name || externalId) + "'" + (selected ? " selected" : "") + ">" + esc(text) + "</option>";
-    }
-
-    function subscriberLabel(subscriber) {
-      if (!subscriber) return "未知目标";
-      const targetKind = subscriber.targetKind || subscriber.type || "";
-      const externalId = subscriber.externalId || subscriber.targetId || "";
-      return "#" + subscriber.id + " · " + subscriber.platformId + " · " + label(targetKind) + " · " + externalId + (subscriber.name ? " · " + subscriber.name : "");
-    }
-
-    function publisherLabel(publisher) {
-      if (!publisher) return "未知发布者";
-      return "#" + publisher.id + " · " + publisher.platformId + " · " + publisher.externalId + (publisher.name ? " · " + publisher.name : "");
-    }
-
-    function subscriptionLabel(subscription) {
-      const subscriber = subscription.subscriber ? subscriberLabel(subscription.subscriber) : "目标 #" + subscription.subscriberId;
-      const publisher = subscription.publisher ? publisherLabel(subscription.publisher) : "发布者 #" + subscription.publisherId;
-      return "#" + subscription.id + " · " + subscriber + " -> " + publisher;
-    }
-
-    function subscriptionAtAllTypes(subscription) {
-      const rules = subscription && subscription.policy && Array.isArray(subscription.policy.mentionRules)
-        ? subscription.policy.mentionRules
-        : [];
-      return rules
-        .filter(rule => rule.mode === "MENTION_ALL")
-        .map(rule => mentionRuleKey(rule.selector || {}))
-        .filter(Boolean);
-    }
-
-    function mentionRuleKey(selector) {
-      const eventTypes = Array.isArray(selector.eventTypes) ? selector.eventTypes : [];
-      if (eventTypes.includes("live.started") || eventTypes.includes("live.ended")) return "LIVE";
-      if (Array.isArray(selector.attachmentKinds) && selector.attachmentKinds.includes("VIDEO")) return "VIDEO";
-      if (eventTypes.includes("dynamic.created")) return "DYNAMIC";
-      return "";
-    }
-
-    function buildSubscriptionPolicy(basePolicy, atAllTypes) {
-      const policy = Object.assign({
-        updateSelectors: [{ eventTypes: ["dynamic.created"], attachmentKinds: [] }],
-        mentionRules: [],
-        templateId: null,
-        filtersEnabled: true
-      }, basePolicy || {});
-      const selectors = {
-        DYNAMIC: { eventTypes: ["dynamic.created"], attachmentKinds: [] },
-        LIVE: { eventTypes: ["live.started", "live.ended"], attachmentKinds: [] },
-        VIDEO: { eventTypes: ["dynamic.created"], attachmentKinds: ["VIDEO"] }
-      };
-      policy.mentionRules = (atAllTypes || [])
-        .filter(type => selectors[type])
-        .map(type => ({ selector: selectors[type], mode: "MENTION_ALL" }));
-      return policy;
-    }
-
-    function atAllSummary(subscription) {
-      const types = subscriptionAtAllTypes(subscription);
-      if (!types.length) return "<span class='muted'>关闭</span>";
-      const all = atAllTypeValues.every(type => types.includes(type));
-      return esc(all ? "全部" : types.map(type => label(type)).join("、"));
-    }
-
-    function renderAtAllControls(selectedTypes) {
-      const selected = new Set(selectedTypes || []);
-      return "<div class='form-field full-width'>"
-        + "<label>@全体</label>"
-        + "<div class='forms'>"
-        + "<label class='check-control'><input id='actionAtAllAll' type='checkbox'>全部</label>"
-        + atAllTypeValues.map(type =>
-            "<label class='check-control'><input type='checkbox' data-atall-type='" + type + "'" + (selected.has(type) ? " checked" : "") + ">" + label(type) + "</label>"
-          ).join("")
-        + "</div>"
-        + "<span id='actionAtAllHint' class='field-hint'></span>"
-        + "</div>";
-    }
-
-    function collectAtAllTypes() {
-      return Array.from(document.querySelectorAll("[data-atall-type]"))
-        .filter(input => input.checked && !input.disabled)
-        .map(input => input.dataset.atallType);
-    }
-
-    function bindAtAllControls(targetTypeProvider) {
-      const all = els("actionAtAllAll");
-      const checks = Array.from(document.querySelectorAll("[data-atall-type]"));
-      if (!all || checks.length === 0) return;
-      const refreshAll = () => {
-        all.checked = checks.every(input => input.checked);
-      };
-      const refreshAvailability = () => {
-        const enabled = targetTypeProvider() === "GROUP";
-        all.disabled = !enabled;
-        checks.forEach(input => {
-          input.disabled = !enabled;
-          if (!enabled) input.checked = false;
-        });
-        const hint = els("actionAtAllHint");
-        if (hint) hint.textContent = enabled ? "开启后会在匹配类型的推送消息结尾追加 @全体。" : "仅群目标支持 @全体。";
-        refreshAll();
-      };
-      all.onchange = () => {
-        checks.forEach(input => { input.checked = all.checked; });
-      };
-      checks.forEach(input => {
-        input.onchange = refreshAll;
+    function query(params) {
+      const out = new URLSearchParams();
+      Object.entries(params || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && String(value).trim() !== "") out.set(key, value);
       });
-      refreshAvailability();
-      return refreshAvailability;
+      const text = out.toString();
+      return text ? "?" + text : "";
     }
 
-    function uniqueValues(values) {
-      return Array.from(new Set(values.filter(value => value !== null && value !== undefined && String(value).trim() !== "").map(value => String(value))));
+    async function api(path, options = {}) {
+      const headers = Object.assign({ Authorization: "Bearer " + state.token }, options.headers || {});
+      if (options.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+      const response = await fetch("/api" + path, Object.assign({}, options, { headers }));
+      if (response.status === 401) {
+        logout("认证失败");
+        throw new Error("认证失败");
+      }
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!response.ok) throw new Error((data && (data.message || data.error)) || "请求失败");
+      return data;
+    }
+    async function apiBlob(path) {
+      const response = await fetch("/api" + path, { headers: { Authorization: "Bearer " + state.token } });
+      if (!response.ok) throw new Error("资源加载失败");
+      return response.blob();
+    }
+    function invalidate(...keys) {
+      if (keys.length === 0) state.cache = {};
+      keys.forEach(key => delete state.cache[key]);
     }
 
-    function countBy(rows, idKey, id) {
-      return uniqueValues(rows.filter(row => String(row[idKey]) === String(id)).map(row => row[idKey === "publisherId" ? "subscriberId" : "publisherId"])).length;
+    function showLogin(message, isError) {
+      stopLogPolling();
+      $("appView").hidden = true;
+      $("loginView").hidden = false;
+      setLoginMessage(message || "", isError);
     }
-
-    function headerImageCell(uri) {
-      const value = String(uri || "").trim();
-      if (!value) return "<span class='muted'>未设置</span>";
-      return "<a class='image-cell' href='" + esc(value) + "' target='_blank' rel='noreferrer'>"
-        + "<img class='thumb' alt='头图' src='" + esc(value) + "'>"
-        + "<span>查看</span>"
-        + "</a>";
+    function showApp() {
+      $("loginView").hidden = true;
+      $("appView").hidden = false;
+      setPage(location.hash.replace("#", "") || "dashboard");
     }
-
-    function renderTable(id, columns, rows) {
-      const colCount = columns.length;
-      const head = "<tr>" + columns.map(c => "<th>" + esc(c.label) + "</th>").join("") + "</tr>";
-      const body = rows.length
-        ? rows.map(row => "<tr>" + columns.map(c => "<td>" + (c.render ? c.render(row) : esc(row[c.key])) + "</td>").join("") + "</tr>").join("")
-        : "<tr><td colspan='" + colCount + "'><div class='empty'>暂无数据</div></td></tr>";
-      els(id).innerHTML = head + body;
+    function logout(message) {
+      state.token = "";
+      localStorage.removeItem(tokenKey);
+      closeModal();
+      showLogin(message || "", !!message);
     }
 
     function setPage(page) {
-      const nextPage = pageMeta[page] ? page : "overview";
-      if (state.page !== nextPage) {
-        closePlatformLoginModal();
-        closeActionModal();
-        closeConfigItemModal();
-      }
-      state.page = nextPage;
-      const meta = pageMeta[nextPage] || pageMeta.overview;
-      els("pageTitle").textContent = meta[0];
-      els("pageSubtitle").textContent = meta[1];
-      document.querySelectorAll("[data-page]").forEach(node => node.hidden = node.dataset.page !== nextPage);
-      document.querySelectorAll("[data-nav]").forEach(node => node.classList.toggle("active", node.dataset.nav === nextPage));
+      state.page = pages[page] ? page : "dashboard";
+      location.hash = state.page;
       document.body.classList.remove("sidebar-open");
-      loadPage(nextPage).catch(error => handleError(error));
+      document.querySelectorAll("[data-nav]").forEach(button => {
+        button.classList.toggle("active", button.dataset.nav === state.page);
+      });
+      $("pageTitle").textContent = pages[state.page][0];
+      $("pageSubtitle").textContent = pages[state.page][1];
+      loadPage(state.page, false).catch(handleError);
     }
-
-    function navigateTo(page) {
-      const nextPage = pageMeta[page] ? page : "overview";
-      const nextHash = "#" + nextPage;
-      if (location.hash === nextHash) {
-        setPage(nextPage);
-      } else {
-        location.hash = nextPage;
-      }
-    }
-
     async function loadPage(page, force) {
-      if (page === "overview") return loadOverview(force);
+      stopLogPolling();
+      if (page === "dashboard") return loadDashboard(force);
+      if (page === "plugins") return loadPlugins(force);
       if (page === "login") return loadPlatformLogins(force);
       if (page === "subscriptions") return loadSubscriptions(force);
       if (page === "entities") return loadEntities(force);
-      if (page === "filters") return loadFilters(force);
+      if (page === "logs") return loadLogsPage(force);
       if (page === "configs") return loadConfigs(force);
+      if (page === "system") return loadSystem(force);
+    }
+    function handleError(error) {
+      notify(error.message || String(error), true);
     }
 
-    async function loadOverview(force) {
-      if (force || !state.cache.overview) {
-        state.cache.overview = await api("/overview");
-      }
-      const overview = state.cache.overview;
-      els("stats").innerHTML = [
-        ["命令数", overview.commandCount],
-        ["订阅数", overview.subscriptionCount],
-        ["待投递", overview.deliveryPending],
-        ["失败", overview.deliveryFailed]
-      ].map(item => "<div class='stat'><b>" + esc(item[1]) + "</b><span>" + esc(item[0]) + "</span></div>").join("");
-      renderTable("plugins", [
-        { label: "ID", key: "id" },
-        { label: "名称", key: "name" },
-        { label: "版本", key: "version" },
-        { label: "状态", render: r => badge(r.state) },
-        { label: "能力", render: r => esc(r.capabilities.join(", ")) },
-        { label: "错误", key: "error" },
-        { label: "操作", render: r => "<div class='table-actions'><button type='button' class='secondary' data-action='reload-plugin' data-plugin-id='" + esc(r.id) + "'>热重启</button></div>" }
-      ], overview.plugins);
-      els("connectionState").innerHTML = "本机";
-      refreshPlatformLoginNav(force).catch(error => handleError(error));
+    async function loadDashboard(force) {
+      if (force || !state.cache.dashboard) state.cache.dashboard = await api("/dashboard");
+      const data = state.cache.dashboard;
+      const deliveryCounts = Object.fromEntries((data.deliveryStatusCounts || []).map(item => [item.state, item.count]));
+      const pluginCounts = Object.fromEntries((data.pluginStateCounts || []).map(item => [item.state, item.count]));
+      $("content").innerHTML = `
+        <section class="page">
+          <div class="stats">
+            ${stat("插件", `${pluginCounts.ACTIVE || 0}/${pluginCounts.TOTAL || 0}`, "运行 / 总数")}
+            ${stat("订阅", data.subscriptionCount, "订阅关系")}
+            ${stat("发布者", data.publisherCount, "来源实体")}
+            ${stat("消息目标", data.subscriberCount, "出口目标")}
+            ${stat("待投递", deliveryCounts.PENDING || 0, "队列等待")}
+            ${stat("失败投递", deliveryCounts.FAILED || 0, "需要处理")}
+          </div>
+          <div class="grid">
+            <section class="panel half">
+              <div class="panel-head"><h2>插件健康</h2><button class="secondary" data-action="goto" data-page="plugins">打开</button></div>
+              ${renderPluginSummary(data.plugins || [])}
+            </section>
+            <section class="panel half">
+              <div class="panel-head"><h2>平台登录</h2><button class="secondary" data-action="goto" data-page="login">打开</button></div>
+              ${renderLoginSummary(data.platformLogins || [])}
+            </section>
+            <section class="panel half">
+              <div class="panel-head"><h2>最近投递失败</h2><button class="secondary" data-action="goto" data-page="system">诊断</button></div>
+              ${renderDeliveryCompact(data.recentDeliveries || [])}
+            </section>
+            <section class="panel half">
+              <div class="panel-head"><h2>最近日志</h2><button class="secondary" data-action="goto" data-page="logs">打开</button></div>
+              ${renderLogCompact(data.recentLogs || [])}
+            </section>
+            <section class="panel full">
+              <div class="panel-head"><h2>系统</h2><button class="secondary" data-action="goto" data-page="system">打开</button></div>
+              <div class="stats">
+                ${stat("运行时间", fmtDuration(data.system.uptimeMs), "自 " + fmtTime(data.system.startedAtEpochMillis, true))}
+                ${stat("内存", fmtBytes(data.system.usedMemoryBytes), "已用 / " + fmtBytes(data.system.maxMemoryBytes))}
+                ${stat("后台端口", data.system.webAdminPort, data.system.webAdminHost)}
+              </div>
+            </section>
+          </div>
+        </section>`;
+    }
+    function stat(title, value, sub) {
+      return `<div class="stat"><b>${esc(value)}</b><span>${esc(title)} · ${esc(sub || "")}</span></div>`;
+    }
+    function renderPluginSummary(plugins) {
+      return renderTable(plugins.slice(0, 6), [
+        { title: "插件", render: p => cell(p.name, p.id) },
+        { title: "状态", render: p => pill(p.state) },
+        { title: "能力", render: p => tags((p.capabilities || []).slice(0, 4)) }
+      ]);
+    }
+    function renderLoginSummary(items) {
+      return renderTable(items, [
+        { title: "平台", render: item => cell(item.platformId, item.pluginName) },
+        { title: "状态", render: item => pill(item.status) },
+        { title: "账号", render: item => cell(item.account && item.account.name || "-", item.message) }
+      ]);
+    }
+    function renderDeliveryCompact(rows) {
+      return rows.length ? renderTable(rows, [
+        { title: "消息", render: row => cell(row.messageId, row.targetKey.replace(/\u001F/g, " / ")) },
+        { title: "状态", render: row => pill(row.status) },
+        { title: "错误", render: row => `<span class="sub-line">${esc(row.lastError || "-")}</span>` }
+      ]) : `<div class="empty">暂无失败投递</div>`;
+    }
+    function renderLogCompact(rows) {
+      return rows.length ? renderTable(rows, [
+        { title: "时间", render: row => `<span class="sub-line">${fmtTime(row.timestampEpochMillis, true)}</span>` },
+        { title: "级别", render: row => pill(row.level) },
+        { title: "内容", render: row => cell(row.message, row.loggerName) }
+      ]) : `<div class="empty">暂无日志</div>`;
     }
 
-    async function refreshPlatformLoginNav(force) {
-      if (force || state.cache.platformLogins === null) {
-        state.cache.platformLogins = await api("/platform-logins");
-      }
-      updatePlatformLoginNav(state.cache.platformLogins);
+    async function loadPlugins(force) {
+      if (force || !state.cache.plugins) state.cache.plugins = await api("/plugins");
+      const rows = state.cache.plugins;
+      $("content").innerHTML = `
+        <section class="page">
+          <section class="panel full">
+            <div class="toolbar">
+              <h2>插件</h2>
+              <div class="toolbar-actions"><button data-action="refresh-current" class="secondary">刷新</button></div>
+            </div>
+            ${renderTable(rows, [
+              { title: "插件", render: p => cell(p.name, `${p.id} · v${p.version}`) },
+              { title: "状态", render: p => pill(p.state) },
+              { title: "能力", render: p => tags(p.capabilities || []) },
+              { title: "加载时间", render: p => `<span class="sub-line">${fmtTime(p.loadTime, true)}</span>` },
+              { title: "路径 / 错误", render: p => cell(p.sourceJarPath || "-", p.error || "") },
+              { title: "操作", render: p => pluginActions(p) }
+            ])}
+          </section>
+        </section>`;
     }
-
-    function updatePlatformLoginNav() {
+    function pluginActions(plugin) {
+      const startDisabled = plugin.state !== "LOADED" ? " disabled" : "";
+      const stopDisabled = plugin.state !== "ACTIVE" ? " disabled" : "";
+      return `<div class="row-actions">
+        <button data-action="plugin-start" data-id="${attr(plugin.id)}"${startDisabled}>启动</button>
+        <button class="secondary" data-action="plugin-stop" data-id="${attr(plugin.id)}"${stopDisabled}>停止</button>
+        <button class="secondary" data-action="plugin-reload" data-id="${attr(plugin.id)}">重载</button>
+        <button class="secondary" data-action="plugin-config" data-id="${attr(plugin.id)}">配置</button>
+      </div>`;
     }
 
     async function loadPlatformLogins(force) {
-      if (force || state.cache.platformLogins === null) {
-        state.cache.platformLogins = await api("/platform-logins");
-      }
-      updatePlatformLoginNav(state.cache.platformLogins);
-      renderPlatformLogins(state.cache.platformLogins);
-      if (force) notify("已刷新平台登录状态", false);
+      if (force || !state.cache.platformLogins) state.cache.platformLogins = await api("/platform-logins");
+      const rows = state.cache.platformLogins;
+      $("content").innerHTML = `
+        <section class="page">
+          <div class="cards">
+            ${rows.length ? rows.map(renderPlatformCard).join("") : `<div class="empty">暂无可登录平台</div>`}
+          </div>
+        </section>`;
     }
-
-    function renderPlatformLogins(platforms) {
-      const list = els("platformLoginList");
-      if (!platforms || platforms.length === 0) {
-        list.innerHTML = "<div class='empty'>未安装消息源插件</div>";
-        return;
-      }
-      list.innerHTML = platforms.map(renderPlatformLoginCard).join("");
-    }
-
-    function renderPlatformLoginCard(platform) {
-      const key = platformKey(platform.platformId);
-      const methods = platform.supportedLoginMethods || [];
-      const accountName = platform.account ? esc(platform.account.name || "未命名") : "未登录或未获取";
-      const accountId = platform.account && platform.account.userId ? esc(platform.account.userId) : "暂无账号 ID";
-      const methodLabels = methods.length ? methods.map(method => badge(method)).join("") : "<span class='pill warn'>不支持后台登录</span>";
-      const cookieButton = methods.includes("COOKIE")
-        ? "<button data-action='open-cookie-login' data-platform='" + esc(platform.platformId) + "' data-platform-key='" + key + "'>Cookie 登录</button>"
-        : "";
-      const qrButton = methods.includes("QR_CODE")
-        ? "<button class='secondary' data-action='open-qr-login' data-platform='" + esc(platform.platformId) + "' data-platform-key='" + key + "'>扫码登录</button>"
-        : "";
-      const readonlyText = methods.length ? "" : "<span class='muted'>该平台插件不支持后台登录。</span>";
-      return "<article class='platform-card' data-platform-card='" + key + "'>"
-        + "<div class='platform-card-head'><div class='platform-title'>"
-        + "<h3>" + esc(platform.pluginName || platform.platformId) + "</h3>"
-        + "<div class='muted'>" + esc(platform.platformId) + " · " + esc(platform.pluginId) + " · v" + esc(platform.pluginVersion) + "</div>"
-        + "<div class='platform-meta'>" + badge(platform.pluginState) + badge(platform.status) + methodLabels + "</div>"
-        + "</div></div>"
-        + "<div class='platform-account'><span class='muted'>当前账号</span><strong>" + accountName + "</strong><span class='muted'>" + accountId + "</span></div>"
-        + "<div class='muted'>" + esc(localizeLoginMessage(platform.message)) + "</div>"
-        + "<div id='platform-message-" + key + "' class='platform-message'></div>"
-        + "<div class='platform-actions'>" + cookieButton + qrButton + "<button class='secondary' data-action='refresh-platform-login' data-platform='" + esc(platform.platformId) + "' data-platform-key='" + key + "'>刷新</button>" + readonlyText + "</div>"
-        + "</article>";
-    }
-
-    function localizeLoginMessage(message) {
-      const text = String(message || "");
-      const lower = text.toLowerCase();
-      if (lower.includes("login success") || lower.includes("logged in")) return "已登录";
-      if (lower.includes("not logged in")) return "未登录";
-      if (lower.includes("unsupported")) return "当前平台不支持该登录能力";
-      if (lower.includes("waiting")) return "等待扫码确认";
-      if (lower.includes("canceled")) return "已取消";
-      if (lower.includes("expired")) return "二维码已过期";
-      if (lower.includes("blank")) return "输入不能为空";
-      return text;
-    }
-
-    function localizeActionMessage(message, fallback) {
-      const text = String(message || "");
-      const lower = text.toLowerCase();
-      if (lower.includes("subscription removed")) return "订阅已删除";
-      if (lower.includes("filter rule removed")) return "过滤规则已删除";
-      if (lower.includes("filter rules removed")) {
-        const match = text.match(/count=(\d+)/i);
-        return match ? "过滤规则已清空：" + match[1] + " 条" : "过滤规则已清空";
-      }
-      if (lower.includes("publisher removed")) {
-        const match = text.match(/subscriptions=(\d+)/i);
-        return match ? "发布者已删除，关联订阅已删除 " + match[1] + " 个" : "发布者已删除";
-      }
-      if (lower.includes("subscriber removed")) {
-        const match = text.match(/subscriptions=(\d+)/i);
-        return match ? "消息目标已删除，关联订阅已删除 " + match[1] + " 个" : "消息目标已删除";
-      }
-      return fallback || text;
-    }
-
-    async function ensurePlatformLogins(force) {
-      if (force || state.cache.platformLogins === null) {
-        state.cache.platformLogins = await api("/platform-logins");
-      }
-      return state.cache.platformLogins;
-    }
-
-    async function ensureSubscriberTargetPlatforms(force) {
-      if (force || state.cache.subscriberTargetPlatforms === null) {
-        state.cache.subscriberTargetPlatforms = await api("/subscriber-target-platforms");
-      }
-      return state.cache.subscriberTargetPlatforms;
-    }
-
-    async function loadSubscriberTargets(platformId, type) {
-      const query = new URLSearchParams();
-      if (platformId) query.set("platformId", platformId);
-      if (type) query.set("type", type);
-      return api("/subscriber-targets" + (query.toString() ? "?" + query.toString() : ""));
-    }
-
-    async function ensurePublishers(force) {
-      if (force || state.cache.publishers.length === 0) {
-        state.cache.publishers = await api("/publishers");
-      }
-      return state.cache.publishers;
-    }
-
-    async function ensureSubscribers(force) {
-      if (force || state.cache.subscribers.length === 0) {
-        state.cache.subscribers = await api("/subscribers");
-      }
-      return state.cache.subscribers;
+    function renderPlatformCard(item) {
+      const methods = item.supportedLoginMethods || [];
+      return `<article class="card">
+        <div class="card-head">
+          <div>${cell(item.platformId, `${item.pluginName} · ${item.pluginVersion}`)}</div>
+          ${pill(item.status)}
+        </div>
+        <div>${tags(methods.map(label))}</div>
+        <div>${cell(item.account && item.account.name || "未显示账号", item.message || "")}</div>
+        <div class="row-actions">
+          <button data-action="cookie-login" data-platform="${attr(item.platformId)}"${methods.includes("COOKIE") ? "" : " disabled"}>Cookie</button>
+          <button class="secondary" data-action="qr-login" data-platform="${attr(item.platformId)}"${methods.includes("QR_CODE") ? "" : " disabled"}>二维码</button>
+          <button class="secondary" data-action="refresh-login" data-platform="${attr(item.platformId)}">刷新</button>
+        </div>
+      </article>`;
     }
 
     async function ensureSubscriptions(force) {
-      if (force || state.cache.subscriptions.length === 0) {
-        state.cache.subscriptions = await api("/subscriptions");
-      }
+      if (force || !state.cache.subscriptions) state.cache.subscriptions = await api("/subscriptions");
       return state.cache.subscriptions;
+    }
+    async function loadSubscriptions(force) {
+      const rows = await ensureSubscriptions(force);
+      $("content").innerHTML = `
+        <section class="page">
+          <section class="panel full">
+            <div class="toolbar">
+              <h2>订阅关系</h2>
+              <div class="toolbar-actions">
+                <button data-action="create-subscription">新建订阅</button>
+                <button data-action="refresh-current" class="secondary">刷新</button>
+              </div>
+            </div>
+            ${renderTable(rows, [
+              { title: "发布者", render: s => identity(s.publisher && s.publisher.name, publisherKey(s.publisher), s.publisher && s.publisher.avatarUri) },
+              { title: "消息目标", render: s => cell(s.subscriber && s.subscriber.name, targetKey(s.subscriber)) },
+              { title: "接收事件", render: s => tags(policyEvents(s.policy).map(eventLabel)) },
+              { title: "@全体", render: s => tags(mentionEvents(s.policy).map(eventLabel)) },
+              { title: "动态过滤", render: s => cell(`${s.filterRuleCount || 0} 条阻止规则`, "仅作用于动态内容") },
+              { title: "更新时间", render: s => `<span class="sub-line">${fmtTime(s.updatedAtEpochSeconds)}</span>` },
+              { title: "操作", render: s => `<div class="row-actions"><button data-action="subscription-detail" data-id="${s.id}">详情</button><button class="danger" data-action="delete-subscription" data-id="${s.id}">删除</button></div>` }
+            ])}
+          </section>
+        </section>`;
+    }
+    function publisherKey(p) {
+      return p ? `${p.platformId}:${p.kind}:${p.externalId}` : "-";
+    }
+    function targetKey(t) {
+      return t ? `${t.platformId}:${t.targetKind}:${t.externalId}` : "-";
+    }
+    function entityStateText(value) {
+      const map = { ACTIVE: "启用", DISABLED: "停用" };
+      return map[value] || value || "-";
+    }
+    function entityStatePill(value) {
+      return `<span class="pill ${value === "ACTIVE" ? "ok" : "bad"}">${esc(entityStateText(value))}</span>`;
+    }
+    function policyEvents(policy) {
+      const events = policy && Array.isArray(policy.enabledEvents) ? policy.enabledEvents : [];
+      return events.length ? events : ["DYNAMIC"];
+    }
+    function mentionEvents(policy) {
+      return policy && Array.isArray(policy.mentionAllEvents) ? policy.mentionAllEvents : [];
     }
 
     async function loadEntities(force) {
-      await Promise.all([ensurePublishers(force), ensureSubscribers(force), ensureSubscriptions(force)]);
-      renderTable("publishers", [
-        { label: "ID", key: "id" },
-        { label: "平台", key: "platformId" },
-        { label: "外部 ID", key: "externalId" },
-        { label: "名称", key: "name" },
-        { label: "头图", render: r => headerImageCell(r.bannerUri || r.headerUri) },
-        { label: "目标数", render: r => esc(countBy(state.cache.subscriptions, "publisherId", r.id)) },
-        { label: "状态", render: r => badge(r.state) },
-        { label: "操作", render: r => "<div class='table-actions'><button data-action='edit-publisher' data-id='" + r.id + "'>修改</button><button class='danger' data-action='delete-publisher' data-id='" + r.id + "'>删除</button></div>" }
-      ], state.cache.publishers);
-      renderTable("subscribers", [
-        { label: "ID", key: "id" },
-        { label: "平台", key: "platformId" },
-        { label: "类型", render: r => esc(label(r.targetKind || r.type)) },
-        { label: "目标", render: r => esc(r.externalId || r.targetId || "") },
-        { label: "名称", key: "name" },
-        { label: "发布者数", render: r => esc(countBy(state.cache.subscriptions, "subscriberId", r.id)) },
-        { label: "状态", render: r => badge(r.state) },
-        { label: "操作", render: r => "<div class='table-actions'><button data-action='edit-subscriber' data-id='" + r.id + "'>修改</button><button class='danger' data-action='delete-subscriber' data-id='" + r.id + "'>删除</button></div>" }
-      ], state.cache.subscribers);
+      if (force || !state.cache.publishers) state.cache.publishers = await api("/publishers");
+      if (force || !state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
+      const publishers = state.cache.publishers;
+      const subscribers = state.cache.subscribers;
+      $("content").innerHTML = `
+        <section class="page">
+          <section class="panel full">
+            <div class="panel-head"><h2>发布者</h2><button class="secondary" data-action="refresh-current">刷新</button></div>
+            ${renderTable(publishers, [
+              { title: "发布者", render: p => identity(p.name, publisherKey(p), p.avatarUri) },
+              { title: "头图", render: p => p.bannerUri ? `<img class="avatar" src="${attr(p.bannerUri)}" alt="" onerror="this.style.visibility='hidden'">` : `<span class="sub-line">-</span>` },
+              { title: "订阅", render: p => `<span class="primary-line">${p.subscriptionCount || 0}</span>` },
+              { title: "状态", render: p => entityStatePill(p.state) },
+              { title: "创建时间", render: p => `<span class="sub-line">${fmtTime(p.createTime)}</span>` },
+              { title: "操作", render: p => `<div class="row-actions"><button data-action="edit-publisher" data-id="${p.id}">编辑</button><button class="danger" data-action="delete-publisher" data-id="${p.id}">删除</button></div>` }
+            ])}
+          </section>
+          <section class="panel full">
+            <div class="panel-head"><h2>消息目标</h2></div>
+            ${renderTable(subscribers, [
+              { title: "目标", render: s => cell(s.name, targetKey(s)) },
+              { title: "订阅", render: s => `<span class="primary-line">${s.subscriptionCount || 0}</span>` },
+              { title: "状态", render: s => entityStatePill(s.state) },
+              { title: "创建时间", render: s => `<span class="sub-line">${fmtTime(s.createTime)}</span>` },
+              { title: "操作", render: s => `<div class="row-actions"><button data-action="edit-subscriber" data-id="${s.id}">编辑</button><button class="danger" data-action="delete-subscriber" data-id="${s.id}">删除</button></div>` }
+            ])}
+          </section>
+        </section>`;
+    }
+    function liveSummary(publisher) {
+      const lives = publisher.liveStatuses || [];
+      if (!lives.length) return "无直播状态";
+      return lives.map(live => `${label(live.status)} ${live.title || live.roomId}`).join(" / ");
+    }
+    function cursorSummary(publisher) {
+      const cursors = publisher.cursors || [];
+      if (!cursors.length) return "无游标";
+      const latest = cursors.slice().sort((a, b) => b.lastSeenAtEpochSeconds - a.lastSeenAtEpochSeconds)[0];
+      return `${latest.sourceKey} · ${eventLabel(latest.eventType)} · ${fmtTime(latest.lastSeenAtEpochSeconds)}`;
     }
 
-    async function loadSubscriptions(force) {
-      await ensureSubscriptions(force);
-      renderTable("subscriptions", [
-        { label: "ID", key: "id" },
-        { label: "目标", render: r => esc((r.subscriber && r.subscriber.platformId + ":" + label(r.subscriber.targetKind || r.subscriber.type) + ":" + (r.subscriber.externalId || r.subscriber.targetId)) || r.subscriberId) },
-        { label: "发布者", render: r => esc((r.publisher && r.publisher.platformId + ":" + r.publisher.externalId + " " + r.publisher.name) || r.publisherId) },
-        { label: "@全体", render: r => atAllSummary(r) },
-        { label: "创建时间", render: r => esc(formatTime(r.createdAtEpochSeconds)) },
-        { label: "操作", render: r => "<div class='table-actions'><button data-action='edit-subscription-atall' data-id='" + r.id + "'>编辑@全体</button><button class='danger' data-action='delete-subscription' data-id='" + r.id + "'>删除</button></div>" }
-      ], state.cache.subscriptions);
-    }
-
-    async function loadFilters(force) {
-      await ensureSubscriptions(force);
-      updateFilterScopeOptions();
-      const id = els("filterScopeSubscriptionId").value.trim();
-      state.cache.filters = await api("/filter-rules" + (id ? "?subscriptionId=" + encodeURIComponent(id) : ""));
-      renderTable("filters", [
-        { label: "ID", key: "id" },
-        { label: "订阅", key: "subscriptionId" },
-        { label: "动作", render: r => esc(label(r.action)) },
-        { label: "条件", render: r => esc((r.condition && r.condition.type) || "") },
-        { label: "值", render: r => esc(filterConditionValue(r.condition)) },
-        { label: "启用", render: r => badge(r.enabled ? "ACTIVE" : "DISABLED") },
-        { label: "操作", render: r => "<div class='table-actions'><button class='danger' data-action='delete-filter' data-id='" + r.id + "'>删除</button></div>" }
-      ], state.cache.filters);
-    }
-
-    function filterConditionValue(condition) {
-      if (!condition) return "";
-      if (condition.kind) return condition.kind;
-      if (condition.value) return condition.value;
-      if (condition.pattern) return condition.pattern;
-      return JSON.stringify(condition);
-    }
-
-    function updateFilterScopeOptions(selectedValue) {
-      const select = els("filterScopeSubscriptionId");
-      if (!select) return;
-      const current = selectedValue !== undefined ? selectedValue : select.value;
-      select.innerHTML = optionHtml("", "全部订阅", current === "") + state.cache.subscriptions
-        .map(subscription => optionHtml(subscription.id, subscriptionLabel(subscription), String(subscription.id) === String(current)))
-        .join("");
-      els("clearFilters").disabled = !select.value;
-    }
-
-    async function ensureConfigs(force) {
-      if (force || !state.cache.configs) {
-        state.cache.configs = await api("/configs");
-        state.cache.configDetails = {};
+    async function loadLogsPage(force) {
+      if (force) {
+        state.logRows = [];
+        state.logSince = 0;
       }
-      return state.cache.configs;
+      $("content").innerHTML = `
+        <section class="page">
+          <section class="panel full">
+            <div class="filters">
+              <div class="field"><label>级别</label><select id="logLevel"><option value="">全部</option><option>ERROR</option><option>WARN</option><option>INFO</option><option>DEBUG</option></select></div>
+              <div class="field"><label>模块</label><input id="logLogger" placeholder="logger"></div>
+              <div class="field"><label>关键词</label><input id="logQuery" placeholder="message"></div>
+              <div class="toolbar-actions">
+                <button data-action="apply-log-filter">筛选</button>
+                <button class="secondary" data-action="toggle-log-pause">${state.logsPaused ? "继续" : "暂停"}</button>
+              </div>
+            </div>
+            <div id="logsTable"></div>
+          </section>
+        </section>`;
+      await refreshLogs(true);
+      startLogPolling();
     }
-
-    async function ensureConfigDetail(id, force) {
-      if (force || !state.cache.configDetails[id]) {
-        state.cache.configDetails[id] = await api("/configs/" + encodeURIComponent(id));
+    async function refreshLogs(force) {
+      const params = {
+        level: $("logLevel") && $("logLevel").value,
+        logger: $("logLogger") && $("logLogger").value,
+        q: $("logQuery") && $("logQuery").value,
+        limit: 120
+      };
+      if (!force && state.logSince) params.since = state.logSince;
+      const response = await api("/logs" + query(params));
+      state.logSince = response.nextSince || state.logSince;
+      if (force) state.logRows = response.entries || [];
+      else {
+        const known = new Set(state.logRows.map(row => row.seq));
+        state.logRows = state.logRows.concat((response.entries || []).filter(row => !known.has(row.seq))).slice(-200);
       }
-      return state.cache.configDetails[id];
+      renderLogs();
+    }
+    function renderLogs() {
+      const target = $("logsTable");
+      if (!target) return;
+      const rows = state.logRows.slice().reverse();
+      target.innerHTML = renderTable(rows, [
+        { title: "时间", render: row => `<span class="sub-line">${fmtTime(row.timestampEpochMillis, true)}</span>` },
+        { title: "级别", render: row => pill(row.level) },
+        { title: "模块", render: row => `<span class="sub-line">${esc(row.loggerName)}</span>` },
+        { title: "内容", render: row => `<div class="log-row">${esc(row.message)}${row.throwable ? "\n" + esc(row.throwable) : ""}</div>` }
+      ]);
+    }
+    function startLogPolling() {
+      stopLogPolling();
+      state.logTimer = setInterval(() => {
+        if (!state.logsPaused && state.page === "logs") refreshLogs(false).catch(handleError);
+      }, 2500);
+    }
+    function stopLogPolling() {
+      if (state.logTimer) clearInterval(state.logTimer);
+      state.logTimer = null;
     }
 
     async function loadConfigs(force) {
-      const configs = await ensureConfigs(force);
-      if (!configs.length) {
-        els("configList").innerHTML = "<div class='empty'>暂无可编辑配置</div>";
-        els("configForm").innerHTML = "";
-        return;
-      }
-      if (!configs.some(item => item.id === state.selectedConfigId)) {
-        state.selectedConfigId = configs[0].id;
-      }
-      renderConfigList(configs);
-      const detail = await ensureConfigDetail(state.selectedConfigId, force);
-      renderConfigForm(detail);
+      if (force || !state.cache.configs) state.cache.configs = await api("/configs");
+      const rows = state.cache.configs;
+      $("content").innerHTML = `
+        <section class="page">
+          <div class="cards">
+            ${rows.map(item => `<article class="card">
+              <div class="card-head">${cell(item.name, item.id)}${item.pluginState ? pill(item.pluginState) : pill("ACTIVE")}</div>
+              <span class="sub-line">${esc(item.description || item.sourcePath)}</span>
+              <div class="row-actions"><button data-action="edit-config" data-id="${attr(item.id)}">编辑</button></div>
+            </article>`).join("") || `<div class="empty">暂无配置</div>`}
+          </div>
+        </section>`;
     }
 
-    function renderConfigList(configs) {
-      els("configList").innerHTML = configs.map(item => {
-        const active = item.id === state.selectedConfigId ? " active" : "";
-        const source = item.pluginId ? item.pluginId + " · " + label(item.pluginState) : item.sourcePath;
-        return "<button type='button' class='" + active + "' data-action='select-config' data-config-id='" + esc(item.id) + "'>"
-          + "<strong>" + esc(item.name) + "</strong><small>" + esc(item.id) + " · " + esc(source || "") + "</small></button>";
-      }).join("");
+    async function loadSystem(force) {
+      if (force || !state.cache.system) state.cache.system = await api("/system/status");
+      if (force || !state.cache.deliveries) state.cache.deliveries = await api("/deliveries?limit=80");
+      const s = state.cache.system;
+      const deliveries = state.cache.deliveries;
+      $("content").innerHTML = `
+        <section class="page">
+          <div class="stats">
+            ${stat("运行时间", fmtDuration(s.uptimeMs), fmtTime(s.startedAtEpochMillis, true))}
+            ${stat("内存", fmtBytes(s.usedMemoryBytes), "已用 / " + fmtBytes(s.maxMemoryBytes))}
+            ${stat("CPU", s.availableProcessors, "可用处理器")}
+            ${stat("后台", s.webAdminPort, s.webAdminHost)}
+          </div>
+          <section class="panel full">
+            <div class="panel-head"><h2>路径</h2></div>
+            ${renderTable([s], [
+              { title: "数据库", render: row => `<span class="sub-line">${esc(row.databasePath || "-")}</span>` },
+              { title: "主配置", render: row => `<span class="sub-line">${esc(row.mainConfigPath)}</span>` },
+              { title: "Java", render: row => cell(row.javaVersion, row.osName) }
+            ])}
+          </section>
+          <section class="panel full">
+            <div class="panel-head"><h2>最近投递</h2><button class="secondary" data-action="refresh-current">刷新</button></div>
+            ${renderTable(deliveries, [
+              { title: "消息", render: row => cell(row.messageId, row.sourceUpdateKey || "") },
+              { title: "目标", render: row => cell(`${row.platformId}:${label(row.targetKind)}:${row.targetId}`, row.targetKey.replace(/\u001F/g, " / ")) },
+              { title: "状态", render: row => pill(row.status) },
+              { title: "尝试", render: row => `<span class="primary-line">${row.attempts}</span>` },
+              { title: "错误", render: row => `<span class="sub-line">${esc(row.lastError || "-")}</span>` },
+              { title: "更新时间", render: row => `<span class="sub-line">${fmtTime(row.updatedAtEpochSeconds)}</span>` }
+            ])}
+          </section>
+        </section>`;
     }
 
-    function setConfigMessage(text, isError) {
-      setMessage("configMessage", text || "", isError);
+    function openModal(title, body, onSubmit, options = {}) {
+      if (state.modalCleanup) state.modalCleanup();
+      state.modalCleanup = options.cleanup || null;
+      state.modalSubmit = onSubmit || null;
+      $("modalTitle").textContent = title;
+      $("modalBody").innerHTML = body;
+      $("modalBox").className = "modal " + (options.size || "");
+      $("modalConfirm").hidden = options.confirmHidden || !onSubmit;
+      $("modalConfirm").textContent = options.confirmText || "保存";
+      $("modalCancel").textContent = options.cancelText || "取消";
+      setModalMessage("", false);
+      $("modalBackdrop").hidden = false;
     }
-
-    function hideConfigReloadAction() {
-      state.pendingConfigReloadPluginId = null;
-      const actions = els("configReloadActions");
-      if (actions) actions.hidden = true;
+    function closeModal() {
+      if (state.modalCleanup) state.modalCleanup();
+      state.modalCleanup = null;
+      state.modalSubmit = null;
+      $("modalBackdrop").hidden = true;
+      $("modalBody").innerHTML = "";
+      setModalMessage("", false);
     }
-
-    function showConfigReloadAction(pluginId) {
-      state.pendingConfigReloadPluginId = pluginId || null;
-      const actions = els("configReloadActions");
-      if (actions) actions.hidden = !state.pendingConfigReloadPluginId;
-    }
-
-    function configInputId(path) {
-      return "config-" + String(path).replace(/[^A-Za-z0-9_-]/g, "-");
-    }
-
-    function configValue(detail, path) {
-      return detail && detail.values ? detail.values[path] : null;
-    }
-
-    function renderConfigForm(detail) {
-      els("configTitle").textContent = detail.name || detail.id;
-      els("configSubtitle").textContent = (detail.description || detail.sourcePath || "").trim();
-      setConfigMessage("", false);
-      hideConfigReloadAction();
-      const fields = detail.schema.fields || [];
-      const hasRestartFields = fields.some(field => field.restartRequired);
-      els("configRestartHint").hidden = !hasRestartFields;
-      const groups = [];
-      fields.forEach(field => {
-        const section = field.section || "General";
-        let group = groups.find(item => item.section === section);
-        if (!group) {
-          group = { section: section, fields: [] };
-          groups.push(group);
-        }
-        group.fields.push(field);
-      });
-      els("configForm").innerHTML = groups.map(group => {
-        return "<section class='config-section'><h3>" + esc(group.section) + "</h3><div class='forms'>"
-          + group.fields.map(field => renderConfigField(detail, field)).join("")
-          + "</div></section>";
-      }).join("");
-    }
-
-    function configLabelHtml(field, id) {
-      const mark = field.restartRequired ? "<span class='restart-mark' title='保存后需要重启'>⚠️</span>" : "";
-      return "<label for='" + id + "'>" + esc(field.label) + mark + "</label>";
-    }
-
-    function renderConfigField(detail, field) {
-      const id = configInputId(field.path);
-      const value = configValue(detail, field.path);
-      const hint = field.description ? "<span class='field-hint'>" + esc(field.description) + "</span>" : "";
-      const labelHtml = configLabelHtml(field, id);
-      if (isCommandPermissionsField(field)) {
-        return "<div class='form-field full-width'>" + labelHtml
-          + "<div class='config-table-wrap' data-config-permissions='" + esc(field.path) + "'><table><thead><tr><th>平台</th><th>目标类型</th><th>目标 ID</th><th>作用域</th><th>线程</th><th>账号</th><th>发送者</th><th>角色</th><th>操作</th></tr></thead><tbody>"
-          + renderPermissionRows(value || [])
-          + "</tbody></table></div><div class='form-actions'><button type='button' class='secondary' data-action='open-permission-modal'>添加规则</button></div>"
-          + hint + "</div>";
-      }
-      let control = "";
-      if (field.type === "BOOLEAN") {
-        control = "<label class='check-control'><input id='" + id + "' type='checkbox' data-config-input='" + esc(field.path) + "'" + (value === true ? " checked" : "") + ">启用</label>";
-      } else if (field.type === "SELECT") {
-        control = "<select id='" + id + "' data-config-input='" + esc(field.path) + "'>"
-          + (field.options || []).map(option => optionHtml(option.value, option.label || option.value, String(value) === String(option.value))).join("")
-          + "</select>";
-      } else if (field.type === "NUMBER") {
-        control = "<input id='" + id + "' type='number' data-config-input='" + esc(field.path) + "' value='" + esc(value ?? "") + "'>";
-      } else if (field.type === "JSON") {
-        const jsonValue = value == null ? "" : JSON.stringify(value, null, 2);
-        control = "<textarea id='" + id + "' data-config-input='" + esc(field.path) + "' data-config-json='true'>" + esc(jsonValue) + "</textarea>";
-      } else if (field.type === "TEXTAREA") {
-        control = "<textarea id='" + id + "' data-config-input='" + esc(field.path) + "'>" + esc(value ?? "") + "</textarea>";
-      } else if (field.type === "SECRET") {
-        const placeholder = detail.secretStates && detail.secretStates[field.path] ? "已设置，留空保留原值" : "";
-        control = "<input id='" + id + "' type='password' data-config-input='" + esc(field.path) + "' placeholder='" + esc(placeholder) + "'>";
-      } else {
-        control = "<input id='" + id + "' data-config-input='" + esc(field.path) + "' value='" + esc(value ?? "") + "'>";
-      }
-      return "<div class='form-field'>" + labelHtml + control + hint + "</div>";
-    }
-
-    function isCommandPermissionsField(field) {
-      return field.path === "command.permissions" && field.type === "JSON";
-    }
-
-    function configRowDataAttr(value) {
-      return esc(JSON.stringify(value || {}));
-    }
-
-    function readConfigRowData(row) {
-      if (!row) return {};
+    async function submitModal() {
+      if (!state.modalSubmit) return closeModal();
+      $("modalConfirm").disabled = true;
       try {
-        return JSON.parse(row.dataset.configJson || "{}");
-      } catch (_) {
-        return {};
-      }
-    }
-
-    function renderPermissionRows(permissions) {
-      if (!permissions.length) return "<tr data-empty-row><td colspan='9'><div class='empty'>暂无权限规则</div></td></tr>";
-      return permissions.map(permissionConfigRow).join("");
-    }
-
-    function permissionConfigRow(rule) {
-      const value = rule || {};
-      const targetKind = value.targetKind || "";
-      const role = value.role || "ADMIN";
-      const normalized = {
-        platformId: value.platformId || "*",
-        targetKind: targetKind || null,
-        targetId: value.targetId || "*",
-        scopeId: value.scopeId || "*",
-        threadId: value.threadId || "*",
-        accountId: value.accountId || "*",
-        senderId: value.senderId || "*",
-        role: role
-      };
-      return "<tr data-permission-row data-config-json='" + configRowDataAttr(normalized) + "'>"
-        + "<td><div class='config-table-text'>" + esc(normalized.platformId) + "</div></td>"
-        + "<td><div class='config-table-text'>" + esc(permissionTargetKindLabel(normalized.targetKind)) + "</div></td>"
-        + "<td><div class='config-table-text'>" + esc(normalized.targetId) + "</div></td>"
-        + "<td><div class='config-table-text'>" + esc(normalized.scopeId) + "</div></td>"
-        + "<td><div class='config-table-text'>" + esc(normalized.threadId) + "</div></td>"
-        + "<td><div class='config-table-text'>" + esc(normalized.accountId) + "</div></td>"
-        + "<td><div class='config-table-text'>" + esc(normalized.senderId) + "</div></td>"
-        + "<td><div class='config-table-text'>" + esc(permissionRoleLabel(normalized.role)) + "</div></td>"
-        + "<td><div class='table-actions'><button type='button' class='secondary' data-action='edit-permission-row'>修改</button><button type='button' class='secondary' data-action='remove-permission-row'>移除</button></div></td>"
-        + "</tr>";
-    }
-
-    function permissionValueFromRow(row) {
-      const data = readConfigRowData(row);
-      return {
-        platformId: String(data.platformId || "*"),
-        targetKind: data.targetKind || null,
-        targetId: String(data.targetId || "*"),
-        scopeId: String(data.scopeId || "*"),
-        threadId: String(data.threadId || "*"),
-        accountId: String(data.accountId || "*"),
-        senderId: String(data.senderId || "*"),
-        role: String(data.role || "ADMIN")
-      };
-    }
-
-    function permissionTargetKindLabel(value) {
-      return value === "GROUP" ? "群聊"
-        : value === "USER" ? "用户"
-        : value === "CHANNEL" ? "频道"
-        : "全部目标类型";
-    }
-
-    function permissionRoleLabel(value) {
-      return value === "USER" ? "普通用户" : "管理员";
-    }
-
-    function setConfigItemMessage(text, isError) {
-      setMessage("configItemMessage", text || "", isError);
-    }
-
-    function openConfigItemModal(kind, row) {
-      const isEdit = Boolean(row);
-      state.configItemModal = { kind: kind, row: row || null };
-      setConfigItemMessage("", false);
-      els("configItemTitle").textContent = isEdit ? "修改权限规则" : "添加权限规则";
-      els("confirmConfigItem").textContent = isEdit ? "保存" : "添加";
-      const value = isEdit ? permissionValueFromRow(row) : {
-        platformId: "*",
-        targetKind: null,
-        targetId: "*",
-        scopeId: "*",
-        threadId: "*",
-        accountId: "*",
-        senderId: "*",
-        role: "ADMIN"
-      };
-      els("configItemBody").innerHTML = "<div class='forms'>"
-        + "<div class='form-field'><label for='configPermissionPlatform'>平台</label><input id='configPermissionPlatform' value='" + esc(value.platformId) + "'></div>"
-        + "<div class='form-field'><label for='configPermissionTargetKind'>目标类型</label><select id='configPermissionTargetKind'>"
-        + optionHtml("", "全部目标类型", !value.targetKind) + optionHtml("GROUP", "群聊", value.targetKind === "GROUP") + optionHtml("USER", "用户", value.targetKind === "USER") + optionHtml("CHANNEL", "频道", value.targetKind === "CHANNEL")
-        + "</select></div>"
-        + "<div class='form-field'><label for='configPermissionTargetId'>目标 ID</label><input id='configPermissionTargetId' value='" + esc(value.targetId) + "'></div>"
-        + "<div class='form-field'><label for='configPermissionScopeId'>作用域 ID</label><input id='configPermissionScopeId' value='" + esc(value.scopeId) + "'></div>"
-        + "<div class='form-field'><label for='configPermissionThreadId'>线程 ID</label><input id='configPermissionThreadId' value='" + esc(value.threadId) + "'></div>"
-        + "<div class='form-field'><label for='configPermissionAccountId'>账号 ID</label><input id='configPermissionAccountId' value='" + esc(value.accountId) + "'></div>"
-        + "<div class='form-field'><label for='configPermissionSenderId'>发送者 ID</label><input id='configPermissionSenderId' value='" + esc(value.senderId) + "'></div>"
-        + "<div class='form-field'><label for='configPermissionRole'>角色</label><select id='configPermissionRole'>"
-        + optionHtml("ADMIN", "管理员", value.role === "ADMIN") + optionHtml("USER", "普通用户", value.role === "USER")
-        + "</select></div>"
-        + "</div>";
-      els("configItemModal").hidden = false;
-      setTimeout(() => els("configPermissionPlatform").focus(), 0);
-    }
-
-    function closeConfigItemModal() {
-      state.configItemModal = null;
-      if (!els("configItemModal")) return;
-      els("configItemModal").hidden = true;
-      els("configItemBody").innerHTML = "";
-      setConfigItemMessage("", false);
-    }
-
-    function refreshConfigTableEmptyRows() {
-      const permissionBody = document.querySelector("[data-config-permissions] tbody");
-      if (permissionBody && !permissionBody.querySelector("[data-permission-row]") && !permissionBody.querySelector("[data-empty-row]")) {
-        permissionBody.insertAdjacentHTML("beforeend", "<tr data-empty-row><td colspan='9'><div class='empty'>暂无权限规则</div></td></tr>");
-      }
-    }
-
-    function addConfigItemFromModal() {
-      const modal = state.configItemModal;
-      if (!modal) return;
-      const tbody = document.querySelector("[data-config-permissions] tbody");
-      if (!tbody) return;
-      const next = {
-        platformId: els("configPermissionPlatform").value.trim() || "*",
-        targetKind: els("configPermissionTargetKind").value || null,
-        targetId: els("configPermissionTargetId").value.trim() || "*",
-        scopeId: els("configPermissionScopeId").value.trim() || "*",
-        threadId: els("configPermissionThreadId").value.trim() || "*",
-        accountId: els("configPermissionAccountId").value.trim() || "*",
-        senderId: els("configPermissionSenderId").value.trim() || "*",
-        role: els("configPermissionRole").value || "ADMIN"
-      };
-      if (modal.row) {
-        modal.row.outerHTML = permissionConfigRow(next);
-      } else {
-        const empty = tbody.querySelector("[data-empty-row]");
-        if (empty) empty.remove();
-        tbody.insertAdjacentHTML("beforeend", permissionConfigRow(next));
-      }
-      closeConfigItemModal();
-    }
-
-    function collectConfigValues(detail) {
-      const values = {};
-      (detail.schema.fields || []).forEach(field => {
-        if (isCommandPermissionsField(field)) {
-          values[field.path] = Array.from(document.querySelectorAll("[data-permission-row]")).map(permissionValueFromRow);
-        } else {
-          const input = document.querySelector("[data-config-input='" + field.path + "']");
-          if (!input) return;
-          if (field.type === "BOOLEAN") {
-            values[field.path] = input.checked;
-          } else if (field.type === "NUMBER") {
-            values[field.path] = input.value === "" ? null : Number(input.value);
-          } else if (field.type === "JSON") {
-            values[field.path] = input.value.trim() ? JSON.parse(input.value) : null;
-          } else {
-            values[field.path] = input.value;
-          }
-        }
-      });
-      return values;
-    }
-
-    async function saveSelectedConfig() {
-      const id = state.selectedConfigId;
-      const detail = await ensureConfigDetail(id);
-      const values = collectConfigValues(detail);
-      if (id === "main") {
-        const requiredTemplates = ["templates.dynamic", "templates.liveStarted", "templates.liveEnded"];
-        if (requiredTemplates.some(path => !String(values[path] || "").trim())) {
-          setConfigMessage("三种推送模板都不能为空", true);
-          return;
-        }
-      }
-      const result = await api("/configs/" + encodeURIComponent(id), {
-        method: "PUT",
-        body: JSON.stringify({ values: values })
-      });
-      if (id === "main" && values["webAdmin.token"] && String(values["webAdmin.token"]).trim()) {
-        state.token = String(values["webAdmin.token"]).trim();
-        localStorage.setItem("dynamicBotAdminToken", state.token);
-      }
-      state.cache.configDetails[id] = Object.assign({}, detail, {
-        values: result.values,
-        secretStates: result.secretStates
-      });
-      if (id === "main") invalidate("overview");
-      renderConfigForm(state.cache.configDetails[id]);
-      if (result.restartRequired && result.pluginId) {
-        showConfigReloadAction(result.pluginId);
-      }
-      const suffix = result.restartRequired ? "；需要重启 " + result.restartTargets.join(", ") : "";
-      setConfigMessage(result.message + suffix, false);
-      notify(result.message + suffix, false);
-    }
-
-    async function reloadPlugin(pluginId, source) {
-      if (!pluginId) return;
-      const result = await api("/plugins/" + encodeURIComponent(pluginId) + "/reload", { method: "POST" });
-      invalidate("overview", "platformLogins", "configs");
-      if (state.page === "overview") {
-        await loadOverview(true);
-      } else if (state.page === "login") {
-        await loadPlatformLogins(true);
-      } else if (state.page === "configs") {
-        await loadConfigs(true);
-      }
-      const message = source === "config" ? "插件已重启，配置已生效" : (result.message || "插件已重启");
-      notify(message, false);
-      if (source === "config") {
-        setConfigMessage(message, false);
-        hideConfigReloadAction();
-      }
-      return result;
-    }
-
-    async function stopApplication() {
-      if (!confirm("确定要停止主项目吗？停止后 Web 后台会断开，需要手动重新启动进程。")) return;
-      const button = els("stopApplication");
-      button.disabled = true;
-      try {
-        await api("/system/stop", { method: "POST" });
-        els("connectionState").textContent = "停止中";
-        notify("主项目正在停止", false);
+        await state.modalSubmit();
       } catch (error) {
-        button.disabled = false;
-        throw error;
+        setModalMessage(error.message || String(error), true);
+      } finally {
+        $("modalConfirm").disabled = false;
       }
     }
 
-    function invalidate(...keys) {
-      keys.forEach(key => {
-        if (Array.isArray(state.cache[key])) state.cache[key] = [];
-        else state.cache[key] = null;
-      });
-    }
+    async function openCreateSubscription() {
+      await ensureSubscriptions(false);
+      if (!state.cache.platformLogins) state.cache.platformLogins = await api("/platform-logins");
+      if (!state.cache.publishers) state.cache.publishers = await api("/publishers");
+      const targetPlatforms = await api("/subscriber-target-platforms").catch(() => []);
+      const fallbackTargets = targetPlatforms.length ? targetPlatforms : [{ platformId: "onebot", pluginName: "手动", supportedTypes: ["GROUP", "USER"] }];
+      const publisherPlatforms = Array.from(new Set(
+        (state.cache.platformLogins || []).map(item => item.platformId)
+          .concat((state.cache.publishers || []).map(item => item.platformId))
+      )).filter(Boolean);
+      let targetCandidates = [];
 
-    function formatTime(epochSeconds) {
-      if (!epochSeconds) return "";
-      return new Date(epochSeconds * 1000).toLocaleString();
-    }
+      openModal("新建订阅", `
+        <div class="form-grid">
+          <div class="field"><label>目标平台</label><select id="subTargetPlatform">${fallbackTargets.map(p => `<option value="${attr(p.platformId)}">${esc(p.platformId)} · ${esc(p.pluginName || p.pluginId || "")}</option>`).join("")}</select></div>
+          <div class="field"><label>目标类型</label><select id="subTargetKind"></select></div>
+          <div class="field full" id="subTargetCandidateWrap"><label>可用目标</label><select id="subTargetCandidate"></select></div>
+          <div class="field full" id="subTargetManualWrap"><label>目标 ID</label><input id="subTargetManual"></div>
+          <div class="field full"><span id="subTargetStatus" class="inline-note"></span></div>
+          <div class="field"><label>发布者平台</label><input id="subPublisherPlatform" list="publisherPlatforms" value="${attr(publisherPlatforms[0] || "bilibili")}"><datalist id="publisherPlatforms">${publisherPlatforms.map(p => `<option value="${attr(p)}"></option>`).join("")}</datalist></div>
+          <div class="field"><label>发布者 ID</label><input id="subPublisherId"></div>
+          <div class="field full">${policyForm("subPolicy", null, "GROUP")}</div>
+          <div class="field full"><label class="check"><input id="subAutoFollow" type="checkbox" checked>自动关注发布者</label></div>
+        </div>
+      `, async () => {
+        const targetId = targetCandidates.length ? $("subTargetCandidate").value : $("subTargetManual").value.trim();
+        const payload = {
+          subscriberPlatform: $("subTargetPlatform").value.trim(),
+          targetKind: $("subTargetKind").value,
+          subscriberTargetId: targetId,
+          publisherPlatform: $("subPublisherPlatform").value.trim(),
+          publisherExternalId: $("subPublisherId").value.trim(),
+          autoFollow: $("subAutoFollow").checked,
+          policy: collectPolicy("subPolicy")
+        };
+        if (!payload.subscriberPlatform || !payload.subscriberTargetId || !payload.publisherPlatform || !payload.publisherExternalId) throw new Error("请填写必要字段");
+        await api("/subscriptions", { method: "POST", body: JSON.stringify(payload) });
+        closeModal();
+        invalidate("dashboard", "subscriptions", "publishers", "subscribers");
+        await loadSubscriptions(true);
+        notify("订阅已创建", false);
+      }, { size: "wide" });
 
-    function handleError(error) {
-      if (String(error.message).toLowerCase().includes("unauthorized")) {
-        localStorage.removeItem("dynamicBotAdminToken");
-        showLogin("Token 无效或已过期", true);
-      } else {
-        notify(error.message, true);
-      }
+      const policyUpdater = wirePolicyForm("subPolicy", () => $("subTargetKind").value);
+      const refreshTargetKinds = async () => {
+        const platformId = $("subTargetPlatform").value;
+        const platform = fallbackTargets.find(item => item.platformId === platformId);
+        const kinds = platform && platform.supportedTypes && platform.supportedTypes.length
+          ? platform.supportedTypes
+          : ["GROUP", "USER", "CHANNEL", "OTHER"];
+        $("subTargetKind").innerHTML = kinds.map(kind => `<option value="${attr(kind)}">${esc(label(kind))}</option>`).join("");
+        policyUpdater();
+        await refreshTargetCandidates();
+      };
+      const refreshTargetCandidates = async () => {
+        const platform = $("subTargetPlatform").value;
+        const kind = $("subTargetKind").value;
+        $("subTargetStatus").textContent = "正在获取目标...";
+        targetCandidates = [];
+        try {
+          targetCandidates = await api(`/subscriber-targets?platformId=${encodeURIComponent(platform)}&type=${encodeURIComponent(kind)}`);
+        } catch (error) {
+          $("subTargetStatus").textContent = "目标列表获取失败，请手动填写目标 ID";
+        }
+        if (targetCandidates.length) {
+          $("subTargetCandidateWrap").hidden = false;
+          $("subTargetManualWrap").hidden = true;
+          $("subTargetCandidate").innerHTML = targetCandidates.map(target =>
+            `<option value="${attr(target.externalId)}">${esc(target.name || target.externalId)} · ${esc(target.externalId)}</option>`
+          ).join("");
+          $("subTargetStatus").textContent = `已获取 ${targetCandidates.length} 个目标`;
+        } else {
+          $("subTargetCandidateWrap").hidden = true;
+          $("subTargetManualWrap").hidden = false;
+          $("subTargetStatus").textContent = $("subTargetStatus").textContent || "未获取到目标，请手动填写目标 ID";
+        }
+      };
+      $("subTargetPlatform").onchange = refreshTargetKinds;
+      $("subTargetKind").onchange = async () => {
+        policyUpdater();
+        await refreshTargetCandidates();
+      };
+      await refreshTargetKinds();
     }
-
-    function setPlatformMessage(platformId, text, isError) {
-      const node = els("platform-message-" + platformKey(platformId));
-      if (node) {
-        node.textContent = "";
-        node.classList.toggle("error", false);
-      }
-      if (text) notify(platformId + "：" + text, isError);
+    function policyForm(prefix, policy, targetKind) {
+      const selectedEvents = new Set(policyEvents(policy));
+      const selectedMentions = new Set(mentionEvents(policy));
+      const groupTarget = targetKind === "GROUP";
+      return `<div class="panel">
+        <div class="rule-matrix">
+          ${eventTypes.map(([value, text]) => {
+            const enabled = selectedEvents.has(value);
+            const mention = selectedMentions.has(value);
+            return `<div class="rule-row">
+              <strong>${esc(text)}</strong>
+              <label class="check"><input type="checkbox" name="${prefix}-event" value="${value}"${enabled ? " checked" : ""}>接收</label>
+              <label class="check"><input type="checkbox" name="${prefix}-mention" value="${value}"${mention ? " checked" : ""}${groupTarget && enabled ? "" : " disabled"}>@全体</label>
+            </div>`;
+          }).join("")}
+        </div>
+      </div>`;
     }
-
-    function setLoginModalMessage(text, isError) {
-      setMessage("platformLoginMessage", text || "", isError);
-    }
-
-    function handlePlatformError(platformId, error) {
-      if (String(error.message).toLowerCase().includes("unauthorized")) {
-        handleError(error);
-        return;
-      }
-      setPlatformMessage(platformId, error.message, true);
-      if (state.platformLoginModal && state.platformLoginModal.platformId === platformId) {
-        setLoginModalMessage(error.message, true);
-      }
-    }
-
-    function clearQrSession(platformId, cancelRemote) {
-      const current = state.qrSessions[platformId];
-      if (!current) return;
-      if (current.timer) clearInterval(current.timer);
-      if (current.url) URL.revokeObjectURL(current.url);
-      delete state.qrSessions[platformId];
-      if (cancelRemote && current.loginId) {
-        api("/login/qr/" + encodeURIComponent(current.loginId), { method: "DELETE" })
-          .catch(error => handlePlatformError(platformId, error));
-      }
-    }
-
-    function clearAllQrSessions(cancelRemote) {
-      Object.keys(state.qrSessions).forEach(platformId => clearQrSession(platformId, cancelRemote));
-    }
-
-    function setPlatformBusy(platformId, busy) {
-      const key = platformKey(platformId);
-      document.querySelectorAll("[data-platform-key='" + key + "']").forEach(node => {
-        if (node.tagName === "BUTTON") node.disabled = busy;
-      });
-      if (state.platformLoginModal && state.platformLoginModal.platformId === platformId) {
-        els("confirmPlatformLogin").disabled = busy;
-      }
-    }
-
-    async function refreshPlatformLogin(platformId) {
-      state.cache.platformLogins = await api("/platform-logins");
-      updatePlatformLoginNav(state.cache.platformLogins);
-      renderPlatformLogins(state.cache.platformLogins);
-      if (platformId) setPlatformMessage(platformId, "已刷新登录状态", false);
-    }
-
-    function findPlatformLogin(platformId) {
-      return (state.cache.platformLogins || []).find(item => item.platformId === platformId);
-    }
-
-    function platformDisplayName(platformId) {
-      const platform = findPlatformLogin(platformId);
-      return platform ? (platform.pluginName || platform.platformId) : platformId;
-    }
-
-    function openPlatformLoginModal(platformId, mode) {
-      clearQrSession(platformId, true);
-      state.platformLoginModal = { platformId, mode };
-      const key = platformKey(platformId);
-      const title = platformDisplayName(platformId) + (mode === "cookie" ? " Cookie 登录" : " 二维码登录");
-      els("platformLoginTitle").textContent = title;
-      els("platformLoginModal").hidden = false;
-      setLoginModalMessage("", false);
-      els("confirmPlatformLogin").hidden = mode !== "cookie";
-      els("confirmPlatformLogin").disabled = false;
-      if (mode === "cookie") {
-        els("platformLoginBody").innerHTML = "<div class='form-field full-width'><label for='platformCookieInput'>Cookie</label><textarea id='platformCookieInput' placeholder='SESSDATA=...'></textarea></div>";
-        setTimeout(() => els("platformCookieInput").focus(), 0);
-      } else {
-        els("platformLoginBody").innerHTML = "<div id='qr-" + key + "' class='qr-box'><span class='muted'>正在生成二维码...</span></div>";
-        startQrLogin(platformId).catch(error => handlePlatformError(platformId, error));
-      }
-    }
-
-    function closePlatformLoginModal() {
-      if (state.platformLoginModal && state.platformLoginModal.mode === "qr") {
-        clearQrSession(state.platformLoginModal.platformId, true);
-      }
-      state.platformLoginModal = null;
-      els("platformLoginModal").hidden = true;
-      els("platformLoginBody").innerHTML = "";
-      setLoginModalMessage("", false);
-      els("confirmPlatformLogin").hidden = false;
-      els("confirmPlatformLogin").disabled = false;
-    }
-
-    async function submitCookieLogin() {
-      const modal = state.platformLoginModal;
-      if (!modal || modal.mode !== "cookie") return;
-      const platformId = modal.platformId;
-      const input = els("platformCookieInput");
-      if (!input || !input.value.trim()) {
-        setLoginModalMessage("请输入 Cookie", true);
-        return;
-      }
-      setPlatformBusy(platformId, true);
-      try {
-        const result = await api("/platforms/" + encodeURIComponent(platformId) + "/login/cookie", {
-          method: "POST",
-          body: JSON.stringify({ cookie: input.value })
+    function wirePolicyForm(prefix, targetKindProvider) {
+      const update = () => {
+        const groupTarget = targetKindProvider() === "GROUP";
+        eventTypes.forEach(([value]) => {
+          const eventNode = document.querySelector(`input[name="${prefix}-event"][value="${value}"]`);
+          const mentionNode = document.querySelector(`input[name="${prefix}-mention"][value="${value}"]`);
+          if (!eventNode || !mentionNode) return;
+          mentionNode.disabled = !groupTarget || !eventNode.checked;
+          if (mentionNode.disabled) mentionNode.checked = false;
         });
-        input.value = "";
-        await refreshPlatformLogin(platformId);
-        const text = "Cookie 登录：" + label(result.status) + " " + localizeLoginMessage(result.message);
-        const failed = result.status === "FAILED" || result.status === "EXPIRED" || result.status === "UNSUPPORTED";
-        setPlatformMessage(platformId, text, failed);
-        if (result.status === "SUCCESS") {
-          closePlatformLoginModal();
-        } else {
-          setLoginModalMessage(text, failed);
-        }
-      } catch (error) {
-        handlePlatformError(platformId, error);
-      } finally {
-        setPlatformBusy(platformId, false);
-      }
-    }
-
-    async function startQrLogin(platformId) {
-      const key = platformKey(platformId);
-      clearQrSession(platformId, true);
-      setPlatformBusy(platformId, true);
-      try {
-        const started = await api("/platforms/" + encodeURIComponent(platformId) + "/login/qr", { method: "POST" });
-        const blob = await apiBlob(started.imageUrl);
-        const url = URL.createObjectURL(blob);
-        if (!state.platformLoginModal || state.platformLoginModal.platformId !== platformId || state.platformLoginModal.mode !== "qr") {
-          URL.revokeObjectURL(url);
-          return;
-        }
-        const qr = els("qr-" + key);
-        if (qr) {
-          qr.innerHTML = "<img alt='二维码' src='" + url + "'><span id='qrStatus-" + key + "'>" + esc(localizeLoginMessage(started.message || "等待扫码")) + "</span>";
-        }
-        state.qrSessions[platformId] = { timer: null, url: url, loginId: started.loginId };
-        state.qrSessions[platformId].timer = setInterval(async () => {
-          try {
-            const status = await api("/login/qr/" + started.loginId);
-            const statusNode = els("qrStatus-" + key);
-            if (statusNode) statusNode.textContent = label(status.status) + " " + localizeLoginMessage(status.message);
-            if (status.status !== "PENDING") {
-              clearQrSession(platformId);
-              await refreshPlatformLogin(platformId);
-              const text = "二维码登录：" + label(status.status) + " " + localizeLoginMessage(status.message);
-              const failed = status.status === "FAILED" || status.status === "EXPIRED";
-              setPlatformMessage(platformId, text, failed);
-              if (state.platformLoginModal && state.platformLoginModal.platformId === platformId) {
-                setLoginModalMessage(text, failed);
-              }
-            }
-          } catch (error) {
-            clearQrSession(platformId);
-            handlePlatformError(platformId, error);
-          }
-        }, 1500);
-      } catch (error) {
-        clearQrSession(platformId);
-        handlePlatformError(platformId, error);
-      } finally {
-        setPlatformBusy(platformId, false);
-      }
-    }
-
-    function setActionMessage(text, isError) {
-      setMessage("actionMessage", text || "", isError);
-    }
-
-    async function openActionModal(kind) {
-      closePlatformLoginModal();
-      state.actionModal = { kind };
-      const titles = {
-        subscription: "创建订阅",
-        filter: "添加过滤规则"
       };
-      const confirmTexts = {
-        subscription: "创建",
-        filter: "添加"
+      document.querySelectorAll(`input[name="${prefix}-event"]`).forEach(node => node.onchange = update);
+      update();
+      return update;
+    }
+    function collectPolicy(prefix) {
+      const enabledEvents = Array.from(document.querySelectorAll(`input[name="${prefix}-event"]:checked`)).map(item => item.value);
+      const mentionAllEvents = Array.from(document.querySelectorAll(`input[name="${prefix}-mention"]:checked`))
+        .filter(item => !item.disabled && enabledEvents.includes(item.value))
+        .map(item => item.value);
+      if (enabledEvents.length === 0) throw new Error("至少选择一种接收事件");
+      return { enabledEvents, mentionAllEvents };
+    }
+    async function openSubscriptionDetail(id) {
+      const subscriptions = await ensureSubscriptions(false);
+      const subscription = subscriptions.find(item => Number(item.id) === Number(id));
+      if (!subscription) throw new Error("未找到订阅");
+      const targetKind = subscription.subscriber && subscription.subscriber.targetKind || "OTHER";
+      openModal("订阅详情", `
+        <div class="grid">
+          <section class="panel full">
+            <div class="panel-head">
+              <div><h2>订阅规则</h2><p>${esc(publisherKey(subscription.publisher))} -> ${esc(targetKey(subscription.subscriber))}</p></div>
+            </div>
+            ${policyForm("editPolicy", subscription.policy, targetKind)}
+          </section>
+          <section class="panel full">
+            <div class="panel-head"><h2>动态内容过滤</h2><div class="row-actions"><button data-action="add-filter" data-id="${subscription.id}">添加规则</button><button class="danger" data-action="clear-filters" data-id="${subscription.id}">清空规则</button></div></div>
+            <div id="filterList">${renderFilterList(subscription)}</div>
+          </section>
+        </div>
+      `, async () => {
+        await api(`/subscriptions/${subscription.id}`, { method: "PATCH", body: JSON.stringify({ policy: collectPolicy("editPolicy") }) });
+        closeModal();
+        invalidate("dashboard", "subscriptions");
+        await loadSubscriptions(true);
+        notify("订阅规则已保存", false);
+      }, { size: "wide" });
+      wirePolicyForm("editPolicy", () => targetKind);
+    }
+    function renderFilterList(subscription) {
+      const rules = subscription.filterRules || [];
+      return renderTable(rules, [
+        { title: "类型", render: r => `<span class="primary-line">${esc(filterConditionTypeText(r.condition))}</span>` },
+        { title: "条件", render: r => cell(filterConditionText(r.condition), "命中即阻止") },
+        { title: "创建时间", render: r => `<span class="sub-line">${fmtTime(r.createdAtEpochSeconds)}</span>` },
+        { title: "操作", render: r => `<button class="danger" data-action="delete-filter" data-id="${r.id}" data-subscription="${subscription.id}">删除</button>` }
+      ]);
+    }
+    function filterConditionTypeText(condition) {
+      if (!condition) return "-";
+      if (condition.type === "HAS_ATTACHMENT_KIND") return "元素";
+      if (condition.type === "TEXT_CONTAINS") return "关键词";
+      if (condition.type === "TEXT_REGEX") return "正则";
+      if (condition.type === "HAS_REFERENCE") return "引用";
+      return condition.type || "-";
+    }
+    function filterConditionText(condition) {
+      if (!condition) return "-";
+      if (condition.type === "HAS_ATTACHMENT_KIND") return label(condition.kind);
+      if (condition.type === "TEXT_CONTAINS") return condition.value;
+      if (condition.type === "TEXT_REGEX") return condition.pattern;
+      if (condition.type === "HAS_REFERENCE") return condition.kind ? label(condition.kind) : "任意引用";
+      return condition.type || JSON.stringify(condition);
+    }
+    function openFilterRuleModal(subscriptionId) {
+      openModal("添加过滤规则", `
+        <div class="form-grid">
+          <div class="field"><label>类型</label><select id="filterType"><option value="HAS_ATTACHMENT_KIND">元素</option><option value="TEXT_CONTAINS">关键词</option><option value="TEXT_REGEX">正则</option><option value="HAS_REFERENCE">引用</option></select></div>
+          <div class="field" id="filterElementWrap"><label>元素</label><select id="filterElement">${attachmentKinds.map(([v,t]) => `<option value="${v}">${t}</option>`).join("")}</select></div>
+          <div class="field" id="filterReferenceWrap" hidden><label>引用</label><select id="filterReference"><option value="">任意引用</option><option value="REPOST">转发</option><option value="QUOTE">引用</option><option value="ORIGIN">原动态</option></select></div>
+          <div class="field full" id="filterTextWrap" hidden><label>内容</label><input id="filterText"></div>
+        </div>
+      `, async () => {
+        const condition = collectFilterCondition();
+        await api(`/subscriptions/${subscriptionId}/filter-rules`, { method: "POST", body: JSON.stringify({ condition }) });
+        closeModal();
+        invalidate("subscriptions", "dashboard");
+        await loadSubscriptions(true);
+        await openSubscriptionDetail(subscriptionId);
+        notify("过滤规则已添加", false);
+      }, { size: "small" });
+      const refresh = () => {
+        const type = $("filterType").value;
+        $("filterElementWrap").hidden = type !== "HAS_ATTACHMENT_KIND";
+        $("filterReferenceWrap").hidden = type !== "HAS_REFERENCE";
+        $("filterTextWrap").hidden = !["TEXT_CONTAINS", "TEXT_REGEX"].includes(type);
       };
-      els("actionTitle").textContent = titles[kind] || "操作";
-      els("confirmAction").textContent = confirmTexts[kind] || "保存";
-      els("confirmAction").disabled = true;
-      els("actionBody").innerHTML = "<div class='empty'>正在加载可选项...</div>";
-      setActionMessage("", false);
-      els("actionModal").hidden = false;
-      try {
-        let canSubmit = true;
-        if (kind === "subscription") canSubmit = await renderSubscriptionAction();
-        if (kind === "filter") canSubmit = await renderFilterAction();
-        els("confirmAction").disabled = canSubmit === false;
-      } catch (error) {
-        setActionMessage(error.message, true);
-      }
+      $("filterType").onchange = refresh;
+      refresh();
+    }
+    function collectFilterCondition() {
+      const type = $("filterType").value;
+      if (type === "HAS_ATTACHMENT_KIND") return { type, kind: $("filterElement").value };
+      if (type === "HAS_REFERENCE") return { type, kind: $("filterReference").value || null };
+      const text = $("filterText").value.trim();
+      if (!text) throw new Error("请填写过滤内容");
+      if (type === "TEXT_REGEX") return { type, pattern: text };
+      return { type, value: text, ignoreCase: true };
     }
 
-    function closeActionModal() {
-      state.actionModal = null;
-      if (!els("actionModal")) return;
-      els("actionModal").hidden = true;
-      els("actionBody").innerHTML = "";
-      setActionMessage("", false);
-      els("confirmAction").disabled = false;
-    }
-
-    function openEntityEditModal(kind, id) {
-      closePlatformLoginModal();
-      const isPublisher = kind === "publisher";
-      const rows = isPublisher ? state.cache.publishers : state.cache.subscribers;
-      const entity = rows.find(item => Number(item.id) === Number(id));
-      if (!entity) {
-        notify("未找到要修改的数据，请刷新后重试", true);
-        return;
-      }
-      state.actionModal = { kind: kind, id: Number(id) };
-      els("actionTitle").textContent = isPublisher ? "修改发布者" : "修改消息目标";
-      els("confirmAction").textContent = "保存";
-      els("confirmAction").disabled = false;
-      setActionMessage("", false);
-      const stateOptions = ["ACTIVE", "DISABLED"]
-        .map(value => optionHtml(value, label(value), value === entity.state))
-        .join("");
-      els("actionBody").innerHTML = isPublisher
-        ? "<div class='forms'>"
-          + "<div class='form-field full-width'><label for='actionEntityHeaderUri'>头图 URL</label><input id='actionEntityHeaderUri' value='" + esc(entity.bannerUri || entity.headerUri || "") + "' placeholder='留空表示清除头图'></div>"
-          + "<div class='form-field full-width'><label for='actionEntityState'>状态</label><select id='actionEntityState'>" + stateOptions + "</select></div>"
-          + "</div>"
-        : "<div class='forms'>"
-          + "<div class='form-field full-width'><label for='actionEntityState'>状态</label><select id='actionEntityState'>" + stateOptions + "</select></div>"
-          + "</div>";
-      els("actionModal").hidden = false;
-      setTimeout(() => {
-        const focusTarget = isPublisher ? els("actionEntityHeaderUri") : els("actionEntityState");
-        if (focusTarget) focusTarget.focus();
-      }, 0);
-    }
-
-    function openSubscriptionAtAllModal(id) {
-      closePlatformLoginModal();
-      const subscription = state.cache.subscriptions.find(item => Number(item.id) === Number(id));
-      if (!subscription) {
-        notify("未找到要修改的订阅，请刷新后重试", true);
-        return;
-      }
-      state.actionModal = { kind: "subscription-atall", id: Number(id) };
-      els("actionTitle").textContent = "编辑 @全体";
-      els("confirmAction").textContent = "保存";
-      els("confirmAction").disabled = false;
-      setActionMessage("", false);
-      els("actionBody").innerHTML = "<div class='forms'>"
-        + "<div class='form-field full-width'><label>订阅</label><div class='config-table-text'>" + esc(subscriptionLabel(subscription)) + "</div></div>"
-        + renderAtAllControls(subscriptionAtAllTypes(subscription))
-        + "</div>";
-      bindAtAllControls(() => subscription.subscriber ? (subscription.subscriber.targetKind || subscription.subscriber.type) : "");
-      els("actionModal").hidden = false;
-    }
-
-    async function renderSubscriptionAction() {
-      await Promise.all([ensureSubscribers(), ensurePublishers(), ensurePlatformLogins(), ensureSubscriberTargetPlatforms()]);
-      const subscribers = state.cache.subscribers;
-      const selectedSubscriber = subscribers[0] ? String(subscribers[0].id) : "new";
-      const subscriberOptions = optionHtml("new", "新建消息目标", selectedSubscriber === "new")
-        + subscribers.map(subscriber => optionHtml(subscriber.id, subscriberLabel(subscriber), String(subscriber.id) === selectedSubscriber)).join("");
-      const targetPlatforms = state.cache.subscriberTargetPlatforms || [];
-      const targetPlatformOptions = targetPlatforms.length
-        ? targetPlatforms.map((platform, index) => optionHtml(platform.platformId, platform.platformId + " · " + platform.pluginName, index === 0)).join("")
-        : optionHtml("", "暂无可用消息出口平台", true);
-      const publisherPlatforms = uniqueValues((state.cache.platformLogins || []).map(item => item.platformId).concat(state.cache.publishers.map(item => item.platformId)));
-      const publisherPlatformControl = publisherPlatforms.length
-        ? "<select id='actionPublisherPlatform'>" + publisherPlatforms.map((platform, index) => optionHtml(platform, platform, index === 0)).join("") + "</select>"
-        : "<input id='actionPublisherPlatform' placeholder='未检测到消息源平台'>";
-      els("actionBody").innerHTML = "<div class='forms'>"
-        + "<div class='form-field full-width'><label for='actionSubscriberSelect'>消息目标</label><select id='actionSubscriberSelect'>" + subscriberOptions + "</select><span class='field-hint'>选择已有目标会自动使用平台、类型和目标 ID。</span></div>"
-        + "<div id='actionSubscriberFields' class='forms full-width'>"
-        + "<div class='form-field'><label for='actionSubscriberPlatform'>目标平台</label><select id='actionSubscriberPlatform'>" + targetPlatformOptions + "</select></div>"
-        + "<div class='form-field'><label for='actionSubscriberType'>目标类型</label><select id='actionSubscriberType'></select></div>"
-        + "<div class='form-field full-width'><label for='actionSubscriberTargetId'>目标 ID / 名称</label><select id='actionSubscriberTargetId'></select><span id='actionSubscriberTargetHint' class='field-hint'>从后台获取可用目标。</span></div>"
-        + "</div>"
-        + "<div class='form-field'><label for='actionPublisherPlatform'>发布者平台</label>" + publisherPlatformControl + "</div>"
-        + "<div class='form-field'><label for='actionPublisherExternalId'>发布者外部 ID</label><input id='actionPublisherExternalId' placeholder='例如 Bilibili UID'></div>"
-        + renderAtAllControls([])
-        + "</div>";
-      const refreshAtAllAvailability = bindAtAllControls(() => currentSubscriptionActionTargetType());
-      els("actionSubscriberSelect").onchange = () => updateSubscriptionTargetFields().catch(error => setActionMessage(error.message, true));
-      els("actionSubscriberPlatform").onchange = () => {
-        updateSubscriberTypeOptions();
-        loadSubscriptionTargetOptions().catch(error => setActionMessage(error.message, true));
-        if (refreshAtAllAvailability) refreshAtAllAvailability();
-      };
-      els("actionSubscriberType").onchange = () => {
-        loadSubscriptionTargetOptions().catch(error => setActionMessage(error.message, true));
-        if (refreshAtAllAvailability) refreshAtAllAvailability();
-      };
-      els("actionSubscriberTargetId").onchange = updateSubscriptionSubmitState;
-      els("actionPublisherPlatform").onchange = updateSubscriptionSubmitState;
-      els("actionPublisherExternalId").oninput = updateSubscriptionSubmitState;
-      updateSubscriberTypeOptions();
-      await updateSubscriptionTargetFields();
-      return selectedSubscriber !== "new" || Boolean(els("actionSubscriberTargetId").value);
-    }
-
-    function currentSubscriptionActionTargetType() {
-      const selectedValue = els("actionSubscriberSelect") ? els("actionSubscriberSelect").value : "";
-      const selectedSubscriber = state.cache.subscribers.find(item => String(item.id) === selectedValue);
-      if (selectedSubscriber) return selectedSubscriber.targetKind || selectedSubscriber.type;
-      return els("actionSubscriberType") ? els("actionSubscriberType").value : "";
-    }
-
-    async function updateSubscriptionTargetFields() {
-      const select = els("actionSubscriberSelect");
-      const fields = els("actionSubscriberFields");
-      if (!select || !fields) return;
-      fields.hidden = select.value !== "new";
-      if (select.value === "new") {
-        await loadSubscriptionTargetOptions();
-      }
-      const refreshAtAll = bindAtAllControls(() => currentSubscriptionActionTargetType());
-      if (refreshAtAll) refreshAtAll();
-      updateSubscriptionSubmitState();
-    }
-
-    function updateSubscriberTypeOptions() {
-      const platformId = els("actionSubscriberPlatform") ? els("actionSubscriberPlatform").value : "";
-      const typeSelect = els("actionSubscriberType");
-      if (!typeSelect) return;
-      const platform = (state.cache.subscriberTargetPlatforms || []).find(item => item.platformId === platformId);
-      const types = platform && platform.supportedTypes.length ? platform.supportedTypes : ["GROUP", "USER", "CHANNEL", "OTHER"];
-      const current = typeSelect.value;
-      typeSelect.innerHTML = types.map((type, index) => optionHtml(type, label(type), type === current || (!current && index === 0))).join("");
-      const refreshAtAll = bindAtAllControls(() => currentSubscriptionActionTargetType());
-      if (refreshAtAll) refreshAtAll();
-    }
-
-    async function loadSubscriptionTargetOptions() {
-      const targetSelect = els("actionSubscriberTargetId");
-      const hint = els("actionSubscriberTargetHint");
-      const platformId = els("actionSubscriberPlatform") ? els("actionSubscriberPlatform").value : "";
-      const type = els("actionSubscriberType") ? els("actionSubscriberType").value : "";
-      if (!targetSelect || !hint) return;
-      if (!platformId || !type) {
-        targetSelect.innerHTML = optionHtml("", "暂无可用目标", true);
-        targetSelect.disabled = true;
-        hint.textContent = "未检测到可用消息出口平台。";
-        updateSubscriptionSubmitState();
-        return;
-      }
-      targetSelect.disabled = true;
-      targetSelect.innerHTML = optionHtml("", "正在加载目标...", true);
-      hint.textContent = "正在从后台获取 " + platformId + " 的 " + label(type) + " 列表。";
-      try {
-        const targets = await loadSubscriberTargets(platformId, type);
-        targetSelect.innerHTML = targets.length
-          ? targets.map((target, index) => targetOptionHtml(target, index === 0)).join("")
-          : optionHtml("", "暂无可选目标", true);
-        targetSelect.disabled = targets.length === 0;
-        hint.textContent = targets.length
-          ? "已加载 " + targets.length + " 个目标，目标名称会随选择自动保存。"
-          : "后台没有返回该类型目标，请确认消息出口插件已连接。";
-      } catch (error) {
-        targetSelect.innerHTML = optionHtml("", "目标加载失败", true);
-        targetSelect.disabled = true;
-        hint.textContent = "目标加载失败：" + error.message;
-        setActionMessage(error.message, true);
-      }
-      updateSubscriptionSubmitState();
-    }
-
-    function updateSubscriptionSubmitState() {
-      if (!state.actionModal || state.actionModal.kind !== "subscription") return;
-      const selectedValue = els("actionSubscriberSelect") ? els("actionSubscriberSelect").value : "";
-      const targetValue = els("actionSubscriberTargetId") ? els("actionSubscriberTargetId").value : "";
-      const publisherPlatform = els("actionPublisherPlatform") ? els("actionPublisherPlatform").value.trim() : "";
-      const publisherExternalId = els("actionPublisherExternalId") ? els("actionPublisherExternalId").value.trim() : "";
-      els("confirmAction").disabled = !publisherPlatform || !publisherExternalId || (selectedValue === "new" && !targetValue);
-    }
-
-    async function renderFilterAction() {
-      await ensureSubscriptions();
-      if (state.cache.subscriptions.length === 0) {
-        els("actionBody").innerHTML = "<div class='empty'>暂无订阅，请先创建订阅关系。</div>";
-        return false;
-      }
-      const subscriptionOptions = state.cache.subscriptions
-        .map((subscription, index) => optionHtml(subscription.id, subscriptionLabel(subscription), index === 0))
-        .join("");
-      els("actionBody").innerHTML = "<div class='forms'>"
-        + "<div class='form-field full-width'><label for='actionFilterSubscriptionId'>订阅</label><select id='actionFilterSubscriptionId'>" + subscriptionOptions + "</select></div>"
-        + "<div class='form-field'><label for='actionFilterRuleType'>规则类型</label><select id='actionFilterRuleType'>"
-        + optionHtml("ELEMENT", "元素", true) + optionHtml("CONTENT", "内容", false)
-        + "</select></div>"
-        + "<div class='form-field' id='actionFilterMatcherWrap'><label for='actionFilterMatcher'>匹配方式</label><select id='actionFilterMatcher'>"
-        + optionHtml("KEYWORD", "关键词", true) + optionHtml("REGEX", "正则表达式", false)
-        + "</select></div>"
-        + "<div class='form-field' id='actionFilterElementWrap'><label for='actionFilterElement'>元素</label><select id='actionFilterElement'>"
-        + ["IMAGE", "VIDEO", "CARD", "POLL"].map((item, index) => optionHtml(item, label(item), index === 0)).join("")
-        + "</select></div>"
-        + "<div class='form-field full-width' id='actionFilterValueWrap'><label for='actionFilterValue'>匹配内容</label><input id='actionFilterValue' placeholder='关键词或正则表达式'></div>"
-        + "</div>";
-      els("actionFilterRuleType").onchange = updateFilterActionFields;
-      updateFilterActionFields();
-      return true;
-    }
-
-    function updateFilterActionFields() {
-      const isElement = els("actionFilterRuleType") && els("actionFilterRuleType").value === "ELEMENT";
-      if (els("actionFilterMatcherWrap")) els("actionFilterMatcherWrap").hidden = isElement;
-      if (els("actionFilterValueWrap")) els("actionFilterValueWrap").hidden = isElement;
-      if (els("actionFilterElementWrap")) els("actionFilterElementWrap").hidden = !isElement;
-    }
-
-    async function submitActionModal() {
-      if (!state.actionModal) return;
-      els("confirmAction").disabled = true;
-      try {
-        if (state.actionModal.kind === "subscription") {
-          await submitSubscriptionAction();
-        } else if (state.actionModal.kind === "filter") {
-          await submitFilterAction();
-        } else if (state.actionModal.kind === "publisher") {
-          await submitPublisherEditAction();
-        } else if (state.actionModal.kind === "subscriber") {
-          await submitSubscriberEditAction();
-        } else if (state.actionModal.kind === "subscription-atall") {
-          await submitSubscriptionAtAllAction();
-        }
-      } finally {
-        if (state.actionModal) els("confirmAction").disabled = false;
-      }
-    }
-
-    async function submitSubscriptionAction() {
-      const selectedValue = els("actionSubscriberSelect").value;
-      const selectedSubscriber = state.cache.subscribers.find(item => String(item.id) === selectedValue);
-      const selectedTarget = els("actionSubscriberTargetId");
-      const selectedTargetOption = selectedTarget && selectedTarget.selectedIndex >= 0 ? selectedTarget.options[selectedTarget.selectedIndex] : null;
-      const payload = selectedSubscriber ? {
-        subscriberPlatform: selectedSubscriber.platformId,
-        targetKind: selectedSubscriber.targetKind || selectedSubscriber.type,
-        subscriberTargetId: selectedSubscriber.externalId || selectedSubscriber.targetId,
-        subscriberName: selectedSubscriber.name
-      } : {
-        subscriberPlatform: els("actionSubscriberPlatform").value,
-        targetKind: els("actionSubscriberType").value,
-        subscriberTargetId: selectedTarget ? selectedTarget.value : "",
-        subscriberName: selectedTargetOption ? (selectedTargetOption.dataset.name || selectedTargetOption.textContent || selectedTargetOption.value) : ""
-      };
-      payload.publisherPlatform = els("actionPublisherPlatform").value;
-      payload.publisherExternalId = els("actionPublisherExternalId").value;
-      payload.autoFollow = true;
-      payload.policy = buildSubscriptionPolicy(null, collectAtAllTypes());
-      if (!payload.publisherPlatform.trim()) return setActionMessage("请选择发布者平台", true);
-      if (!payload.publisherExternalId.trim()) return setActionMessage("请填写发布者外部 ID", true);
-      if (!selectedSubscriber && !payload.subscriberTargetId.trim()) return setActionMessage("请选择消息目标", true);
-      await api("/subscriptions", { method: "POST", body: JSON.stringify(payload) });
-      closeActionModal();
-      invalidate("overview", "publishers", "subscribers", "subscriptions", "filters");
-      await loadSubscriptions(true);
-      notify("订阅已创建", false);
-    }
-
-    async function submitSubscriptionAtAllAction() {
-      const modal = state.actionModal;
-      if (!modal || modal.kind !== "subscription-atall") return;
-      const subscription = state.cache.subscriptions.find(item => Number(item.id) === Number(modal.id));
-      await api("/subscriptions/" + encodeURIComponent(modal.id), {
-        method: "PATCH",
-        body: JSON.stringify({ policy: buildSubscriptionPolicy(subscription && subscription.policy, collectAtAllTypes()) })
+    async function openEditPublisher(id) {
+      if (!state.cache.publishers) state.cache.publishers = await api("/publishers");
+      const item = state.cache.publishers.find(row => Number(row.id) === Number(id));
+      openModal("编辑发布者", `
+        <div class="form-grid">
+          <div class="field"><label>状态</label><select id="entityState"><option${item.state === "ACTIVE" ? " selected" : ""}>ACTIVE</option><option${item.state === "DISABLED" ? " selected" : ""}>DISABLED</option></select></div>
+          <div class="field full"><label>头图</label><input id="entityHeader" value="${attr(item.bannerUri || "")}"></div>
+        </div>
+      `, async () => {
+        await api(`/publishers/${id}`, { method: "PATCH", body: JSON.stringify({ headerUri: $("entityHeader").value, state: $("entityState").value }) });
+        closeModal();
+        invalidate("publishers", "subscriptions", "dashboard");
+        await loadEntities(true);
+        notify("发布者已保存", false);
       });
-      closeActionModal();
-      invalidate("overview", "subscriptions");
-      await loadSubscriptions(true);
-      notify("@全体设置已保存", false);
     }
-
-    async function submitFilterAction() {
-      const ruleType = els("actionFilterRuleType").value;
-      const matcher = els("actionFilterMatcher").value;
-      const value = ruleType === "ELEMENT" ? els("actionFilterElement").value : els("actionFilterValue").value;
-      const condition = ruleType === "ELEMENT"
-        ? (value === "ORIGIN"
-          ? { type: "HAS_REFERENCE", kind: "ORIGIN" }
-          : { type: "HAS_ATTACHMENT_KIND", kind: value })
-        : (matcher === "REGEX"
-          ? { type: "TEXT_REGEX", pattern: value }
-          : { type: "TEXT_CONTAINS", value: value, ignoreCase: true });
-      const payload = {
-        subscriptionId: Number(els("actionFilterSubscriptionId").value),
-        action: "BLOCK",
-        condition: condition
-      };
-      if (!payload.subscriptionId) return setActionMessage("请选择订阅", true);
-      if (!value.trim()) return setActionMessage("请填写匹配内容", true);
-      await api("/filter-rules", { method: "POST", body: JSON.stringify(payload) });
-      closeActionModal();
-      await loadFilters(true);
-      notify("过滤规则已添加", false);
-    }
-
-    async function submitPublisherEditAction() {
-      const modal = state.actionModal;
-      if (!modal || modal.kind !== "publisher") return;
-      const payload = {
-        headerUri: els("actionEntityHeaderUri").value,
-        state: els("actionEntityState").value
-      };
-      await api("/publishers/" + encodeURIComponent(modal.id), {
-        method: "PATCH",
-        body: JSON.stringify(payload)
+    async function openEditSubscriber(id) {
+      if (!state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
+      const item = state.cache.subscribers.find(row => Number(row.id) === Number(id));
+      openModal("编辑消息目标", `
+        <div class="form-grid">
+          <div class="field"><label>状态</label><select id="entityState"><option${item.state === "ACTIVE" ? " selected" : ""}>ACTIVE</option><option${item.state === "DISABLED" ? " selected" : ""}>DISABLED</option></select></div>
+        </div>
+      `, async () => {
+        await api(`/subscribers/${id}`, { method: "PATCH", body: JSON.stringify({ state: $("entityState").value }) });
+        closeModal();
+        invalidate("subscribers", "subscriptions", "dashboard");
+        await loadEntities(true);
+        notify("消息目标已保存", false);
       });
-      closeActionModal();
-      invalidate("overview", "publishers", "subscriptions");
-      await loadEntities(true);
-      notify("发布者已保存", false);
     }
-
-    async function submitSubscriberEditAction() {
-      const modal = state.actionModal;
-      if (!modal || modal.kind !== "subscriber") return;
-      await api("/subscribers/" + encodeURIComponent(modal.id), {
-        method: "PATCH",
-        body: JSON.stringify({ state: els("actionEntityState").value })
+    async function openConfigEditor(id) {
+      const detail = await api(`/configs/${encodeURIComponent(id)}`);
+      const sections = {};
+      detail.schema.fields.forEach(field => {
+        const section = field.section || "常规";
+        (sections[section] = sections[section] || []).push(field);
       });
-      closeActionModal();
-      invalidate("overview", "subscribers", "subscriptions");
-      await loadEntities(true);
-      notify("消息目标已保存", false);
+      openModal("编辑配置：" + detail.name, Object.entries(sections).map(([name, fields]) => `
+        <section class="panel">
+          <div class="panel-head"><h2>${esc(name)}</h2></div>
+          <div class="form-grid">${fields.map(field => configFieldHtml(detail, field)).join("")}</div>
+        </section>`).join(""), async () => {
+        const values = {};
+        detail.schema.fields.forEach(field => values[field.path] = collectConfigField(field));
+        const result = await api(`/configs/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify({ values }) });
+        closeModal();
+        invalidate("configs", "dashboard", "system");
+        await loadConfigs(true);
+        notify(result.message || "配置已保存", false);
+      }, { size: "wide" });
+    }
+    function configFieldHtml(detail, field) {
+      const raw = detail.values[field.path];
+      const value = raw === null || raw === undefined ? "" : (typeof raw === "object" ? JSON.stringify(raw, null, 2) : String(raw));
+      const restart = field.restartRequired ? " · 需重启" : "";
+      const labelHtml = `<label for="cfg-${attr(field.path)}">${esc(field.label)}${esc(restart)}</label>`;
+      if (field.type === "BOOLEAN") {
+        return `<div class="field"><label class="check"><input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="checkbox"${raw === true ? " checked" : ""}>${esc(field.label)}${esc(restart)}</label></div>`;
+      }
+      if (field.type === "SELECT") {
+        return `<div class="field">${labelHtml}<select id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}">${(field.options || []).map(opt => `<option value="${attr(opt.value)}"${String(raw) === String(opt.value) ? " selected" : ""}>${esc(opt.label)}</option>`).join("")}</select></div>`;
+      }
+      if (field.type === "TEXTAREA" || field.type === "JSON") {
+        return `<div class="field full">${labelHtml}<textarea id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}">${esc(value)}</textarea></div>`;
+      }
+      const inputType = field.type === "NUMBER" ? "number" : (field.type === "SECRET" ? "password" : "text");
+      return `<div class="field">${labelHtml}<input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="${inputType}" value="${attr(value)}"></div>`;
+    }
+    function collectConfigField(field) {
+      const node = Array.from(document.querySelectorAll("[data-config-path]")).find(item => item.dataset.configPath === field.path);
+      if (!node) return null;
+      if (field.type === "BOOLEAN") return node.checked;
+      if (field.type === "NUMBER") return Number(node.value || 0);
+      if (field.type === "JSON") return node.value.trim() ? JSON.parse(node.value) : null;
+      return node.value;
     }
 
-    document.querySelectorAll("[data-nav]").forEach(button => {
-      button.addEventListener("click", () => navigateTo(button.dataset.nav));
-    });
-
-    window.addEventListener("hashchange", () => setPage(pageFromLocation()));
+    async function openCookieLogin(platform) {
+      openModal(`${platform} Cookie 登录`, `<div class="field"><label>Cookie</label><textarea id="cookieValue" placeholder="SESSDATA=..."></textarea></div>`, async () => {
+        const result = await api(`/platforms/${encodeURIComponent(platform)}/login/cookie`, { method: "POST", body: JSON.stringify({ cookie: $("cookieValue").value }) });
+        closeModal();
+        invalidate("platformLogins", "dashboard");
+        await loadPlatformLogins(true);
+        notify(result.message || "登录请求已提交", result.status !== "SUCCESS");
+      }, { size: "small" });
+    }
+    async function openQrLogin(platform) {
+      const start = await api(`/platforms/${encodeURIComponent(platform)}/login/qr`, { method: "POST" });
+      const blob = await apiBlob(start.imageUrl.replace("/api", ""));
+      const imageUrl = URL.createObjectURL(blob);
+      let timer = null;
+      let qrDone = false;
+      openModal(`${platform} 二维码登录`, `
+        <div class="form-grid">
+          <div class="field full"><img src="${attr(imageUrl)}" alt="二维码" style="width:220px;height:220px;border:1px solid var(--line);border-radius:8px;background:#fff"></div>
+          <div class="field full"><div id="qrStatus" class="message">${esc(start.message || "等待扫码")}</div></div>
+        </div>
+      `, null, {
+        confirmHidden: true,
+        cancelText: "关闭",
+        size: "small",
+        cleanup: () => {
+          URL.revokeObjectURL(imageUrl);
+          if (timer) clearInterval(timer);
+          if (!qrDone) api(`/login/qr/${encodeURIComponent(start.loginId)}`, { method: "DELETE" }).catch(() => {});
+        }
+      });
+      timer = setInterval(async () => {
+        const status = await api(`/login/qr/${encodeURIComponent(start.loginId)}`);
+        $("qrStatus").textContent = status.message;
+        if (!["PENDING"].includes(status.status)) {
+          qrDone = true;
+          clearInterval(timer);
+          timer = null;
+          invalidate("platformLogins", "dashboard");
+          await loadPlatformLogins(true).catch(() => {});
+        }
+      }, 2500);
+    }
 
     document.addEventListener("click", async event => {
       const button = event.target.closest("[data-action]");
       if (!button) return;
       const action = button.dataset.action;
-      const id = Number(button.dataset.id);
-      const platform = button.dataset.platform;
-      const configId = button.dataset.configId;
-      const pluginId = button.dataset.pluginId;
+      const id = button.dataset.id;
       try {
-        if (action === "select-config") {
-          state.selectedConfigId = configId;
-          await loadConfigs();
-        } else if (action === "reload-plugin") {
-          await reloadPlugin(pluginId);
-        } else if (action === "open-permission-modal") {
-          openConfigItemModal("permission");
-        } else if (action === "edit-permission-row") {
-          const row = button.closest("[data-permission-row]");
-          if (row) openConfigItemModal("permission", row);
-        } else if (action === "remove-permission-row") {
-          const row = button.closest("[data-permission-row]");
-          if (row) row.remove();
-          refreshConfigTableEmptyRows();
-        } else if (action === "open-cookie-login") {
-          openPlatformLoginModal(platform, "cookie");
-        } else if (action === "open-qr-login") {
-          openPlatformLoginModal(platform, "qr");
-        } else if (action === "refresh-platform-login") {
-          setPlatformBusy(platform, true);
-          try {
-            await refreshPlatformLogin(platform);
-          } finally {
-            setPlatformBusy(platform, false);
-          }
-        } else if (action === "edit-publisher") {
-          openEntityEditModal("publisher", id);
-        } else if (action === "edit-subscriber") {
-          openEntityEditModal("subscriber", id);
-        } else if (action === "edit-subscription-atall") {
-          openSubscriptionAtAllModal(id);
-        } else if (action === "delete-publisher") {
-          const count = countBy(state.cache.subscriptions, "publisherId", id);
-          if (!confirm("确定删除这个发布者吗？将同步删除关联的 " + count + " 个订阅关系。")) return;
-          const result = await api("/publishers/" + id, { method: "DELETE" });
-          invalidate("overview", "publishers", "subscriptions", "filters");
-          await loadEntities(true);
-          notify(localizeActionMessage(result.message, "发布者已删除"), false);
-        } else if (action === "delete-subscriber") {
-          const count = countBy(state.cache.subscriptions, "subscriberId", id);
-          if (!confirm("确定删除这个消息目标吗？将同步删除关联的 " + count + " 个订阅关系。")) return;
-          const result = await api("/subscribers/" + id, { method: "DELETE" });
-          invalidate("overview", "subscribers", "subscriptions", "filters");
-          await loadEntities(true);
-          notify(localizeActionMessage(result.message, "消息目标已删除"), false);
-        } else if (action === "delete-subscription") {
-          if (!confirm("确定删除这个订阅关系吗？")) return;
-          const result = await api("/subscriptions/" + id, { method: "DELETE" });
-          invalidate("overview", "subscriptions", "filters");
+        if (action === "goto") setPage(button.dataset.page);
+        else if (action === "refresh-current") {
+          const keysByPage = {
+            dashboard: ["dashboard"],
+            plugins: ["plugins"],
+            login: ["platformLogins"],
+            subscriptions: ["subscriptions"],
+            entities: ["publishers", "subscribers"],
+            logs: [],
+            configs: ["configs"],
+            system: ["system", "deliveries"]
+          };
+          invalidate(...(keysByPage[state.page] || []));
+          await loadPage(state.page, true);
+          notify("已刷新", false);
+        }
+        else if (action === "plugin-start" || action === "plugin-stop" || action === "plugin-reload") {
+          const verb = action.replace("plugin-", "");
+          const result = await api(`/plugins/${encodeURIComponent(id)}/${verb}`, { method: "POST" });
+          invalidate("plugins", "dashboard", "platformLogins", "configs");
+          await loadPlugins(true);
+          notify(result.message || "插件操作已完成", false);
+        } else if (action === "plugin-config") {
+          setPage("configs");
+        } else if (action === "cookie-login") openCookieLogin(button.dataset.platform);
+        else if (action === "qr-login") openQrLogin(button.dataset.platform);
+        else if (action === "refresh-login") { invalidate("platformLogins", "dashboard"); await loadPlatformLogins(true); }
+        else if (action === "create-subscription") openCreateSubscription();
+        else if (action === "subscription-detail") openSubscriptionDetail(id);
+        else if (action === "delete-subscription") {
+          if (!confirm("确定删除这个订阅吗？")) return;
+          const result = await api(`/subscriptions/${id}`, { method: "DELETE" });
+          invalidate("dashboard", "subscriptions", "publishers", "subscribers");
           await loadSubscriptions(true);
-          notify(localizeActionMessage(result.message, "订阅已删除"), false);
+          notify(result.message, false);
+        } else if (action === "add-filter") {
+          openFilterRuleModal(id);
+        } else if (action === "clear-filters") {
+          if (!confirm("确定清空这个订阅的过滤规则吗？")) return;
+          const result = await api(`/subscriptions/${id}/filter-rules`, { method: "DELETE" });
+          invalidate("subscriptions", "dashboard");
+          const subscriptions = await ensureSubscriptions(true);
+          const subscription = subscriptions.find(item => Number(item.id) === Number(id));
+          $("filterList").innerHTML = renderFilterList(subscription);
+          notify(result.message || "过滤规则已清空", false);
         } else if (action === "delete-filter") {
           if (!confirm("确定删除这条过滤规则吗？")) return;
-          const result = await api("/filter-rules/" + id, { method: "DELETE" });
-          await loadFilters(true);
-          notify(localizeActionMessage(result.message, "过滤规则已删除"), false);
-        }
+          await api(`/filter-rules/${id}`, { method: "DELETE" });
+          invalidate("subscriptions", "dashboard");
+          const subscriptions = await ensureSubscriptions(true);
+          const subscription = subscriptions.find(item => Number(item.id) === Number(button.dataset.subscription));
+          $("filterList").innerHTML = renderFilterList(subscription);
+          notify("过滤规则已删除", false);
+        } else if (action === "edit-publisher") openEditPublisher(id);
+        else if (action === "edit-subscriber") openEditSubscriber(id);
+        else if (action === "delete-publisher") {
+          if (!confirm("确定删除这个发布者及关联订阅吗？")) return;
+          const result = await api(`/publishers/${id}`, { method: "DELETE" });
+          invalidate("dashboard", "publishers", "subscriptions");
+          await loadEntities(true);
+          notify(result.message, false);
+        } else if (action === "delete-subscriber") {
+          if (!confirm("确定删除这个消息目标及关联订阅吗？")) return;
+          const result = await api(`/subscribers/${id}`, { method: "DELETE" });
+          invalidate("dashboard", "subscribers", "subscriptions");
+          await loadEntities(true);
+          notify(result.message, false);
+        } else if (action === "apply-log-filter") {
+          state.logRows = [];
+          state.logSince = 0;
+          await refreshLogs(true);
+        } else if (action === "toggle-log-pause") {
+          state.logsPaused = !state.logsPaused;
+          button.textContent = state.logsPaused ? "继续" : "暂停";
+        } else if (action === "edit-config") openConfigEditor(id);
       } catch (error) {
         handleError(error);
       }
     });
 
-    els("loginForm").onsubmit = async event => {
+    document.querySelectorAll("[data-nav]").forEach(button => button.onclick = () => setPage(button.dataset.nav));
+    window.addEventListener("hashchange", () => {
+      const page = location.hash.replace("#", "") || "dashboard";
+      if (page !== state.page) setPage(page);
+    });
+    $("loginForm").onsubmit = async event => {
       event.preventDefault();
-      els("loginButton").disabled = true;
+      $("loginButton").disabled = true;
       try {
-        const overview = await verifyToken(els("loginToken").value);
-        localStorage.setItem("dynamicBotAdminToken", state.token);
-        state.cache.overview = overview;
+        state.token = $("loginToken").value.trim();
+        await api("/dashboard");
+        localStorage.setItem(tokenKey, state.token);
         showApp();
-        refreshPlatformLoginNav(true).catch(handleError);
-        showInitialPage();
       } catch (error) {
-        showLogin(error.message, true);
+        state.token = "";
+        setLoginMessage(error.message, true);
       } finally {
-        els("loginButton").disabled = false;
+        $("loginButton").disabled = false;
       }
     };
-
-    els("logout").onclick = () => {
-      closePlatformLoginModal();
-      closeActionModal();
-      closeConfigItemModal();
-      clearAllQrSessions(true);
-      state.token = "";
-      localStorage.removeItem("dynamicBotAdminToken");
-      showLogin("", false);
+    $("logout").onclick = () => logout();
+    $("refreshPage").onclick = async () => {
+      invalidate();
+      await loadPage(state.page, true).catch(handleError);
     };
-    els("refresh").onclick = async () => {
-      try {
-        invalidate("overview", "platformLogins", "publishers", "subscribers", "subscriptions", "filters", "subscriberTargetPlatforms", "configs");
-        await loadPage(state.page, true);
-        notify("已刷新当前页面", false);
-      } catch (error) {
-        handleError(error);
-      }
-    };
-    els("refreshPlatformLogins").onclick = () => loadPlatformLogins(true).catch(handleError);
-    els("mobileMenu").onclick = () => document.body.classList.toggle("sidebar-open");
-    els("cancelPlatformLogin").onclick = closePlatformLoginModal;
-    els("confirmPlatformLogin").onclick = () => submitCookieLogin().catch(handleError);
-    els("platformLoginModal").addEventListener("click", event => {
-      if (event.target === els("platformLoginModal")) closePlatformLoginModal();
+    $("mobileMenu").onclick = () => document.body.classList.toggle("sidebar-open");
+    $("modalClose").onclick = closeModal;
+    $("modalCancel").onclick = closeModal;
+    $("modalConfirm").onclick = submitModal;
+    $("modalBackdrop").addEventListener("click", event => {
+      if (event.target === $("modalBackdrop")) closeModal();
     });
-
-    els("cancelAction").onclick = closeActionModal;
-    els("confirmAction").onclick = () => submitActionModal().catch(error => {
-      setActionMessage(error.message, true);
-      notify(error.message, true);
-    });
-    els("actionModal").addEventListener("click", event => {
-      if (event.target === els("actionModal")) closeActionModal();
-    });
-    els("cancelConfigItem").onclick = closeConfigItemModal;
-    els("confirmConfigItem").onclick = addConfigItemFromModal;
-    els("configItemModal").addEventListener("click", event => {
-      if (event.target === els("configItemModal")) closeConfigItemModal();
-    });
-    els("openCreateSubscription").onclick = () => openActionModal("subscription").catch(handleError);
-    els("openAddFilter").onclick = () => openActionModal("filter").catch(handleError);
-    els("saveConfig").onclick = () => saveSelectedConfig().catch(error => {
-      setConfigMessage(error.message, true);
-      handleError(error);
-    });
-    els("reloadConfigPlugin").onclick = () => reloadPlugin(state.pendingConfigReloadPluginId, "config").catch(error => {
-      const message = "配置已保存，但插件重启失败：" + error.message;
-      setConfigMessage(message, true);
-      notify(message, true);
-    });
-    els("stopApplication").onclick = () => stopApplication().catch(handleError);
-
-    els("loadFilters").onclick = () => loadFilters(true).catch(handleError);
-    els("filterScopeSubscriptionId").onchange = () => loadFilters().catch(handleError);
-    els("clearFilters").onclick = async () => {
-      const id = els("filterScopeSubscriptionId").value.trim();
-      if (!id) return notify("请先选择一个订阅", true);
-      if (!confirm("确定清空订阅 #" + id + " 的所有过滤规则吗？")) return;
-      try {
-        const result = await api("/subscriptions/" + encodeURIComponent(id) + "/filter-rules", { method: "DELETE" });
-        await loadFilters(true);
-        notify(localizeActionMessage(result.message, "过滤规则已清空"), false);
-      } catch (error) { handleError(error); }
+    $("stopApplication").onclick = async () => {
+      if (!confirm("确定停止主项目吗？")) return;
+      const result = await api("/system/stop", { method: "POST" });
+      notify(result.message, false);
     };
 
     if (state.token) {
-      verifyToken(state.token).then(overview => {
-        state.cache.overview = overview;
-        showApp();
-        refreshPlatformLoginNav(true).catch(handleError);
-        showInitialPage();
-      }).catch(() => showLogin("已保存的 token 无效", true));
+      api("/dashboard").then(showApp).catch(() => showLogin("已保存的 token 无效", true));
     } else {
       showLogin("", false);
     }

@@ -193,6 +193,30 @@ public object MessageDeliveryRepository {
         }
     }
 
+    public fun countAll(): Long {
+        return transaction {
+            MessageDeliveryTable.selectAll().count()
+        }
+    }
+
+    public fun countsByStatus(): Map<DeliveryStatus, Long> {
+        return DeliveryStatus.entries.associateWith(::countByStatus)
+    }
+
+    public fun findRecent(status: DeliveryStatus? = null, limit: Int = 50): List<MessageDelivery> {
+        val safeLimit = limit.coerceIn(1, 200)
+        return transaction {
+            MessageDeliveryTable
+                .selectAll()
+                .let { query ->
+                    if (status == null) query else query.where { MessageDeliveryTable.status eq status }
+                }
+                .map { it.toMessageDelivery() }
+                .sortedWith(compareByDescending<MessageDelivery> { it.updatedAtEpochSeconds }.thenByDescending { it.id })
+                .take(safeLimit)
+        }
+    }
+
     public fun findMessage(messageId: String): Message? {
         return transaction {
             MessageOutboxTable

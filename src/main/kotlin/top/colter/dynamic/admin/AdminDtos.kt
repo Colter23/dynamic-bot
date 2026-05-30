@@ -27,6 +27,46 @@ public data class OverviewResponse(
 )
 
 @Serializable
+public data class DashboardResponse(
+    val generatedAtEpochMillis: Long,
+    val system: SystemStatusDto,
+    val commandCount: Int,
+    val publisherCount: Int,
+    val subscriberCount: Int,
+    val subscriptionCount: Long,
+    val pluginStateCounts: List<StateCountDto>,
+    val deliveryStatusCounts: List<StateCountDto>,
+    val plugins: List<PluginDto>,
+    val platformLogins: List<PlatformLoginDto>,
+    val recentLogs: List<AdminLogEntryDto>,
+    val recentDeliveries: List<MessageDeliveryDto>,
+)
+
+@Serializable
+public data class StateCountDto(
+    val state: String,
+    val count: Long,
+)
+
+@Serializable
+public data class SystemStatusDto(
+    val startedAtEpochMillis: Long,
+    val uptimeMs: Long,
+    val javaVersion: String,
+    val osName: String,
+    val availableProcessors: Int,
+    val usedMemoryBytes: Long,
+    val freeMemoryBytes: Long,
+    val totalMemoryBytes: Long,
+    val maxMemoryBytes: Long,
+    val databasePath: String? = null,
+    val mainConfigPath: String,
+    val webAdminEnabled: Boolean,
+    val webAdminHost: String,
+    val webAdminPort: Int,
+)
+
+@Serializable
 public data class PluginDto(
     val id: String,
     val name: String,
@@ -40,6 +80,16 @@ public data class PluginDto(
 
 @Serializable
 public data class PluginReloadResponse(
+    val changed: Boolean,
+    val success: Boolean,
+    val pluginId: String,
+    val pluginState: String? = null,
+    val message: String,
+    val error: String? = null,
+)
+
+@Serializable
+public data class PluginLifecycleResponse(
     val changed: Boolean,
     val success: Boolean,
     val pluginId: String,
@@ -75,6 +125,9 @@ public data class PublisherDto(
     val bannerUri: String? = null,
     val createTime: Long,
     val createUser: Int,
+    val subscriptionCount: Long = 0,
+    val liveStatuses: List<PublisherLiveStatusDto> = emptyList(),
+    val cursors: List<SourceCursorDto> = emptyList(),
 )
 
 @Serializable
@@ -90,6 +143,7 @@ public data class SubscriberDto(
     val state: String,
     val createTime: Long,
     val createUser: Int,
+    val subscriptionCount: Long = 0,
 )
 
 @Serializable
@@ -122,17 +176,75 @@ public data class SubscriptionDto(
     val policy: SubscriptionPolicy,
     val subscriber: SubscriberDto? = null,
     val publisher: PublisherDto? = null,
+    val filterRuleCount: Int = 0,
+    val filterRules: List<DynamicFilterRuleDto> = emptyList(),
 )
 
 @Serializable
 public data class DynamicFilterRuleDto(
     val id: Int,
     val subscriptionId: Int,
-    val action: String,
     val condition: FilterCondition,
-    val priority: Int,
-    val enabled: Boolean,
     val createdAtEpochSeconds: Long,
+)
+
+@Serializable
+public data class SourceCursorDto(
+    val publisherId: Int,
+    val sourceKey: String,
+    val eventType: String,
+    val lastSeenUpdateKey: String,
+    val lastSeenAtEpochSeconds: Long,
+)
+
+@Serializable
+public data class PublisherLiveStatusDto(
+    val publisherId: Int,
+    val roomId: String,
+    val status: String,
+    val title: String,
+    val coverUri: String? = null,
+    val area: String? = null,
+    val startedAtEpochSeconds: Long? = null,
+    val lastObservedAtEpochSeconds: Long,
+)
+
+@Serializable
+public data class MessageDeliveryDto(
+    val id: Int,
+    val messageId: String,
+    val sourceUpdateKey: String? = null,
+    val renderVariant: String? = null,
+    val platformId: String,
+    val targetKind: String,
+    val targetId: String,
+    val targetKey: String,
+    val status: String,
+    val attempts: Int,
+    val sinkMessageId: String? = null,
+    val lastError: String? = null,
+    val nextAttemptAtEpochSeconds: Long? = null,
+    val lockedUntilEpochSeconds: Long? = null,
+    val createdAtEpochSeconds: Long,
+    val updatedAtEpochSeconds: Long,
+)
+
+@Serializable
+public data class AdminLogEntryDto(
+    val seq: Long,
+    val timestampEpochMillis: Long,
+    val level: String,
+    val loggerName: String,
+    val threadName: String,
+    val message: String,
+    val throwable: String? = null,
+)
+
+@Serializable
+public data class AdminLogResponse(
+    val entries: List<AdminLogEntryDto>,
+    val nextSince: Long,
+    val capacity: Int,
 )
 
 @Serializable
@@ -194,7 +306,6 @@ public data class CreateSubscriptionRequest(
     val subscriberPlatform: String,
     val targetKind: String,
     val subscriberTargetId: String,
-    val subscriberName: String? = null,
     val publisherPlatform: String,
     val publisherExternalId: String,
     val autoFollow: Boolean = true,
@@ -219,10 +330,7 @@ public data class UpdateSubscriptionRequest(
 
 @Serializable
 public data class CreateFilterRuleRequest(
-    val subscriptionId: Int,
-    val action: String = "BLOCK",
     val condition: FilterCondition,
-    val priority: Int = 0,
 )
 
 @Serializable
