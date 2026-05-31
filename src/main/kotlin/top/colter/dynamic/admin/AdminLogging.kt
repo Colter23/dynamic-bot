@@ -108,9 +108,14 @@ public object AdminLogging {
             if (installed) return
             val rootLogger = context.getLogger(Logger.ROOT_LOGGER_NAME)
             if (rootLogger.getAppender(APPENDER_NAME) == null) {
+                val noiseFilter = OneBotClientNoiseFilter().apply {
+                    this.context = context
+                    start()
+                }
                 val appender = AdminLogAppender().apply {
                     name = APPENDER_NAME
                     this.context = context
+                    addFilter(noiseFilter)
                     start()
                 }
                 rootLogger.addAppender(appender)
