@@ -100,6 +100,7 @@ public object MainConfigForms {
                     label = "命令前缀",
                     type = ConfigFieldType.TEXT,
                     section = "命令",
+                    description = "Bot 命令的触发前缀，例如 /db；修改后新的命令会按此前缀识别。",
                     required = true,
                 ),
                 ConfigFieldSpec(
@@ -114,18 +115,21 @@ public object MainConfigForms {
                     label = "无订阅目标时自动取消关注",
                     type = ConfigFieldType.BOOLEAN,
                     section = "订阅",
+                    description = "发布者没有任何有效订阅目标时，允许来源插件自动取消关注该发布者。",
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.autoParseEnabled",
                     label = "自动解析链接",
                     type = ConfigFieldType.BOOLEAN,
                     section = "链接解析",
+                    description = "收到聊天消息中的动态链接时，自动解析并按当前消息目标转发动态内容。",
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.maxLinksPerMessage",
                     label = "单条消息最大解析链接数",
                     type = ConfigFieldType.NUMBER,
                     section = "链接解析",
+                    description = "一条聊天消息内最多自动处理多少个动态链接，超出部分会被忽略。",
                     min = 1,
                 ),
                 ConfigFieldSpec(
@@ -133,12 +137,14 @@ public object MainConfigForms {
                     label = "解析失败时自动回复",
                     type = ConfigFieldType.BOOLEAN,
                     section = "链接解析",
+                    description = "自动解析链接失败时，在原消息目标中回复失败原因。",
                 ),
                 ConfigFieldSpec(
-                    path = "linkParsing.autoDedupeTtlMs",
-                    label = "自动去重时间窗口（毫秒）",
+                    path = "linkParsing.autoDedupeTtlSeconds",
+                    label = "自动去重时间窗口（秒）",
                     type = ConfigFieldType.NUMBER,
                     section = "链接解析",
+                    description = "同一个动态链接在该时间窗口内只会自动转发一次；支持小数，例如 0.5 表示 0.5 秒。",
                     min = 0,
                 ),
                 ConfigFieldSpec(
@@ -146,6 +152,7 @@ public object MainConfigForms {
                     label = "原图缓存目录",
                     type = ConfigFieldType.TEXT,
                     section = "图片缓存",
+                    description = "下载到本地的头像、封面、动态图片等原始图片缓存目录。",
                     required = true,
                     restartRequired = true,
                     restartTarget = "主程序",
@@ -155,16 +162,18 @@ public object MainConfigForms {
                     label = "渲染图片目录",
                     type = ConfigFieldType.TEXT,
                     section = "图片缓存",
+                    description = "动态绘制结果的输出目录，消息发送时会从这里读取生成图片。",
                     required = true,
                     restartRequired = true,
                     restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
-                    path = "imageCache.downloadTimeoutMs",
-                    label = "图片下载超时（毫秒）",
+                    path = "imageCache.downloadTimeoutSeconds",
+                    label = "图片下载超时（秒）",
                     type = ConfigFieldType.NUMBER,
                     section = "图片缓存",
-                    min = 1,
+                    description = "下载单张远程图片的超时时间；支持小数，例如 0.5 表示 0.5 秒。",
+                    min = 0,
                     restartRequired = true,
                     restartTarget = "主程序",
                 ),
@@ -173,6 +182,7 @@ public object MainConfigForms {
                     label = "最大并发下载数",
                     type = ConfigFieldType.NUMBER,
                     section = "图片缓存",
+                    description = "同一条动态中允许同时下载的图片数量，过高可能增加网络和内存压力。",
                     min = 1,
                     restartRequired = true,
                     restartTarget = "主程序",
@@ -182,6 +192,7 @@ public object MainConfigForms {
                     label = "清理任务 Cron",
                     type = ConfigFieldType.TEXT,
                     section = "图片缓存",
+                    description = "图片缓存清理任务的 Cron 表达式，默认每天凌晨 4 点执行。",
                     required = true,
                     restartRequired = true,
                     restartTarget = "主程序",
@@ -191,6 +202,7 @@ public object MainConfigForms {
                     label = "清理原图缓存",
                     type = ConfigFieldType.BOOLEAN,
                     section = "图片缓存",
+                    description = "开启后会定期删除长时间未访问的原始图片缓存。",
                     restartRequired = true,
                     restartTarget = "主程序",
                 ),
@@ -199,6 +211,7 @@ public object MainConfigForms {
                     label = "原图最大闲置天数",
                     type = ConfigFieldType.NUMBER,
                     section = "图片缓存",
+                    description = "原图缓存超过该天数未被访问后会被清理；0 表示只要命中清理任务即可删除。",
                     min = 0,
                     restartRequired = true,
                     restartTarget = "主程序",
@@ -208,6 +221,7 @@ public object MainConfigForms {
                     label = "清理渲染图片",
                     type = ConfigFieldType.BOOLEAN,
                     section = "图片缓存",
+                    description = "开启后会定期删除长时间未访问的动态绘制结果。",
                     restartRequired = true,
                     restartTarget = "主程序",
                 ),
@@ -216,6 +230,7 @@ public object MainConfigForms {
                     label = "渲染图片最大闲置天数",
                     type = ConfigFieldType.NUMBER,
                     section = "图片缓存",
+                    description = "渲染图片超过该天数未被访问后会被清理；0 表示只要命中清理任务即可删除。",
                     min = 0,
                     restartRequired = true,
                     restartTarget = "主程序",
@@ -225,14 +240,16 @@ public object MainConfigForms {
                     label = "最大投递尝试次数",
                     type = ConfigFieldType.NUMBER,
                     section = "消息投递",
+                    description = "消息发送失败后最多尝试投递的次数，达到上限后会标记为失败。",
                     min = 1,
                 ),
                 ConfigFieldSpec(
-                    path = "delivery.retryDelayMs",
-                    label = "投递重试间隔（毫秒）",
+                    path = "delivery.retryDelaySeconds",
+                    label = "投递重试间隔（秒）",
                     type = ConfigFieldType.NUMBER,
                     section = "消息投递",
-                    min = 1,
+                    description = "投递失败后等待多久再次尝试；支持小数，例如 0.5 表示 0.5 秒。",
+                    min = 0,
                     restartRequired = true,
                     restartTarget = "主程序",
                 ),
@@ -241,20 +258,23 @@ public object MainConfigForms {
                     label = "投递并发数",
                     type = ConfigFieldType.NUMBER,
                     section = "消息投递",
+                    description = "同一轮投递任务允许并发发送的消息数量。",
                     min = 1,
                 ),
                 ConfigFieldSpec(
-                    path = "delivery.lockTtlMs",
-                    label = "投递锁超时（毫秒）",
+                    path = "delivery.lockTtlSeconds",
+                    label = "投递锁超时（秒）",
                     type = ConfigFieldType.NUMBER,
                     section = "消息投递",
-                    min = 1,
+                    description = "投递任务被领取后多久未完成会恢复为待投递；支持小数，例如 0.5 表示 0.5 秒。",
+                    min = 0,
                 ),
                 ConfigFieldSpec(
                     path = "draw.layout",
                     label = "布局套装",
                     type = ConfigFieldType.SELECT,
                     section = "绘图",
+                    description = "动态图片使用的绘图布局，影响整体排版和内容呈现。",
                     options = DrawLayoutRegistry.options(),
                     required = true,
                 ),
@@ -271,12 +291,14 @@ public object MainConfigForms {
                     label = "自动获取主题色",
                     type = ConfigFieldType.BOOLEAN,
                     section = "绘图",
+                    description = "开启后会优先从头像或图片中提取主题色，失败时使用全局主题色。",
                 ),
                 ConfigFieldSpec(
                     path = "draw.ornament",
                     label = "头部装饰",
                     type = ConfigFieldType.SELECT,
                     section = "绘图",
+                    description = "动态图片头部右侧的装饰内容，可选择 Logo、二维码或不显示。",
                     options = DrawOrnament.entries.map { ConfigFieldOption(it.name, it.name) },
                     required = true,
                 ),
@@ -285,6 +307,7 @@ public object MainConfigForms {
                     label = "绘图宽度",
                     type = ConfigFieldType.NUMBER,
                     section = "绘图",
+                    description = "生成动态图片的基础宽度，过小会压缩内容，过大可能增加渲染耗时。",
                     min = 320,
                 ),
                 ConfigFieldSpec(
@@ -310,6 +333,7 @@ public object MainConfigForms {
                     label = "启用 Web 后台",
                     type = ConfigFieldType.BOOLEAN,
                     section = "Web 后台",
+                    description = "关闭后不启动内置运维后台，需要重启主程序才能生效。",
                     restartRequired = true,
                     restartTarget = "Web 后台",
                 ),
@@ -318,6 +342,7 @@ public object MainConfigForms {
                     label = "Web 后台监听地址",
                     type = ConfigFieldType.TEXT,
                     section = "Web 后台",
+                    description = "后台服务绑定的地址；本机访问通常使用 127.0.0.1，对外开放需谨慎配置。",
                     required = true,
                     restartRequired = true,
                     restartTarget = "Web 后台",
@@ -327,6 +352,7 @@ public object MainConfigForms {
                     label = "Web 后台端口",
                     type = ConfigFieldType.NUMBER,
                     section = "Web 后台",
+                    description = "后台服务监听端口，访问地址为 http://监听地址:端口/admin。",
                     min = 1,
                     max = 65_535,
                     restartRequired = true,
@@ -337,6 +363,7 @@ public object MainConfigForms {
                     label = "Web 后台 Token",
                     type = ConfigFieldType.SECRET,
                     section = "Web 后台",
+                    description = "登录 Web 后台使用的访问令牌，留空会在首次启动时自动生成。",
                     secret = true,
                 ),
             ),
@@ -356,18 +383,18 @@ public object MainConfigForms {
             require(rule.senderId.isNotBlank()) { "command.permissions[$index].senderId 不能为空" }
         }
         require(config.linkParsing.maxLinksPerMessage >= 1) { "单条消息最大解析链接数至少为 1" }
-        require(config.linkParsing.autoDedupeTtlMs >= 0) { "自动去重时间窗口不能为负数" }
+        require(config.linkParsing.autoDedupeTtlSeconds >= 0.0) { "自动去重时间窗口不能为负数" }
         require(config.imageCache.sourceRoot.isNotBlank()) { "原图缓存目录不能为空" }
         require(config.imageCache.renderedRoot.isNotBlank()) { "渲染图片目录不能为空" }
-        require(config.imageCache.downloadTimeoutMs >= 1) { "图片下载超时至少为 1 毫秒" }
+        require(config.imageCache.downloadTimeoutSeconds > 0.0) { "图片下载超时必须大于 0 秒" }
         require(config.imageCache.maxConcurrentDownloads >= 1) { "最大并发下载数至少为 1" }
         require(config.imageCache.cleanupCron.isNotBlank()) { "清理任务 Cron 不能为空" }
         require(config.imageCache.sourceCleanup.maxIdleDays >= 0) { "原图最大闲置天数不能为负数" }
         require(config.imageCache.renderedCleanup.maxIdleDays >= 0) { "渲染图片最大闲置天数不能为负数" }
         require(config.delivery.maxAttempts >= 1) { "最大投递尝试次数至少为 1" }
-        require(config.delivery.retryDelayMs >= 1) { "投递重试间隔至少为 1 毫秒" }
+        require(config.delivery.retryDelaySeconds > 0.0) { "投递重试间隔必须大于 0 秒" }
         require(config.delivery.dispatchConcurrency >= 1) { "投递并发数至少为 1" }
-        require(config.delivery.lockTtlMs >= 1) { "投递锁超时至少为 1 毫秒" }
+        require(config.delivery.lockTtlSeconds > 0.0) { "投递锁超时必须大于 0 秒" }
         require(config.draw.layout.isNotBlank()) { "绘图布局不能为空" }
         require(DrawLayoutRegistry.hasSuite(config.draw.layout)) {
             "绘图布局必须是 ${DrawLayoutRegistry.options().joinToString("|") { it.value }} 之一"
@@ -392,7 +419,7 @@ public object MainConfigForms {
         if (previous.imageCache != next.imageCache) {
             targets += "主程序"
         }
-        if (previous.delivery.retryDelayMs != next.delivery.retryDelayMs) {
+        if (previous.delivery.retryDelaySeconds != next.delivery.retryDelaySeconds) {
             targets += "主程序"
         }
         if (previous.draw.font != next.draw.font) {

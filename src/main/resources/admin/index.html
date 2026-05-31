@@ -1821,7 +1821,8 @@
         return secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml);
       }
       const inputType = field.type === "NUMBER" ? "number" : (field.type === "SECRET" ? "password" : "text");
-      return `<div class="field" data-config-field-path="${attr(field.path)}">${labelHtml}<input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="${inputType}" value="${attr(value)}">${descriptionHtml}</div>`;
+      const numberAttrs = field.type === "NUMBER" ? ` step="any"${field.min !== undefined && field.min !== null ? ` min="${attr(field.min)}"` : ""}${field.max !== undefined && field.max !== null ? ` max="${attr(field.max)}"` : ""}` : "";
+      return `<div class="field" data-config-field-path="${attr(field.path)}">${labelHtml}<input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="${inputType}"${numberAttrs} value="${attr(value)}">${descriptionHtml}</div>`;
     }
     function secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml) {
       const hasSecret = !!(detail.secretStates && detail.secretStates[field.path]);

@@ -93,7 +93,7 @@ internal object AdminConfigJson {
     }
 
     private fun validateNumber(field: ConfigFieldSpec, value: JsonElement) {
-        val number = jsonText(value)?.toLongOrNull()
+        val number = jsonText(value)?.toDoubleOrNull()
             ?: throw IllegalArgumentException("${field.path} must be a number")
         field.min?.let { min ->
             require(number >= min) { "${field.path} must be at least $min" }

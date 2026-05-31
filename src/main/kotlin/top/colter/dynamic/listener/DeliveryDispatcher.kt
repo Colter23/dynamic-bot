@@ -15,6 +15,8 @@ import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.core.tools.loggerFor
+import kotlin.math.ceil
+import kotlin.math.roundToLong
 
 private val logger = loggerFor<DeliveryDispatcher>()
 
@@ -40,7 +42,7 @@ public class DeliveryDispatcher(
         val requests = MessageDeliveryRepository.claimDue(
             nowEpochSeconds = now,
             limit = config.dispatchConcurrency.coerceAtLeast(1) * 4,
-            lockTtlMs = config.lockTtlMs.coerceAtLeast(1),
+            lockTtlMs = secondsToMillis(config.lockTtlSeconds, minimumMillis = 1),
         )
         if (requests.isEmpty()) return@coroutineScope DeliveryDispatchStats(0, 0, 0, 0)
 
@@ -154,7 +156,7 @@ public class DeliveryDispatcher(
     ): DeliveryOutcome {
         val shouldRetry = result.retryable && request.delivery.attempts < config.maxAttempts.coerceAtLeast(1)
         return if (shouldRetry) {
-            val nextAttemptAt = nowEpochSeconds() + ((config.retryDelayMs.coerceAtLeast(1) + 999) / 1000)
+            val nextAttemptAt = nowEpochSeconds() + wholeSeconds(config.retryDelaySeconds)
             MessageDeliveryRepository.markRetry(
                 deliveryId = request.delivery.id,
                 error = result.reason,
@@ -188,6 +190,13 @@ public class DeliveryDispatcher(
     }
 
     private fun nowEpochSeconds(): Long = System.currentTimeMillis() / 1000
+
+    private fun secondsToMillis(seconds: Double, minimumMillis: Long): Long {
+        if (seconds <= 0.0 && minimumMillis <= 0) return 0
+        return (seconds * 1_000.0).roundToLong().coerceAtLeast(minimumMillis)
+    }
+
+    private fun wholeSeconds(seconds: Double): Long = ceil(seconds).toLong().coerceAtLeast(1)
 
     private enum class DeliveryOutcome {
         SENT,

@@ -9,7 +9,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
-import kotlin.time.Duration.Companion.milliseconds
+import kotlin.time.Duration.Companion.seconds
 import top.colter.dynamic.admin.AdminLogging
 import top.colter.dynamic.admin.AdminServer
 import top.colter.dynamic.command.CommandListener
@@ -244,7 +244,7 @@ public object DynamicApplication : CoroutineScope {
             TaskDefinition(
                 id = "main-delivery-dispatch",
                 schedule = TaskSchedule.FixedDelay(
-                    delay = config.delivery.retryDelayMs.coerceAtLeast(1).milliseconds,
+                    delay = config.delivery.retryDelaySeconds.seconds,
                     runImmediately = true,
                 ),
                 action = {

@@ -15,6 +15,7 @@ import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.draw.image.DynamicImageCache
+import kotlin.math.roundToLong
 
 public data class AdminMediaResult(
     val bytes: ByteArray,
@@ -46,7 +47,10 @@ public class AdminMediaService(
             return AdminMediaResult(local.bytes, contentTypeFor(local.path, imageUri, local.bytes))
         }
 
-        val downloaded = downloadHttpImage(imageUri, configProvider().imageCache.downloadTimeoutMs.coerceAtLeast(1))
+        val downloaded = downloadHttpImage(
+            imageUri,
+            secondsToMillis(configProvider().imageCache.downloadTimeoutSeconds, minimumMillis = 1),
+        )
         DynamicImageCache.store(image, resolvedPlatformId, kind, downloaded.bytes)
         return AdminMediaResult(
             bytes = downloaded.bytes,
@@ -175,4 +179,9 @@ public class AdminMediaService(
         private const val USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
     }
+}
+
+private fun secondsToMillis(seconds: Double, minimumMillis: Long): Long {
+    if (seconds <= 0.0 && minimumMillis <= 0) return 0
+    return (seconds * 1_000.0).roundToLong().coerceAtLeast(minimumMillis)
 }

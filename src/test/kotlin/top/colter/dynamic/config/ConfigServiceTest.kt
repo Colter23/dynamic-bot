@@ -174,6 +174,7 @@ class ConfigServiceTest {
                     path = "token",
                     label = "Token",
                     type = ConfigFieldType.SECRET,
+                    description = "测试令牌说明",
                     secret = true,
                     restartRequired = true,
                     restartTarget = "test-plugin",
@@ -182,6 +183,7 @@ class ConfigServiceTest {
         )
 
         assertEquals("token", spec.fields.single().path)
+        assertEquals("测试令牌说明", spec.fields.single().description)
         assertEquals(true, spec.fields.single().secret)
         assertEquals(true, spec.fields.single().restartRequired)
         assertEquals("test-plugin", spec.fields.single().restartTarget)

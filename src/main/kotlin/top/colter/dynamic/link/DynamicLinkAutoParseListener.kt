@@ -10,6 +10,7 @@ import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
+import kotlin.math.roundToLong
 
 internal class DynamicLinkAutoParseListener(
     private val configProvider: () -> MainDynamicConfig,
@@ -28,7 +29,7 @@ internal class DynamicLinkAutoParseListener(
             context = event.context,
             maxLinks = linkParsing.maxLinksPerMessage,
             dedupe = dedupe,
-            dedupeTtlMs = linkParsing.autoDedupeTtlMs,
+            dedupeTtlMs = secondsToMillis(linkParsing.autoDedupeTtlSeconds, minimumMillis = 0),
         )
 
         if (linkParsing.autoReplyOnFailure) {
@@ -52,5 +53,10 @@ internal class DynamicLinkAutoParseListener(
             status = status,
             errorMessage = if (status == CommandStatus.FAILED) message else null,
         ).let { eventBus.broadcast(it) }
+    }
+
+    private fun secondsToMillis(seconds: Double, minimumMillis: Long): Long {
+        if (seconds <= 0.0 && minimumMillis <= 0) return 0
+        return (seconds * 1_000.0).roundToLong().coerceAtLeast(minimumMillis)
     }
 }

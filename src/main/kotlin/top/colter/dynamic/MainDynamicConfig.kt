@@ -44,13 +44,13 @@ public data class LinkParsingConfig(
     val autoParseEnabled: Boolean = true,
     val maxLinksPerMessage: Int = 1,
     val autoReplyOnFailure: Boolean = false,
-    val autoDedupeTtlMs: Long = 60_000,
+    val autoDedupeTtlSeconds: Double = 60.0,
 )
 
 public data class ImageCacheConfig(
     val sourceRoot: String = "data/images/source",
     val renderedRoot: String = "data/images/draw",
-    val downloadTimeoutMs: Long = 10_000,
+    val downloadTimeoutSeconds: Double = 10.0,
     val maxConcurrentDownloads: Int = 8,
     val cleanupCron: String = "0 4 * * *",
     val sourceCleanup: ImageCleanupConfig = ImageCleanupConfig(),
@@ -64,9 +64,9 @@ public data class ImageCleanupConfig(
 
 public data class DeliveryConfig(
     val maxAttempts: Int = 3,
-    val retryDelayMs: Long = 30_000,
+    val retryDelaySeconds: Double = 30.0,
     val dispatchConcurrency: Int = 4,
-    val lockTtlMs: Long = 120_000,
+    val lockTtlSeconds: Double = 120.0,
 )
 
 public data class DrawSettings(

@@ -84,7 +84,14 @@ class DeliveryDispatcherTest {
     private fun dispatcher(vararg sinks: RecordingSink): DeliveryDispatcher {
         return DeliveryDispatcher(
             sinkProvider = { sinks.map { it.handle() } },
-            configProvider = { DeliveryConfig(maxAttempts = 2, retryDelayMs = 1, dispatchConcurrency = 2, lockTtlMs = 10_000) },
+            configProvider = {
+                DeliveryConfig(
+                    maxAttempts = 2,
+                    retryDelaySeconds = 0.001,
+                    dispatchConcurrency = 2,
+                    lockTtlSeconds = 10.0,
+                )
+            },
         )
     }
 

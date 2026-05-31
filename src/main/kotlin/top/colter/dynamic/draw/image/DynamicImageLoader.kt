@@ -26,6 +26,7 @@ import top.colter.dynamic.core.data.mediaReferences
 import top.colter.dynamic.core.tools.loggerFor
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
+import kotlin.math.roundToLong
 
 private val logger = loggerFor<CachedDynamicImageLoader>()
 
@@ -79,7 +80,7 @@ public class CachedDynamicImageLoader(
         }
 
         try {
-            val bytes = downloader.download(image.uri, config.downloadTimeoutMs.coerceAtLeast(1))
+            val bytes = downloader.download(image.uri, secondsToMillis(config.downloadTimeoutSeconds, minimumMillis = 1))
             DynamicImageCache.store(image, platformId, imageType, bytes)
             waiter.complete(Unit)
         } catch (e: CancellationException) {
@@ -141,4 +142,9 @@ private suspend fun <T> CompletableFuture<T>.await(): T {
         }
         continuation.invokeOnCancellation { cancel(true) }
     }
+}
+
+private fun secondsToMillis(seconds: Double, minimumMillis: Long): Long {
+    if (seconds <= 0.0 && minimumMillis <= 0) return 0
+    return (seconds * 1_000.0).roundToLong().coerceAtLeast(minimumMillis)
 }
