@@ -8,6 +8,7 @@ import top.colter.dynamic.core.data.DynamicContentNodeMention
 import top.colter.dynamic.core.data.DynamicContentNodeTag
 import top.colter.dynamic.core.data.DynamicContentNodeText
 import top.colter.dynamic.draw.DrawConfig
+import top.colter.skiko.Dp
 import top.colter.skiko.Modifier
 import top.colter.skiko.dp
 import top.colter.skiko.fillMaxWidth
@@ -18,7 +19,11 @@ import top.colter.skiko.px
 import top.colter.skiko.withDefaultFontFamily
 import top.colter.skiko.data.RichParagraphBuilder
 
-internal fun Layout.drawDynamicContent(content: DynamicContent, config: DrawConfig) {
+internal fun Layout.drawDynamicContent(
+    content: DynamicContent,
+    config: DrawConfig,
+    bottomSpacing: Dp = 0.dp,
+) {
     if (content.nodes.isEmpty()) return
 
     val style = TextStyle()
@@ -50,6 +55,6 @@ internal fun Layout.drawDynamicContent(content: DynamicContent, config: DrawConf
 
     RichText(
         paragraph = paragraph.build(),
-        modifier = Modifier().margin(bottom = 20.dp).fillMaxWidth(),
+        modifier = Modifier().margin(bottom = bottomSpacing).fillMaxWidth(),
     )
 }

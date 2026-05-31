@@ -21,6 +21,8 @@ import top.colter.skiko.dp
 import top.colter.skiko.fillMaxWidth
 import top.colter.skiko.height
 import top.colter.skiko.layout.Layout
+import top.colter.skiko.margin
+import top.colter.skiko.offset
 import top.colter.skiko.withAlpha
 
 internal fun Layout.drawPublisher(
@@ -40,7 +42,11 @@ internal fun Layout.drawPublisher(
             badge = officialImage,
             accentColor = config.theme.primaryColor,
             mutedColor = config.theme.mutedTextColor,
-            modifier = Modifier().fillMaxWidth().height(50.dp),
+            modifier = Modifier()
+                .fillMaxWidth()
+                .height(50.dp)
+                .margin(bottom = 14.dp)
+                .offset(y = (-5).dp),
         )
     } else {
         val ornamentImage = when (config.settings.ornament) {

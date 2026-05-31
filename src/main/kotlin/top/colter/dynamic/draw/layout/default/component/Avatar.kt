@@ -1,6 +1,7 @@
 ﻿package top.colter.dynamic.draw.layout.default.component
 
 import org.jetbrains.skia.Image
+import top.colter.skiko.Dp
 import top.colter.skiko.Modifier
 import top.colter.skiko.aspectRatio
 import top.colter.skiko.border
@@ -31,6 +32,8 @@ internal fun Layout.Avatar(
     face: Image,
     pendant: Image? = null,
     badge: Image? = null,
+    faceBorderWidth: Dp = 4.dp,
+    badgeBorderWidth: Dp = 3.dp,
     alignment: LayoutAlignment = LayoutAlignment.CENTER,
     modifier: Modifier
 ) = Box(
@@ -54,7 +57,7 @@ internal fun Layout.Avatar(
             modifier = Modifier()
                 .fillRatioWidth(faceRatio)
                 .circle()
-                .border(4.dp)
+                .border(faceBorderWidth)
                 .shadows(Shadow.ELEVATION_2)
         )
 
@@ -78,7 +81,7 @@ internal fun Layout.Avatar(
                 modifier = Modifier()
                     .fillRatioWidth(badgeRatio)
                     .circle()
-                    .border(3.dp)
+                    .border(badgeBorderWidth)
             )
         }
     }

@@ -13,24 +13,34 @@ import top.colter.skiko.data.Ratio
 import top.colter.skiko.data.Shadow
 import top.colter.skiko.layout.*
 
+private val attachmentSpacing: Dp = 20.dp
 
 internal fun Layout.drawDynamicAttachments(
     attachments: List<DynamicAttachment>,
     config: DrawConfig,
     mode: DynamicRenderMode = DynamicRenderMode.ROOT,
+    bottomSpacing: Dp = 0.dp,
 ) {
-    attachments.forEach { attachment ->
+    attachments.forEachIndexed { index, attachment ->
+        val modifier = Modifier()
+            .fillMaxWidth()
+            .margin(bottom = if (index < attachments.lastIndex) attachmentSpacing else bottomSpacing)
+
         when (attachment) {
-            is ImageAttachment -> drawDynamicImages(attachment.images, config)
-            is VideoAttachment -> drawDynamicVideo(attachment, config, mode)
-            is CardAttachment -> drawDynamicCard(attachment, config)
+            is ImageAttachment -> drawDynamicImages(attachment.images, config, modifier)
+            is VideoAttachment -> drawDynamicVideo(attachment, config, mode, modifier)
+            is CardAttachment -> drawDynamicCard(attachment, config, modifier)
             else -> Unit
         }
     }
 }
 
 
-private fun Layout.drawDynamicImages(pics: List<ImageItem>, config: DrawConfig) {
+private fun Layout.drawDynamicImages(
+    pics: List<ImageItem>,
+    config: DrawConfig,
+    modifier: Modifier = Modifier().fillMaxWidth(),
+) {
     val imgList = pics.map { it to config.image(it.image) }
     val imgModifier = Modifier().background(config.theme.cardColor).border(2.dp, 10.dp, config.theme.borderColor).shadows(Shadow.ELEVATION_1)
     if (imgList.size == 1) imgModifier.fillMaxWidth()
@@ -39,7 +49,7 @@ private fun Layout.drawDynamicImages(pics: List<ImageItem>, config: DrawConfig) 
         maxLineCount = lineCount,
         space = 15.dp,
         lockRatio = imgList.size != 1,
-        modifier = Modifier().fillMaxWidth()
+        modifier = modifier
     ) {
         for ((pic, image) in imgList) {
             DynamicImageTile(
@@ -89,7 +99,12 @@ private fun Layout.DynamicImageTile(
 }
 
 
-private fun Layout.drawDynamicVideo(video: VideoAttachment, config: DrawConfig, mode: DynamicRenderMode) {
+private fun Layout.drawDynamicVideo(
+    video: VideoAttachment,
+    config: DrawConfig,
+    mode: DynamicRenderMode,
+    modifier: Modifier = Modifier().fillMaxWidth(),
+) {
     val cover = video.cover ?: return
     if (mode == DynamicRenderMode.FORWARD) {
         MediaSmall(
@@ -102,6 +117,7 @@ private fun Layout.drawDynamicVideo(video: VideoAttachment, config: DrawConfig, 
             cardColor = config.theme.cardColor,
             borderColor = config.theme.borderColor,
             secondaryTextColor = config.theme.secondaryTextColor,
+            modifier = modifier,
         )
     } else {
         Media(
@@ -115,12 +131,17 @@ private fun Layout.drawDynamicVideo(video: VideoAttachment, config: DrawConfig, 
             cardColor = config.theme.cardColor,
             borderColor = config.theme.borderColor,
             secondaryTextColor = config.theme.secondaryTextColor,
+            modifier = modifier,
         )
     }
 }
 
 
-private fun Layout.drawDynamicCard(card: CardAttachment, config: DrawConfig) {
+private fun Layout.drawDynamicCard(
+    card: CardAttachment,
+    config: DrawConfig,
+    modifier: Modifier = Modifier().fillMaxWidth(),
+) {
     val cover = card.cover ?: return
     Media(
         cover = config.image(cover),
@@ -132,6 +153,7 @@ private fun Layout.drawDynamicCard(card: CardAttachment, config: DrawConfig) {
         cardColor = config.theme.cardColor,
         borderColor = config.theme.borderColor,
         secondaryTextColor = config.theme.secondaryTextColor,
+        modifier = modifier,
     )
 }
 

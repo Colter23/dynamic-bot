@@ -8,6 +8,11 @@ import top.colter.skiko.layout.Layout
 import top.colter.skiko.layout.Row
 import top.colter.skiko.layout.Text
 
+private val authorSmallAvatarSize = 46.dp
+private val authorSmallAvatarTrailing = 16.dp
+private val authorSmallNameTop = 0.dp
+private val authorSmallTimeTop = 7.dp
+
 /**
  * 作者小组件
  */
@@ -28,24 +33,32 @@ internal fun Layout.AuthorSmall(
     Avatar(
         face = face,
         badge = badge,
-        modifier = Modifier().fillMaxHeight().margin(right = 15.dp)
+        faceBorderWidth = 2.dp,
+        badgeBorderWidth = 2.dp,
+        alignment = LayoutAlignment.LEFT_TOP,
+        modifier = Modifier()
+            .height(authorSmallAvatarSize)
+            .margin(right = authorSmallAvatarTrailing)
+            .offset(y = (-7).dp)
+            .bleed(2.dp)
     )
     Row(
         modifier = Modifier().fillMaxWidth().fillHeight(), // .background(Color.GREEN),
-        alignment = LayoutAlignment.LEFT
+        alignment = LayoutAlignment.LEFT_TOP
     ) {
         Text(
             text = name,
             color = accentColor,
             fontSize = 30.dp,
-            alignment = LayoutAlignment.LEFT,
-            modifier = Modifier().margin(right = 15.dp)
+            alignment = LayoutAlignment.LEFT_TOP,
+            modifier = Modifier().margin(top = authorSmallNameTop, right = 15.dp)
         )
         Text(
             text = time,
             color = mutedColor,
             fontSize = 22.dp,
-            alignment = LayoutAlignment.LEFT,
+            alignment = LayoutAlignment.LEFT_TOP,
+            modifier = Modifier().margin(top = authorSmallTimeTop),
         )
     }
 }

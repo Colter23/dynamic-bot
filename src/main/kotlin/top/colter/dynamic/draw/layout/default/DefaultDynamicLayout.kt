@@ -7,6 +7,7 @@ import top.colter.dynamic.core.data.DynamicReferenceKind
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.util.formatTime
+import top.colter.skiko.Dp
 import top.colter.skiko.Modifier
 import top.colter.skiko.background
 import top.colter.skiko.border
@@ -27,12 +28,18 @@ internal enum class DynamicRenderMode {
     FORWARD,
 }
 
+private val scenePadding: Dp = 20.dp
+private val contentSpacing: Dp = 20.dp
+private val cardPadding: Dp = 20.dp
+private val cardBorderWidth: Dp = 3.dp
+private val cardRadius: Dp = 15.dp
+
 internal fun renderDefaultDynamic(update: SourceUpdate, config: DrawConfig): Image {
     return View(
         fontRegistry = config.fontRegistry,
         modifier = Modifier()
             .width(config.settings.width.dp)
-            .padding(20.dp)
+            .padding(scenePadding)
             .background(
                 gradient = Gradient(
                     LayoutAlignment.LEFT_TOP,
@@ -49,8 +56,18 @@ private fun Layout.DefaultDynamicView(
     update: SourceUpdate,
     config: DrawConfig,
     mode: DynamicRenderMode = DynamicRenderMode.ROOT,
+    topSpacing: Dp = contentSpacing,
 ) {
     val payload = update.payload as? DynamicPayload ?: return
+    val title = payload.title?.takeIf { it.isNotBlank() }
+    val content = payload.content?.takeIf { it.nodes.isNotEmpty() }
+    val originReferences = payload.references
+        .filter { reference -> reference.kind == DynamicReferenceKind.ORIGIN }
+        .mapNotNull { reference -> reference.embedded }
+    val hasContent = content != null
+    val hasAttachments = payload.attachments.isNotEmpty()
+    val hasOriginReferences = originReferences.isNotEmpty()
+
     Column(modifier = Modifier().fillMaxWidth()) {
         if (mode == DynamicRenderMode.ROOT) {
             drawPublisher(
@@ -65,10 +82,10 @@ private fun Layout.DefaultDynamicView(
         Column(
             modifier = Modifier()
                 .fillMaxWidth()
-                .margin(top = 20.dp, bottom = 20.dp)
-                .padding(20.dp)
+                .margin(top = topSpacing)
+                .padding(cardPadding)
                 .background(config.theme.cardColor)
-                .border(3.dp, 15.dp, config.theme.borderColor)
+                .border(cardBorderWidth, cardRadius, config.theme.borderColor)
         ) {
             if (mode == DynamicRenderMode.FORWARD) {
                 drawPublisher(
@@ -80,26 +97,38 @@ private fun Layout.DefaultDynamicView(
                 )
             }
 
-            payload.title?.let { title ->
+            title?.let {
                 Text(
-                    text = title,
+                    text = it,
                     color = config.theme.textColor,
                     fontSize = 36.dp,
                     fontStyle = FontStyle.BOLD,
                     maxLinesCount = 2,
-                    modifier = Modifier().margin(bottom = 20.dp),
+                    modifier = Modifier().margin(bottom = if (hasContent || hasAttachments) contentSpacing else 0.dp),
                 )
             }
-            payload.content?.let { content -> drawDynamicContent(content, config) }
-            if (payload.attachments.isNotEmpty()) {
+            content?.let {
+                drawDynamicContent(
+                    content = it,
+                    config = config,
+                    bottomSpacing = if (hasAttachments) contentSpacing else 0.dp,
+                )
+            }
+            if (hasAttachments) {
                 drawDynamicAttachments(payload.attachments, config, mode)
             }
-            payload.references
-                .filter { reference -> reference.kind == DynamicReferenceKind.ORIGIN }
-                .mapNotNull { reference -> reference.embedded }
-                .forEach { origin ->
-                    DefaultDynamicView(origin, config, DynamicRenderMode.FORWARD)
+            if (hasOriginReferences) {
+                val hasBodyBeforeOrigin = title != null || hasContent || hasAttachments
+                originReferences.forEachIndexed { index, origin ->
+                    val originTopSpacing = if (hasBodyBeforeOrigin || index > 0) contentSpacing else 0.dp
+                    DefaultDynamicView(
+                        update = origin,
+                        config = config,
+                        mode = DynamicRenderMode.FORWARD,
+                        topSpacing = originTopSpacing,
+                    )
                 }
+            }
         }
     }
 }
