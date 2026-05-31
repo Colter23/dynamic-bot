@@ -47,13 +47,13 @@ class PublisherRepositoryTest {
                 avatar = testMedia("https://example.com/face.png", MediaKind.AVATAR),
                 banner = testMedia("https://example.com/header.png", MediaKind.COVER),
                 pendant = testMedia("https://example.com/pendant.png", MediaKind.AVATAR),
-            ).copy(official = "official"),
+            ).copy(avatarBadgeKey = "avatarBadge.official.individual"),
         )
         val updated = PublisherRepository.upsertInfo(
             PublisherInfo(
                 key = testPublisherKey(platformId = "bilibili", externalId = "123456"),
                 name = "test-up-updated",
-                official = null,
+                avatarBadgeKey = null,
                 state = EntityState.ACTIVE,
                 avatar = testMedia("https://example.com/face2.png", MediaKind.AVATAR),
                 banner = null,
@@ -76,7 +76,7 @@ class PublisherRepositoryTest {
         val found = PublisherRepository.findByKey(PublisherKey.of("bilibili", externalId = "123456"))
         assertNotNull(found)
         assertEquals("test-up-updated", found.name)
-        assertNull(found.official)
+        assertNull(found.avatarBadgeKey)
         assertNull(found.banner)
         assertNull(found.pendant)
         assertNotNull(PublisherRepository.findByKey(PublisherKey.of("x", externalId = "123456")))

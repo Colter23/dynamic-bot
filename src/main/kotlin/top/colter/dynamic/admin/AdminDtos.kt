@@ -119,7 +119,7 @@ public data class PublisherDto(
     val kind: String,
     val externalId: String,
     val name: String,
-    val official: String? = null,
+    val avatarBadgeKey: String? = null,
     val state: String,
     val avatarUri: String,
     val pendantUri: String? = null,

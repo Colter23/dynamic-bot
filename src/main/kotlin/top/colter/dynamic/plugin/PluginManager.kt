@@ -51,6 +51,7 @@ import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageDelivery
 import top.colter.dynamic.core.data.TargetAddress
+import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import java.io.File
 import java.net.URLClassLoader
 import java.nio.file.Paths
@@ -71,6 +72,7 @@ public class PluginManager(
     private val pluginDataDirPath: String = "data/plugins",
     private val sourceStateStore: SourceStateStore = RepositorySourceStateStore,
     private val subscriptionQueryService: SubscriptionQueryService = RepositorySubscriptionQueryService,
+    private val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
     private val sinkMaxConcurrency: Int = 4,
     private val shutdownDrainTimeoutMs: Long = 5000,
 ) {
@@ -193,6 +195,7 @@ public class PluginManager(
             runtime.scope.cancel("插件已卸载：$pluginId")
             runCatching { (runtime.classLoader as? URLClassLoader)?.close() }
                 .onFailure { logger.warn(it) { "插件类加载器关闭失败：pluginId=$pluginId" } }
+            drawAssetRegistry.unregisterPluginAssets(pluginId)
             plugins.remove(pluginId)
             inFlightDispatchJobs.remove(pluginId)
             logger.info { "插件已卸载：pluginId=$pluginId" }
@@ -434,7 +437,16 @@ public class PluginManager(
 
         val loaded = loader.load(descriptor, scanResult.jarFile.absolutePath)
         val capabilities = inferCapabilities(loaded.instance)
-        require(capabilities.isNotEmpty()) { "插件 ${descriptor.id} 未实现任何已知扩展接口" }
+        if (capabilities.isEmpty()) {
+            runCatching { loaded.classLoader.close() }
+            throw IllegalArgumentException("插件 ${descriptor.id} 未实现任何已知扩展接口")
+        }
+        runCatching {
+            drawAssetRegistry.registerPluginAssets(descriptor.id, descriptor.drawAssets, loaded.classLoader)
+        }.onFailure {
+            runCatching { loaded.classLoader.close() }
+            throw it
+        }
 
         val pluginScope = createPluginScope(descriptor.id)
         val runtime = PluginRuntime(
@@ -462,6 +474,7 @@ public class PluginManager(
         runCatching {
             runBlocking { loaded.instance.onLoad(context) }
         }.onFailure {
+            drawAssetRegistry.unregisterPluginAssets(descriptor.id)
             pluginScope.cancel("插件加载失败：${descriptor.id}")
             runCatching { loaded.classLoader.close() }
             throw it

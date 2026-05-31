@@ -124,7 +124,7 @@ public class SourceUpdateProcessor(
         val normalizedPublisher = stored.copy(
             key = incoming.key,
             name = incoming.name,
-            official = incoming.official,
+            avatarBadgeKey = incoming.avatarBadgeKey,
             avatar = incoming.avatar,
             pendant = incoming.pendant,
             banner = incoming.banner ?: stored.banner,

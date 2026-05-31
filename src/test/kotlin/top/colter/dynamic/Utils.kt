@@ -52,6 +52,7 @@ fun testPublisherKey(
 fun testPublisherInfo(
     key: PublisherKey = testPublisherKey(),
     name: String = "demo",
+    avatarBadgeKey: String? = null,
     avatar: MediaRef = testMedia("https://example.com/${key.externalId}.png", MediaKind.AVATAR),
     banner: MediaRef? = null,
     pendant: MediaRef? = null,
@@ -59,6 +60,7 @@ fun testPublisherInfo(
 ): PublisherInfo = PublisherInfo(
     key = key,
     name = name,
+    avatarBadgeKey = avatarBadgeKey,
     state = state,
     avatar = avatar,
     banner = banner,
@@ -69,6 +71,7 @@ fun testPublisher(
     id: Int = 1,
     key: PublisherKey = testPublisherKey(),
     name: String = "demo",
+    avatarBadgeKey: String? = null,
     avatar: MediaRef = testMedia("https://example.com/${key.externalId}.png", MediaKind.AVATAR),
     banner: MediaRef? = null,
     pendant: MediaRef? = null,
@@ -77,6 +80,7 @@ fun testPublisher(
     id = id,
     key = key,
     name = name,
+    avatarBadgeKey = avatarBadgeKey,
     state = state,
     avatar = avatar,
     banner = banner,

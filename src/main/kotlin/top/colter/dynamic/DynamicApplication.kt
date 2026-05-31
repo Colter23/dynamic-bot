@@ -34,6 +34,8 @@ import top.colter.dynamic.task.DefaultTaskScheduler
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.dynamic.draw.image.ImageFileCleaner
+import top.colter.dynamic.draw.DefaultDynamicDrawService
+import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.listener.DeliveryDispatcher
 import top.colter.dynamic.link.DynamicLinkAutoParseListener
 import top.colter.dynamic.link.DynamicLinkForwarder
@@ -48,6 +50,7 @@ public object DynamicApplication : CoroutineScope {
     private val eventBus: EventBus = EventBus()
     private val configService: ConfigService = YamlConfigService()
     private val commandRegistry: CommandRegistry = CommandRegistry()
+    private val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry()
     private lateinit var sourceUpdateProcessor: SourceUpdateProcessor
     private lateinit var deliveryDispatcher: DeliveryDispatcher
     private val commandPublisher: CommandPublisher = CommandPublisher { request ->
@@ -75,6 +78,7 @@ public object DynamicApplication : CoroutineScope {
         commandRegistry = commandRegistry,
         commandPublisher = commandPublisher,
         sourceUpdatePublisher = sourceUpdatePublisher,
+        drawAssetRegistry = drawAssetRegistry,
     )
     private val listenerTokens: MutableList<ListenerToken> = mutableListOf()
     private val taskScheduler: DefaultTaskScheduler = DefaultTaskScheduler(scope = this)
@@ -137,6 +141,10 @@ public object DynamicApplication : CoroutineScope {
             configProvider = configStore::current,
             configService = configService,
             eventBus = eventBus,
+            drawService = DefaultDynamicDrawService(
+                configProvider = configStore::current,
+                assetResolver = drawAssetRegistry,
+            ),
             broadcastMessages = false,
             onDeliveriesQueued = {
                 deliveryDispatcher.dispatchDue()

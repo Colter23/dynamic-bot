@@ -31,7 +31,7 @@ public object PublisherRepository {
                 it[kind] = publisher.key.kind
                 it[externalId] = publisher.key.externalId
                 it[name] = publisher.name
-                it[official] = publisher.official
+                it[avatarBadgeKey] = publisher.avatarBadgeKey
                 it[state] = publisher.state
                 it[avatar] = publisher.avatar
                 it[banner] = publisher.banner
@@ -49,7 +49,7 @@ public object PublisherRepository {
                 it[kind] = publisher.key.kind
                 it[externalId] = publisher.key.externalId
                 it[name] = publisher.name
-                it[official] = publisher.official
+                it[avatarBadgeKey] = publisher.avatarBadgeKey
                 it[state] = publisher.state
                 it[avatar] = publisher.avatar
                 it[banner] = publisher.banner
@@ -98,7 +98,7 @@ public object PublisherRepository {
             val updatedPublisher = existed.copy(
                 key = info.key,
                 name = info.name,
-                official = info.official,
+                avatarBadgeKey = info.avatarBadgeKey,
                 state = info.state,
                 avatar = info.avatar,
                 banner = info.banner,
@@ -116,7 +116,7 @@ public object PublisherRepository {
                 it[kind] = info.key.kind
                 it[externalId] = info.key.externalId
                 it[name] = info.name
-                it[official] = info.official
+                it[avatarBadgeKey] = info.avatarBadgeKey
                 it[state] = info.state
                 it[avatar] = info.avatar
                 it[banner] = info.banner
@@ -129,7 +129,7 @@ public object PublisherRepository {
                     id = id,
                     key = info.key,
                     name = info.name,
-                    official = info.official,
+                    avatarBadgeKey = info.avatarBadgeKey,
                     state = info.state,
                     avatar = info.avatar,
                     banner = info.banner,
@@ -152,7 +152,7 @@ public fun ResultRow.toPublisher(): Publisher = Publisher(
         externalId = this[PublisherTable.externalId],
     ),
     name = this[PublisherTable.name],
-    official = this[PublisherTable.official],
+    avatarBadgeKey = this[PublisherTable.avatarBadgeKey],
     state = this[PublisherTable.state],
     avatar = this[PublisherTable.avatar],
     banner = this[PublisherTable.banner],

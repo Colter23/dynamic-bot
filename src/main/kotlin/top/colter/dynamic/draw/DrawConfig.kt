@@ -8,6 +8,8 @@ import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.dynamic.draw.resource.DrawFonts
+import top.colter.dynamic.draw.resource.EmptyPlatformDrawAssetResolver
+import top.colter.dynamic.draw.resource.PlatformDrawAssetResolver
 import top.colter.skiko.FontRegistry
 import top.colter.skiko.Fonts
 import top.colter.skiko.withAlpha
@@ -26,6 +28,7 @@ public data class DrawConfig(
     val settings: DrawSettings = DrawSettings(),
     val theme: DrawTheme = DrawThemeFactory.fromSettings(settings),
     val imageResolver: DynamicImageResolver = DynamicImageCache,
+    val assetResolver: PlatformDrawAssetResolver = EmptyPlatformDrawAssetResolver,
     val fontRegistry: FontRegistry = Fonts.default,
 ) {
     init {
@@ -33,6 +36,10 @@ public data class DrawConfig(
     }
 
     public fun image(image: MediaRef): Image = imageResolver.image(image)
+
+    public fun platformAssetImage(key: String, width: Int? = null, height: Int? = null): Image? {
+        return assetResolver.image(platform.id, key, width, height)
+    }
 }
 
 public enum class DrawThemeMode {

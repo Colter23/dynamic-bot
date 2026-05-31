@@ -14,7 +14,7 @@
       "type": "USER"
     },
     "name": "Demo Publisher",
-    "official": null,
+    "avatarBadgeKey": null,
     "state": "ACTIVE",
     "face": {
       "uri": "https://i2.hdslb.com/bfs/face/demo.jpg",

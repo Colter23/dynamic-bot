@@ -841,7 +841,7 @@ private fun Publisher.toDto(
     kind = kind.name,
     externalId = externalId,
     name = name,
-    official = official,
+    avatarBadgeKey = avatarBadgeKey,
     state = state.name,
     avatarUri = avatar.uri,
     pendantUri = pendant?.uri,

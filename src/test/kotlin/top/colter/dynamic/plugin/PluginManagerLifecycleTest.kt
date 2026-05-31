@@ -10,6 +10,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
@@ -49,6 +50,7 @@ import top.colter.dynamic.core.plugin.PluginDescriptor
 import top.colter.dynamic.core.plugin.PublisherSourcePlugin
 import top.colter.dynamic.core.plugin.SourceStateStore
 import top.colter.dynamic.core.plugin.SubscriptionQueryService
+import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 
 class PluginManagerLifecycleTest {
 
@@ -147,6 +149,38 @@ class PluginManagerLifecycleTest {
     }
 
     @Test
+    fun loadShouldRegisterAndUnloadPluginDrawAssets() {
+        val pluginDir = createTempDirectory("plugin-manager-draw-assets").toFile()
+        val drawAssetRegistry = PlatformDrawAssetRegistry()
+        val manager = PluginManager(
+            pluginDirPath = pluginDir.path,
+            drawAssetRegistry = drawAssetRegistry,
+        )
+        createPluginJar(
+            pluginDir = pluginDir,
+            id = "draw-assets",
+            mainClass = LifecycleRecordingPlugin::class.java.name,
+            extraYaml = """
+                drawAssets:
+                  - platformId: bilibili
+                    key: avatarBadge.official.individual
+                    kind: AVATAR_BADGE
+                    resourcePath: draw/test/badge.svg
+                    mimeType: image/svg+xml
+            """.trimIndent(),
+            resourceEntries = mapOf("draw/test/badge.svg" to TEST_BADGE_SVG.toByteArray(Charsets.UTF_8)),
+        )
+
+        val result = manager.loadAllPlugins()
+
+        assertEquals(listOf("draw-assets"), result.loadedPlugins)
+        assertNotNull(drawAssetRegistry.image(PlatformId.of("bilibili"), "avatarBadge.official.individual", 24, 24))
+        assertTrue(manager.unloadPlugin("draw-assets"))
+        assertNull(drawAssetRegistry.image(PlatformId.of("bilibili"), "avatarBadge.official.individual", 24, 24))
+        manager.shutdown()
+    }
+
+    @Test
     fun constructorShouldNotRegisterSubscriptionListenerUntilStart() {
         val eventBus = EventBus()
         val manager = PluginManager(
@@ -229,19 +263,29 @@ class PluginManagerLifecycleTest {
         mainClass: String,
         apiVersion: String = CORE_PLUGIN_API_VERSION,
         fileName: String = "$id.jar",
+        extraYaml: String = "",
+        resourceEntries: Map<String, ByteArray> = emptyMap(),
     ) {
-        val yaml = """
-            id: $id
-            name: Test Plugin $id
-            version: 0.0.1
-            mainClass: $mainClass
-            apiVersion: $apiVersion
-        """.trimIndent()
+        val yaml = buildString {
+            appendLine("id: $id")
+            appendLine("name: Test Plugin $id")
+            appendLine("version: 0.0.1")
+            appendLine("mainClass: $mainClass")
+            appendLine("apiVersion: $apiVersion")
+            if (extraYaml.isNotBlank()) {
+                appendLine(extraYaml)
+            }
+        }
 
         JarOutputStream(FileOutputStream(pluginDir.resolve(fileName))).use { output ->
             output.putNextEntry(JarEntry("plugin.yml"))
             output.write(yaml.toByteArray(Charsets.UTF_8))
             output.closeEntry()
+            resourceEntries.forEach { (path, bytes) ->
+                output.putNextEntry(JarEntry(path))
+                output.write(bytes)
+                output.closeEntry()
+            }
         }
     }
 
@@ -264,6 +308,11 @@ class PluginManagerLifecycleTest {
                 batches = listOf(MessageBatch(listOf(MessageContent.Text("hello")))),
             ),
         )
+    }
+
+    private companion object {
+        private const val TEST_BADGE_SVG: String =
+            """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="48" fill="#00a1d6"/></svg>"""
     }
 
     private class TestSourcePlugin : PublisherSourcePlugin {

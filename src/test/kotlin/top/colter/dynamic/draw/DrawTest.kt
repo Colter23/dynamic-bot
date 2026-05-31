@@ -201,7 +201,7 @@ class DrawTest {
 
     @Test
     fun `test dynamic publisher ornaments`() {
-        val publisher = demoPublisher("ornament").copy(official = "BILIBILI_A.png")
+        val publisher = demoPublisher("ornament").copy(avatarBadgeKey = "avatarBadge.official.individual")
         val update = testDynamicUpdate(
             publisher = publisher,
             payload = DynamicPayload(blocks = listOf(textBlock("Publisher ornament variants"))),

@@ -14,7 +14,7 @@ public object PublisherTable : IntIdTable("publisher") {
     public val kind: Column<PublisherKind> = enumerationByName<PublisherKind>("kind", 30).default(PublisherKind.USER)
     public val externalId: Column<String> = varchar(name = "external_id", length = 100)
     public val name: Column<String> = varchar(name = "name", length = 255)
-    public val official: Column<String?> = varchar(name = "official", length = 255).nullable()
+    public val avatarBadgeKey: Column<String?> = varchar(name = "avatar_badge_key", length = 255).nullable()
     public val state: Column<EntityState> = enumerationByName<EntityState>("state", 20).default(EntityState.ACTIVE)
     public val avatar: Column<MediaRef> = registerColumn("avatar", mediaRefColumn())
     public val banner: Column<MediaRef?> = registerColumn("banner", mediaRefColumn()).nullable()

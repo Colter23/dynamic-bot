@@ -8,13 +8,11 @@ import org.jetbrains.skia.Shader
 import org.jetbrains.skia.Surface
 import java.util.concurrent.ConcurrentHashMap
 import top.colter.dynamic.DrawOrnament
-import top.colter.dynamic.core.data.MediaKind
-import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.PublisherInfo
+import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.draw.layout.default.component.Author
 import top.colter.dynamic.draw.layout.default.component.AuthorSmall
-import top.colter.dynamic.draw.resource.loadResourceImage
 import top.colter.dynamic.draw.resource.qrCode
 import top.colter.skiko.Modifier
 import top.colter.skiko.dp
@@ -32,14 +30,14 @@ internal fun Layout.drawPublisher(
     config: DrawConfig,
     mode: DynamicRenderMode,
 ) {
-    val officialImage = publisher.official?.let { loadResourceImage(name = it) }
+    val avatarBadgeImage = publisher.avatarBadgeKey?.let { config.platformAssetImage(it, width = 100, height = 100) }
 
     if (mode == DynamicRenderMode.FORWARD) {
         AuthorSmall(
             face = config.image(publisher.avatar),
             name = publisher.name,
             time = time,
-            badge = officialImage,
+            badge = avatarBadgeImage,
             accentColor = config.theme.primaryColor,
             mutedColor = config.theme.mutedTextColor,
             modifier = Modifier()
@@ -60,7 +58,7 @@ internal fun Layout.drawPublisher(
             pendant = publisher.pendant?.let { config.image(it) },
             head = publisherHead(publisher, config),
             ornament = ornamentImage,
-            badge = officialImage,
+            badge = avatarBadgeImage,
             name = publisher.name,
             time = time,
             modifier = Modifier().fillMaxWidth().height(100.dp),
@@ -75,23 +73,14 @@ private fun publisherHead(publisher: PublisherInfo, config: DrawConfig): Image {
 private val platformHeadCache = ConcurrentHashMap<String, Image>()
 
 private fun platformDefaultHead(config: DrawConfig): Image {
-    val platformId = config.platform.id.value.uppercase()
-    return loadResourceImage(name = "${platformId}_HEAD.png")
-        ?: loadResourceImage(name = "${platformId}_BANNER.png")
+    return config.platformAssetImage(PlatformDrawAssetKeys.DEFAULT_HEADER)
         ?: platformHeadCache.getOrPut(defaultHeadCacheKey(config)) {
             makePlatformDefaultHead(config)
         }
 }
 
 private fun platformLogo(config: DrawConfig): Image? {
-    val platformId = config.platform.id.value.uppercase()
-    return loadResourceImage(name = "${platformId}_A.png")
-        ?: loadResourceImage(name = "${platformId}_LOGO.png")
-        ?: config.platform.icon
-            ?.let { config.image(it.copy(kind = MediaKind.IMAGE)) }
-        ?: config.platform.homepageUri
-            ?.takeIf { it.isNotBlank() }
-            ?.let { config.image(MediaRef(uri = it, kind = MediaKind.IMAGE)) }
+    return config.platformAssetImage(PlatformDrawAssetKeys.PRIMARY_LOGO)
 }
 
 private fun defaultHeadCacheKey(config: DrawConfig): String {

@@ -1,12 +1,11 @@
 ﻿
 import kotlinx.coroutines.runBlocking
 import org.jetbrains.skia.Color
+import org.jetbrains.skia.Paint
+import org.jetbrains.skia.Surface
 import top.colter.dynamic.draw.layout.default.component.*
-import top.colter.dynamic.draw.resource.loadSVG
-import top.colter.dynamic.draw.resource.makeImage
 import top.colter.dynamic.loadTestImage
 import top.colter.dynamic.loadTestResource
-import top.colter.dynamic.resource
 import top.colter.dynamic.testOutput
 import top.colter.skiko.*
 import top.colter.skiko.data.LayoutAlignment
@@ -33,7 +32,13 @@ class ComponentDrawTest {
 
         val face = loadTestImage("image", "avatar1.jpg")
         val pendant = loadTestImage("image", "pendant.png")
-        val badge = loadSVG(resource.resolve("icon/PERSONAL_OFFICIAL_VERIFY.svg").readBytes()).makeImage(100, 100)
+        val badge = Surface.makeRasterN32Premul(100, 100).apply {
+            val paint = Paint().apply {
+                isAntiAlias = true
+                color = Color.makeRGB(0, 161, 214)
+            }
+            canvas.drawCircle(50f, 50f, 46f, paint)
+        }.makeImageSnapshot()
 
         View(
             file = testOutput.resolve("avatar.png"),

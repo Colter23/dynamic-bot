@@ -21,6 +21,8 @@ import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.draw.image.CachedDynamicImageLoader
 import top.colter.dynamic.draw.image.DynamicImageLoader
+import top.colter.dynamic.draw.resource.EmptyPlatformDrawAssetResolver
+import top.colter.dynamic.draw.resource.PlatformDrawAssetResolver
 
 public fun interface DynamicDrawService {
     public suspend fun render(update: SourceUpdate, storedPublisher: Publisher?): MediaRef
@@ -29,6 +31,7 @@ public fun interface DynamicDrawService {
 public class DefaultDynamicDrawService(
     private val configProvider: () -> MainDynamicConfig,
     imageLoader: DynamicImageLoader? = null,
+    private val assetResolver: PlatformDrawAssetResolver = EmptyPlatformDrawAssetResolver,
     private val themeService: PublisherDrawThemeService = PublisherDrawThemeService(),
 ) : DynamicDrawService {
     private val runtimeImageLoader: DynamicImageLoader by lazy {
@@ -71,6 +74,7 @@ public class DefaultDynamicDrawService(
                 ),
                 settings = config.draw,
                 theme = theme,
+                assetResolver = assetResolver,
             ),
         ).encodeToData(EncodedImageFormat.PNG, 100)
             ?: error("动态图片编码失败")
