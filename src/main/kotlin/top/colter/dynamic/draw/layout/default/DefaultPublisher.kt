@@ -23,6 +23,9 @@ import top.colter.skiko.margin
 import top.colter.skiko.offset
 import top.colter.skiko.withAlpha
 
+private val publisherLogoHeight = 120.dp
+private val publisherQrCodeHeight = 150.dp
+
 internal fun Layout.drawPublisher(
     publisher: PublisherInfo,
     time: String,
@@ -47,11 +50,19 @@ internal fun Layout.drawPublisher(
                 .offset(y = (-5).dp),
         )
     } else {
+        val platformLogoImage = platformLogo(config)
+        val platformTextLogoImage = platformTextLogo(config)
+        val qrCodeImage = if (config.settings.ornament == DrawOrnament.QRCODE && link.isNotBlank()) {
+            qrCode(link, config.theme.primaryColor.withAlpha(1f))
+        } else {
+            null
+        }
         val ornamentImage = when (config.settings.ornament) {
-            DrawOrnament.LOGO -> platformLogo(config)
-            DrawOrnament.QRCODE -> qrCode(link, config.theme.primaryColor.withAlpha(1f))
+            DrawOrnament.LOGO -> platformLogoImage
+            DrawOrnament.QRCODE -> platformTextLogoImage ?: platformLogoImage
             DrawOrnament.NONE -> null
         }
+        val publisherHeight = if (qrCodeImage != null) publisherQrCodeHeight else publisherLogoHeight
 
         Author(
             face = config.image(publisher.avatar),
@@ -61,7 +72,10 @@ internal fun Layout.drawPublisher(
             badge = avatarBadgeImage,
             name = publisher.name,
             time = time,
-            modifier = Modifier().fillMaxWidth().height(100.dp),
+            qrCode = qrCodeImage,
+            accentColor = config.theme.primaryColor,
+            cardHeight = publisherHeight,
+            modifier = Modifier().fillMaxWidth(),
         )
     }
 }
@@ -81,6 +95,10 @@ private fun platformDefaultHead(config: DrawConfig): Image {
 
 private fun platformLogo(config: DrawConfig): Image? {
     return config.platformAssetImage(PlatformDrawAssetKeys.PRIMARY_LOGO)
+}
+
+private fun platformTextLogo(config: DrawConfig): Image? {
+    return config.platformAssetImage(PlatformDrawAssetKeys.TEXT_LOGO)
 }
 
 private fun defaultHeadCacheKey(config: DrawConfig): String {

@@ -20,12 +20,14 @@ internal fun Layout.Author(
     ornament: Image? = null,
     badge: Image? = null,
     qrCode: Image? = null,
+    accentColor: Int = Color.makeRGB(251, 114, 153),
+    cardHeight: Dp = 150.dp,
     alignment: LayoutAlignment = LayoutAlignment.CENTER,
     modifier: Modifier
 ) = Box (
     alignment = alignment,
     modifier = modifier
-        .height(150.dp)
+        .height(cardHeight)
         .fillMaxWidth()
         .background(
             image = head,
@@ -63,7 +65,7 @@ internal fun Layout.Author(
             Box(modifier = Modifier().fillMaxWidth().fillRatioHeight(0.56f)) {
                 Text(
                     text = name,
-                    color = Color.WHITE,
+                    color = accentColor,
                     fontSize = 36.dp,
                     alignment = LayoutAlignment.LEFT,
                 )
@@ -81,6 +83,7 @@ internal fun Layout.Author(
         Decorate(
             image = ornament,
             qrCode = qrCode,
+            accentColor = accentColor,
             modifier = Modifier().fillMaxHeight()
         )
 
