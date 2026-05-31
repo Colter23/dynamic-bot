@@ -177,6 +177,7 @@ class DrawTest {
                         cover = testMedia("https://example.com/origin-video-cover.jpg", MediaKind.COVER),
                         durationSeconds = 3723,
                         badge = "Replay",
+                        style = MediaCardStyle.SMALL
                     ),
                 ),
             ),
