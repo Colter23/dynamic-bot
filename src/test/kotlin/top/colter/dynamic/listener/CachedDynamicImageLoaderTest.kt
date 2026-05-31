@@ -15,7 +15,9 @@ import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.ImageCacheConfig
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
+import top.colter.dynamic.draw.image.CachedDynamicImageLoader
 import top.colter.dynamic.draw.image.DynamicImageCache
+import top.colter.dynamic.draw.image.ImageDownloader
 import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testPublisherInfo
 

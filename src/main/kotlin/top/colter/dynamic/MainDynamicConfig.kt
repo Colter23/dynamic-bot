@@ -71,9 +71,8 @@ public data class DeliveryConfig(
 
 public data class DrawSettings(
     val layout: String = "default",
-    val themeColor: String = "#FE65A6",
-    val backgroundStartColor: String = "#C3C0FF",
-    val backgroundEndColor: String = "#BFFAFF",
+    val themeColors: String = "#FE65A6",
+    val autoTheme: Boolean = true,
     val ornament: DrawOrnament = DrawOrnament.LOGO,
     val width: Int = 1000,
     val font: DrawFontSettings = DrawFontSettings(),

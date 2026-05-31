@@ -1,6 +1,5 @@
 ﻿package top.colter.dynamic.listener
 
-import java.nio.file.Paths
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -21,6 +20,7 @@ import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.SourceUpdate
@@ -33,6 +33,7 @@ import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
+import top.colter.dynamic.draw.DynamicDrawService
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PersistenceManager
@@ -55,8 +56,7 @@ class SourceUpdateDynamicTest {
         val listener = SourceUpdateProcessor(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "{draw}\nvideo {name} {content}")),
             eventBus = eventBus,
-            imageLoader = DynamicImageLoader { },
-            imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/dynamic.png") },
+            drawService = DynamicDrawService { _, _ -> MediaRef("D:/tmp/dynamic.png", MediaKind.IMAGE) },
         )
 
         val received = captureMessageEvent(eventBus)
@@ -66,7 +66,7 @@ class SourceUpdateDynamicTest {
         assertEquals(listOf(subscriber.address), event.message.targets)
         val contents = event.message.batches.single().content
         assertTrue(contents.first() is MessageContent.Image)
-        assertEquals("D:\\tmp\\dynamic.png", (contents.first() as MessageContent.Image).image.uri)
+        assertEquals("D:/tmp/dynamic.png", (contents.first() as MessageContent.Image).image.uri)
         assertEquals("\nvideo Demo UP Demo content", contents.filterIsInstance<MessageContent.Text>().single().fallbackText)
     }
 
@@ -95,10 +95,9 @@ class SourceUpdateDynamicTest {
         val listener = SourceUpdateProcessor(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "{draw}\n{name}")),
             eventBus = eventBus,
-            imageLoader = DynamicImageLoader { },
-            imageRenderer = DynamicImageRenderer { update ->
+            drawService = DynamicDrawService { update, _ ->
                 renderedBanner = update.publisher.banner?.uri
-                Paths.get("D:/tmp/synced.png")
+                MediaRef("D:/tmp/synced.png", MediaKind.IMAGE)
             },
         )
 
@@ -134,8 +133,7 @@ class SourceUpdateDynamicTest {
         val listener = SourceUpdateProcessor(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "tail {name}")),
             eventBus = eventBus,
-            imageLoader = DynamicImageLoader { },
-            imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/not-used.png") },
+            drawService = DynamicDrawService { _, _ -> MediaRef("D:/tmp/not-used.png", MediaKind.IMAGE) },
         )
 
         val received = captureMessageEvents(eventBus)
@@ -170,10 +168,9 @@ class SourceUpdateDynamicTest {
         val listener = SourceUpdateProcessor(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "allowed {name}")),
             eventBus = eventBus,
-            imageLoader = DynamicImageLoader { },
-            imageRenderer = DynamicImageRenderer {
+            drawService = DynamicDrawService { _, _ ->
                 renderCalls += 1
-                Paths.get("D:/tmp/allowed.png")
+                MediaRef("D:/tmp/allowed.png", MediaKind.IMAGE)
             },
         )
 

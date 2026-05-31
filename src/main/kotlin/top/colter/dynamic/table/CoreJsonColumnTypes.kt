@@ -9,6 +9,7 @@ import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.UpdateKey
 import top.colter.dynamic.core.data.coreJson
+import top.colter.dynamic.draw.DrawThemePalette
 
 public val coreTableJson = coreJson
 
@@ -39,3 +40,6 @@ public fun filterConditionColumn(): JsonColumnType<FilterCondition> =
 public fun updateKeyColumn(): JsonColumnType<UpdateKey> = JsonColumnType(UpdateKey.serializer())
 
 public fun messageColumn(): JsonColumnType<Message> = JsonColumnType(Message.serializer())
+
+public fun drawThemePaletteColumn(): JsonColumnType<DrawThemePalette> =
+    JsonColumnType(DrawThemePalette.serializer())

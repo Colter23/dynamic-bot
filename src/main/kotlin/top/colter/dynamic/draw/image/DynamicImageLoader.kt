@@ -1,4 +1,4 @@
-﻿package top.colter.dynamic.listener
+package top.colter.dynamic.draw.image
 
 import java.net.URI
 import java.net.http.HttpClient
@@ -24,7 +24,6 @@ import top.colter.dynamic.core.data.MediaReference
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.mediaReferences
 import top.colter.dynamic.core.tools.loggerFor
-import top.colter.dynamic.draw.image.DynamicImageCache
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 

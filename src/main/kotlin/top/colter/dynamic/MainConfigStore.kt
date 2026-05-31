@@ -10,6 +10,7 @@ import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.draw.DrawLayoutRegistry
+import top.colter.dynamic.draw.DrawThemeFactory
 
 public class MainConfigStore(
     private val configService: ConfigService = YamlConfigService(),
@@ -258,25 +259,18 @@ public object MainConfigForms {
                     required = true,
                 ),
                 ConfigFieldSpec(
-                    path = "draw.themeColor",
-                    label = "主题色",
+                    path = "draw.themeColors",
+                    label = "全局主题色",
                     type = ConfigFieldType.TEXT,
                     section = "绘图",
+                    description = "多个颜色用英文分号分隔，例如 #FE65A6;#BFFAFF",
                     required = true,
                 ),
                 ConfigFieldSpec(
-                    path = "draw.backgroundStartColor",
-                    label = "背景起始色",
-                    type = ConfigFieldType.TEXT,
+                    path = "draw.autoTheme",
+                    label = "自动从头像生成主题色",
+                    type = ConfigFieldType.BOOLEAN,
                     section = "绘图",
-                    required = true,
-                ),
-                ConfigFieldSpec(
-                    path = "draw.backgroundEndColor",
-                    label = "背景结束色",
-                    type = ConfigFieldType.TEXT,
-                    section = "绘图",
-                    required = true,
                 ),
                 ConfigFieldSpec(
                     path = "draw.ornament",
@@ -378,9 +372,7 @@ public object MainConfigForms {
         require(DrawLayoutRegistry.hasSuite(config.draw.layout)) {
             "绘图布局必须是 ${DrawLayoutRegistry.options().joinToString("|") { it.value }} 之一"
         }
-        requireColor(config.draw.themeColor, "draw.themeColor")
-        requireColor(config.draw.backgroundStartColor, "draw.backgroundStartColor")
-        requireColor(config.draw.backgroundEndColor, "draw.backgroundEndColor")
+        DrawThemeFactory.parseThemeColors(config.draw.themeColors)
         require(config.draw.width >= 320) { "绘图宽度至少为 320" }
         require(config.webAdmin.port in 1..65_535) { "Web 后台端口必须在 1 到 65535 之间" }
         require(config.webAdmin.host.isNotBlank()) { "Web 后台监听地址不能为空" }
@@ -418,11 +410,4 @@ public object MainConfigForms {
             .map { ConfigFieldOption(it.name, it.name) }
     }
 
-    private fun requireColor(value: String, path: String) {
-        require(HEX_COLOR_REGEX.matches(value)) {
-            "$path 必须是 #RRGGBB 或 #RRGGBBAA"
-        }
-    }
-
-    private val HEX_COLOR_REGEX: Regex = Regex("#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?")
 }

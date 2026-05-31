@@ -1,17 +1,12 @@
 ﻿package top.colter.dynamic.listener
 
-import java.nio.file.Paths
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.config.loadOrCreate
-import top.colter.dynamic.core.data.CardAttachment
-import top.colter.dynamic.core.data.DynamicContent
-import top.colter.dynamic.core.data.DynamicLabel
 import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LivePayload
-import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
@@ -25,6 +20,8 @@ import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
+import top.colter.dynamic.draw.DefaultDynamicDrawService
+import top.colter.dynamic.draw.DynamicDrawService
 import top.colter.dynamic.filter.DynamicFilterEvaluator
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.MessageEnqueueResult
@@ -42,8 +39,7 @@ public class SourceUpdateProcessor(
     private val configService: ConfigService = YamlConfigService(),
     private val eventBus: EventBus = EventBus(),
     private val templateRenderer: PushTemplateRenderer = PushTemplateRenderer(),
-    imageLoader: DynamicImageLoader? = null,
-    imageRenderer: DynamicImageRenderer? = null,
+    drawService: DynamicDrawService? = null,
     private val broadcastMessages: Boolean = true,
     private val onDeliveriesQueued: suspend () -> Unit = {},
 ) {
@@ -51,15 +47,8 @@ public class SourceUpdateProcessor(
         config ?: configService.loadOrCreate(MainDynamicConfig.CONFIG_ID) { MainDynamicConfig() }
     }
     private val runtimeConfigProvider: () -> MainDynamicConfig = configProvider ?: { fixedConfig }
-    private val startupConfig: MainDynamicConfig by lazy { runtimeConfigProvider() }
-    private val runtimeImageLoader: DynamicImageLoader by lazy {
-        imageLoader ?: CachedDynamicImageLoader(startupConfig.imageCache)
-    }
-    private val runtimeImageRenderer: DynamicImageRenderer by lazy {
-        imageRenderer ?: FileDynamicImageRenderer(
-            outputDir = Paths.get(startupConfig.imageCache.renderedRoot),
-            drawSettingsProvider = { runtimeConfigProvider().draw },
-        )
+    private val runtimeDrawService: DynamicDrawService by lazy {
+        drawService ?: DefaultDynamicDrawService(configProvider = runtimeConfigProvider)
     }
 
     public suspend fun process(request: SourceUpdatePublishRequest): SourceUpdatePublishResult {
@@ -98,7 +87,7 @@ public class SourceUpdateProcessor(
             return SourceUpdatePublishResult.ignored("所有目标均未订阅该事件、被过滤或订阅时间晚于动态时间")
         }
 
-        val chain = buildMessageBatches(resolveDynamicTemplate(), normalizedUpdate)
+        val chain = buildMessageBatches(resolveDynamicTemplate(), normalizedUpdate, storedPublisher)
         return publishMessage(
             update = normalizedUpdate,
             targets = deliverableTargets,
@@ -120,7 +109,7 @@ public class SourceUpdateProcessor(
             return SourceUpdatePublishResult.ignored("没有可投递目标")
         }
 
-        val chain = buildMessageBatches(resolveLiveTemplate(normalizedUpdate), normalizedUpdate)
+        val chain = buildMessageBatches(resolveLiveTemplate(normalizedUpdate), normalizedUpdate, storedPublisher)
         return publishMessage(
             update = normalizedUpdate,
             targets = targets,
@@ -190,16 +179,22 @@ public class SourceUpdateProcessor(
         }
     }
 
-    private suspend fun buildMessageBatches(template: String, update: SourceUpdate): List<MessageBatch> {
-        val drawImage = if (templateRenderer.requiresDraw(template, update)) renderImage(update) else null
+    private suspend fun buildMessageBatches(
+        template: String,
+        update: SourceUpdate,
+        storedPublisher: Publisher?,
+    ): List<MessageBatch> {
+        val drawImage = if (templateRenderer.requiresDraw(template, update)) {
+            renderImage(update, storedPublisher)
+        } else {
+            null
+        }
         return templateRenderer.render(template, update, drawImage)
     }
 
-    private suspend fun renderImage(update: SourceUpdate): MediaRef? {
-        val drawableUpdate = if (update.payload is LivePayload) update.toDrawableDynamicUpdate() else update
+    private suspend fun renderImage(update: SourceUpdate, storedPublisher: Publisher?): MediaRef? {
         return runCatching {
-            runtimeImageLoader.load(drawableUpdate)
-            MediaRef(uri = runtimeImageRenderer.render(drawableUpdate).toString(), kind = MediaKind.IMAGE)
+            runtimeDrawService.render(update, storedPublisher)
         }.onFailure {
             logger.warn(it) { "绘图失败，回退为文本消息：update=${update.key.stableValue()}" }
         }.getOrNull()
@@ -304,36 +299,6 @@ public class SourceUpdateProcessor(
     private fun List<top.colter.dynamic.core.data.TargetAddress>.targetSummary(): String {
         val visible = take(5).joinToString(",") { it.stableValue() }
         return if (size > 5) "$visible...+${size - 5}" else visible
-    }
-
-    private fun SourceUpdate.toDrawableDynamicUpdate(): SourceUpdate {
-        val live = payload as? LivePayload ?: return this
-        val liveTitle = live.title.ifBlank { "Live" }
-        val contentText = listOfNotNull(
-            liveTitle,
-            live.area?.takeIf { it.isNotBlank() },
-            link?.takeIf { it.isNotBlank() },
-        ).joinToString("\n")
-        val card = live.cover?.let {
-            CardAttachment(
-                id = live.roomId,
-                cardKind = "live",
-                title = liveTitle,
-                description = live.area.orEmpty(),
-                badge = "LIVE",
-                cover = it,
-                link = link,
-            )
-        }
-
-        return copy(
-            payload = DynamicPayload(
-                labels = listOf(DynamicLabel("LIVE")),
-                title = liveTitle,
-                content = DynamicContent.text(contentText),
-                attachments = card?.let { listOf(it) }.orEmpty(),
-            ),
-        )
     }
 
     private data class DeliveryTarget(

@@ -1,6 +1,5 @@
 ﻿package top.colter.dynamic.listener
 
-import java.nio.file.Paths
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -17,6 +16,7 @@ import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.LiveStatus
 import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.SourceEventType
@@ -29,6 +29,7 @@ import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
+import top.colter.dynamic.draw.DynamicDrawService
 import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
@@ -50,8 +51,7 @@ class SourceUpdateProcessorTest {
                 ),
             ),
             eventBus = eventBus,
-            imageLoader = DynamicImageLoader { },
-            imageRenderer = DynamicImageRenderer { Paths.get("D:/tmp/live-started.png") },
+            drawService = DynamicDrawService { _, _ -> MediaRef("D:/tmp/live-started.png", MediaKind.IMAGE) },
         )
         val received = captureMessageEvent(eventBus)
         val startedAt = System.currentTimeMillis() / 1000 + 60
@@ -68,7 +68,7 @@ class SourceUpdateProcessorTest {
         assertEquals(2, event.message.batches.size)
         val first = event.message.batches.first().content
         assertEquals(2, first.filterIsInstance<MessageContent.Image>().size)
-        assertEquals("D:\\tmp\\live-started.png", first.filterIsInstance<MessageContent.Image>().first().image.uri)
+        assertEquals("D:/tmp/live-started.png", first.filterIsInstance<MessageContent.Image>().first().image.uri)
         val text = first.filterIsInstance<MessageContent.Text>().joinToString("") { it.fallbackText }
         assertTrue(text.contains("Demo UP|123|456|Live title|Games"))
         assertTrue(text.contains("https://live.bilibili.com/456"))

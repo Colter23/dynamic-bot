@@ -7,6 +7,7 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import top.colter.dynamic.table.DynamicFilterRuleTable
 import top.colter.dynamic.table.MessageDeliveryTable
 import top.colter.dynamic.table.MessageOutboxTable
+import top.colter.dynamic.table.PublisherDrawThemeTable
 import top.colter.dynamic.table.PublisherLiveStatusTable
 import top.colter.dynamic.table.PublisherTable
 import top.colter.dynamic.table.SubscriberTable
@@ -38,6 +39,7 @@ public object PersistenceManager {
             transaction {
                 SchemaUtils.createMissingTablesAndColumns(
                     PublisherTable,
+                    PublisherDrawThemeTable,
                     PublisherLiveStatusTable,
                     SubscriberTable,
                     SubscriptionTable,
