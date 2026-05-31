@@ -61,8 +61,9 @@ dependencies {
         else -> error("Unsupported arch: $osArch")
     }
     val target = "${targetOs}-${targetArch}"
-    //runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-linux-x64:$skikoVersion")
-    runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-$target:$skikoVersion")
+    linkedSetOf(target, "windows-x64", "linux-x64").forEach { runtimeTarget ->
+        runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-$runtimeTarget:$skikoVersion")
+    }
     testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")
     testImplementation("io.ktor:ktor-client-content-negotiation:$ktorVersion")
     testImplementation(kotlin("test"))

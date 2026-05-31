@@ -5,20 +5,35 @@ import org.jetbrains.skia.Image
 import org.jetbrains.skia.Surface
 import org.jetbrains.skia.svg.SVGDOM
 import java.io.IOException
-import java.lang.ClassLoader.getSystemResourceAsStream
+import java.io.InputStream
 
 
 //internal val logger  = KotlinLogging.logger {}
 
+private object DrawResourceAnchor
 private val resourceImageCache = mutableMapOf<String, Image>()
 
 internal fun loadResourceBytes(path: String, name: String): ByteArray? {
+    val resourcePath = path.removeSuffix("/") + "/" + name
     return try {
-        getSystemResourceAsStream(path.removeSuffix("/") + "/" + name)?.readBytes()
+        openResource(resourcePath)?.use { it.readBytes() }
     } catch (e: IOException) {
 //        logger.error(e) { "加载资源失败 $path" }
         null
     }
+}
+
+private fun openResource(resourcePath: String): InputStream? {
+    val classLoaders = listOfNotNull(
+        Thread.currentThread().contextClassLoader,
+        DrawResourceAnchor::class.java.classLoader,
+        ClassLoader.getSystemClassLoader(),
+    ).distinct()
+
+    for (classLoader in classLoaders) {
+        classLoader.getResourceAsStream(resourcePath)?.let { return it }
+    }
+    return ClassLoader.getSystemResourceAsStream(resourcePath)
 }
 
 internal fun loadResourceImage(path: String = "image", name: String): Image? {

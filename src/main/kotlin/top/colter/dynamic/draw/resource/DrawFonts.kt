@@ -5,6 +5,7 @@ import top.colter.dynamic.DrawFontSettings
 import top.colter.skiko.FontConfig
 import top.colter.skiko.FontRegistry
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
 
 internal object DrawFonts {
@@ -34,7 +35,7 @@ internal object DrawFonts {
         emoji: Boolean,
     ): Boolean {
         if (path.isBlank()) return false
-        val normalized = Paths.get(path).toAbsolutePath().normalize()
+        val normalized = resolveFontPath(path) ?: return false
         if (!Files.isRegularFile(normalized)) return false
 
         return runCatching {
@@ -56,15 +57,16 @@ internal object DrawFonts {
     }
 
     private fun loadConfiguredFamily(fontRegistry: FontRegistry, family: String, emoji: Boolean): Boolean {
-        if (family.isBlank()) return false
+        val familyName = family.trim()
+        if (familyName.isBlank()) return false
 
         return runCatching {
-            val fontSet = fontRegistry.matchFamily(family)
+            val fontSet = fontRegistry.matchFamily(familyName)
             if (fontSet.count() <= 0) return@runCatching false
 
             val previousDefault = fontRegistry.defaultFont
             val face = fontSet.getTypeface(0) ?: return@runCatching false
-            fontRegistry.loadTypeface(face, family)
+            fontRegistry.loadTypeface(face, familyName)
 
             if (emoji) {
                 if (previousDefault == null) fontRegistry.defaultFont = null
@@ -94,4 +96,17 @@ internal object DrawFonts {
         loadResourceBytes(FONT_PATH, name)
             ?.let { Data.makeFromBytes(it) }
             ?.let { fontRegistry.loadTypeface(it) }
+
+    private fun resolveFontPath(path: String): Path? {
+        val text = path.trim()
+        return runCatching {
+            if (text == "~" || text.startsWith("~/") || text.startsWith("~\\")) {
+                val home = System.getProperty("user.home").orEmpty()
+                if (home.isBlank()) Paths.get(text)
+                else Paths.get(home).resolve(text.removePrefix("~").trimStart('/', '\\'))
+            } else {
+                Paths.get(text)
+            }.toAbsolutePath().normalize()
+        }.getOrNull()
+    }
 }
