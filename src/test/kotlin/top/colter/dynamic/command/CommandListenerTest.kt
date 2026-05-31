@@ -28,8 +28,10 @@ import top.colter.dynamic.core.plugin.FollowActionResult
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
+import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.PersistenceManager
+import top.colter.dynamic.repository.PublisherDrawThemeRepository
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SubscriptionRepository
@@ -46,6 +48,7 @@ class CommandListenerTest {
             config = MainDynamicConfig(),
             commandRegistry = CommandRegistry(),
             eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
         )
 
         val result = dispatch(eventBus, listener, commandEvent("/db subscribe bilibili 123"))
@@ -70,6 +73,7 @@ class CommandListenerTest {
             config = MainDynamicConfig(),
             commandRegistry = CommandRegistry(),
             eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
         )
 
         val result = dispatch(eventBus, listener, commandEvent("/db filter add element bilibili 123 video"))
@@ -89,6 +93,7 @@ class CommandListenerTest {
             config = MainDynamicConfig(),
             commandRegistry = CommandRegistry(),
             eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
         )
 
         val result = dispatch(eventBus, listener, commandEvent("/db unsubscribe bilibili 123"))
@@ -99,6 +104,33 @@ class CommandListenerTest {
             SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")),
         )
         assertTrue(SubscriptionRepository.findPublisherIdsBySubscriberId(subscriber.id).isEmpty())
+    }
+
+    @Test
+    fun themeSetShowAndClearShouldUpdatePublisherTheme() = runBlocking {
+        initDb("command-theme")
+        seedSubscription()
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = MainDynamicConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+
+        val setResult = dispatch(eventBus, listener, commandEvent("/db theme set bilibili 123 #FE65A6;#BFFAFF"))
+        val publisher = assertNotNull(PublisherRepository.findByKey(PublisherKey.of("bilibili", externalId = "123")))
+
+        assertEquals(CommandStatus.SUCCESS, setResult.status)
+        assertTrue(renderMessage(setResult).contains("发布者主题色已保存"))
+        assertNotNull(PublisherDrawThemeRepository.findByPublisherId(publisher.id))
+        val showResult = dispatch(eventBus, listener, commandEvent("/db theme show bilibili 123"))
+        assertTrue(renderMessage(showResult).contains("背景="))
+        val clearResult = dispatch(eventBus, listener, commandEvent("/db theme clear bilibili 123"))
+        assertEquals(CommandStatus.SUCCESS, clearResult.status)
+        assertTrue(renderMessage(clearResult).contains("发布者主题色已清除"))
+        assertTrue(PublisherDrawThemeRepository.findByPublisherId(publisher.id) == null)
     }
 
     private suspend fun dispatch(

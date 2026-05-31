@@ -268,7 +268,7 @@ public object MainConfigForms {
                 ),
                 ConfigFieldSpec(
                     path = "draw.autoTheme",
-                    label = "自动从头像生成主题色",
+                    label = "自动获取主题色",
                     type = ConfigFieldType.BOOLEAN,
                     section = "绘图",
                 ),

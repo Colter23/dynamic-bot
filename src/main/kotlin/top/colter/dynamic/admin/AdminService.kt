@@ -40,8 +40,14 @@ import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.plugin.PublisherLoginProvider
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
+import top.colter.dynamic.draw.DefaultPublisherThemeInitializer
+import top.colter.dynamic.draw.DrawThemePalette
+import top.colter.dynamic.draw.PublisherDrawThemeService
+import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.MessageDeliveryRepository
+import top.colter.dynamic.repository.PublisherDrawTheme
+import top.colter.dynamic.repository.PublisherDrawThemeRepository
 import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.repository.PublisherLiveStatusRepository
 import top.colter.dynamic.repository.PublisherRepository
@@ -76,6 +82,8 @@ public class AdminService(
     },
     private val startedAtEpochMillis: Long = System.currentTimeMillis(),
     private val databasePathProvider: () -> String? = { PersistenceManager.currentPath() },
+    private val publisherDrawThemeService: PublisherDrawThemeService = PublisherDrawThemeService(),
+    private val publisherThemeInitializer: PublisherThemeInitializer = DefaultPublisherThemeInitializer(configProvider = configProvider),
 ) {
     public constructor(
         pluginManager: PluginManager,
@@ -303,6 +311,7 @@ public class AdminService(
         val subscriptionCounts = subscriptions.groupingBy { it.publisherId }.eachCount()
         val liveStatuses = PublisherLiveStatusRepository.findAll().groupBy { it.publisherId }
         val cursors = SourceCursorRepository.findAll().groupBy { it.publisherId }
+        val drawThemes = PublisherDrawThemeRepository.findAll().associateBy { it.publisherId }
         return PublisherRepository.findAll()
             .sortedWith(compareBy<Publisher> { it.platformId.value }.thenBy { it.externalId })
             .map { publisher ->
@@ -310,6 +319,7 @@ public class AdminService(
                     subscriptionCount = subscriptionCounts[publisher.id]?.toLong() ?: 0,
                     liveStatuses = liveStatuses[publisher.id].orEmpty(),
                     cursors = cursors[publisher.id].orEmpty(),
+                    drawTheme = drawThemes[publisher.id],
                 )
             }
     }
@@ -323,7 +333,15 @@ public class AdminService(
             state = request.state?.let { parseEnum<EntityState>(it, "state") } ?: publisher.state,
         )
         PublisherRepository.replace(updated)
-        return PublisherRepository.findById(id)?.toDto() ?: updated.toDto()
+        if (request.clearTheme) {
+            publisherDrawThemeService.clearTheme(id)
+        } else {
+            request.themeColors?.trim()?.takeIf { it.isNotBlank() }?.let { colors ->
+                publisherDrawThemeService.setTheme(id, colors)
+            }
+        }
+        val drawTheme = PublisherDrawThemeRepository.findByPublisherId(id)
+        return PublisherRepository.findById(id)?.toDto(drawTheme = drawTheme) ?: updated.toDto(drawTheme = drawTheme)
     }
 
     public fun deletePublisher(id: Int): ActionResultResponse {
@@ -337,6 +355,7 @@ public class AdminService(
             }
         SourceCursorRepository.deleteByPublisherId(publisher.id)
         PublisherLiveStatusRepository.deleteByPublisherId(publisher.id)
+        PublisherDrawThemeRepository.deleteByPublisherId(publisher.id)
         val removed = PublisherRepository.deleteById(publisher.id)
         return ActionResultResponse(
             changed = removed,
@@ -476,12 +495,19 @@ public class AdminService(
             name = resolveSubscriberDisplayName(subscriberAddress),
         )
         requireSubscriptionPolicyAllowed(subscriberUpsert.value, request.policy)
+        val previousSubscriptionCount = SubscriptionRepository.countByPublisherId(publisherUpsert.value.id)
         val subscriptionResult = SubscriptionRepository.subscribe(
             subscriberId = subscriberUpsert.value.id,
             publisherId = publisherUpsert.value.id,
             policy = request.policy,
         )
         applySubscriptionMutation(subscriptionResult)
+        if (subscriptionResult.changed) {
+            publisherThemeInitializer.initializeAfterFirstSubscription(
+                publisher = publisherUpsert.value,
+                previousSubscriptionCount = previousSubscriptionCount,
+            )
+        }
         if (!subscriptionResult.changed) {
             val existing = SubscriptionRepository.findBySubscriberAndPublisher(
                 subscriberId = subscriberUpsert.value.id,
@@ -809,6 +835,7 @@ private fun Publisher.toDto(
     subscriptionCount: Long = 0,
     liveStatuses: List<PublisherLiveStatus> = emptyList(),
     cursors: List<SourceCursor> = emptyList(),
+    drawTheme: PublisherDrawTheme? = null,
 ): PublisherDto = PublisherDto(
     id = id,
     platformId = platformId.value,
@@ -823,8 +850,17 @@ private fun Publisher.toDto(
     createTime = createTime,
     createUser = createUser,
     subscriptionCount = subscriptionCount,
+    drawTheme = drawTheme?.palette?.toDto(),
     liveStatuses = liveStatuses.sortedBy { it.roomId }.map { it.toDto() },
     cursors = cursors.sortedWith(compareBy<SourceCursor> { it.sourceKey }.thenBy { it.eventType.value }).map { it.toDto() },
+)
+
+private fun DrawThemePalette.toDto(): PublisherDrawThemeDto = PublisherDrawThemeDto(
+    mode = mode.name,
+    backgroundColors = backgroundColors,
+    primaryColor = primaryColor,
+    linkColor = linkColor,
+    textColor = textColor,
 )
 
 private fun Subscriber.toDto(subscriptionCount: Long = 0): SubscriberDto = SubscriberDto(

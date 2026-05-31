@@ -5,6 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.MainDynamicConfig
@@ -30,6 +31,7 @@ import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.core.plugin.MessageTargetCandidate
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
+import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.plugin.PluginCapability
 import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.plugin.PluginInfo
@@ -37,6 +39,7 @@ import top.colter.dynamic.plugin.PluginState
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PersistenceManager
+import top.colter.dynamic.repository.PublisherDrawThemeRepository
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SubscriptionRepository
@@ -171,6 +174,34 @@ class AdminServerTest {
     }
 
     @Test
+    fun updatePublisherShouldSetClearAndListDrawTheme() {
+        initDb("admin-publisher-theme")
+        val publisher = PublisherRepository.upsertInfo(testPublisherInfo(name = "demo-up")).value
+        val service = service(FakePublisherFollowPlugin())
+
+        val themed = service.updatePublisher(
+            publisher.id,
+            UpdatePublisherRequest(themeColors = "#FE65A6;#BFFAFF"),
+        )
+        val listed = service.publishers().single()
+
+        assertNotNull(themed.drawTheme)
+        val listedTheme = assertNotNull(listed.drawTheme)
+        assertEquals(
+            listedTheme.backgroundColors,
+            PublisherDrawThemeRepository.findByPublisherId(publisher.id)!!.palette.backgroundColors,
+        )
+
+        val cleared = service.updatePublisher(
+            publisher.id,
+            UpdatePublisherRequest(clearTheme = true),
+        )
+
+        assertNull(cleared.drawTheme)
+        assertNull(PublisherDrawThemeRepository.findByPublisherId(publisher.id))
+    }
+
+    @Test
     fun deliveriesShouldReturnRecentRowsAndDashboardCounts() = runBlocking {
         initDb("admin-delivery-dashboard")
         val service = service(FakePublisherFollowPlugin())
@@ -277,6 +308,7 @@ class AdminServerTest {
             publisherLookupResolver = { platformId -> plugin.takeIf { platformId == plugin.platformId.value } },
             publisherFollowResolver = { platformId -> plugin.takeIf { platformId == plugin.platformId.value } },
             configProvider = { MainDynamicConfig() },
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
         )
     }
 

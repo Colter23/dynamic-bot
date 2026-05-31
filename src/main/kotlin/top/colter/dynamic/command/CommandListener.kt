@@ -50,8 +50,12 @@ import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
+import top.colter.dynamic.draw.DefaultPublisherThemeInitializer
+import top.colter.dynamic.draw.PublisherDrawThemeService
+import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.MessageDeliveryRepository
+import top.colter.dynamic.repository.PublisherDrawThemeRepository
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SubscriptionRepository
@@ -79,6 +83,8 @@ public class CommandListener(
     private val configService: ConfigService = YamlConfigService(),
     private val commandRegistry: CommandRegistry = CommandRegistry(),
     private val eventBus: EventBus = EventBus(),
+    private val publisherDrawThemeService: PublisherDrawThemeService = PublisherDrawThemeService(),
+    publisherThemeInitializer: PublisherThemeInitializer? = null,
 ) : Listener<CommandEvent> {
     private companion object {
         private const val MAIN_OWNER: String = "main"
@@ -90,6 +96,9 @@ public class CommandListener(
     private val runtimeConfigProvider: () -> MainDynamicConfig = configProvider ?: { fixedConfig }
     private val runtimeConfig: MainDynamicConfig
         get() = runtimeConfigProvider()
+    private val runtimePublisherThemeInitializer: PublisherThemeInitializer by lazy {
+        publisherThemeInitializer ?: DefaultPublisherThemeInitializer(configProvider = runtimeConfigProvider)
+    }
 
     private val commandPrefix: String
         get() = runtimeConfig.command.prefix
@@ -154,7 +163,13 @@ public class CommandListener(
         stopRequester?.let { commandRegistry.register(StopApplicationCommandHandler(it), MAIN_OWNER) }
         commandRegistry.register(ParseDynamicLinkCommandHandler(dynamicLinkForwarder, commandPrefixProvider), MAIN_OWNER)
         commandRegistry.register(
-            SubscribeCommandHandler(publisherLookupResolver, publisherFollowResolver, commandPrefixProvider, eventBus),
+            SubscribeCommandHandler(
+                publisherLookupResolver,
+                publisherFollowResolver,
+                commandPrefixProvider,
+                eventBus,
+                runtimePublisherThemeInitializer,
+            ),
             MAIN_OWNER,
         )
         commandRegistry.register(LoginCommandHandler(publisherLoginResolver, commandPrefixProvider, eventBus), MAIN_OWNER)
@@ -169,6 +184,7 @@ public class CommandListener(
         commandRegistry.register(FilterListCommandHandler(commandPrefixProvider), MAIN_OWNER)
         commandRegistry.register(FilterRemoveCommandHandler(commandPrefixProvider), MAIN_OWNER)
         commandRegistry.register(FilterClearCommandHandler(commandPrefixProvider), MAIN_OWNER)
+        commandRegistry.register(ThemeCommandHandler(commandPrefixProvider, publisherDrawThemeService), MAIN_OWNER)
     }
 }
 
@@ -540,6 +556,7 @@ private class SubscribeCommandHandler(
     private val followResolver: (String) -> PublisherFollowPlugin?,
     private val commandPrefixProvider: () -> String,
     private val eventBus: EventBus,
+    private val publisherThemeInitializer: PublisherThemeInitializer,
 ) : CommandHandler {
     private val commandPrefix: String
         get() = commandPrefixProvider()
@@ -588,12 +605,19 @@ private class SubscribeCommandHandler(
         }
 
         val publisherUpsert = PublisherRepository.upsertInfo(publisherInfo)
+        val previousSubscriptionCount = SubscriptionRepository.countByPublisherId(publisherUpsert.value.id)
         val subscriber = SubscriberRepository.ensure(
             address = invocation.context.target,
             name = invocation.context.chatId,
         )
         val mutation = SubscriptionRepository.subscribe(subscriber.id, publisherUpsert.value.id)
         mutation.event?.let { eventBus.broadcast(it) }
+        if (mutation.changed) {
+            publisherThemeInitializer.initializeAfterFirstSubscription(
+                publisher = publisherUpsert.value,
+                previousSubscriptionCount = previousSubscriptionCount,
+            )
+        }
 
         val publisherState = if (publisherUpsert.created) "新建" else "已存在"
         val subscriptionState = if (mutation.changed) "新建" else "已存在"
@@ -689,6 +713,80 @@ private class TemplateListCommandHandler(
             templates.liveEnded,
         )
         return CommandExecutionResult.success(lines.joinToString("\n"))
+    }
+}
+
+private class ThemeCommandHandler(
+    private val commandPrefixProvider: () -> String,
+    private val themeService: PublisherDrawThemeService,
+) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
+    override val spec: CommandSpec = CommandSpec(
+        path = listOf("theme"),
+        description = "查看或设置当前会话已订阅发布者的绘图主题色",
+        usage = "theme <show|set|clear> <platform> <publisherUserId> [#FE65A6;#BFFAFF]",
+        requiredRole = CommandRole.USER,
+    )
+
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.size < 3) return failedUsage()
+        val action = invocation.args[0].lowercase()
+        val platform = invocation.args[1]
+        val publisherUserId = invocation.args[2]
+        val target = when (val resolved = resolveFilterTarget(invocation, platform, publisherUserId)) {
+            is FilterTargetResolveResult.Failed -> return resolved.result
+            is FilterTargetResolveResult.Found -> resolved.target
+        }
+
+        return when (action) {
+            "show" -> showTheme(target.publisher)
+            "set" -> setTheme(invocation, target.publisher)
+            "clear" -> clearTheme(target.publisher)
+            else -> failedUsage()
+        }
+    }
+
+    private fun showTheme(publisher: Publisher): CommandExecutionResult {
+        val theme = PublisherDrawThemeRepository.findByPublisherId(publisher.id)
+            ?: return success("发布者未设置专属主题色：${publisher.name}")
+        return success(formatTheme("发布者主题色", publisher, theme.palette.backgroundColors, theme.palette.primaryColor))
+    }
+
+    private fun setTheme(invocation: CommandInvocation, publisher: Publisher): CommandExecutionResult {
+        val colors = invocation.args.drop(3).joinToString(" ").trim()
+        if (colors.isBlank()) return failed("用法：$commandPrefix ${spec.usage}")
+        val palette = try {
+            themeService.setTheme(publisher.id, colors)
+        } catch (e: IllegalArgumentException) {
+            return failed("主题色无效：${e.message}")
+        }
+        return success(formatTheme("发布者主题色已保存", publisher, palette.backgroundColors, palette.primaryColor))
+    }
+
+    private fun clearTheme(publisher: Publisher): CommandExecutionResult {
+        val changed = themeService.clearTheme(publisher.id)
+        return success(
+            if (changed) {
+                "发布者主题色已清除：${publisher.name}"
+            } else {
+                "发布者未设置专属主题色：${publisher.name}"
+            },
+        )
+    }
+
+    private fun formatTheme(
+        title: String,
+        publisher: Publisher,
+        backgroundColors: List<String>,
+        primaryColor: String,
+    ): String {
+        return "$title：${publisher.name}\n背景=${backgroundColors.joinToString(";")}\n强调=$primaryColor"
+    }
+
+    private fun failedUsage(): CommandExecutionResult {
+        return failed("用法：$commandPrefix ${spec.usage}")
     }
 }
 

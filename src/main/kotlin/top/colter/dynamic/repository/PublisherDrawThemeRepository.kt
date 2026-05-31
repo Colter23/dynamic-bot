@@ -30,6 +30,14 @@ public object PublisherDrawThemeRepository {
         }
     }
 
+    public fun findAll(): List<PublisherDrawTheme> {
+        return transaction {
+            PublisherDrawThemeTable
+                .selectAll()
+                .map { it.toPublisherDrawTheme() }
+        }
+    }
+
     public fun upsert(publisherId: Int, palette: DrawThemePalette): PublisherDrawTheme {
         val now = nowInstant()
         transaction {

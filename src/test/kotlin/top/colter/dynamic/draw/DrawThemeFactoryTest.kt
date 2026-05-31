@@ -8,10 +8,10 @@ import kotlin.test.assertTrue
 
 class DrawThemeFactoryTest {
     @Test
-    fun singleColorShouldGenerateTwoColorGradient() {
+    fun singleColorShouldGenerateThreeColorGradient() {
         val theme = DrawThemeFactory.fromThemeColorText("#FE65A6")
 
-        assertEquals(2, theme.backgroundColors.size)
+        assertEquals(3, theme.backgroundColors.size)
         assertTrue(theme.backgroundColors.distinct().size > 1)
     }
 
@@ -33,15 +33,18 @@ class DrawThemeFactoryTest {
             null,
         )
 
-        assertTrue(hsb[1] < 1.0f)
+        assertEquals(0.30f, hsb[1], absoluteTolerance = 0.01f)
+        assertEquals(1.0f, hsb[2], absoluteTolerance = 0.01f)
     }
 
     @Test
     fun themeModeShouldSwitchCardAndTextColors() {
         val lightTheme = DrawThemeFactory.fromThemeColorText("#FFFFFF")
+        val pinkTheme = DrawThemeFactory.fromThemeColorText("#FE65A6")
         val darkTheme = DrawThemeFactory.fromThemeColorText("#000000")
 
         assertEquals(DrawThemeMode.LIGHT, lightTheme.mode)
+        assertEquals(DrawThemeMode.LIGHT, pinkTheme.mode)
         assertEquals(DrawThemeMode.DARK, darkTheme.mode)
         assertTrue(relativeLuminance(lightTheme.textColor) < relativeLuminance(lightTheme.cardColor))
         assertTrue(relativeLuminance(darkTheme.textColor) > relativeLuminance(darkTheme.cardColor))

@@ -127,8 +127,18 @@ public data class PublisherDto(
     val createTime: Long,
     val createUser: Int,
     val subscriptionCount: Long = 0,
+    val drawTheme: PublisherDrawThemeDto? = null,
     val liveStatuses: List<PublisherLiveStatusDto> = emptyList(),
     val cursors: List<SourceCursorDto> = emptyList(),
+)
+
+@Serializable
+public data class PublisherDrawThemeDto(
+    val mode: String,
+    val backgroundColors: List<String>,
+    val primaryColor: String,
+    val linkColor: String,
+    val textColor: String,
 )
 
 @Serializable
@@ -303,6 +313,8 @@ public data class UpdatePublisherRequest(
     val name: String? = null,
     val headerUri: String? = null,
     val state: String? = null,
+    val themeColors: String? = null,
+    val clearTheme: Boolean = false,
 )
 
 @Serializable

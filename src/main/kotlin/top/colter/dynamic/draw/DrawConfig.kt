@@ -106,12 +106,7 @@ public object DrawThemeFactory {
         require(colors.size <= MAX_THEME_COLORS) { "主题色最多支持 $MAX_THEME_COLORS 个" }
 
         val sourceColors = colors.map(::parseHexColor)
-        val preliminary = sourceColors.map { normalizeForModeDetection(it) }
-        val mode = if (preliminary.map(::relativeLuminance).average() >= 0.55) {
-            DrawThemeMode.LIGHT
-        } else {
-            DrawThemeMode.DARK
-        }
+        val mode = detectMode(sourceColors)
         val backgroundColors = if (sourceColors.size == 1) {
             gradientFromSingleColor(sourceColors.single(), mode)
         } else {
@@ -142,27 +137,37 @@ public object DrawThemeFactory {
         return parts
     }
 
-    private fun normalizeForModeDetection(color: Int): Int {
-        val hsl = color.toHsl()
-        return HslColor(hsl.h, min(hsl.s, 0.42), hsl.l.coerceIn(0.18, 0.88)).toColor()
+    private fun detectMode(colors: List<Int>): DrawThemeMode {
+        val averageLightness = colors.map { it.toHsl().l }.average()
+        val averageBrightness = colors.map { it.toHsv().v }.average()
+        return if (averageLightness >= 0.42 || averageBrightness >= 0.58) {
+            DrawThemeMode.LIGHT
+        } else {
+            DrawThemeMode.DARK
+        }
     }
 
     private fun gradientFromSingleColor(color: Int, mode: DrawThemeMode): List<Int> {
-        return listOf(
-            normalizeBackgroundColor(color.shiftHue(-10.0), mode, if (mode == DrawThemeMode.LIGHT) 0.08 else -0.04),
-            normalizeBackgroundColor(color.shiftHue(16.0), mode, if (mode == DrawThemeMode.LIGHT) -0.02 else 0.06),
-        )
+        val hsv = color.toHsv()
+        val hues = listOf(hsv.h - 30.0, hsv.h, hsv.h + 30.0)
+        if (mode == DrawThemeMode.LIGHT) {
+            return hues.map { hue -> HsvColor(hue, 0.30, 1.0).toColor() }
+        }
+        val saturation = hsv.s.coerceIn(0.34, 0.52)
+        val brightness = (hsv.v * 0.32 + 0.16).coerceIn(0.16, 0.34)
+        return hues.map { hue -> HsvColor(hue, saturation, brightness).toColor() }
     }
 
-    private fun normalizeBackgroundColor(color: Int, mode: DrawThemeMode, lightnessShift: Double = 0.0): Int {
-        val hsl = color.toHsl()
-        val saturation = min(hsl.s, if (mode == DrawThemeMode.LIGHT) 0.38 else 0.44)
-        val targetLightness = if (mode == DrawThemeMode.LIGHT) {
-            (hsl.l * 0.25 + 0.76 + lightnessShift).coerceIn(0.68, 0.90)
-        } else {
-            (hsl.l * 0.25 + 0.18 + lightnessShift).coerceIn(0.14, 0.36)
+    private fun normalizeBackgroundColor(color: Int, mode: DrawThemeMode): Int {
+        val hsv = color.toHsv()
+        if (mode == DrawThemeMode.LIGHT) {
+            return HsvColor(hsv.h, 0.30, 1.0).toColor()
         }
-        return HslColor(hsl.h, saturation, targetLightness).toColor()
+        return HsvColor(
+            h = hsv.h,
+            s = hsv.s.coerceIn(0.34, 0.52),
+            v = (hsv.v * 0.32 + 0.16).coerceIn(0.16, 0.34),
+        ).toColor()
     }
 
     private fun accentColor(color: Int, mode: DrawThemeMode, cardBase: Int): Int {
@@ -241,6 +246,33 @@ private data class HslColor(
     }
 }
 
+private data class HsvColor(
+    val h: Double,
+    val s: Double,
+    val v: Double,
+) {
+    fun toColor(): Int {
+        val normalizedHue = ((h % 360.0) + 360.0) % 360.0
+        val c = v * s
+        val hPrime = normalizedHue / 60.0
+        val x = c * (1.0 - abs(hPrime % 2.0 - 1.0))
+        val (r1, g1, b1) = when {
+            hPrime < 1 -> Triple(c, x, 0.0)
+            hPrime < 2 -> Triple(x, c, 0.0)
+            hPrime < 3 -> Triple(0.0, c, x)
+            hPrime < 4 -> Triple(0.0, x, c)
+            hPrime < 5 -> Triple(x, 0.0, c)
+            else -> Triple(c, 0.0, x)
+        }
+        val m = v - c
+        return Color.makeRGB(
+            ((r1 + m) * 255).roundByte(),
+            ((g1 + m) * 255).roundByte(),
+            ((b1 + m) * 255).roundByte(),
+        )
+    }
+}
+
 private fun Int.toHsl(): HslColor {
     val r = red() / 255.0
     val g = green() / 255.0
@@ -260,9 +292,21 @@ private fun Int.toHsl(): HslColor {
     return HslColor((hue + 360.0) % 360.0, saturation, lightness)
 }
 
-private fun Int.shiftHue(degrees: Double): Int {
-    val hsl = toHsl()
-    return hsl.copy(h = hsl.h + degrees).toColor()
+private fun Int.toHsv(): HsvColor {
+    val r = red() / 255.0
+    val g = green() / 255.0
+    val b = blue() / 255.0
+    val max = max(r, max(g, b))
+    val min = min(r, min(g, b))
+    val delta = max - min
+    if (delta == 0.0) return HsvColor(0.0, 0.0, max)
+    val saturation = if (max == 0.0) 0.0 else delta / max
+    val hue = when (max) {
+        r -> 60.0 * (((g - b) / delta) % 6.0)
+        g -> 60.0 * (((b - r) / delta) + 2.0)
+        else -> 60.0 * (((r - g) / delta) + 4.0)
+    }
+    return HsvColor((hue + 360.0) % 360.0, saturation, max)
 }
 
 private fun ensureContrast(
