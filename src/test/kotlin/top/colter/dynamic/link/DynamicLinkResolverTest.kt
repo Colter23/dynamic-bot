@@ -6,6 +6,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicPayload
+import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.link.DynamicLinkResolution
 import top.colter.dynamic.core.link.DynamicLinkResolver
@@ -71,7 +72,7 @@ class DynamicLinkResolverTest {
                         name = "publisher",
                     ),
                     externalId = parsedLink.updateId,
-                    payload = DynamicPayload(content = DynamicContent.text("resolved")),
+                    payload = DynamicPayload(blocks = listOf(TextBlock(DynamicContent.text("resolved")))),
                 ),
             )
         }

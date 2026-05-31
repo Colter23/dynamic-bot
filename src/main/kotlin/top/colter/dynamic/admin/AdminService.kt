@@ -9,7 +9,6 @@ import top.colter.dynamic.core.config.ConfigurablePlugin
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.data.DeliveryStatus
-import top.colter.dynamic.core.data.DynamicAttachmentKind
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.MessageDelivery

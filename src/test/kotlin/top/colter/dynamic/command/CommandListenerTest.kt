@@ -12,7 +12,7 @@ import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandStatus
-import top.colter.dynamic.core.data.DynamicAttachmentKind
+import top.colter.dynamic.core.data.DynamicBlockKind
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.PlatformId
@@ -80,7 +80,7 @@ class CommandListenerTest {
 
         assertEquals(CommandStatus.SUCCESS, result.status)
         val rule = DynamicFilterRuleRepository.findAll().single()
-        assertEquals(FilterCondition.HasAttachmentKind(DynamicAttachmentKind.VIDEO), rule.condition)
+        assertEquals(FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO), rule.condition)
     }
 
     @Test

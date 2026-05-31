@@ -1,14 +1,16 @@
 ﻿package top.colter.dynamic.filter
 
-import top.colter.dynamic.core.data.CardAttachment
-import top.colter.dynamic.core.data.DynamicAttachmentKind
+import top.colter.dynamic.core.data.DynamicBlock
+import top.colter.dynamic.core.data.DynamicBlockKind
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.FilterCondition
-import top.colter.dynamic.core.data.ImageAttachment
-import top.colter.dynamic.core.data.PollAttachment
+import top.colter.dynamic.core.data.ImageGridBlock
+import top.colter.dynamic.core.data.MediaCardBlock
+import top.colter.dynamic.core.data.PollBlock
+import top.colter.dynamic.core.data.RepostBlock
 import top.colter.dynamic.core.data.SourceUpdate
-import top.colter.dynamic.core.data.VideoAttachment
+import top.colter.dynamic.core.data.TextBlock
 
 public object DynamicFilterEvaluator {
     public fun isBlocked(update: SourceUpdate, rules: Iterable<DynamicFilterRule>): Boolean {
@@ -21,7 +23,7 @@ public object DynamicFilterEvaluator {
 
     public fun matches(update: SourceUpdate, condition: FilterCondition): Boolean {
         return when (condition) {
-            is FilterCondition.HasAttachmentKind -> hasAttachmentKind(update, condition.kind)
+            is FilterCondition.HasBlockKind -> hasBlockKind(update, condition.kind)
             is FilterCondition.TextContains -> filterableTextFields(update).any {
                 it.contains(condition.value, ignoreCase = condition.ignoreCase)
             }
@@ -31,27 +33,29 @@ public object DynamicFilterEvaluator {
             }.getOrDefault(false)
             is FilterCondition.HasReference -> {
                 val payload = update.payload as? DynamicPayload ?: return false
-                payload.references.any { reference -> condition.kind == null || reference.kind == condition.kind }
+                payload.blocks.filterIsInstance<RepostBlock>()
+                    .any { reference -> condition.kind == null || reference.referenceKind == condition.kind }
             }
         }
     }
 
-    private fun hasAttachmentKind(update: SourceUpdate, kind: DynamicAttachmentKind): Boolean {
+    private fun hasBlockKind(update: SourceUpdate, kind: DynamicBlockKind): Boolean {
         val payload = update.payload as? DynamicPayload ?: return false
-        return hasAttachmentKind(payload, kind, mutableSetOf(update.key.stableValue()))
+        return hasBlockKind(payload, kind, mutableSetOf(update.key.stableValue()))
     }
 
-    private fun hasAttachmentKind(
+    private fun hasBlockKind(
         payload: DynamicPayload,
-        kind: DynamicAttachmentKind,
+        kind: DynamicBlockKind,
         visitedUpdateKeys: MutableSet<String>,
     ): Boolean {
-        if (payload.attachments.any { it.kind == kind }) return true
-        return payload.references
+        if (payload.blocks.any { it.blockKind == kind }) return true
+        return payload.blocks
+            .filterIsInstance<RepostBlock>()
             .mapNotNull { it.embedded }
             .filter { visitedUpdateKeys.add(it.key.stableValue()) }
             .mapNotNull { it.payload as? DynamicPayload }
-            .any { hasAttachmentKind(it, kind, visitedUpdateKeys) }
+            .any { hasBlockKind(it, kind, visitedUpdateKeys) }
     }
 
     private fun filterableTextFields(update: SourceUpdate): List<String> {
@@ -66,43 +70,43 @@ public object DynamicFilterEvaluator {
         val fields = mutableListOf<String>()
         payload.title.addTo(fields)
         payload.labels.forEach { label -> label.text.addTo(fields) }
-        payload.content?.plainText.addTo(fields)
-        payload.content?.nodes.orEmpty().forEach { node -> node.text.addTo(fields) }
-
-        payload.attachments.forEach { attachment ->
-            when (attachment) {
-                is ImageAttachment -> attachment.images.forEach { image ->
-                    image.badge.addTo(fields)
-                    image.alt.addTo(fields)
-                    image.image.alt.addTo(fields)
-                }
-                is VideoAttachment -> {
-                    attachment.title.addTo(fields)
-                    attachment.description.addTo(fields)
-                    attachment.badge.addTo(fields)
-                    attachment.metrics.forEach { metric -> metric.display.addTo(fields) }
-                }
-                is CardAttachment -> {
-                    attachment.title.addTo(fields)
-                    attachment.description.addTo(fields)
-                    attachment.badge.addTo(fields)
-                    attachment.info.addTo(fields)
-                }
-                is PollAttachment -> {
-                    attachment.title.addTo(fields)
-                    attachment.options.forEach { option ->
-                        option.text.addTo(fields)
-                        option.displayVotes.addTo(fields)
-                    }
-                }
-            }
-        }
-        payload.references
+        payload.blocks.forEach { block -> block.addFilterableText(fields) }
+        payload.blocks
+            .filterIsInstance<RepostBlock>()
             .mapNotNull { it.embedded }
             .filter { visitedUpdateKeys.add(it.key.stableValue()) }
             .mapNotNull { it.payload as? DynamicPayload }
             .forEach { fields += filterableTextFields(it, visitedUpdateKeys) }
         return fields
+    }
+
+    private fun DynamicBlock.addFilterableText(fields: MutableList<String>) {
+        when (this) {
+            is TextBlock -> {
+                content.plainText.addTo(fields)
+                content.nodes.forEach { node -> node.text.addTo(fields) }
+            }
+            is ImageGridBlock -> images.forEach { image ->
+                image.badge.addTo(fields)
+                image.alt.addTo(fields)
+                image.image.alt.addTo(fields)
+            }
+            is MediaCardBlock -> {
+                card.title.addTo(fields)
+                card.description.addTo(fields)
+                card.badge.addTo(fields)
+                card.info.addTo(fields)
+                card.metrics.forEach { metric -> metric.display.addTo(fields) }
+            }
+            is PollBlock -> {
+                title.addTo(fields)
+                options.forEach { option ->
+                    option.text.addTo(fields)
+                    option.displayVotes.addTo(fields)
+                }
+            }
+            is RepostBlock -> Unit
+        }
     }
 
     private fun String?.addTo(fields: MutableList<String>) {

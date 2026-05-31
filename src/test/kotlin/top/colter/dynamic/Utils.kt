@@ -15,6 +15,7 @@ import top.colter.dynamic.core.data.PublisherKind
 import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourcePayload
 import top.colter.dynamic.core.data.SourceUpdate
+import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.data.UpdateKey
@@ -104,7 +105,7 @@ fun testDynamicUpdate(
     publisher: PublisherInfo = testPublisherInfo(),
     eventType: SourceEventType = SourceEventType.DYNAMIC_CREATED,
     externalId: String = "dynamic-1",
-    payload: SourcePayload = DynamicPayload(content = DynamicContent.text("hello")),
+    payload: SourcePayload = DynamicPayload(blocks = listOf(TextBlock(DynamicContent.text("hello")))),
 ): SourceUpdate = SourceUpdate(
     key = UpdateKey.of(
         publisherKey = publisher.key,

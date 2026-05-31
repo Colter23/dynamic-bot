@@ -5,16 +5,20 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import org.jetbrains.skia.EncodedImageFormat
 import top.colter.dynamic.MainDynamicConfig
-import top.colter.dynamic.core.data.CardAttachment
 import top.colter.dynamic.core.data.DynamicContent
+import top.colter.dynamic.core.data.DynamicMediaCard
+import top.colter.dynamic.core.data.DynamicMediaCardKind
 import top.colter.dynamic.core.data.DynamicLabel
 import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.LivePayload
+import top.colter.dynamic.core.data.MediaCardBlock
+import top.colter.dynamic.core.data.MediaCardStyle
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.SourceUpdate
+import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.draw.image.CachedDynamicImageLoader
 import top.colter.dynamic.draw.image.DynamicImageLoader
 
@@ -93,14 +97,18 @@ public fun SourceUpdate.toDrawableDynamicUpdate(): SourceUpdate {
         link?.takeIf { it.isNotBlank() },
     ).joinToString("\n")
     val card = live.cover?.let {
-        CardAttachment(
-            id = live.roomId,
-            cardKind = "live",
-            title = liveTitle,
-            description = live.area.orEmpty(),
-            badge = "LIVE",
-            cover = it,
-            link = link,
+        MediaCardBlock(
+            style = MediaCardStyle.LARGE,
+            card = DynamicMediaCard(
+                kind = DynamicMediaCardKind.LIVE,
+                sourceKind = "live",
+                id = live.roomId,
+                title = liveTitle,
+                description = live.area.orEmpty(),
+                badge = "LIVE",
+                cover = it,
+                link = link,
+            ),
         )
     }
 
@@ -108,8 +116,10 @@ public fun SourceUpdate.toDrawableDynamicUpdate(): SourceUpdate {
         payload = DynamicPayload(
             labels = listOf(DynamicLabel("LIVE")),
             title = liveTitle,
-            content = DynamicContent.text(contentText),
-            attachments = card?.let { listOf(it) }.orEmpty(),
+            blocks = buildList {
+                add(TextBlock(DynamicContent.text(contentText)))
+                card?.let(::add)
+            },
         ),
     )
 }

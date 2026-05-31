@@ -4,7 +4,6 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import top.colter.dynamic.DrawOrnament
 import top.colter.dynamic.DrawSettings
-import top.colter.dynamic.core.data.CardAttachment
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicContentNodeEmoji
 import top.colter.dynamic.core.data.DynamicContentNodeLink
@@ -12,18 +11,22 @@ import top.colter.dynamic.core.data.DynamicContentNodeMention
 import top.colter.dynamic.core.data.DynamicContentNodeTag
 import top.colter.dynamic.core.data.DynamicContentNodeText
 import top.colter.dynamic.core.data.DynamicContentTagType
+import top.colter.dynamic.core.data.DynamicMediaCard
+import top.colter.dynamic.core.data.DynamicMediaCardKind
 import top.colter.dynamic.core.data.DynamicMetric
 import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.DynamicReferenceKind
-import top.colter.dynamic.core.data.ImageAttachment
+import top.colter.dynamic.core.data.ImageGridBlock
 import top.colter.dynamic.core.data.ImageItem
+import top.colter.dynamic.core.data.MediaCardBlock
+import top.colter.dynamic.core.data.MediaCardStyle
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaReference
 import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.core.data.PublisherInfo
+import top.colter.dynamic.core.data.RepostBlock
 import top.colter.dynamic.core.data.SourceUpdate
-import top.colter.dynamic.core.data.SourceUpdateReference
-import top.colter.dynamic.core.data.VideoAttachment
+import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.core.data.mediaReferences
 import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.dynamic.loadTestResource
@@ -48,13 +51,11 @@ class DrawTest {
     fun `test dynamic`() {
         val update = testDynamicUpdate(
             payload = DynamicPayload(
-                content = DynamicContent.text("Demo content"),
-                attachments = listOf(
-                    ImageAttachment(
-                        images = listOf(
-                            ImageItem(testMedia("https://example.com/pic.png", MediaKind.IMAGE)),
-                        ),
-                    ),
+                blocks = listOf(
+                    textBlock("Demo content"),
+                    ImageGridBlock(
+                        images = listOf(ImageItem(testMedia("https://example.com/pic.png", MediaKind.IMAGE))),
+                    )
                 ),
             ),
         )
@@ -66,28 +67,32 @@ class DrawTest {
         val update = testDynamicUpdate(
             payload = DynamicPayload(
                 title = "Content node demo",
-                content = DynamicContent(
-                    nodes = listOf(
-                        DynamicContentNodeText("Plain text "),
-                        DynamicContentNodeEmoji(
-                            text = "[tv_doge]",
-                            image = testMedia("https://example.com/emoji/tv_doge.png", MediaKind.EMOJI),
-                        ),
-                        DynamicContentNodeLink(
-                            text = " link",
-                            icon = testMedia("https://example.com/icon.png", MediaKind.IMAGE),
-                            url = "https://example.com",
-                        ),
-                        DynamicContentNodeMention(
-                            text = " @demo",
-                            publisherKey = testPublisherKey(externalId = "mention-demo"),
-                            url = "https://example.com/mention",
-                        ),
-                        DynamicContentNodeTag(
-                            text = " #topic",
-                            tagType = DynamicContentTagType.TOPIC,
-                            externalId = "topic-demo",
-                            url = "https://example.com/topic",
+                blocks = listOf(
+                    TextBlock(
+                        DynamicContent(
+                            nodes = listOf(
+                                DynamicContentNodeText("Plain text "),
+                                DynamicContentNodeEmoji(
+                                    text = "[tv_doge]",
+                                    image = testMedia("https://example.com/emoji/tv_doge.png", MediaKind.EMOJI),
+                                ),
+                                DynamicContentNodeLink(
+                                    text = " link",
+                                    icon = testMedia("https://example.com/icon.png", MediaKind.IMAGE),
+                                    url = "https://example.com",
+                                ),
+                                DynamicContentNodeMention(
+                                    text = " @demo",
+                                    publisherKey = testPublisherKey(externalId = "mention-demo"),
+                                    url = "https://example.com/mention",
+                                ),
+                                DynamicContentNodeTag(
+                                    text = " #topic",
+                                    tagType = DynamicContentTagType.TOPIC,
+                                    externalId = "topic-demo",
+                                    url = "https://example.com/topic",
+                                ),
+                            ),
                         ),
                     ),
                 ),
@@ -100,11 +105,11 @@ class DrawTest {
     fun `test dynamic image grids`() {
         val update = testDynamicUpdate(
             payload = DynamicPayload(
-                content = DynamicContent.text("Image grid variants"),
-                attachments = listOf(
-                    imageAttachment(count = 2, prefix = "two"),
-                    imageAttachment(count = 4, prefix = "four"),
-                    imageAttachment(count = 9, prefix = "nine"),
+                blocks = listOf(
+                    textBlock("Image grid variants"),
+                    imageBlock(count = 2, prefix = "two"),
+                    imageBlock(count = 4, prefix = "four"),
+                    imageBlock(count = 9, prefix = "nine"),
                 ),
             ),
         )
@@ -115,9 +120,9 @@ class DrawTest {
     fun `test dynamic video attachment`() {
         val update = testDynamicUpdate(
             payload = DynamicPayload(
-                content = DynamicContent.text("Video attachment"),
-                attachments = listOf(
-                    VideoAttachment(
+                blocks = listOf(
+                    textBlock("Video attachment"),
+                    videoBlock(
                         id = "video-demo",
                         title = "Demo video title",
                         description = "A rendered video card with cover, badge, duration, and metrics.",
@@ -139,11 +144,12 @@ class DrawTest {
     fun `test dynamic card attachment`() {
         val update = testDynamicUpdate(
             payload = DynamicPayload(
-                content = DynamicContent.text("Card attachment"),
-                attachments = listOf(
-                    CardAttachment(
+                blocks = listOf(
+                    textBlock("Card attachment"),
+                    cardBlock(
                         id = "article-demo",
-                        cardKind = "article",
+                        kind = DynamicMediaCardKind.ARTICLE,
+                        sourceKind = "article",
                         title = "Demo article card",
                         description = "A rendered card with a banner cover and badge.",
                         badge = "Article",
@@ -162,9 +168,9 @@ class DrawTest {
             externalId = "origin-dynamic",
             publisher = demoPublisher("origin"),
             payload = DynamicPayload(
-                content = DynamicContent.text("Original dynamic content"),
-                attachments = listOf(
-                    VideoAttachment(
+                blocks = listOf(
+                    textBlock("Original dynamic content"),
+                    videoBlock(
                         id = "origin-video",
                         title = "Forward mode video card",
                         description = "Rendered through the embedded origin dynamic path.",
@@ -178,10 +184,10 @@ class DrawTest {
         val update = testDynamicUpdate(
             externalId = "repost-dynamic",
             payload = DynamicPayload(
-                content = DynamicContent.text("Repost with embedded origin"),
-                references = listOf(
-                    SourceUpdateReference(
-                        kind = DynamicReferenceKind.ORIGIN,
+                blocks = listOf(
+                    textBlock("Repost with embedded origin"),
+                    RepostBlock(
+                        referenceKind = DynamicReferenceKind.ORIGIN,
                         key = origin.key,
                         link = origin.link,
                         embedded = origin,
@@ -197,7 +203,7 @@ class DrawTest {
         val publisher = demoPublisher("ornament").copy(official = "BILIBILI_A.png")
         val update = testDynamicUpdate(
             publisher = publisher,
-            payload = DynamicPayload(content = DynamicContent.text("Publisher ornament variants")),
+            payload = DynamicPayload(blocks = listOf(textBlock("Publisher ornament variants"))),
         )
 
         renderToOutput(
@@ -222,7 +228,7 @@ class DrawTest {
         )
         val update = testDynamicUpdate(
             publisher = publisher,
-            payload = DynamicPayload(content = DynamicContent.text("Publisher without banner uses default head")),
+            payload = DynamicPayload(blocks = listOf(textBlock("Publisher without banner uses default head"))),
         )
 
         renderToOutput("dynamic_publisher_default_head.png", update)
@@ -233,8 +239,10 @@ class DrawTest {
         val update = testDynamicUpdate(
             payload = DynamicPayload(
                 title = "Minimal layout demo",
-                content = DynamicContent.text("Minimal currently delegates to the default dynamic renderer."),
-                attachments = listOf(imageAttachment(count = 3, prefix = "minimal")),
+                blocks = listOf(
+                    textBlock("Minimal currently delegates to the default dynamic renderer."),
+                    imageBlock(count = 3, prefix = "minimal"),
+                ),
             ),
         )
         renderToOutput(
@@ -244,14 +252,72 @@ class DrawTest {
         )
     }
 
-    private fun imageAttachment(count: Int, prefix: String): ImageAttachment {
-        return ImageAttachment(
+    private fun textBlock(text: String): TextBlock {
+        return TextBlock(DynamicContent.text(text))
+    }
+
+    private fun imageBlock(count: Int, prefix: String): ImageGridBlock {
+        return ImageGridBlock(
             images = (1..count).map { index ->
                 ImageItem(
                     image = testMedia("https://example.com/$prefix-image-$index.png", MediaKind.IMAGE),
                     badge = if (index == 1) "$count pics" else null,
                 )
             },
+        )
+    }
+
+    private fun videoBlock(
+        id: String,
+        title: String,
+        description: String,
+        cover: top.colter.dynamic.core.data.MediaRef,
+        durationSeconds: Long,
+        badge: String,
+        metrics: List<DynamicMetric> = emptyList(),
+        style: MediaCardStyle = MediaCardStyle.LARGE,
+    ): MediaCardBlock {
+        return cardBlock(
+            id = id,
+            kind = DynamicMediaCardKind.VIDEO,
+            sourceKind = "video",
+            title = title,
+            description = description,
+            cover = cover,
+            durationSeconds = durationSeconds,
+            badge = badge,
+            metrics = metrics,
+            style = style,
+        )
+    }
+
+    private fun cardBlock(
+        id: String,
+        kind: DynamicMediaCardKind,
+        sourceKind: String,
+        title: String,
+        description: String,
+        badge: String,
+        cover: top.colter.dynamic.core.data.MediaRef,
+        coverRatio: Float? = null,
+        durationSeconds: Long? = null,
+        metrics: List<DynamicMetric> = emptyList(),
+        style: MediaCardStyle = MediaCardStyle.LARGE,
+    ): MediaCardBlock {
+        return MediaCardBlock(
+            style = style,
+            card = DynamicMediaCard(
+                kind = kind,
+                sourceKind = sourceKind,
+                id = id,
+                title = title,
+                description = description,
+                badge = badge,
+                cover = cover,
+                coverRatio = coverRatio,
+                durationSeconds = durationSeconds,
+                metrics = metrics,
+            ),
         )
     }
 

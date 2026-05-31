@@ -98,10 +98,10 @@ public object DynamicFilterRuleRepository {
     private fun validateCondition(condition: FilterCondition) {
         when (condition) {
             is FilterCondition.TextContains -> require(condition.value.isNotBlank()) {
-                "text condition value must not be blank"
+                "文本过滤条件不能为空"
             }
             is FilterCondition.TextRegex -> Regex(condition.pattern)
-            is FilterCondition.HasAttachmentKind,
+            is FilterCondition.HasBlockKind,
             is FilterCondition.HasReference -> Unit
         }
     }

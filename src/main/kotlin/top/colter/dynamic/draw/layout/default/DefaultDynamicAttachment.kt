@@ -15,22 +15,32 @@ import top.colter.skiko.layout.*
 
 private val attachmentSpacing: Dp = 20.dp
 
-internal fun Layout.drawDynamicAttachments(
-    attachments: List<DynamicAttachment>,
+internal fun Layout.drawDynamicBlocks(
+    blocks: List<DynamicBlock>,
     config: DrawConfig,
     mode: DynamicRenderMode = DynamicRenderMode.ROOT,
     bottomSpacing: Dp = 0.dp,
 ) {
-    attachments.forEachIndexed { index, attachment ->
+    blocks.forEachIndexed { index, block ->
         val modifier = Modifier()
             .fillMaxWidth()
-            .margin(bottom = if (index < attachments.lastIndex) attachmentSpacing else bottomSpacing)
+            .margin(bottom = if (index < blocks.lastIndex) attachmentSpacing else bottomSpacing)
 
-        when (attachment) {
-            is ImageAttachment -> drawDynamicImages(attachment.images, config, modifier)
-            is VideoAttachment -> drawDynamicVideo(attachment, config, mode, modifier)
-            is CardAttachment -> drawDynamicCard(attachment, config, modifier)
-            else -> Unit
+        when (block) {
+            is TextBlock -> drawDynamicContent(block.content, config, bottomSpacing = if (index < blocks.lastIndex) attachmentSpacing else bottomSpacing)
+            is ImageGridBlock -> drawDynamicImages(block.images, config, modifier)
+            is MediaCardBlock -> drawDynamicMediaCard(block, config, modifier)
+            is PollBlock -> drawDynamicPoll(block, config, modifier)
+            is RepostBlock -> block.embedded?.let { origin ->
+                Column(modifier = modifier) {
+                    DefaultDynamicView(
+                        update = origin,
+                        config = config,
+                        mode = DynamicRenderMode.FORWARD,
+                        topSpacing = 0.dp,
+                    )
+                }
+            }
         }
     }
 }
@@ -99,34 +109,68 @@ private fun Layout.DynamicImageTile(
 }
 
 
-private fun Layout.drawDynamicVideo(
-    video: VideoAttachment,
+private fun Layout.drawDynamicMediaCard(
+    block: MediaCardBlock,
     config: DrawConfig,
-    mode: DynamicRenderMode,
     modifier: Modifier = Modifier().fillMaxWidth(),
 ) {
-    val cover = video.cover ?: return
-    if (mode == DynamicRenderMode.FORWARD) {
-        MediaSmall(
-            cover = config.image(cover),
-            title = video.title,
-            desc = video.description,
-            duration = video.durationSeconds?.toDurationText().orEmpty(),
-            badge = video.badge.orEmpty(),
+    val card = block.card
+    val cover = card.cover?.let(config::image)
+    val duration = card.durationSeconds?.toDurationText().orEmpty()
+    val info = card.info ?: listOf(card.metricText("play", "播放"), card.metricText("danmaku", "弹幕"))
+        .filter { it.isNotBlank() }
+        .joinToString(" ")
+    when (block.style) {
+        MediaCardStyle.LARGE -> {
+            if (cover == null) {
+                MediaSmall(
+                    cover = null,
+                    title = card.title,
+                    desc = card.description,
+                    duration = duration,
+                    badge = card.badge.orEmpty(),
+                    accentColor = config.theme.primaryColor,
+                    cardColor = config.theme.cardColor,
+                    borderColor = config.theme.borderColor,
+                    secondaryTextColor = config.theme.secondaryTextColor,
+                    modifier = modifier,
+                )
+            } else {
+                Media(
+                    cover = cover,
+                    title = card.title,
+                    desc = card.description,
+                    duration = duration,
+                    badge = card.badge.orEmpty(),
+                    info = info,
+                    coverRatio = card.coverRatio ?: Ratio.COVER_1,
+                    accentColor = config.theme.primaryColor,
+                    cardColor = config.theme.cardColor,
+                    borderColor = config.theme.borderColor,
+                    secondaryTextColor = config.theme.secondaryTextColor,
+                    modifier = modifier,
+                )
+            }
+        }
+        MediaCardStyle.SMALL -> MediaSmall(
+            cover = cover,
+            title = card.title,
+            desc = card.description,
+            duration = duration,
+            badge = card.badge.orEmpty(),
+            coverRatio = card.coverRatio ?: Ratio.COVER_2,
             accentColor = config.theme.primaryColor,
             cardColor = config.theme.cardColor,
             borderColor = config.theme.borderColor,
             secondaryTextColor = config.theme.secondaryTextColor,
             modifier = modifier,
         )
-    } else {
-        Media(
-            cover = config.image(cover),
-            title = video.title,
-            desc = video.description,
-            duration = video.durationSeconds?.toDurationText().orEmpty(),
-            badge = video.badge.orEmpty(),
-            info = video.metricText("play", "播放") + " " + video.metricText("danmaku", "弹幕"),
+        MediaCardStyle.MINI -> MediaMini(
+            cover = cover,
+            title = card.title,
+            desc = card.description,
+            badge = card.badge.orEmpty(),
+            coverRatio = card.coverRatio ?: Ratio.COVER_2,
             accentColor = config.theme.primaryColor,
             cardColor = config.theme.cardColor,
             borderColor = config.theme.borderColor,
@@ -136,19 +180,19 @@ private fun Layout.drawDynamicVideo(
     }
 }
 
-
-private fun Layout.drawDynamicCard(
-    card: CardAttachment,
+private fun Layout.drawDynamicPoll(
+    poll: PollBlock,
     config: DrawConfig,
     modifier: Modifier = Modifier().fillMaxWidth(),
 ) {
-    val cover = card.cover ?: return
-    Media(
-        cover = config.image(cover),
-        title = card.title,
-        desc = card.description,
-        badge = card.badge.orEmpty(),
-        coverRatio = card.coverRatio ?: Ratio.COVER_1,
+    val options = poll.options.joinToString("\n") { option ->
+        listOfNotNull(option.text, option.displayVotes).joinToString(" ")
+    }.ifBlank { poll.status.name }
+    MediaSmall(
+        cover = null,
+        title = poll.title,
+        desc = options,
+        badge = "投票",
         accentColor = config.theme.primaryColor,
         cardColor = config.theme.cardColor,
         borderColor = config.theme.borderColor,
@@ -157,37 +201,7 @@ private fun Layout.drawDynamicCard(
     )
 }
 
-private fun Layout.drawDynamicSmallCard(card: CardAttachment, config: DrawConfig) {
-    val cover = card.cover ?: return
-    MediaSmall(
-        cover = config.image(cover),
-        title = card.title,
-        desc = card.description,
-        badge = card.badge.orEmpty(),
-        coverRatio = card.coverRatio ?: Ratio.COVER_1,
-        accentColor = config.theme.primaryColor,
-        cardColor = config.theme.cardColor,
-        borderColor = config.theme.borderColor,
-        secondaryTextColor = config.theme.secondaryTextColor,
-    )
-}
-
-private fun Layout.drawDynamicMiniCard(card: CardAttachment, config: DrawConfig) {
-    val cover = card.cover ?: return
-    MediaMini(
-        cover = config.image(cover),
-        title = card.title,
-        desc = card.description,
-        badge = card.badge.orEmpty(),
-        coverRatio = card.coverRatio ?: Ratio.COVER_1,
-        accentColor = config.theme.primaryColor,
-        cardColor = config.theme.cardColor,
-        borderColor = config.theme.borderColor,
-        secondaryTextColor = config.theme.secondaryTextColor,
-    )
-}
-
-private fun VideoAttachment.metricText(key: String, suffix: String): String {
+private fun DynamicMediaCard.metricText(key: String, suffix: String): String {
     val value = metrics.firstOrNull { it.key == key }?.display.orEmpty()
     return if (value.isBlank()) "" else "$value$suffix"
 }

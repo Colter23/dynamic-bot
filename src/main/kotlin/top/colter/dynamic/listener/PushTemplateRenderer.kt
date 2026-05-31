@@ -4,13 +4,16 @@ import top.colter.dynamic.core.data.DynamicContentNodeLink
 import top.colter.dynamic.core.data.DynamicContentNodeMention
 import top.colter.dynamic.core.data.DynamicContentNodeTag
 import top.colter.dynamic.core.data.DynamicPayload
-import top.colter.dynamic.core.data.ImageAttachment
+import top.colter.dynamic.core.data.ImageGridBlock
 import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.MediaRef
+import top.colter.dynamic.core.data.MediaCardBlock
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.RepostBlock
 import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
+import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.util.formatTime
 
 public class PushTemplateRenderer {
@@ -74,8 +77,8 @@ public class PushTemplateRenderer {
     ) {
         when (key) {
             "draw" -> drawImage?.let { contents += MessageContent.Image(fallbackText = "", image = it) }
-            "images" -> dynamic.attachments.filterIsInstance<ImageAttachment>().forEach { attachment ->
-                attachment.images.forEach {
+            "images" -> dynamic.blocks.filterIsInstance<ImageGridBlock>().forEach { block ->
+                block.images.forEach {
                     contents += MessageContent.Image(fallbackText = "", image = it.image, altText = it.alt)
                 }
             }
@@ -90,7 +93,9 @@ public class PushTemplateRenderer {
             "uid" -> update.publisher.externalId
             "did" -> update.key.externalId
             "time" -> update.occurredAtEpochSeconds.formatTime()
-            "content" -> dynamic.content?.plainText.orEmpty()
+            "content" -> dynamic.blocks
+                .filterIsInstance<TextBlock>()
+                .joinToString("\n") { it.content.plainText }
             "link" -> update.link
             else -> null
         }
@@ -145,20 +150,33 @@ public class PushTemplateRenderer {
 
     private fun collectAdditionalLinks(update: SourceUpdate, dynamic: DynamicPayload): List<String> {
         val links = linkedSetOf<String>()
-        dynamic.attachments.forEach { attachment ->
-            attachment.link.addIfUseful(links, update.link)
-        }
-        dynamic.content?.nodes
-            .orEmpty()
-            .forEach {
-                when (it) {
-                    is DynamicContentNodeLink -> it.url.addIfUseful(links, update.link)
-                    is DynamicContentNodeMention -> it.url.addIfUseful(links, update.link)
-                    is DynamicContentNodeTag -> it.url.addIfUseful(links, update.link)
-                    else -> Unit
+        dynamic.blocks.forEach { block ->
+            block.link.addIfUseful(links, update.link)
+            when (block) {
+                is TextBlock -> collectContentLinks(block, links, update.link)
+                is MediaCardBlock -> block.card.link.addIfUseful(links, update.link)
+                is RepostBlock -> {
+                    block.embedded?.let { embedded ->
+                        (embedded.payload as? DynamicPayload)
+                            ?.let { payload -> collectAdditionalLinks(embedded, payload) }
+                            ?.forEach { it.addIfUseful(links, update.link) }
+                    }
                 }
+                else -> Unit
             }
+        }
         return links.toList()
+    }
+
+    private fun collectContentLinks(block: TextBlock, links: MutableSet<String>, mainLink: String?) {
+        block.content.nodes.forEach {
+            when (it) {
+                is DynamicContentNodeLink -> it.url.addIfUseful(links, mainLink)
+                is DynamicContentNodeMention -> it.url.addIfUseful(links, mainLink)
+                is DynamicContentNodeTag -> it.url.addIfUseful(links, mainLink)
+                else -> Unit
+            }
+        }
     }
 
     private fun String?.addIfUseful(links: MutableSet<String>, mainLink: String?) {

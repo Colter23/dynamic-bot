@@ -25,7 +25,7 @@ import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
 import top.colter.dynamic.core.data.DeliveryStatus
-import top.colter.dynamic.core.data.DynamicAttachmentKind
+import top.colter.dynamic.core.data.DynamicBlockKind
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.MediaKind
@@ -200,8 +200,8 @@ private fun failed(message: String): CommandExecutionResult {
     return CommandExecutionResult.failed(message)
 }
 
-private fun parseDynamicElementType(value: String): DynamicAttachmentKind? {
-    return DynamicAttachmentKind.entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
+private fun parseDynamicElementType(value: String): DynamicBlockKind? {
+    return DynamicBlockKind.entries.firstOrNull { it.name.equals(value, ignoreCase = true) }
 }
 
 private fun parseContentCondition(value: String, pattern: String): FilterCondition? {
@@ -799,7 +799,7 @@ private class FilterAddElementCommandHandler(
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "add", "element"),
         description = "为订阅添加动态元素屏蔽规则",
-        usage = "filter add element <platform> <publisherUserId> <image|video|card|poll>",
+        usage = "filter add element <platform> <publisherUserId> <text|image|video|card|poll|repost>",
         requiredRole = CommandRole.USER,
     )
 
@@ -819,7 +819,7 @@ private class FilterAddElementCommandHandler(
 
         val result = DynamicFilterRuleRepository.addRule(
             subscriptionId = target.subscription.id,
-            condition = FilterCondition.HasAttachmentKind(element),
+            condition = FilterCondition.HasBlockKind(element),
         )
         val state = if (result.created) "已创建" else "已存在"
         return success("过滤规则$state：${formatFilterRule(result.value, target.publisher)}")

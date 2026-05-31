@@ -4,7 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
-import top.colter.dynamic.core.data.DynamicAttachmentKind
+import top.colter.dynamic.core.data.DynamicBlockKind
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.initTestDatabase
@@ -19,7 +19,7 @@ class DynamicFilterRuleRepositoryTest {
 
         val imageRule = DynamicFilterRuleRepository.addRule(
             subscriptionId,
-            FilterCondition.HasAttachmentKind(DynamicAttachmentKind.IMAGE),
+            FilterCondition.HasBlockKind(DynamicBlockKind.IMAGE),
         )
         val keywordRule = DynamicFilterRuleRepository.addRule(
             subscriptionId,
@@ -56,7 +56,7 @@ class DynamicFilterRuleRepositoryTest {
         assertFailsWith<IllegalArgumentException> {
             DynamicFilterRuleRepository.addRule(
                 404,
-                FilterCondition.HasAttachmentKind(DynamicAttachmentKind.IMAGE),
+                FilterCondition.HasBlockKind(DynamicBlockKind.IMAGE),
             )
         }
         assertFailsWith<IllegalArgumentException> {

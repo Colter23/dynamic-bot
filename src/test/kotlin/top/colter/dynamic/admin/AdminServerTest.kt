@@ -10,7 +10,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.data.DeliveryStatus
-import top.colter.dynamic.core.data.DynamicAttachmentKind
+import top.colter.dynamic.core.data.DynamicBlockKind
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
@@ -140,13 +140,13 @@ class AdminServerTest {
         val rule = service.createFilterRule(
             subscription.id,
             CreateFilterRuleRequest(
-                condition = FilterCondition.HasAttachmentKind(DynamicAttachmentKind.POLL),
+                condition = FilterCondition.HasBlockKind(DynamicBlockKind.POLL),
             ),
         )
 
         assertEquals("new-up", updated.name)
         assertEquals("https://example.com/banner.png", updated.bannerUri)
-        assertEquals(FilterCondition.HasAttachmentKind(DynamicAttachmentKind.POLL), rule.condition)
+        assertEquals(FilterCondition.HasBlockKind(DynamicBlockKind.POLL), rule.condition)
         assertEquals(1, DynamicFilterRuleRepository.findBySubscriptionId(subscription.id).size)
     }
 
@@ -159,7 +159,7 @@ class AdminServerTest {
         val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!
         DynamicFilterRuleRepository.addRule(
             subscription.id,
-            FilterCondition.HasAttachmentKind(DynamicAttachmentKind.VIDEO),
+            FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO),
         )
         val service = service(FakePublisherFollowPlugin())
 
@@ -168,7 +168,7 @@ class AdminServerTest {
         val subscriberDto = service.subscribers().single()
 
         assertEquals(1, dto.filterRuleCount)
-        assertEquals(FilterCondition.HasAttachmentKind(DynamicAttachmentKind.VIDEO), dto.filterRules.single().condition)
+        assertEquals(FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO), dto.filterRules.single().condition)
         assertEquals(1, publisherDto.subscriptionCount)
         assertEquals(1, subscriberDto.subscriptionCount)
     }

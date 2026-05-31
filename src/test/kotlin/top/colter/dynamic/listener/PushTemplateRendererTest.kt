@@ -4,21 +4,25 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
-import top.colter.dynamic.core.data.CardAttachment
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicContentNodeLink
 import top.colter.dynamic.core.data.DynamicContentNodeText
+import top.colter.dynamic.core.data.DynamicMediaCard
+import top.colter.dynamic.core.data.DynamicMediaCardKind
 import top.colter.dynamic.core.data.DynamicMetric
 import top.colter.dynamic.core.data.DynamicPayload
-import top.colter.dynamic.core.data.ImageAttachment
+import top.colter.dynamic.core.data.ImageGridBlock
 import top.colter.dynamic.core.data.ImageItem
 import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.LiveStatus
+import top.colter.dynamic.core.data.MediaCardBlock
+import top.colter.dynamic.core.data.MediaCardStyle
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
+import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testMedia
 import top.colter.dynamic.testPublisherInfo
@@ -87,9 +91,9 @@ class PushTemplateRendererTest {
 
         assertEquals(
             listOf(
+                "https://example.com/content-link",
                 "https://www.bilibili.com/video/BV1",
                 "https://example.com/card",
-                "https://example.com/content-link",
             ).joinToString("\n"),
             chains.single().content.single().fallbackText,
         )
@@ -129,41 +133,51 @@ class PushTemplateRendererTest {
             externalId = "dynamic-1",
             payload = DynamicPayload(
                 title = "Demo Title",
-                content = DynamicContent(
-                    listOf(
-                        DynamicContentNodeText("Demo content"),
-                        DynamicContentNodeLink("link", url = "https://example.com/content-link"),
+                blocks = listOf(
+                    TextBlock(
+                        DynamicContent(
+                            listOf(
+                                DynamicContentNodeText("Demo content"),
+                                DynamicContentNodeLink("link", url = "https://example.com/content-link"),
+                            ),
+                        ),
                     ),
-                ),
-                attachments = listOf(
-                    ImageAttachment(
+                    ImageGridBlock(
                         images = listOf(
                             ImageItem(testMedia("https://example.com/pic-a.png", MediaKind.IMAGE), width = 100, height = 100),
                             ImageItem(testMedia("https://example.com/pic-b.png", MediaKind.IMAGE), width = 100, height = 100),
                         ),
                     ),
-                    top.colter.dynamic.core.data.VideoAttachment(
-                        id = "BV1",
-                        title = "video",
-                        description = "desc",
-                        cover = testMedia("https://example.com/cover.png", MediaKind.COVER),
-                        durationSeconds = 60,
-                        badge = "video",
-                        metrics = listOf(
-                            DynamicMetric(key = "play", display = "1"),
-                            DynamicMetric(key = "danmaku", display = "2"),
-                            DynamicMetric(key = "like", display = "3"),
+                    MediaCardBlock(
+                        style = MediaCardStyle.LARGE,
+                        card = DynamicMediaCard(
+                            kind = DynamicMediaCardKind.VIDEO,
+                            id = "BV1",
+                            title = "video",
+                            description = "desc",
+                            cover = testMedia("https://example.com/cover.png", MediaKind.COVER),
+                            durationSeconds = 60,
+                            badge = "video",
+                            metrics = listOf(
+                                DynamicMetric(key = "play", display = "1"),
+                                DynamicMetric(key = "danmaku", display = "2"),
+                                DynamicMetric(key = "like", display = "3"),
+                            ),
+                            link = "https://www.bilibili.com/video/BV1",
                         ),
-                        link = "https://www.bilibili.com/video/BV1",
                     ),
-                    CardAttachment(
-                        id = "card-1",
-                        cardKind = "article",
-                        title = "card",
-                        description = "desc",
-                        badge = "card",
-                        cover = testMedia("https://example.com/card.png", MediaKind.COVER),
-                        link = "https://example.com/card",
+                    MediaCardBlock(
+                        style = MediaCardStyle.LARGE,
+                        card = DynamicMediaCard(
+                            kind = DynamicMediaCardKind.ARTICLE,
+                            sourceKind = "article",
+                            id = "card-1",
+                            title = "card",
+                            description = "desc",
+                            badge = "card",
+                            cover = testMedia("https://example.com/card.png", MediaKind.COVER),
+                            link = "https://example.com/card",
+                        ),
                     ),
                 ),
             ),

@@ -15,10 +15,14 @@ import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.PushTemplates
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicContent
+import top.colter.dynamic.core.data.DynamicMediaCard
+import top.colter.dynamic.core.data.DynamicMediaCardKind
 import top.colter.dynamic.core.data.DynamicMetric
 import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.FilterCondition
+import top.colter.dynamic.core.data.MediaCardBlock
+import top.colter.dynamic.core.data.MediaCardStyle
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageContent
@@ -28,7 +32,7 @@ import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.SubscriptionEventKind
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetKind
-import top.colter.dynamic.core.data.VideoAttachment
+import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.event.MessageEvent
@@ -251,26 +255,30 @@ class SourceUpdateDynamicTest {
             publisher = publisher.toInfo(),
             externalId = "dynamic-1",
             payload = DynamicPayload(
-                content = DynamicContent.text("Demo content"),
-                attachments = if (withVideo) {
-                    listOf(
-                        VideoAttachment(
-                            id = "BV1",
-                            title = "Demo video",
-                            description = "Demo video description",
-                            cover = testMedia("https://example.com/cover.png", MediaKind.COVER),
-                            durationSeconds = 60,
-                            badge = "video",
-                            metrics = listOf(
-                                DynamicMetric(key = "play", display = "1"),
-                                DynamicMetric(key = "danmaku", display = "2"),
-                                DynamicMetric(key = "like", display = "3"),
+                blocks = buildList {
+                    add(TextBlock(DynamicContent.text("Demo content")))
+                    if (withVideo) {
+                        add(
+                            MediaCardBlock(
+                                style = MediaCardStyle.LARGE,
+                                card = DynamicMediaCard(
+                                    kind = DynamicMediaCardKind.VIDEO,
+                                    id = "BV1",
+                                    title = "Demo video",
+                                    description = "Demo video description",
+                                    cover = testMedia("https://example.com/cover.png", MediaKind.COVER),
+                                    durationSeconds = 60,
+                                    badge = "video",
+                                    metrics = listOf(
+                                        DynamicMetric(key = "play", display = "1"),
+                                        DynamicMetric(key = "danmaku", display = "2"),
+                                        DynamicMetric(key = "like", display = "3"),
+                                    ),
+                                    link = "https://www.bilibili.com/video/BV1",
+                                ),
                             ),
-                            link = "https://www.bilibili.com/video/BV1",
-                        ),
-                    )
-                } else {
-                    emptyList()
+                        )
+                    }
                 },
             ),
         ).copy(

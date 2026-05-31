@@ -3,7 +3,6 @@
 import org.jetbrains.skia.FontStyle
 import org.jetbrains.skia.Image
 import top.colter.dynamic.core.data.DynamicPayload
-import top.colter.dynamic.core.data.DynamicReferenceKind
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.util.formatTime
@@ -52,7 +51,7 @@ internal fun renderDefaultDynamic(update: SourceUpdate, config: DrawConfig): Ima
     }
 }
 
-private fun Layout.DefaultDynamicView(
+internal fun Layout.DefaultDynamicView(
     update: SourceUpdate,
     config: DrawConfig,
     mode: DynamicRenderMode = DynamicRenderMode.ROOT,
@@ -60,13 +59,8 @@ private fun Layout.DefaultDynamicView(
 ) {
     val payload = update.payload as? DynamicPayload ?: return
     val title = payload.title?.takeIf { it.isNotBlank() }
-    val content = payload.content?.takeIf { it.nodes.isNotEmpty() }
-    val originReferences = payload.references
-        .filter { reference -> reference.kind == DynamicReferenceKind.ORIGIN }
-        .mapNotNull { reference -> reference.embedded }
-    val hasContent = content != null
-    val hasAttachments = payload.attachments.isNotEmpty()
-    val hasOriginReferences = originReferences.isNotEmpty()
+    val blocks = payload.blocks
+    val hasBlocks = blocks.isNotEmpty()
 
     Column(modifier = Modifier().fillMaxWidth()) {
         if (mode == DynamicRenderMode.ROOT) {
@@ -104,30 +98,11 @@ private fun Layout.DefaultDynamicView(
                     fontSize = 36.dp,
                     fontStyle = FontStyle.BOLD,
                     maxLinesCount = 2,
-                    modifier = Modifier().margin(bottom = if (hasContent || hasAttachments) contentSpacing else 0.dp),
+                    modifier = Modifier().margin(bottom = if (hasBlocks) contentSpacing else 0.dp),
                 )
             }
-            content?.let {
-                drawDynamicContent(
-                    content = it,
-                    config = config,
-                    bottomSpacing = if (hasAttachments) contentSpacing else 0.dp,
-                )
-            }
-            if (hasAttachments) {
-                drawDynamicAttachments(payload.attachments, config, mode)
-            }
-            if (hasOriginReferences) {
-                val hasBodyBeforeOrigin = title != null || hasContent || hasAttachments
-                originReferences.forEachIndexed { index, origin ->
-                    val originTopSpacing = if (hasBodyBeforeOrigin || index > 0) contentSpacing else 0.dp
-                    DefaultDynamicView(
-                        update = origin,
-                        config = config,
-                        mode = DynamicRenderMode.FORWARD,
-                        topSpacing = originTopSpacing,
-                    )
-                }
+            if (hasBlocks) {
+                drawDynamicBlocks(blocks, config, mode)
             }
         }
     }
