@@ -7,12 +7,15 @@ import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.repository.LinkParseTargetConfigRepository
 import kotlin.math.roundToLong
+
+private val autoParseLogger = loggerFor<DynamicLinkAutoParseListener>()
 
 internal class DynamicLinkAutoParseListener(
     private val configProvider: () -> MainDynamicConfig,
@@ -29,16 +32,24 @@ internal class DynamicLinkAutoParseListener(
 
         val triggerMode = LinkParseTargetConfigRepository.findByAddress(event.context.target)?.triggerMode
             ?: linkParsing.fallbackTriggerMode
-        if (!triggerMode.allows(event)) return
+        if (!triggerMode.allows(event)) {
+            logTriggerBlocked(event, triggerMode)
+            return
+        }
 
         var progressReceipt: LinkParseProgressReceipt? = null
+        val autoDedupe = dedupe.takeIf { triggerMode == LinkParseTriggerMode.ALWAYS }
         val result = try {
             forwarder.forwardFirst(
                 text = event.rawText,
                 context = event.context,
                 maxLinks = linkParsing.maxLinksPerMessage,
-                dedupe = dedupe,
-                dedupeTtlMs = secondsToMillis(linkParsing.autoDedupeTtlSeconds, minimumMillis = 0),
+                dedupe = autoDedupe,
+                dedupeTtlMs = if (autoDedupe == null) {
+                    0
+                } else {
+                    secondsToMillis(linkParsing.autoDedupeTtlSeconds, minimumMillis = 0)
+                },
                 onForwardingStarted = {
                     if (progressReceipt == null) {
                         progressReceipt = progressMessenger.send(event, linkParsing.progressReply)
@@ -84,6 +95,20 @@ internal class DynamicLinkAutoParseListener(
             LinkParseTriggerMode.DISABLED -> false
             LinkParseTriggerMode.ALWAYS -> true
             LinkParseTriggerMode.MENTION_ONLY -> event.context.mentionsBot()
+        }
+    }
+
+    private fun logTriggerBlocked(event: CommandEvent, triggerMode: LinkParseTriggerMode) {
+        if (!event.rawText.contains("http://") && !event.rawText.contains("https://")) return
+        val context = event.context
+        when (triggerMode) {
+            LinkParseTriggerMode.DISABLED -> autoParseLogger.info {
+                "链接自动解析未触发：当前消息目标已关闭链接解析 target=${context.target.stableValue()}"
+            }
+            LinkParseTriggerMode.MENTION_ONLY -> autoParseLogger.info {
+                "链接自动解析未触发：需要在同一条消息中 @ 当前 bot target=${context.target.stableValue()} botAccountId=${context.botAccountId ?: "未知"} mentionedAccountIds=${context.mentionedAccountIds.joinToString(",").ifBlank { "无" }}"
+            }
+            LinkParseTriggerMode.ALWAYS -> Unit
         }
     }
 

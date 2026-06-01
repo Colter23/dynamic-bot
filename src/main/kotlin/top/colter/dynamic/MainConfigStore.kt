@@ -130,7 +130,11 @@ public object MainConfigForms {
                     type = ConfigFieldType.SELECT,
                     section = "链接解析",
                     description = "当前消息目标没有单独配置时使用的自动解析触发方式。",
-                    options = LinkParseTriggerMode.entries.map { ConfigFieldOption(it.name, it.name) },
+                    options = listOf(
+                        ConfigFieldOption(LinkParseTriggerMode.DISABLED.name, "不解析"),
+                        ConfigFieldOption(LinkParseTriggerMode.MENTION_ONLY.name, "必须 @bot"),
+                        ConfigFieldOption(LinkParseTriggerMode.ALWAYS.name, "匹配链接即解析"),
+                    ),
                     required = true,
                 ),
                 ConfigFieldSpec(
@@ -153,7 +157,7 @@ public object MainConfigForms {
                     label = "自动去重时间窗口（秒）",
                     type = ConfigFieldType.NUMBER,
                     section = "链接解析",
-                    description = "同一个动态链接在该时间窗口内只会自动转发一次；支持小数，例如 0.5 表示 0.5 秒。",
+                    description = "同一个动态链接在该时间窗口内只会自动转发一次，仅“匹配链接即解析”模式有效。",
                     min = 0,
                 ),
                 ConfigFieldSpec(

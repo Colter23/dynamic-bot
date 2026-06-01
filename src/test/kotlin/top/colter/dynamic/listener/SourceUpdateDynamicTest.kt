@@ -4,6 +4,7 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
@@ -37,7 +38,9 @@ import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
+import top.colter.dynamic.core.event.SourceUpdatePublishStatus
 import top.colter.dynamic.draw.DynamicDrawService
+import top.colter.dynamic.link.LINK_PARSE_EVENT_LABEL
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PersistenceManager
@@ -72,6 +75,63 @@ class SourceUpdateDynamicTest {
         assertTrue(contents.first() is MessageContent.Image)
         assertEquals("D:/tmp/dynamic.png", (contents.first() as MessageContent.Image).image.uri)
         assertEquals("\nvideo Demo UP Demo content", contents.filterIsInstance<MessageContent.Text>().single().fallbackText)
+    }
+
+    @Test
+    fun shouldKeepDuplicateProtectionForRegularDynamicUpdates() = runBlocking {
+        initDb("dynamic-listener-regular-dedupe")
+        val eventBus = EventBus()
+        val publisher = createPublisher()
+        val subscriber = createSubscriber()
+        SubscriptionRepository.subscribe(subscriber.id, publisher.id)
+        val listener = SourceUpdateProcessor(
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "{name} {link}")),
+            eventBus = eventBus,
+        )
+        val received = captureMessageEvents(eventBus)
+        val request = SourceUpdatePublishRequest(sourcePlugin = "test", update = demoDynamic(publisher))
+
+        val first = listener.process(request)
+        val firstEvent = withTimeout(3_000) { received.receive() }
+        val second = listener.process(request)
+
+        assertEquals(SourceUpdatePublishStatus.ENQUEUED, first.status)
+        assertEquals(SourceUpdatePublishStatus.DUPLICATE, second.status)
+        assertEquals("${request.update.key.stableValue()}:default", firstEvent.message.id)
+        assertEquals(1, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
+        assertNull(withTimeoutOrNull(300) { received.receive() })
+    }
+
+    @Test
+    fun shouldCreateNewDeliveriesForRepeatedLinkParseRequests() = runBlocking {
+        initDb("dynamic-listener-link-parse-repeat")
+        val eventBus = EventBus()
+        val publisher = createPublisher()
+        val subscriber = createSubscriber()
+        val listener = SourceUpdateProcessor(
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "{name} {link}")),
+            eventBus = eventBus,
+        )
+        val received = captureMessageEvents(eventBus)
+        val request = SourceUpdatePublishRequest(
+            sourcePlugin = "test",
+            deliveryTarget = subscriber,
+            deliveryTag = LINK_PARSE_EVENT_LABEL,
+            update = demoDynamic(publisher),
+        )
+
+        val first = listener.process(request)
+        val firstEvent = withTimeout(3_000) { received.receive() }
+        val second = listener.process(request)
+        val secondEvent = withTimeout(3_000) { received.receive() }
+
+        assertEquals(SourceUpdatePublishStatus.ENQUEUED, first.status)
+        assertEquals(SourceUpdatePublishStatus.ENQUEUED, second.status)
+        assertEquals(2, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
+        assertEquals(firstEvent.message.sourceUpdateKey, secondEvent.message.sourceUpdateKey)
+        assertNotEquals(firstEvent.message.id, secondEvent.message.id)
+        assertTrue(firstEvent.message.id.contains(":default:link-parse:"))
+        assertTrue(secondEvent.message.id.contains(":default:link-parse:"))
     }
 
     @Test

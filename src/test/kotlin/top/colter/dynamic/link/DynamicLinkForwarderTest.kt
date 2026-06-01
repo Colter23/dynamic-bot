@@ -6,6 +6,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import top.colter.dynamic.LinkParseProgressReplyConfig
@@ -192,6 +193,34 @@ class DynamicLinkForwarderTest {
     }
 
     @Test
+    fun `auto parser should not ttl dedupe explicit bot mentions`() = runBlocking {
+        initDb("auto-mention-repeat")
+        val resolver = FakeDynamicLinkResolver()
+        val sourceUpdates = RecordingSourceUpdatePublisher()
+        val listener = DynamicLinkAutoParseListener(
+            configProvider = { MainDynamicConfig() },
+            forwarder = DynamicLinkForwarder(
+                resolversProvider = { listOf(resolver) },
+                sourceUpdatePublisher = sourceUpdates,
+            ),
+        )
+        val event = commandEvent(
+            "@42 https://t.bilibili.com/1",
+            botAccountId = "42",
+            mentionedAccountIds = setOf("42"),
+        )
+
+        listener.onMessage(event)
+        listener.onMessage(event)
+
+        val first = withTimeout(3_000) { sourceUpdates.receive() }
+        val second = withTimeout(3_000) { sourceUpdates.receive() }
+        assertEquals("1", first.update.key.externalId)
+        assertEquals("1", second.update.key.externalId)
+        assertEquals(listOf("1", "1"), resolver.resolvedUpdateIds)
+    }
+
+    @Test
     fun `auto parser should use target trigger config before fallback`() = runBlocking {
         initDb("auto-target-trigger")
         val resolver = FakeDynamicLinkResolver()
@@ -349,14 +378,14 @@ class DynamicLinkForwarderTest {
     }
 
     private class RecordingSourceUpdatePublisher : SourceUpdatePublisher {
-        private val received = CompletableDeferred<SourceUpdatePublishRequest>()
+        private val received = Channel<SourceUpdatePublishRequest>(Channel.UNLIMITED)
 
         override suspend fun publish(request: SourceUpdatePublishRequest): SourceUpdatePublishResult {
-            if (!received.isCompleted) received.complete(request)
+            received.send(request)
             return SourceUpdatePublishResult.enqueued(1)
         }
 
-        suspend fun receive(): SourceUpdatePublishRequest = received.await()
+        suspend fun receive(): SourceUpdatePublishRequest = received.receive()
     }
 
     private class FakeDynamicLinkResolver : DynamicLinkResolver {

@@ -1,5 +1,6 @@
 ﻿package top.colter.dynamic.listener
 
+import java.util.UUID
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.config.YamlConfigService
@@ -93,6 +94,7 @@ public class SourceUpdateProcessor(
             targets = deliverableTargets,
             batches = chain,
             skipReason = "update=${normalizedUpdate.key.stableValue()}",
+            messageIdNonce = request.linkParseMessageIdNonce(),
         )
     }
 
@@ -219,6 +221,7 @@ public class SourceUpdateProcessor(
         targets: List<DeliveryTarget>,
         batches: List<MessageBatch>,
         skipReason: String,
+        messageIdNonce: String? = null,
     ): SourceUpdatePublishResult {
         if (batches.isEmpty()) {
             logger.warn { "跳过来源更新：$skipReason，渲染后的消息为空" }
@@ -227,8 +230,8 @@ public class SourceUpdateProcessor(
 
         val (mentionAllTargets, normalTargets) = targets.partition { it.shouldMentionAll(update) }
         val results = listOfNotNull(
-            publishMessageVariant(update, normalTargets, batches, "default"),
-            publishMessageVariant(update, mentionAllTargets, batches.withMentionAllAtTail(), "mention_all"),
+            publishMessageVariant(update, normalTargets, batches, "default", messageIdNonce),
+            publishMessageVariant(update, mentionAllTargets, batches.withMentionAllAtTail(), "mention_all", messageIdNonce),
         )
         val newDeliveryCount = results.sumOf { it.newDeliveries.size }
         return when {
@@ -252,11 +255,12 @@ public class SourceUpdateProcessor(
         targets: List<DeliveryTarget>,
         batches: List<MessageBatch>,
         renderVariant: String,
+        messageIdNonce: String?,
     ): MessageEnqueueResult? {
         if (targets.isEmpty()) return null
 
         val message = Message(
-            id = "${update.key.stableValue()}:$renderVariant",
+            id = buildMessageId(update, renderVariant, messageIdNonce),
             time = System.currentTimeMillis() / 1000,
             sourceUpdateKey = update.key,
             renderVariant = renderVariant,
@@ -278,6 +282,20 @@ public class SourceUpdateProcessor(
             MessageEvent(sourcePlugin = "main", message = broadcastMessage).let { eventBus.broadcast(it) }
         }
         return result
+    }
+
+    private fun SourceUpdatePublishRequest.linkParseMessageIdNonce(): String? {
+        if (deliveryTag != LINK_PARSE_EVENT_LABEL) return null
+        return "link-parse:${System.currentTimeMillis()}:${UUID.randomUUID()}"
+    }
+
+    private fun buildMessageId(
+        update: SourceUpdate,
+        renderVariant: String,
+        nonce: String?,
+    ): String {
+        val base = "${update.key.stableValue()}:$renderVariant"
+        return if (nonce == null) base else "$base:$nonce"
     }
 
     private fun DeliveryTarget.shouldMentionAll(update: SourceUpdate): Boolean {
