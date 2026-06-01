@@ -182,8 +182,10 @@ public object DrawThemeFactory {
         val hsl = color.toHsl()
         return HslColor(
             h = hsl.h,
-            s = hsl.s.coerceIn(0.38, 0.68),
-            l = if (mode == DrawThemeMode.LIGHT) 0.60 else 0.76,
+//            s = hsl.s.coerceIn(0.38, 0.68),
+            s = 1.0,
+//            l = if (mode == DrawThemeMode.LIGHT) 0.60 else 0.76,
+            l = if (mode == DrawThemeMode.LIGHT) 0.70 else 0.76,
         ).toColor()
     }
 
