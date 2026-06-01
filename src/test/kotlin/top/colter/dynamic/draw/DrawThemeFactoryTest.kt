@@ -63,6 +63,25 @@ class DrawThemeFactoryTest {
     }
 
     @Test
+    fun primaryColorShouldBeBrighterThanReadableLinkColorInLightTheme() {
+        val theme = DrawThemeFactory.fromThemeColorText("#FE65A6")
+
+        assertEquals(DrawThemeMode.LIGHT, theme.mode)
+        assertTrue(
+            actual = relativeLuminance(theme.primaryColor) > relativeLuminance(theme.linkColor),
+            message = "亮色主题的强调色应比正文链接色更明亮",
+        )
+        assertTrue(
+            actual = relativeLuminance(theme.primaryColor) > 0.22,
+            message = "亮色主题的强调色不应过暗",
+        )
+        assertTrue(
+            actual = contrastRatio(theme.linkColor, theme.cardColor) >= 4.5,
+            message = "正文链接色仍需保持可读",
+        )
+    }
+
+    @Test
     fun invalidThemeColorTextShouldUseChineseMessages() {
         assertTrue(
             assertFailsWith<IllegalArgumentException> {

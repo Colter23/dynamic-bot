@@ -62,22 +62,20 @@ internal fun Layout.Author(
         )
 
         Column(modifier = Modifier().fillWidth().fillMaxHeight().padding(vertical = 20.dp)) {
-            Box(modifier = Modifier().fillMaxWidth().fillRatioHeight(0.56f)) {
-                Text(
-                    text = name,
-                    color = accentColor,
-                    fontSize = 36.dp,
-                    alignment = LayoutAlignment.LEFT,
-                )
-            }
-            Box(modifier = Modifier().fillMaxWidth().fillRatioHeight(1f - 0.56f)) {
-                Text(
-                    text = time,
-                    color = Color.WHITE.withAlpha(0.8f),
-                    fontSize = 26.dp,
-                    alignment = LayoutAlignment.LEFT,
-                )
-            }
+            Text(
+                text = name,
+                color = Color.WHITE,
+                fontSize = 36.dp,
+                alignment = LayoutAlignment.LEFT,
+                modifier = Modifier().fillMaxWidth().fillRatioHeight(0.56f)
+            )
+            Text(
+                text = time,
+                color = Color.WHITE.withAlpha(0.8f),
+                fontSize = 26.dp,
+                alignment = LayoutAlignment.LEFT,
+                modifier = Modifier().fillMaxWidth().fillRatioHeight(1f - 0.56f)
+            )
         }
 
         Decorate(

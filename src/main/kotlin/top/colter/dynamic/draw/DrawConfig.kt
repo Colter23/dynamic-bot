@@ -120,7 +120,8 @@ public object DrawThemeFactory {
             sourceColors.map { normalizeBackgroundColor(it, mode) }
         }
         val cardBase = if (mode == DrawThemeMode.LIGHT) Color.WHITE else Color.makeRGB(30, 34, 42)
-        val primary = accentColor(sourceColors.first(), mode, cardBase)
+        val primary = primaryAccentColor(sourceColors.first(), mode)
+        val link = readableAccentColor(sourceColors.first(), mode, cardBase)
 
         return DrawTheme(
             mode = mode,
@@ -131,7 +132,7 @@ public object DrawThemeFactory {
             textColor = if (mode == DrawThemeMode.LIGHT) Color.BLACK else Color.WHITE,
             secondaryTextColor = if (mode == DrawThemeMode.LIGHT) Color.BLACK.withAlpha(0.72f) else Color.WHITE.withAlpha(0.78f),
             mutedTextColor = if (mode == DrawThemeMode.LIGHT) Color.makeRGB(112, 118, 128) else Color.makeRGB(178, 186, 198),
-            linkColor = primary,
+            linkColor = link,
         )
     }
 
@@ -177,7 +178,16 @@ public object DrawThemeFactory {
         ).toColor()
     }
 
-    private fun accentColor(color: Int, mode: DrawThemeMode, cardBase: Int): Int {
+    private fun primaryAccentColor(color: Int, mode: DrawThemeMode): Int {
+        val hsl = color.toHsl()
+        return HslColor(
+            h = hsl.h,
+            s = hsl.s.coerceIn(0.38, 0.68),
+            l = if (mode == DrawThemeMode.LIGHT) 0.60 else 0.76,
+        ).toColor()
+    }
+
+    private fun readableAccentColor(color: Int, mode: DrawThemeMode, cardBase: Int): Int {
         val hsl = color.toHsl()
         val candidate = HslColor(
             h = hsl.h,
