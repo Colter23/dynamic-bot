@@ -28,10 +28,11 @@ public class DynamicLinkForwarder(
         maxLinks: Int = 1,
         dedupe: DynamicLinkDedupe? = null,
         dedupeTtlMs: Long = 0,
+        onForwardingStarted: suspend (ParsedDynamicLink) -> Unit = {},
     ): DynamicLinkForwardResult {
         if (maxLinks <= 0) return DynamicLinkForwardResult.Failed("链接解析已禁用")
 
-        val urls = DynamicUrlExtractor.extract(text)
+        val urls = DynamicUrlExtractor.extract(text).take(maxLinks)
         if (urls.isEmpty()) return DynamicLinkForwardResult.NoSupportedLink
 
         val resolvers = resolversProvider()
@@ -47,6 +48,7 @@ public class DynamicLinkForwarder(
                     return DynamicLinkForwardResult.Duplicate(parsedLink)
                 }
 
+                onForwardingStarted(parsedLink)
                 return when (val resolution = resolver.resolveDynamicLink(parsedLink)) {
                     is DynamicLinkResolution.Success -> forward(resolution.update, parsedLink, context)
                     is DynamicLinkResolution.Failed -> DynamicLinkForwardResult.Failed(resolution.reason)

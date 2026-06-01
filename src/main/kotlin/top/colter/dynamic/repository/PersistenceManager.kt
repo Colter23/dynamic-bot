@@ -5,6 +5,7 @@ import org.jetbrains.exposed.v1.jdbc.Database
 import org.jetbrains.exposed.v1.jdbc.SchemaUtils
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import top.colter.dynamic.table.DynamicFilterRuleTable
+import top.colter.dynamic.table.LinkParseTargetConfigTable
 import top.colter.dynamic.table.MessageDeliveryTable
 import top.colter.dynamic.table.MessageOutboxTable
 import top.colter.dynamic.table.PublisherDrawThemeTable
@@ -45,6 +46,7 @@ public object PersistenceManager {
                     SubscriptionTable,
                     SourceCursorTable,
                     DynamicFilterRuleTable,
+                    LinkParseTargetConfigTable,
                     MessageOutboxTable,
                     MessageDeliveryTable,
                 )

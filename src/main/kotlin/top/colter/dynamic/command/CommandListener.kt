@@ -60,6 +60,7 @@ import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.link.DynamicLinkForwarder
+import top.colter.dynamic.link.LinkParseConfigCommandHandler
 import top.colter.dynamic.link.ParseDynamicLinkCommandHandler
 import java.awt.Color
 import java.awt.image.BufferedImage
@@ -162,6 +163,7 @@ public class CommandListener(
         commandRegistry.register(StatusCommandHandler(commandRegistry), MAIN_OWNER)
         stopRequester?.let { commandRegistry.register(StopApplicationCommandHandler(it), MAIN_OWNER) }
         commandRegistry.register(ParseDynamicLinkCommandHandler(dynamicLinkForwarder, commandPrefixProvider), MAIN_OWNER)
+        commandRegistry.register(LinkParseConfigCommandHandler({ runtimeConfig }, commandPrefixProvider), MAIN_OWNER)
         commandRegistry.register(
             SubscribeCommandHandler(
                 publisherLookupResolver,

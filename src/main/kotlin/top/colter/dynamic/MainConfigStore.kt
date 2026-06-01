@@ -125,6 +125,15 @@ public object MainConfigForms {
                     description = "收到聊天消息中的动态链接时，自动解析并按当前消息目标转发动态内容。",
                 ),
                 ConfigFieldSpec(
+                    path = "linkParsing.fallbackTriggerMode",
+                    label = "未配置目标回退触发方式",
+                    type = ConfigFieldType.SELECT,
+                    section = "链接解析",
+                    description = "当前消息目标没有单独配置时使用的自动解析触发方式。",
+                    options = LinkParseTriggerMode.entries.map { ConfigFieldOption(it.name, it.name) },
+                    required = true,
+                ),
+                ConfigFieldSpec(
                     path = "linkParsing.maxLinksPerMessage",
                     label = "单条消息最大解析链接数",
                     type = ConfigFieldType.NUMBER,
@@ -133,7 +142,7 @@ public object MainConfigForms {
                     min = 1,
                 ),
                 ConfigFieldSpec(
-                    path = "linkParsing.autoReplyOnFailure",
+                    path = "linkParsing.replyOnFailure",
                     label = "解析失败时自动回复",
                     type = ConfigFieldType.BOOLEAN,
                     section = "链接解析",
@@ -146,6 +155,28 @@ public object MainConfigForms {
                     section = "链接解析",
                     description = "同一个动态链接在该时间窗口内只会自动转发一次；支持小数，例如 0.5 表示 0.5 秒。",
                     min = 0,
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.progressReply.enabled",
+                    label = "解析中提示",
+                    type = ConfigFieldType.BOOLEAN,
+                    section = "链接解析",
+                    description = "自动解析触发后，在原消息目标中发送一条解析中的提示消息。",
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.progressReply.text",
+                    label = "解析中提示文字",
+                    type = ConfigFieldType.TEXT,
+                    section = "链接解析",
+                    description = "自动解析耗时较长时展示给用户的提示文字。",
+                    required = true,
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.progressReply.recallOnComplete",
+                    label = "完成后撤回解析中提示",
+                    type = ConfigFieldType.BOOLEAN,
+                    section = "链接解析",
+                    description = "解析结果发送完成或失败后，尽量撤回解析中的提示消息；不支持撤回的平台会忽略。",
                 ),
                 ConfigFieldSpec(
                     path = "imageCache.sourceRoot",
@@ -384,6 +415,9 @@ public object MainConfigForms {
         }
         require(config.linkParsing.maxLinksPerMessage >= 1) { "单条消息最大解析链接数至少为 1" }
         require(config.linkParsing.autoDedupeTtlSeconds >= 0.0) { "自动去重时间窗口不能为负数" }
+        if (config.linkParsing.progressReply.enabled) {
+            require(config.linkParsing.progressReply.text.isNotBlank()) { "解析中提示文字不能为空" }
+        }
         require(config.imageCache.sourceRoot.isNotBlank()) { "原图缓存目录不能为空" }
         require(config.imageCache.renderedRoot.isNotBlank()) { "渲染图片目录不能为空" }
         require(config.imageCache.downloadTimeoutSeconds > 0.0) { "图片下载超时必须大于 0 秒" }

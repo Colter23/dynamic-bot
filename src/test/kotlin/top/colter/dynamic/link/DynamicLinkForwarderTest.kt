@@ -8,6 +8,9 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import top.colter.dynamic.LinkParseProgressReplyConfig
+import top.colter.dynamic.LinkParseTriggerMode
+import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.command.CommandRegistry
@@ -28,6 +31,7 @@ import top.colter.dynamic.core.link.DynamicLinkResolution
 import top.colter.dynamic.core.link.DynamicLinkResolver
 import top.colter.dynamic.core.link.ParsedDynamicLink
 import top.colter.dynamic.repository.PersistenceManager
+import top.colter.dynamic.repository.LinkParseTargetConfigRepository
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.testDynamicUpdate
@@ -99,7 +103,7 @@ class DynamicLinkForwarderTest {
         val resolver = FakeDynamicLinkResolver()
         val sourceUpdates = RecordingSourceUpdatePublisher()
         val listener = DynamicLinkAutoParseListener(
-            configProvider = { MainDynamicConfig() },
+            configProvider = { autoParseConfig(LinkParseTriggerMode.ALWAYS) },
             forwarder = DynamicLinkForwarder(
                 resolversProvider = { listOf(resolver) },
                 sourceUpdatePublisher = sourceUpdates,
@@ -121,7 +125,7 @@ class DynamicLinkForwarderTest {
         val resolver = FakeDynamicLinkResolver()
         val sourceUpdates = RecordingSourceUpdatePublisher()
         val listener = DynamicLinkAutoParseListener(
-            configProvider = { MainDynamicConfig() },
+            configProvider = { autoParseConfig(LinkParseTriggerMode.ALWAYS) },
             forwarder = DynamicLinkForwarder(
                 resolversProvider = { listOf(resolver) },
                 sourceUpdatePublisher = sourceUpdates,
@@ -138,6 +142,115 @@ class DynamicLinkForwarderTest {
         listener.onMessage(commandEvent("https://t.bilibili.com/2 https://t.bilibili.com/3"))
 
         assertEquals(listOf("1", "2"), resolver.resolvedUpdateIds)
+    }
+
+    @Test
+    fun `auto parser should ignore links when global auto parsing is disabled`() = runBlocking {
+        initDb("auto-disabled")
+        val resolver = FakeDynamicLinkResolver()
+        val listener = DynamicLinkAutoParseListener(
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        autoParseEnabled = false,
+                        fallbackTriggerMode = LinkParseTriggerMode.ALWAYS,
+                    ),
+                )
+            },
+            forwarder = DynamicLinkForwarder(
+                resolversProvider = { listOf(resolver) },
+                sourceUpdatePublisher = RecordingSourceUpdatePublisher(),
+            ),
+        )
+
+        listener.onMessage(commandEvent("https://t.bilibili.com/1"))
+
+        assertEquals(0, resolver.resolveCalls)
+    }
+
+    @Test
+    fun `auto parser should require bot mention for mention fallback`() = runBlocking {
+        initDb("auto-mention-fallback")
+        val resolver = FakeDynamicLinkResolver()
+        val sourceUpdates = RecordingSourceUpdatePublisher()
+        val listener = DynamicLinkAutoParseListener(
+            configProvider = { MainDynamicConfig() },
+            forwarder = DynamicLinkForwarder(
+                resolversProvider = { listOf(resolver) },
+                sourceUpdatePublisher = sourceUpdates,
+            ),
+        )
+
+        listener.onMessage(commandEvent("https://t.bilibili.com/1", botAccountId = "42"))
+        assertEquals(0, resolver.resolveCalls)
+
+        listener.onMessage(commandEvent("@42 https://t.bilibili.com/1", botAccountId = "42", mentionedAccountIds = setOf("42")))
+
+        val event = withTimeout(3_000) { sourceUpdates.receive() }
+        assertEquals("1", event.update.key.externalId)
+        assertEquals(1, resolver.resolveCalls)
+    }
+
+    @Test
+    fun `auto parser should use target trigger config before fallback`() = runBlocking {
+        initDb("auto-target-trigger")
+        val resolver = FakeDynamicLinkResolver()
+        val sourceUpdates = RecordingSourceUpdatePublisher()
+        val target = TargetAddress.of("onebot", TargetKind.GROUP, "100")
+        LinkParseTargetConfigRepository.upsert(target, LinkParseTriggerMode.ALWAYS, updatedBy = "admin")
+        val listener = DynamicLinkAutoParseListener(
+            configProvider = { MainDynamicConfig() },
+            forwarder = DynamicLinkForwarder(
+                resolversProvider = { listOf(resolver) },
+                sourceUpdatePublisher = sourceUpdates,
+            ),
+        )
+
+        listener.onMessage(commandEvent("https://t.bilibili.com/1"))
+
+        val event = withTimeout(3_000) { sourceUpdates.receive() }
+        assertEquals("1", event.update.key.externalId)
+    }
+
+    @Test
+    fun `auto parser should allow target config to disable fallback parsing`() = runBlocking {
+        initDb("auto-target-disabled")
+        val resolver = FakeDynamicLinkResolver()
+        val target = TargetAddress.of("onebot", TargetKind.GROUP, "100")
+        LinkParseTargetConfigRepository.upsert(target, LinkParseTriggerMode.DISABLED, updatedBy = "admin")
+        val listener = DynamicLinkAutoParseListener(
+            configProvider = { autoParseConfig(LinkParseTriggerMode.ALWAYS) },
+            forwarder = DynamicLinkForwarder(
+                resolversProvider = { listOf(resolver) },
+                sourceUpdatePublisher = RecordingSourceUpdatePublisher(),
+            ),
+        )
+
+        listener.onMessage(commandEvent("https://t.bilibili.com/1"))
+
+        assertEquals(0, resolver.resolveCalls)
+    }
+
+    @Test
+    fun `auto parser should send and recall progress prompt`() = runBlocking {
+        initDb("auto-progress")
+        val resolver = FakeDynamicLinkResolver()
+        val sourceUpdates = RecordingSourceUpdatePublisher()
+        val messenger = RecordingProgressMessenger()
+        val listener = DynamicLinkAutoParseListener(
+            configProvider = { autoParseConfig(LinkParseTriggerMode.ALWAYS) },
+            forwarder = DynamicLinkForwarder(
+                resolversProvider = { listOf(resolver) },
+                sourceUpdatePublisher = sourceUpdates,
+            ),
+            progressMessenger = messenger,
+        )
+
+        listener.onMessage(commandEvent("https://t.bilibili.com/1"))
+        withTimeout(3_000) { sourceUpdates.receive() }
+
+        assertEquals(listOf("链接解析中，请稍候..."), messenger.sentTexts)
+        assertEquals(listOf("progress-1"), messenger.recalledIds)
     }
 
     private suspend fun dispatchCommand(
@@ -185,7 +298,20 @@ class DynamicLinkForwarderTest {
         PersistenceManager.init(tempDir.resolve("test.db").path)
     }
 
-    private fun commandEvent(rawText: String): CommandEvent {
+    private fun autoParseConfig(triggerMode: LinkParseTriggerMode): MainDynamicConfig {
+        return MainDynamicConfig(
+            linkParsing = LinkParsingConfig(
+                fallbackTriggerMode = triggerMode,
+                progressReply = LinkParseProgressReplyConfig(),
+            ),
+        )
+    }
+
+    private fun commandEvent(
+        rawText: String,
+        botAccountId: String? = null,
+        mentionedAccountIds: Set<String> = emptySet(),
+    ): CommandEvent {
         return CommandEvent(
             sourcePlugin = "test",
             context = CommandContext.of(
@@ -193,6 +319,8 @@ class DynamicLinkForwarderTest {
                 kind = TargetKind.GROUP,
                 externalId = "100",
                 senderId = "sender",
+                botAccountId = botAccountId,
+                mentionedAccountIds = mentionedAccountIds,
             ),
             rawText = rawText,
             traceId = "trace",
@@ -201,6 +329,23 @@ class DynamicLinkForwarderTest {
 
     private fun renderMessage(result: CommandResultEvent): String {
         return result.chain.flatMap { it.content }.joinToString("\n") { it.fallbackText }
+    }
+
+    private class RecordingProgressMessenger : LinkParseProgressMessenger {
+        val sentTexts: MutableList<String> = mutableListOf()
+        val recalledIds: MutableList<String> = mutableListOf()
+
+        override suspend fun send(
+            event: CommandEvent,
+            config: LinkParseProgressReplyConfig,
+        ): LinkParseProgressReceipt? {
+            sentTexts += config.text
+            return LinkParseProgressReceipt(event.context.target, "progress-${sentTexts.size}")
+        }
+
+        override suspend fun recall(receipt: LinkParseProgressReceipt) {
+            recalledIds += receipt.sinkMessageId
+        }
     }
 
     private class RecordingSourceUpdatePublisher : SourceUpdatePublisher {

@@ -39,6 +39,7 @@ import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.listener.DeliveryDispatcher
 import top.colter.dynamic.link.DynamicLinkAutoParseListener
 import top.colter.dynamic.link.DynamicLinkForwarder
+import top.colter.dynamic.link.DeliveryLinkParseProgressMessenger
 import top.colter.dynamic.listener.SourceUpdateProcessor
 
 private val logger = loggerFor<DynamicApplication>()
@@ -174,6 +175,10 @@ public object DynamicApplication : CoroutineScope {
                 configProvider = configStore::current,
                 forwarder = dynamicLinkForwarder,
                 eventBus = eventBus,
+                progressMessenger = DeliveryLinkParseProgressMessenger(
+                    sendCommandResult = deliveryDispatcher::sendCommandResult,
+                    recallMessage = deliveryDispatcher::recallMessage,
+                ),
             ),
         )
 

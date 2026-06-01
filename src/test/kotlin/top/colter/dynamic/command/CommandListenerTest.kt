@@ -8,9 +8,12 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.command.CommandRegistry
+import top.colter.dynamic.core.command.CommandPermissionRule
 import top.colter.dynamic.core.data.CommandContext
+import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.DynamicBlockKind
 import top.colter.dynamic.core.data.FilterCondition
@@ -30,6 +33,7 @@ import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
 import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
+import top.colter.dynamic.repository.LinkParseTargetConfigRepository
 import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.repository.PublisherDrawThemeRepository
 import top.colter.dynamic.repository.PublisherRepository
@@ -131,6 +135,35 @@ class CommandListenerTest {
         assertEquals(CommandStatus.SUCCESS, clearResult.status)
         assertTrue(renderMessage(clearResult).contains("发布者主题色已清除"))
         assertTrue(PublisherDrawThemeRepository.findByPublisherId(publisher.id) == null)
+    }
+
+    @Test
+    fun linkSetStatusAndClearShouldManageCurrentTargetConfig() = runBlocking {
+        initDb("command-link")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = MainDynamicConfig(
+                command = top.colter.dynamic.CommandConfig(
+                    permissions = listOf(CommandPermissionRule(senderId = "sender", role = CommandRole.ADMIN)),
+                ),
+            ),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val setResult = dispatch(eventBus, listener, commandEvent("/db link set always"))
+        val stored = assertNotNull(
+            LinkParseTargetConfigRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")),
+        )
+        val statusResult = dispatch(eventBus, listener, commandEvent("/db link status"))
+        val clearResult = dispatch(eventBus, listener, commandEvent("/db link clear"))
+
+        assertEquals(CommandStatus.SUCCESS, setResult.status)
+        assertEquals(LinkParseTriggerMode.ALWAYS, stored.triggerMode)
+        assertTrue(renderMessage(statusResult).contains("匹配到链接就解析"))
+        assertEquals(CommandStatus.SUCCESS, clearResult.status)
+        assertTrue(LinkParseTargetConfigRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")) == null)
     }
 
     private suspend fun dispatch(

@@ -42,9 +42,23 @@ public data class SubscriptionConfig(
 
 public data class LinkParsingConfig(
     val autoParseEnabled: Boolean = true,
+    val fallbackTriggerMode: LinkParseTriggerMode = LinkParseTriggerMode.MENTION_ONLY,
     val maxLinksPerMessage: Int = 1,
-    val autoReplyOnFailure: Boolean = false,
+    val replyOnFailure: Boolean = false,
     val autoDedupeTtlSeconds: Double = 60.0,
+    val progressReply: LinkParseProgressReplyConfig = LinkParseProgressReplyConfig(),
+)
+
+public enum class LinkParseTriggerMode {
+    DISABLED,
+    MENTION_ONLY,
+    ALWAYS,
+}
+
+public data class LinkParseProgressReplyConfig(
+    val enabled: Boolean = true,
+    val text: String = "链接解析中，请稍候...",
+    val recallOnComplete: Boolean = true,
 )
 
 public data class ImageCacheConfig(

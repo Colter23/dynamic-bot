@@ -10,6 +10,8 @@ import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.core.plugin.CommandResultSendRequest
 import top.colter.dynamic.core.plugin.MessageDeliveryRequest
+import top.colter.dynamic.core.plugin.MessageRecallRequest
+import top.colter.dynamic.core.plugin.MessageRecallResult
 import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.plugin.PluginHandle
@@ -68,33 +70,61 @@ public class DeliveryDispatcher(
         stats
     }
 
-    public suspend fun dispatchCommandResult(event: CommandResultEvent) {
-        when (val resolved = resolveSink(event.target.address)) {
+    public suspend fun dispatchCommandResult(event: CommandResultEvent): MessageSendResult {
+        val result = sendCommandResult(
+            CommandResultSendRequest(
+                target = event.target,
+                chain = event.chain,
+                inReplyTo = event.inReplyTo,
+            ),
+        )
+        if (result is MessageSendResult.Failed) {
+            logger.warn {
+                "命令回复发送失败：traceId=${event.inReplyTo}，target=${event.target.address.stableValue()}，原因=${result.reason}"
+            }
+        }
+        return result
+    }
+
+    public suspend fun sendCommandResult(request: CommandResultSendRequest): MessageSendResult {
+        return when (val resolved = resolveSink(request.target.address)) {
             is SinkResolveResult.Found -> {
-                val result = runCatching {
-                    resolved.sink.sendCommandResult(
-                        CommandResultSendRequest(
-                            target = event.target,
-                            chain = event.chain,
-                            inReplyTo = event.inReplyTo,
-                        ),
-                    )
-                }.getOrElse { error ->
-                    MessageSendResult.failed(error.message ?: "命令回复发送失败", retryable = true)
-                }
-                if (result is MessageSendResult.Failed) {
-                    logger.warn {
-                        "命令回复发送失败：traceId=${event.inReplyTo}，target=${event.target.address.stableValue()}，原因=${result.reason}"
+                runCatching { resolved.sink.sendCommandResult(request) }
+                    .getOrElse { error ->
+                        MessageSendResult.failed(error.message ?: "命令回复发送失败", retryable = true)
                     }
-                }
             }
             is SinkResolveResult.NotFound -> {
-                logger.warn { "命令回复无可用消息出口：traceId=${event.inReplyTo}，target=${event.target.address.stableValue()}" }
+                logger.warn { "命令回复无可用消息出口：traceId=${request.inReplyTo}，target=${request.target.address.stableValue()}" }
+                MessageSendResult.failed("命令回复无可用消息出口", retryable = false)
             }
             is SinkResolveResult.Ambiguous -> {
                 logger.warn {
-                    "命令回复消息出口不唯一：traceId=${event.inReplyTo}，target=${event.target.address.stableValue()}，plugins=${resolved.pluginIds}"
+                    "命令回复消息出口不唯一：traceId=${request.inReplyTo}，target=${request.target.address.stableValue()}，plugins=${resolved.pluginIds}"
                 }
+                MessageSendResult.failed("命令回复消息出口不唯一：plugins=${resolved.pluginIds.joinToString(",")}", retryable = false)
+            }
+        }
+    }
+
+    public suspend fun recallMessage(target: TargetAddress, sinkMessageId: String): MessageRecallResult {
+        return when (val resolved = resolveSink(target)) {
+            is SinkResolveResult.Found -> {
+                runCatching {
+                    resolved.sink.recallMessage(MessageRecallRequest(target = target, sinkMessageId = sinkMessageId))
+                }.getOrElse { error ->
+                    MessageRecallResult.failed(error.message ?: "消息撤回失败")
+                }
+            }
+            is SinkResolveResult.NotFound -> {
+                logger.warn { "消息撤回无可用消息出口：target=${target.stableValue()}，sinkMessageId=$sinkMessageId" }
+                MessageRecallResult.failed("消息撤回无可用消息出口")
+            }
+            is SinkResolveResult.Ambiguous -> {
+                logger.warn {
+                    "消息撤回消息出口不唯一：target=${target.stableValue()}，sinkMessageId=$sinkMessageId，plugins=${resolved.pluginIds}"
+                }
+                MessageRecallResult.failed("消息撤回消息出口不唯一：plugins=${resolved.pluginIds.joinToString(",")}")
             }
         }
     }
