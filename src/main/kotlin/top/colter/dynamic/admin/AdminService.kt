@@ -2,6 +2,7 @@
 
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.MainConfigForms
+import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.config.ConfigFormSpec
@@ -44,6 +45,7 @@ import top.colter.dynamic.draw.DrawThemePalette
 import top.colter.dynamic.draw.PublisherDrawThemeService
 import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
+import top.colter.dynamic.repository.LinkParseTargetConfigRepository
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PublisherDrawTheme
 import top.colter.dynamic.repository.PublisherDrawThemeRepository
@@ -369,10 +371,16 @@ public class AdminService(
     public fun subscribers(): List<SubscriberDto> {
         val subscriptions = SubscriptionRepository.findAll()
         val subscriptionCounts = subscriptions.groupingBy { it.subscriberId }.eachCount()
+        val linkParseConfigs = LinkParseTargetConfigRepository.findAll().associateBy { it.address.stableValue() }
+        val fallbackTriggerMode = configProvider().linkParsing.fallbackTriggerMode
         return SubscriberRepository.findAll()
             .sortedWith(compareBy<Subscriber> { it.platformId.value }.thenBy { it.kind.name }.thenBy { it.externalId })
             .map { subscriber ->
-                subscriber.toDto(subscriptionCount = subscriptionCounts[subscriber.id]?.toLong() ?: 0)
+                subscriber.toDto(
+                    subscriptionCount = subscriptionCounts[subscriber.id]?.toLong() ?: 0,
+                    linkParseTriggerMode = linkParseConfigs[subscriber.address.stableValue()]?.triggerMode,
+                    fallbackTriggerMode = fallbackTriggerMode,
+                )
             }
     }
 
@@ -419,6 +427,47 @@ public class AdminService(
             .sortedWith(compareBy<SubscriberTargetDto> { it.platformId }.thenBy { it.targetKind }.thenBy { it.name }.thenBy { it.externalId })
     }
 
+    public suspend fun createSubscriber(request: CreateSubscriberRequest): SubscriberDto {
+        val platformId = request.platformId.trim().also {
+            require(it.isNotBlank()) { "消息目标平台不能为空" }
+        }
+        val externalId = request.externalId.trim().also {
+            require(it.isNotBlank()) { "消息目标 ID 不能为空" }
+        }
+        val address = TargetAddress.of(
+            platformId = platformId,
+            kind = parseEnum<TargetKind>(request.targetKind, "targetKind"),
+            externalId = externalId,
+            scopeId = request.scopeId,
+            threadId = request.threadId,
+            accountId = request.accountId,
+        )
+        val existed = SubscriberRepository.findByAddress(address)
+        val name = request.name?.trim()?.takeIf { it.isNotBlank() }
+            ?: existed?.name
+            ?: resolveSubscriberDisplayName(address)
+        val entityState = request.state?.let { parseEnum<EntityState>(it, "state") }
+            ?: existed?.state
+            ?: EntityState.ACTIVE
+        val upsert = SubscriberRepository.upsert(
+            address = address,
+            name = name,
+            state = entityState,
+        )
+        parseLinkParseTriggerModeOrNull(request.linkParseTriggerMode)?.let { mode ->
+            LinkParseTargetConfigRepository.upsert(
+                address = address,
+                triggerMode = mode,
+                updatedBy = "web-admin",
+            )
+        }
+        val linkParseConfig = LinkParseTargetConfigRepository.findByAddress(address)
+        return upsert.value.toDto(
+            linkParseTriggerMode = linkParseConfig?.triggerMode,
+            fallbackTriggerMode = configProvider().linkParsing.fallbackTriggerMode,
+        )
+    }
+
     public fun updateSubscriber(id: Int, request: UpdateSubscriberRequest): SubscriberDto {
         val subscriber = SubscriberRepository.findById(id) ?: throw NoSuchElementException("未找到消息目标：$id")
         val updated = subscriber.copy(
@@ -426,7 +475,22 @@ public class AdminService(
             state = request.state?.let { parseEnum<EntityState>(it, "state") } ?: subscriber.state,
         )
         SubscriberRepository.replace(updated)
-        return SubscriberRepository.findById(id)?.toDto() ?: updated.toDto()
+        if (request.clearLinkParseTrigger) {
+            LinkParseTargetConfigRepository.deleteByAddress(updated.address)
+        } else {
+            parseLinkParseTriggerModeOrNull(request.linkParseTriggerMode)?.let { mode ->
+                LinkParseTargetConfigRepository.upsert(
+                    address = updated.address,
+                    triggerMode = mode,
+                    updatedBy = "web-admin",
+                )
+            }
+        }
+        val linkParseConfig = LinkParseTargetConfigRepository.findByAddress(updated.address)
+        return (SubscriberRepository.findById(id) ?: updated).toDto(
+            linkParseTriggerMode = linkParseConfig?.triggerMode,
+            fallbackTriggerMode = configProvider().linkParsing.fallbackTriggerMode,
+        )
     }
 
     public fun deleteSubscriber(id: Int): ActionResultResponse {
@@ -438,6 +502,7 @@ public class AdminService(
                     SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId),
                 )
             }
+        LinkParseTargetConfigRepository.deleteByAddress(subscriber.address)
         val removed = SubscriberRepository.deleteById(subscriber.id)
         return ActionResultResponse(
             changed = removed,
@@ -862,7 +927,11 @@ private fun DrawThemePalette.toDto(): PublisherDrawThemeDto = PublisherDrawTheme
     textColor = textColor,
 )
 
-private fun Subscriber.toDto(subscriptionCount: Long = 0): SubscriberDto = SubscriberDto(
+private fun Subscriber.toDto(
+    subscriptionCount: Long = 0,
+    linkParseTriggerMode: LinkParseTriggerMode? = null,
+    fallbackTriggerMode: LinkParseTriggerMode = LinkParseTriggerMode.MENTION_ONLY,
+): SubscriberDto = SubscriberDto(
     id = id,
     platformId = platformId.value,
     targetKind = kind.name,
@@ -875,6 +944,9 @@ private fun Subscriber.toDto(subscriptionCount: Long = 0): SubscriberDto = Subsc
     createTime = createTime,
     createUser = createUser,
     subscriptionCount = subscriptionCount,
+    linkParseTriggerMode = linkParseTriggerMode?.name,
+    effectiveLinkParseTriggerMode = (linkParseTriggerMode ?: fallbackTriggerMode).name,
+    linkParseConfigSource = if (linkParseTriggerMode == null) "FALLBACK" else "CUSTOM",
 )
 
 private fun MessageTargetCandidate.toDto(info: PluginInfo): SubscriberTargetDto = SubscriberTargetDto(
@@ -974,6 +1046,12 @@ private inline fun <reified T : Enum<T>> parseEnum(value: String, fieldName: Str
         ?: throw IllegalArgumentException(
             "$fieldName 无效：$value，可选值=${enumValues<T>().joinToString("|") { it.name }}",
         )
+}
+
+private fun parseLinkParseTriggerModeOrNull(value: String?): LinkParseTriggerMode? {
+    val normalized = value?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    if (normalized.equals("INHERIT", ignoreCase = true)) return null
+    return parseEnum<LinkParseTriggerMode>(normalized, "linkParseTriggerMode")
 }
 
 private fun requireSubscriptionPolicyAllowed(subscriber: Subscriber, policy: SubscriptionPolicy) {

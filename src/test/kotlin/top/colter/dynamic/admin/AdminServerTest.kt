@@ -8,6 +8,8 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
+import top.colter.dynamic.LinkParseTriggerMode
+import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicBlockKind
@@ -37,6 +39,7 @@ import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.plugin.PluginInfo
 import top.colter.dynamic.plugin.PluginState
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
+import top.colter.dynamic.repository.LinkParseTargetConfigRepository
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.repository.PublisherDrawThemeRepository
@@ -174,6 +177,82 @@ class AdminServerTest {
     }
 
     @Test
+    fun subscribersShouldIncludeLinkParseConfigAndFallback() {
+        initDb("admin-subscriber-link-parse-list")
+        val custom = SubscriberRepository.ensure(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "custom")
+        val fallback = SubscriberRepository.ensure(TargetAddress.of("onebot", TargetKind.GROUP, "200"), "fallback")
+        LinkParseTargetConfigRepository.upsert(custom.address, LinkParseTriggerMode.DISABLED, updatedBy = "test")
+        val service = service(
+            plugin = FakePublisherFollowPlugin(),
+            config = MainDynamicConfig(
+                linkParsing = LinkParsingConfig(fallbackTriggerMode = LinkParseTriggerMode.ALWAYS),
+            ),
+        )
+
+        val subscribers = service.subscribers().associateBy { it.externalId }
+
+        assertEquals("DISABLED", subscribers.getValue("100").linkParseTriggerMode)
+        assertEquals("DISABLED", subscribers.getValue("100").effectiveLinkParseTriggerMode)
+        assertEquals("CUSTOM", subscribers.getValue("100").linkParseConfigSource)
+        assertNull(subscribers.getValue("200").linkParseTriggerMode)
+        assertEquals("ALWAYS", subscribers.getValue("200").effectiveLinkParseTriggerMode)
+        assertEquals("FALLBACK", subscribers.getValue("200").linkParseConfigSource)
+        assertEquals(fallback.id, SubscriberRepository.findByAddress(fallback.address)?.id)
+    }
+
+    @Test
+    fun createSubscriberShouldPersistTargetAndLinkParseMode() = runBlocking {
+        initDb("admin-create-subscriber-link-parse")
+        val service = service(
+            plugin = FakePublisherFollowPlugin(),
+            sink = FakeMessageSinkPlugin(
+                listOf(MessageTargetCandidate(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "测试群")),
+            ),
+        )
+
+        val created = service.createSubscriber(
+            CreateSubscriberRequest(
+                platformId = "onebot",
+                targetKind = "GROUP",
+                externalId = "100",
+                linkParseTriggerMode = "ALWAYS",
+            ),
+        )
+
+        assertEquals("测试群", created.name)
+        assertEquals("ALWAYS", created.linkParseTriggerMode)
+        assertEquals("CUSTOM", created.linkParseConfigSource)
+        assertEquals(LinkParseTriggerMode.ALWAYS, LinkParseTargetConfigRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100"))?.triggerMode)
+    }
+
+    @Test
+    fun updateAndDeleteSubscriberShouldManageLinkParseConfig() {
+        initDb("admin-update-subscriber-link-parse")
+        val subscriber = SubscriberRepository.ensure(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "group")
+        val service = service(FakePublisherFollowPlugin())
+
+        val updated = service.updateSubscriber(
+            subscriber.id,
+            UpdateSubscriberRequest(linkParseTriggerMode = "MENTION_ONLY"),
+        )
+
+        assertEquals("MENTION_ONLY", updated.linkParseTriggerMode)
+        assertEquals(LinkParseTriggerMode.MENTION_ONLY, LinkParseTargetConfigRepository.findByAddress(subscriber.address)?.triggerMode)
+
+        val cleared = service.updateSubscriber(
+            subscriber.id,
+            UpdateSubscriberRequest(clearLinkParseTrigger = true),
+        )
+
+        assertNull(cleared.linkParseTriggerMode)
+        assertNull(LinkParseTargetConfigRepository.findByAddress(subscriber.address))
+
+        service.updateSubscriber(subscriber.id, UpdateSubscriberRequest(linkParseTriggerMode = "ALWAYS"))
+        service.deleteSubscriber(subscriber.id)
+        assertNull(LinkParseTargetConfigRepository.findByAddress(subscriber.address))
+    }
+
+    @Test
     fun updatePublisherShouldSetClearAndListDrawTheme() {
         initDb("admin-publisher-theme")
         val publisher = PublisherRepository.upsertInfo(testPublisherInfo(name = "demo-up")).value
@@ -287,7 +366,11 @@ class AdminServerTest {
         PersistenceManager.init(tempDir.resolve("test.db").path)
     }
 
-    private fun service(plugin: PublisherFollowPlugin, sink: MessageSinkPlugin? = null): AdminService {
+    private fun service(
+        plugin: PublisherFollowPlugin,
+        sink: MessageSinkPlugin? = null,
+        config: MainDynamicConfig = MainDynamicConfig(),
+    ): AdminService {
         return AdminService(
             pluginProvider = { emptyList() },
             messageSinkProvider = {
@@ -307,7 +390,7 @@ class AdminServerTest {
             },
             publisherLookupResolver = { platformId -> plugin.takeIf { platformId == plugin.platformId.value } },
             publisherFollowResolver = { platformId -> plugin.takeIf { platformId == plugin.platformId.value } },
-            configProvider = { MainDynamicConfig() },
+            configProvider = { config },
             publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
         )
     }

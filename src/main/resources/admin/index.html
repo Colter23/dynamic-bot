@@ -1171,6 +1171,24 @@
     function entityStatePill(value) {
       return `<span class="pill ${value === "ACTIVE" ? "ok" : "bad"}">${esc(entityStateText(value))}</span>`;
     }
+    function linkParseModeLabel(value) {
+      const map = {
+        INHERIT: "使用全局回退",
+        DISABLED: "不解析",
+        MENTION_ONLY: "必须 @bot",
+        ALWAYS: "匹配链接即解析"
+      };
+      return map[value] || value || "-";
+    }
+    function linkParseModeOptions(selected) {
+      return ["INHERIT", "DISABLED", "MENTION_ONLY", "ALWAYS"].map(mode =>
+        `<option value="${mode}"${mode === selected ? " selected" : ""}>${esc(linkParseModeLabel(mode))}</option>`
+      ).join("");
+    }
+    function linkParseCell(target) {
+      const source = target.linkParseConfigSource === "CUSTOM" ? "当前目标配置" : "全局回退";
+      return cell(linkParseModeLabel(target.effectiveLinkParseTriggerMode), source);
+    }
     function policyEvents(policy) {
       const events = policy && Array.isArray(policy.enabledEvents) ? policy.enabledEvents : [];
       return events.length ? events : ["DYNAMIC"];
@@ -1200,10 +1218,11 @@
             ])}
           </section>
           <section class="panel full">
-            <div class="panel-head"><h2>消息目标</h2></div>
+            <div class="panel-head"><h2>消息目标</h2><button data-action="create-subscriber">添加</button></div>
             ${renderTable(subscribers, [
               { title: "目标", render: s => cell(s.name, targetKey(s)) },
               { title: "订阅", render: s => `<span class="primary-line">${s.subscriptionCount || 0}</span>` },
+              { title: "链接解析", render: s => linkParseCell(s) },
               { title: "状态", render: s => entityStatePill(s.state) },
               { title: "创建时间", render: s => `<span class="sub-line">${fmtTime(s.createTime)}</span>` },
               { title: "操作", render: s => `<div class="row-actions"><button data-action="edit-subscriber" data-id="${s.id}">编辑</button><button class="danger" data-action="delete-subscriber" data-id="${s.id}">删除</button></div>` }
@@ -1632,6 +1651,80 @@
       };
       await refreshTargetKinds();
     }
+    async function openCreateSubscriber() {
+      const targetPlatforms = await api("/subscriber-target-platforms").catch(() => []);
+      const fallbackTargets = targetPlatforms.length ? targetPlatforms : [{ platformId: "onebot", pluginName: "手动", supportedTypes: ["GROUP", "USER"] }];
+      let targetCandidates = [];
+
+      openModal("添加消息目标", `
+        <div class="form-grid">
+          <div class="field"><label>目标平台</label><select id="newTargetPlatform">${fallbackTargets.map(p => `<option value="${attr(p.platformId)}">${esc(p.platformId)} · ${esc(p.pluginName || p.pluginId || "")}</option>`).join("")}</select></div>
+          <div class="field"><label>目标类型</label><select id="newTargetKind"></select></div>
+          <div class="field full" id="newTargetCandidateWrap"><label>可用目标</label><select id="newTargetCandidate"></select></div>
+          <div class="field full" id="newTargetManualWrap"><label>目标 ID</label><input id="newTargetManual"></div>
+          <div class="field full"><label>链接解析</label><select id="newTargetLinkParse">${linkParseModeOptions("INHERIT")}</select><span class="inline-note">使用全局回退时，会跟随主配置里的回退触发方式。</span></div>
+          <div class="field full"><span id="newTargetStatus" class="inline-note"></span></div>
+        </div>
+      `, async () => {
+        const selectedIndex = targetCandidates.length && !$("newTargetCandidateWrap").hidden ? Number($("newTargetCandidate").value) : -1;
+        const selectedTarget = Number.isInteger(selectedIndex) && selectedIndex >= 0 ? targetCandidates[selectedIndex] : null;
+        const payload = {
+          platformId: $("newTargetPlatform").value.trim(),
+          targetKind: $("newTargetKind").value,
+          externalId: selectedTarget ? selectedTarget.externalId : $("newTargetManual").value.trim()
+        };
+        if (selectedTarget) {
+          payload.scopeId = selectedTarget.scopeId || null;
+          payload.threadId = selectedTarget.threadId || null;
+          payload.accountId = selectedTarget.accountId || null;
+          payload.name = selectedTarget.name || null;
+        }
+        const mode = $("newTargetLinkParse").value;
+        if (mode !== "INHERIT") payload.linkParseTriggerMode = mode;
+        if (!payload.platformId || !payload.externalId) throw new Error("请填写必要字段");
+        await api("/subscribers", { method: "POST", body: JSON.stringify(payload) });
+        closeModal();
+        invalidate("dashboard", "subscribers", "subscriptions");
+        await loadEntities(true);
+        notify("消息目标已添加", false);
+      }, { size: "small", confirmText: "添加" });
+
+      const refreshTargetKinds = async () => {
+        const platformId = $("newTargetPlatform").value;
+        const platform = fallbackTargets.find(item => item.platformId === platformId);
+        const kinds = platform && platform.supportedTypes && platform.supportedTypes.length
+          ? platform.supportedTypes
+          : ["GROUP", "USER", "CHANNEL", "OTHER"];
+        $("newTargetKind").innerHTML = kinds.map(kind => `<option value="${attr(kind)}">${esc(label(kind))}</option>`).join("");
+        await refreshTargetCandidates();
+      };
+      const refreshTargetCandidates = async () => {
+        const platform = $("newTargetPlatform").value;
+        const kind = $("newTargetKind").value;
+        $("newTargetStatus").textContent = "正在获取目标...";
+        targetCandidates = [];
+        try {
+          targetCandidates = await api(`/subscriber-targets?platformId=${encodeURIComponent(platform)}&type=${encodeURIComponent(kind)}`);
+        } catch (error) {
+          $("newTargetStatus").textContent = "目标列表获取失败，请手动填写目标 ID";
+        }
+        if (targetCandidates.length) {
+          $("newTargetCandidateWrap").hidden = false;
+          $("newTargetManualWrap").hidden = true;
+          $("newTargetCandidate").innerHTML = targetCandidates.map((target, index) =>
+            `<option value="${index}">${esc(target.name || target.externalId)} · ${esc(target.externalId)}</option>`
+          ).join("");
+          $("newTargetStatus").textContent = `已获取 ${targetCandidates.length} 个目标`;
+        } else {
+          $("newTargetCandidateWrap").hidden = true;
+          $("newTargetManualWrap").hidden = false;
+          $("newTargetStatus").textContent = $("newTargetStatus").textContent || "未获取到目标，请手动填写目标 ID";
+        }
+      };
+      $("newTargetPlatform").onchange = refreshTargetKinds;
+      $("newTargetKind").onchange = refreshTargetCandidates;
+      await refreshTargetKinds();
+    }
     function policyForm(prefix, policy, targetKind) {
       const selectedEvents = new Set(policyEvents(policy));
       const selectedMentions = new Set(mentionEvents(policy));
@@ -1791,12 +1884,21 @@
     async function openEditSubscriber(id) {
       if (!state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
       const item = state.cache.subscribers.find(row => Number(row.id) === Number(id));
+      const currentLinkParse = item.linkParseConfigSource === "CUSTOM" ? item.linkParseTriggerMode : "INHERIT";
       openModal("编辑消息目标", `
         <div class="form-grid">
           <div class="field"><label>状态</label><select id="entityState"><option${item.state === "ACTIVE" ? " selected" : ""}>ACTIVE</option><option${item.state === "DISABLED" ? " selected" : ""}>DISABLED</option></select></div>
+          <div class="field"><label>链接解析</label><select id="subscriberLinkParse">${linkParseModeOptions(currentLinkParse)}</select></div>
+          <div class="field full"><span class="inline-note">选择“使用全局回退”会删除当前消息目标的单独链接解析配置。当前生效：${esc(linkParseModeLabel(item.effectiveLinkParseTriggerMode))}</span></div>
         </div>
       `, async () => {
-        await api(`/subscribers/${id}`, { method: "PATCH", body: JSON.stringify({ state: $("entityState").value }) });
+        const body = {
+          state: $("entityState").value
+        };
+        const mode = $("subscriberLinkParse").value;
+        if (mode === "INHERIT") body.clearLinkParseTrigger = true;
+        else body.linkParseTriggerMode = mode;
+        await api(`/subscribers/${id}`, { method: "PATCH", body: JSON.stringify(body) });
         closeModal();
         invalidate("subscribers", "subscriptions", "dashboard");
         await loadEntities(true);
@@ -2148,6 +2250,7 @@
           $("filterList").innerHTML = renderFilterList(subscription);
           notify("过滤规则已删除", false);
         } else if (action === "edit-publisher") openEditPublisher(id);
+        else if (action === "create-subscriber") openCreateSubscriber();
         else if (action === "edit-subscriber") openEditSubscriber(id);
         else if (action === "delete-publisher") {
           if (!confirm("确定删除这个发布者及关联订阅吗？")) return;

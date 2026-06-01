@@ -206,6 +206,10 @@ public fun Application.adminModule(context: AdminServerContext) {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.subscribers() }
             }
+            post("/subscribers") {
+                if (!call.ensureAuthorized(context)) return@post
+                call.respondApi { context.service.createSubscriber(call.receive()) }
+            }
             get("/subscriber-target-platforms") {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.subscriberTargetPlatforms() }

@@ -155,6 +155,9 @@ public data class SubscriberDto(
     val createTime: Long,
     val createUser: Int,
     val subscriptionCount: Long = 0,
+    val linkParseTriggerMode: String? = null,
+    val effectiveLinkParseTriggerMode: String = "MENTION_ONLY",
+    val linkParseConfigSource: String = "FALLBACK",
 )
 
 @Serializable
@@ -321,6 +324,21 @@ public data class UpdatePublisherRequest(
 public data class UpdateSubscriberRequest(
     val name: String? = null,
     val state: String? = null,
+    val linkParseTriggerMode: String? = null,
+    val clearLinkParseTrigger: Boolean = false,
+)
+
+@Serializable
+public data class CreateSubscriberRequest(
+    val platformId: String,
+    val targetKind: String,
+    val externalId: String,
+    val scopeId: String? = null,
+    val threadId: String? = null,
+    val accountId: String? = null,
+    val name: String? = null,
+    val state: String? = null,
+    val linkParseTriggerMode: String? = null,
 )
 
 @Serializable
