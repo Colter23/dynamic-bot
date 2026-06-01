@@ -13,6 +13,7 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.netty.Netty
 import io.ktor.server.netty.NettyApplicationEngine
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
+import io.ktor.server.request.path
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
@@ -106,6 +107,12 @@ public fun Application.adminModule(context: AdminServerContext) {
         }
         get("/admin") {
             call.respondText(AdminStatic.indexHtml, ContentType.Text.Html)
+        }
+        get("/admin/assets/{...}") {
+            call.respondAdminStaticResource("/admin/assets/")
+        }
+        get("/admin/pages/{...}") {
+            call.respondAdminStaticResource("/admin/pages/")
         }
         get("/admin/{...}") {
             call.respondText(AdminStatic.indexHtml, ContentType.Text.Html)
@@ -376,6 +383,26 @@ private suspend fun ApplicationCall.respondMedia(block: suspend () -> AdminMedia
         respond(HttpStatusCode.BadGateway, ErrorResponse(e.message ?: "图片加载失败"))
     } catch (e: Exception) {
         respond(HttpStatusCode.BadGateway, ErrorResponse(e.message ?: "图片加载失败"))
+    }
+}
+
+private suspend fun ApplicationCall.respondAdminStaticResource(routePrefix: String) {
+    val requestPath = request.path()
+    if (!requestPath.startsWith(routePrefix)) {
+        respond(HttpStatusCode.BadRequest, ErrorResponse("后台资源路径无效"))
+        return
+    }
+    val resourcePath = requestPath.removePrefix("/admin/")
+    try {
+        val resource = AdminStatic.resource(resourcePath)
+        respondBytes(
+            bytes = resource.bytes,
+            contentType = resource.contentType,
+        )
+    } catch (e: IllegalArgumentException) {
+        respond(HttpStatusCode.BadRequest, ErrorResponse(e.message ?: "后台资源路径无效"))
+    } catch (e: IllegalStateException) {
+        respond(HttpStatusCode.NotFound, ErrorResponse(e.message ?: "后台资源不存在"))
     }
 }
 

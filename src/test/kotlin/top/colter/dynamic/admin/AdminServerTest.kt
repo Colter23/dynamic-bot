@@ -7,6 +7,12 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import io.ktor.client.request.get
+import io.ktor.client.request.header
+import io.ktor.client.statement.bodyAsText
+import io.ktor.http.HttpHeaders
+import io.ktor.http.HttpStatusCode
+import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.LinkParsingConfig
@@ -49,6 +55,44 @@ import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.testPublisherInfo
 
 class AdminServerTest {
+    @Test
+    fun adminStaticRoutesShouldServeShellAssetsAndPageFragments() = testApplication {
+        application {
+            adminModule(staticRouteContext())
+        }
+
+        val shell = client.get("/admin")
+        val css = client.get("/admin/assets/admin.css")
+        val js = client.get("/admin/assets/shell.js")
+        val page = client.get("/admin/pages/dashboard.html")
+        val illegal = client.get("/admin/pages/%2e%2e/x")
+
+        assertEquals(HttpStatusCode.OK, shell.status)
+        assertTrue(shell.bodyAsText().contains("/admin/assets/shell.js"))
+        assertEquals(HttpStatusCode.OK, css.status)
+        assertTrue(css.bodyAsText().contains(":root"))
+        assertEquals(HttpStatusCode.OK, js.status)
+        assertTrue(js.bodyAsText().contains("/admin/pages/dashboard.js"))
+        assertEquals(HttpStatusCode.OK, page.status)
+        assertTrue(page.bodyAsText().contains("data-page-root"))
+        assertTrue(illegal.status.value in 400..404)
+    }
+
+    @Test
+    fun adminApiShouldKeepBearerTokenAuthorization() = testApplication {
+        application {
+            adminModule(staticRouteContext())
+        }
+
+        val unauthorized = client.get("/api/plugins")
+        val authorized = client.get("/api/plugins") {
+            header(HttpHeaders.Authorization, "Bearer test-token")
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, unauthorized.status)
+        assertEquals(HttpStatusCode.OK, authorized.status)
+    }
+
     @Test
     fun createSubscriptionShouldPersistPublisherSubscriberAndPolicy() = runBlocking {
         initDb("admin-create-subscription")
@@ -392,6 +436,21 @@ class AdminServerTest {
             publisherFollowResolver = { platformId -> plugin.takeIf { platformId == plugin.platformId.value } },
             configProvider = { config },
             publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+    }
+
+    private fun staticRouteContext(): AdminServerContext {
+        return AdminServerContext(
+            token = "test-token",
+            service = AdminService(
+                pluginProvider = { emptyList() },
+                publisherLookupResolver = { null },
+                publisherFollowResolver = { null },
+                configProvider = { MainDynamicConfig() },
+            ),
+            loginService = AdminLoginService(
+                loginProviderResolver = { null },
+            ),
         )
     }
 
