@@ -177,35 +177,90 @@ async function openCreateSubscription() {
   let targetCandidates = [];
 
   openModal("新建订阅", `
-    <div class="form-grid">
-      <div class="field"><label>目标平台</label><select id="subTargetPlatform">${fallbackTargets.map(p => `<option value="${attr(p.platformId)}">${esc(p.platformId)} · ${esc(p.pluginName || p.pluginId || "")}</option>`).join("")}</select></div>
-      <div class="field"><label>目标类型</label><select id="subTargetKind"></select></div>
-      <div class="field full" id="subTargetCandidateWrap"><label>可用目标</label><select id="subTargetCandidate"></select></div>
-      <div class="field full" id="subTargetManualWrap"><label>目标 ID</label><input id="subTargetManual"></div>
-      <div class="field full"><span id="subTargetStatus" class="inline-note"></span></div>
-      <div class="field"><label>发布者平台</label><input id="subPublisherPlatform" list="publisherPlatforms" value="${attr(publisherPlatforms[0] || "bilibili")}"><datalist id="publisherPlatforms">${publisherPlatforms.map(p => `<option value="${attr(p)}"></option>`).join("")}</datalist></div>
-      <div class="field"><label>发布者 ID</label><input id="subPublisherId"></div>
-      <div class="field full">${policyForm("subPolicy", null, "GROUP")}</div>
-      <div class="field full"><label class="check"><input id="subAutoFollow" type="checkbox" checked>自动关注发布者</label></div>
+    <div class="subscription-create">
+      <section class="panel subscription-card">
+        <div class="panel-head">
+          <div>
+            <h2>消息目标</h2>
+            <p>选择要推送到的即时通讯平台目标，可一次选择多个。</p>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="field"><label>目标平台</label><select id="subTargetPlatform">${fallbackTargets.map(p => `<option value="${attr(p.platformId)}">${esc(p.platformId)} · ${esc(p.pluginName || p.pluginId || "")}</option>`).join("")}</select></div>
+          <div class="field"><label>目标类型</label><select id="subTargetKind"></select></div>
+          <div class="field full" id="subTargetCandidateWrap">
+            <div class="field-head">
+              <label>可用目标</label>
+              <div class="row-actions">
+                <button type="button" class="secondary compact" id="subTargetSelectAll">全选</button>
+                <button type="button" class="secondary compact" id="subTargetClearAll">清空</button>
+              </div>
+            </div>
+            <div id="subTargetCandidateList" class="target-choice-list"></div>
+          </div>
+          <div class="field full" id="subTargetManualWrap"><label>目标 ID</label><input id="subTargetManual" placeholder="插件无法枚举目标时手动填写"></div>
+          <div class="field full"><span id="subTargetStatus" class="inline-note"></span></div>
+        </div>
+      </section>
+
+      <section class="panel subscription-card">
+        <div class="panel-head">
+          <div>
+            <h2>发布者</h2>
+            <p>只需要填写平台和发布者 ID，名称会由后端自动获取。</p>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="field"><label>发布者平台</label><input id="subPublisherPlatform" list="publisherPlatforms" value="${attr(publisherPlatforms[0] || "bilibili")}"><datalist id="publisherPlatforms">${publisherPlatforms.map(p => `<option value="${attr(p)}"></option>`).join("")}</datalist></div>
+          <div class="field"><label>发布者 ID<span style="color: red"> *</span></label><input id="subPublisherId"></div>
+          <div class="field full"><label class="check"><input id="subAutoFollow" type="checkbox" checked>自动关注发布者</label></div>
+        </div>
+      </section>
+
+      <section class="panel subscription-card">
+        <div class="panel-head">
+          <div>
+            <h2>订阅类型</h2>
+            <p>选择接收动态、开播或下播；@全体仅对群目标生效。</p>
+          </div>
+        </div>
+        ${policyForm("subPolicy", null, "GROUP")}
+      </section>
     </div>
   `, async () => {
-    const targetId = targetCandidates.length ? $("subTargetCandidate").value : $("subTargetManual").value.trim();
-    const payload = {
+    const selectedTargets = collectCreateSubscriptionTargets(targetCandidates);
+    const basePayload = {
       subscriberPlatform: $("subTargetPlatform").value.trim(),
       targetKind: $("subTargetKind").value,
-      subscriberTargetId: targetId,
       publisherPlatform: $("subPublisherPlatform").value.trim(),
       publisherExternalId: $("subPublisherId").value.trim(),
       autoFollow: $("subAutoFollow").checked,
       policy: collectPolicy("subPolicy")
     };
-    if (!payload.subscriberPlatform || !payload.subscriberTargetId || !payload.publisherPlatform || !payload.publisherExternalId) throw new Error("请填写必要字段");
-    await api("/subscriptions", { method: "POST", body: JSON.stringify(payload) });
-    closeModal();
+    if (!basePayload.subscriberPlatform || !basePayload.publisherPlatform || !basePayload.publisherExternalId) throw new Error("请填写必要字段");
+    if (selectedTargets.length === 0) throw new Error("请选择至少一个消息目标");
+
+    let successCount = 0;
+    const failures = [];
+    for (const target of selectedTargets) {
+      try {
+        await api("/subscriptions", {
+          method: "POST",
+          body: JSON.stringify(Object.assign({}, basePayload, { subscriberTargetId: target.id }))
+        });
+        successCount += 1;
+      } catch (error) {
+        failures.push(`${target.label}: ${error.message || error}`);
+      }
+    }
     invalidate("dashboard", "subscriptions", "publishers", "subscribers");
     await loadSubscriptions(true);
-    notify("订阅已创建", false);
-  }, { size: "wide" });
+    if (failures.length) {
+      throw new Error(`已创建 ${successCount} 个，失败 ${failures.length} 个：\n${failures.join("\n")}`);
+    }
+    closeModal();
+    notify(successCount > 1 ? `已创建 ${successCount} 个订阅` : "订阅已创建", false);
+  });
 
   const policyUpdater = wirePolicyForm("subPolicy", () => $("subTargetKind").value);
   const refreshTargetKinds = async () => {
@@ -221,24 +276,27 @@ async function openCreateSubscription() {
   const refreshTargetCandidates = async () => {
     const platform = $("subTargetPlatform").value;
     const kind = $("subTargetKind").value;
-    $("subTargetStatus").textContent = "正在获取目标...";
     targetCandidates = [];
+    setCreateSubscriptionTargetLoading("正在获取可用目标...");
     try {
       targetCandidates = await api(`/subscriber-targets?platformId=${encodeURIComponent(platform)}&type=${encodeURIComponent(kind)}`);
     } catch (error) {
+      $("subTargetCandidateWrap").hidden = true;
+      $("subTargetManualWrap").hidden = false;
+      $("subTargetCandidateList").innerHTML = "";
       $("subTargetStatus").textContent = "目标列表获取失败，请手动填写目标 ID";
+      return;
     }
     if (targetCandidates.length) {
       $("subTargetCandidateWrap").hidden = false;
       $("subTargetManualWrap").hidden = true;
-      $("subTargetCandidate").innerHTML = targetCandidates.map(target =>
-        `<option value="${attr(target.externalId)}">${esc(target.name || target.externalId)} · ${esc(target.externalId)}</option>`
-      ).join("");
-      $("subTargetStatus").textContent = `已获取 ${targetCandidates.length} 个目标`;
+      $("subTargetCandidateList").innerHTML = targetCandidates.map((target, index) => targetChoiceHtml(target, index === 0)).join("");
+      $("subTargetStatus").textContent = `已获取 ${targetCandidates.length} 个目标，已默认选择第一个`;
     } else {
       $("subTargetCandidateWrap").hidden = true;
       $("subTargetManualWrap").hidden = false;
-      $("subTargetStatus").textContent = $("subTargetStatus").textContent || "未获取到目标，请手动填写目标 ID";
+      $("subTargetCandidateList").innerHTML = "";
+      $("subTargetStatus").textContent = "未获取到目标，请手动填写目标 ID";
     }
   };
   $("subTargetPlatform").onchange = refreshTargetKinds;
@@ -246,25 +304,59 @@ async function openCreateSubscription() {
     policyUpdater();
     await refreshTargetCandidates();
   };
+  $("subTargetSelectAll").onclick = () => setCreateSubscriptionTargetChecked(true);
+  $("subTargetClearAll").onclick = () => setCreateSubscriptionTargetChecked(false);
   await refreshTargetKinds();
+}
+
+function setCreateSubscriptionTargetLoading(text) {
+  $("subTargetCandidateWrap").hidden = false;
+  $("subTargetManualWrap").hidden = true;
+  $("subTargetCandidateList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
+  $("subTargetStatus").textContent = text;
+}
+
+function targetChoiceHtml(target, checked) {
+  const title = target.name || target.externalId;
+  const parts = [
+    title,
+    target.platformId,
+    label(target.targetKind),
+    target.externalId,
+  ].filter(Boolean).join(" · ");
+  return `<label class="target-choice">
+    <input type="checkbox" name="subTargetCandidate" value="${attr(target.externalId)}" data-label="${attr(title)}"${checked ? " checked" : ""}>
+    <span class="target-choice-text" title="${attr(parts)}">${esc(parts)}</span>
+  </label>`;
+}
+
+function setCreateSubscriptionTargetChecked(checked) {
+  document.querySelectorAll(`input[name="subTargetCandidate"]`).forEach(input => input.checked = checked);
+}
+
+function collectCreateSubscriptionTargets(candidates) {
+  if (candidates.length === 0) {
+    const manual = $("subTargetManual").value.trim();
+    return manual ? [{ id: manual, label: manual }] : [];
+  }
+  return Array.from(document.querySelectorAll(`input[name="subTargetCandidate"]:checked`))
+    .map(input => ({ id: input.value, label: input.dataset.label || input.value }));
 }
 
 function policyForm(prefix, policy, targetKind) {
   const selectedEvents = new Set(policyEvents(policy));
   const selectedMentions = new Set(mentionEvents(policy));
   const groupTarget = targetKind === "GROUP";
-  return `<div class="panel">
-    <div class="rule-matrix">
-      ${eventTypes.map(([value, text]) => {
-        const enabled = selectedEvents.has(value);
-        const mention = selectedMentions.has(value);
-        return `<div class="rule-row">
-          <strong>${esc(text)}</strong>
-          <label class="check"><input type="checkbox" name="${prefix}-event" value="${value}"${enabled ? " checked" : ""}>接收</label>
-          <label class="check"><input type="checkbox" name="${prefix}-mention" value="${value}"${mention ? " checked" : ""}${groupTarget && enabled ? "" : " disabled"}>@全体</label>
-        </div>`;
-      }).join("")}
-    </div>
+  return `<div class="rule-matrix">
+    ${eventTypes.map(([value, text]) => {
+      const enabled = selectedEvents.has(value);
+      const mention = selectedMentions.has(value);
+      return `<div class="rule-row">
+        <strong>${esc(text)}</strong>
+        <label class="check"><input type="checkbox" name="${prefix}-event" value="${value}"${enabled ? " checked" : ""}>接收</label>
+        <label class="check"><input type="checkbox" name="${prefix}-mention" value="${value}"${mention ? " checked" : ""}${groupTarget && enabled ? "" : " disabled"}>@全体</label>
+      </div>`;
+    }).join("")}
   </div>`;
 }
 

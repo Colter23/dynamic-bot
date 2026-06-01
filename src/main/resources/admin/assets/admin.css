@@ -262,6 +262,12 @@
       min-width: 0;
     }
     .field.full { grid-column: 1 / -1; }
+    .field-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
     .field label {
       color: var(--muted);
       font-size: 12px;
@@ -302,6 +308,73 @@
     }
     .rule-row .check {
       min-height: 24px;
+    }
+    .subscription-create {
+      display: grid;
+      gap: 12px;
+    }
+    .subscription-card {
+      box-shadow: none;
+    }
+    .target-choice-list {
+      display: grid;
+      gap: 8px;
+      max-height: 260px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+    }
+    .target-choice {
+      display: grid;
+      grid-template-columns: 18px minmax(0, 1fr);
+      align-items: center;
+      gap: 9px;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      cursor: pointer;
+    }
+    .target-choice input {
+      width: 16px;
+      height: 16px;
+      min-height: 0;
+      padding: 0;
+    }
+    .target-choice-text {
+      display: block;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-weight: 700;
+    }
+    .target-loading {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 38px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+    .loading-spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--line-strong);
+      border-top-color: var(--accent);
+      border-radius: 999px;
+      animation: spin 0.8s linear infinite;
+    }
+    button.compact {
+      min-height: 28px;
+      padding: 4px 8px;
+      font-size: 12px;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
     }
     .inline-note {
       color: var(--muted);
