@@ -1,6 +1,10 @@
 package top.colter.dynamic.draw.layout.default
 
 import org.jetbrains.skia.Color
+import org.jetbrains.skia.Color4f
+import org.jetbrains.skia.ColorSpace
+import org.jetbrains.skia.FilterTileMode
+import org.jetbrains.skia.Gradient
 import org.jetbrains.skia.Image
 import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Rect
@@ -113,21 +117,28 @@ private fun makePlatformDefaultHead(config: DrawConfig): Image {
     val width = 1200
     val height = 300
     val platformColor = colorFromPlatform(config.platform.id.value)
-    val colors = intArrayOf(
+    val colors = arrayOf(
         config.theme.backgroundColors.firstOrNull() ?: platformColor,
         platformColor,
         config.theme.backgroundColors.lastOrNull() ?: config.theme.primaryColor,
-    )
+    ).map { Color4f(it) }.toTypedArray()
 
     return Surface.makeRasterN32Premul(width, height).apply {
         val gradientPaint = Paint().apply {
             isAntiAlias = true
             shader = Shader.makeLinearGradient(
-                x0 = 0f,
-                y0 = 0f,
-                x1 = width.toFloat(),
-                y1 = height.toFloat(),
-                colors = colors,
+                0f,
+                0f,
+                width.toFloat(),
+                height.toFloat(),
+                Gradient(
+                    Gradient.Colors(
+                        colors = colors,
+                        positions = null,
+                        tileMode = FilterTileMode.CLAMP,
+                        colorSpace = ColorSpace.sRGB,
+                    )
+                ),
             )
         }
         canvas.drawRect(Rect.makeXYWH(0f, 0f, width.toFloat(), height.toFloat()), gradientPaint)

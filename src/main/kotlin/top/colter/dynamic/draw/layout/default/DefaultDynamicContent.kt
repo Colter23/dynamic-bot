@@ -16,7 +16,6 @@ import top.colter.skiko.layout.Layout
 import top.colter.skiko.layout.RichText
 import top.colter.skiko.margin
 import top.colter.skiko.px
-import top.colter.skiko.withDefaultFontFamily
 import top.colter.skiko.data.RichParagraphBuilder
 
 internal fun Layout.drawDynamicContent(
@@ -29,11 +28,9 @@ internal fun Layout.drawDynamicContent(
     val style = TextStyle()
         .setColor(config.theme.textColor)
         .setFontSize(30.px)
-        .withDefaultFontFamily(config.fontRegistry)
     val linkStyle = TextStyle()
         .setColor(config.theme.linkColor)
         .setFontSize(30.px)
-        .withDefaultFontFamily(config.fontRegistry)
     val paragraph = RichParagraphBuilder(style)
 
     content.nodes.forEach {

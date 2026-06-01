@@ -17,7 +17,7 @@ configurations.configureEach {
 }
 
 dependencies {
-    val skikoVersion = "0.8.23"
+    val skikoVersion = "0.148.1"
     val ktorVersion = "3.0.3"
     val log4jVersion = "2.25.4"
 

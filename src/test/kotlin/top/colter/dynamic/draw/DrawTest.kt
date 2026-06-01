@@ -36,15 +36,15 @@ import top.colter.dynamic.testOutput
 import top.colter.dynamic.testPublisherInfo
 import top.colter.dynamic.testPublisherKey
 import top.colter.skiko.Dp
-import top.colter.skiko.FontUtils
+import top.colter.skiko.Fonts
 import top.colter.skiko.data.Ratio
 
 class DrawTest {
     @BeforeTest
     fun init() {
         Dp.factor = 1f
-        FontUtils.loadTypeface(loadTestResource("font", "HarmonyOS_SansSC_Medium.ttf").absolutePath)
-        FontUtils.loadEmojiTypeface(loadTestResource("font", "NotoColorEmoji.ttf").absolutePath)
+        Fonts.default.loadTextTypeface(loadTestResource("font", "HarmonyOS_SansSC_Medium.ttf").absolutePath)
+        Fonts.default.loadEmojiTypeface(loadTestResource("font", "NotoColorEmoji.ttf").absolutePath)
     }
 
     @Test

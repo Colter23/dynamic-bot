@@ -11,7 +11,6 @@ import top.colter.dynamic.draw.resource.DrawFonts
 import top.colter.dynamic.draw.resource.EmptyPlatformDrawAssetResolver
 import top.colter.dynamic.draw.resource.PlatformDrawAssetResolver
 import top.colter.skiko.FontRegistry
-import top.colter.skiko.Fonts
 import top.colter.skiko.withAlpha
 import kotlin.math.abs
 import kotlin.math.max
@@ -29,12 +28,8 @@ public data class DrawConfig(
     val theme: DrawTheme = DrawThemeFactory.fromSettings(settings),
     val imageResolver: DynamicImageResolver = DynamicImageCache,
     val assetResolver: PlatformDrawAssetResolver = EmptyPlatformDrawAssetResolver,
-    val fontRegistry: FontRegistry = Fonts.default,
+    val fontRegistry: FontRegistry = DrawFonts.registry(settings.font),
 ) {
-    init {
-        DrawFonts.ensureDefaultFonts(fontRegistry, settings.font)
-    }
-
     public fun image(image: MediaRef): Image = imageResolver.image(image)
 
     public fun platformAssetImage(key: String, width: Int? = null, height: Int? = null): Image? {
