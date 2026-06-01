@@ -25,7 +25,8 @@ const $ = id => document.getElementById(id);
       selectedConfigId: "",
       currentConfigDetail: null,
       pendingConfigRestarts: {},
-      activePageModule: null
+      activePageModule: null,
+      pageLoadSeq: 0
     };
     const pageModuleCache = {};
 
@@ -258,11 +259,15 @@ const $ = id => document.getElementById(id);
       }
     }
     async function loadPage(page, force) {
+      const loadSeq = ++state.pageLoadSeq;
       await unmountActivePage();
       releaseMediaObjectUrls();
       const pageSpec = pages[page] || pages.dashboard;
-      $("content").innerHTML = await fetchText(pageSpec[2]);
+      const html = await fetchText(pageSpec[2]);
+      if (loadSeq !== state.pageLoadSeq) return;
+      $("content").innerHTML = html;
       const pageModule = await loadPageModule(pageSpec[3]);
+      if (loadSeq !== state.pageLoadSeq) return;
       state.activePageModule = pageModule;
       if (pageModule?.mount) await pageModule.mount(pageContext(force));
     }

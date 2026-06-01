@@ -125,3 +125,7 @@ async function loadSystem(force) {
       </section>
     </section>`;
 }
+
+function stat(title, value, sub) {
+  return `<div class="stat"><b>${esc(value)}</b><span>${esc(title)} · ${esc(sub || "")}</span></div>`;
+}
