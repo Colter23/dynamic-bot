@@ -168,6 +168,7 @@ public class CommandListener(
             SubscribeCommandHandler(
                 publisherLookupResolver,
                 publisherFollowResolver,
+                { runtimeConfig },
                 commandPrefixProvider,
                 eventBus,
                 runtimePublisherThemeInitializer,
@@ -556,6 +557,7 @@ private class StopApplicationCommandHandler(
 private class SubscribeCommandHandler(
     private val lookupResolver: (String) -> PublisherLookupPlugin?,
     private val followResolver: (String) -> PublisherFollowPlugin?,
+    private val configProvider: () -> MainDynamicConfig,
     private val commandPrefixProvider: () -> String,
     private val eventBus: EventBus,
     private val publisherThemeInitializer: PublisherThemeInitializer,
@@ -579,31 +581,39 @@ private class SubscribeCommandHandler(
         val publisherUserId = invocation.args[1]
         val lookupPlugin = lookupResolver(platform)
             ?: return CommandExecutionResult.failed("未找到发布者查询插件：$platform")
-        val followPlugin = followResolver(platform)
-            ?: return CommandExecutionResult.failed("未找到发布者关注插件：$platform")
+        val autoFollowEnabled = configProvider().subscription.autoFollowPublisherOnSubscribe
+        val followPlugin = if (autoFollowEnabled) {
+            followResolver(platform) ?: return CommandExecutionResult.failed("未找到发布者关注插件：$platform")
+        } else {
+            null
+        }
 
         val publisherInfo = lookupPlugin.fetchPublisherInfo(publisherUserId)
             ?: return CommandExecutionResult.failed("未找到发布者：$platform:$publisherUserId")
 
-        val followState = followPlugin.queryFollowState(publisherUserId)
-        val autoFollowed = when (followState) {
-            FollowState.FOLLOWING -> false
-            FollowState.NOT_FOLLOWING -> {
-                val followResult = followPlugin.followPublisher(publisherUserId)
-                when (followResult.status) {
-                    FollowActionStatus.FOLLOWED -> true
-                    FollowActionStatus.ALREADY_FOLLOWING -> false
-                    FollowActionStatus.FAILED -> {
-                        return CommandExecutionResult.failed(followResult.message ?: "关注发布者失败：$platform")
-                    }
-                    FollowActionStatus.UNSUPPORTED -> {
-                        return CommandExecutionResult.failed("$platform 不支持自动关注")
+        val autoFollowed = if (autoFollowEnabled) {
+            val followState = followPlugin!!.queryFollowState(publisherUserId)
+            when (followState) {
+                FollowState.FOLLOWING -> false
+                FollowState.NOT_FOLLOWING -> {
+                    val followResult = followPlugin.followPublisher(publisherUserId)
+                    when (followResult.status) {
+                        FollowActionStatus.FOLLOWED -> true
+                        FollowActionStatus.ALREADY_FOLLOWING -> false
+                        FollowActionStatus.FAILED -> {
+                            return CommandExecutionResult.failed(followResult.message ?: "关注发布者失败：$platform")
+                        }
+                        FollowActionStatus.UNSUPPORTED -> {
+                            return CommandExecutionResult.failed("$platform 不支持自动关注")
+                        }
                     }
                 }
+                FollowState.UNSUPPORTED -> {
+                    return CommandExecutionResult.failed("$platform 不支持关注状态检查")
+                }
             }
-            FollowState.UNSUPPORTED -> {
-                return CommandExecutionResult.failed("$platform 不支持关注状态检查")
-            }
+        } else {
+            false
         }
 
         val publisherUpsert = PublisherRepository.upsertInfo(publisherInfo)
@@ -623,7 +633,7 @@ private class SubscribeCommandHandler(
 
         val publisherState = if (publisherUpsert.created) "新建" else "已存在"
         val subscriptionState = if (mutation.changed) "新建" else "已存在"
-        val followStateText = if (autoFollowed) "是" else "否"
+        val followStateText = if (!autoFollowEnabled) "已关闭" else if (autoFollowed) "是" else "否"
         return CommandExecutionResult.success(
             "已订阅：${publisherUpsert.value.name}（自动关注=$followStateText，发布者=$publisherState，订阅=$subscriptionState）",
         )

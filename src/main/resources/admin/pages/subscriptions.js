@@ -276,7 +276,6 @@ async function openCreateSubscription() {
       publisherId: selectedPublisher.publisherId,
       publisherPlatform: selectedPublisher.platformId,
       publisherExternalId: selectedPublisher.externalId,
-      autoFollow: false,
       policy: collectPolicy("subPolicy")
     };
 

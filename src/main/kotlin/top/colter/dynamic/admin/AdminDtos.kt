@@ -382,7 +382,6 @@ public data class CreateSubscriptionRequest(
     val publisherPlatform: String? = null,
     val publisherExternalId: String? = null,
     val publisherId: Int? = null,
-    val autoFollow: Boolean = true,
     val policy: SubscriptionPolicy = SubscriptionPolicy.default(),
 )
 

@@ -4,6 +4,7 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -18,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.SubscriptionConfig
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicBlockKind
 import top.colter.dynamic.core.data.FilterCondition
@@ -143,7 +145,6 @@ class AdminServerTest {
                 subscriberTargetId = "100",
                 publisherPlatform = "bilibili",
                 publisherExternalId = "123",
-                autoFollow = true,
                 policy = policy,
             ),
         )
@@ -157,6 +158,31 @@ class AdminServerTest {
         assertEquals("100", response.subscription.subscriber?.name)
         assertEquals("bilibili", response.subscription.publisher?.platformId)
         assertNotNull(SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")))
+    }
+
+    @Test
+    fun createSubscriptionShouldRespectAutoFollowConfig() = runBlocking {
+        initDb("admin-create-subscription-auto-follow-disabled")
+        val plugin = FakePublisherFollowPlugin()
+        val service = service(
+            plugin = plugin,
+            config = MainDynamicConfig(
+                subscription = SubscriptionConfig(autoFollowPublisherOnSubscribe = false),
+            ),
+        )
+
+        val response = service.createSubscription(
+            CreateSubscriptionRequest(
+                subscriberPlatform = "onebot",
+                targetKind = "GROUP",
+                subscriberTargetId = "100",
+                publisherPlatform = "bilibili",
+                publisherExternalId = "123",
+            ),
+        )
+
+        assertFalse(response.autoFollowed)
+        assertFalse(plugin.followed)
     }
 
     @Test

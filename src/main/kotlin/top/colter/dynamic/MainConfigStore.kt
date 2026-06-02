@@ -111,6 +111,13 @@ public object MainConfigForms {
                     description = "未命中规则时为普通用户；命中多条规则时取最高权限。平台、目标、发送者等字段支持 * 通配。",
                 ),
                 ConfigFieldSpec(
+                    path = "subscription.autoFollowPublisherOnSubscribe",
+                    label = "订阅时自动关注发布者",
+                    type = ConfigFieldType.BOOLEAN,
+                    section = "订阅",
+                    description = "添加订阅时，允许来源插件自动关注对应发布者；关闭后只保存订阅关系，不主动关注。",
+                ),
+                ConfigFieldSpec(
                     path = "subscription.unfollowWhenNoSubscribers",
                     label = "无订阅目标时自动取消关注",
                     type = ConfigFieldType.BOOLEAN,

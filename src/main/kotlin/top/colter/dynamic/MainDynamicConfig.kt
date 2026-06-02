@@ -37,6 +37,7 @@ public data class WebAdminConfig(
 )
 
 public data class SubscriptionConfig(
+    val autoFollowPublisherOnSubscribe: Boolean = true,
     val unfollowWhenNoSubscribers: Boolean = false,
 )
 

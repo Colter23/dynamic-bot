@@ -429,13 +429,13 @@
       box-shadow: 0 8px 20px rgba(24, 33, 45, 0.07);
     }
     .subscription-create-subscription > .subscription-card:nth-of-type(1) {
-      border-color: #9cc8ff;
+      border-color: #4f8fe8;
     }
     .subscription-create-subscription > .subscription-card:nth-of-type(2) {
-      border-color: #f1c47c;
+      border-color: #c97816;
     }
     .subscription-create-subscription > .subscription-card:nth-of-type(3) {
-      border-color: #8fd8bd;
+      border-color: #2f9f78;
     }
     .subscription-mode-switch {
       display: flex;

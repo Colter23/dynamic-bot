@@ -595,7 +595,7 @@ public class AdminService(
         }
         val publisherPlatform = publisherUpsert.value.key.platformId.value
         val publisherExternalId = publisherUpsert.value.key.externalId
-        val autoFollowed = if (request.autoFollow) {
+        val autoFollowed = if (configProvider().subscription.autoFollowPublisherOnSubscribe) {
             val followPlugin = publisherFollowResolver(publisherPlatform)
                 ?: throw NoSuchElementException("未找到发布者关注插件：$publisherPlatform")
             ensureFollowed(followPlugin, publisherPlatform, publisherExternalId)
