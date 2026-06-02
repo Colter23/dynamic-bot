@@ -371,11 +371,17 @@ public data class CreateSubscriberRequest(
 
 @Serializable
 public data class CreateSubscriptionRequest(
-    val subscriberPlatform: String,
-    val targetKind: String,
-    val subscriberTargetId: String,
-    val publisherPlatform: String,
-    val publisherExternalId: String,
+    val subscriberPlatform: String? = null,
+    val targetKind: String? = null,
+    val subscriberTargetId: String? = null,
+    val subscriberId: Int? = null,
+    val subscriberScopeId: String? = null,
+    val subscriberThreadId: String? = null,
+    val subscriberAccountId: String? = null,
+    val subscriberLinkParseTriggerMode: String? = null,
+    val publisherPlatform: String? = null,
+    val publisherExternalId: String? = null,
+    val publisherId: Int? = null,
     val autoFollow: Boolean = true,
     val policy: SubscriptionPolicy = SubscriptionPolicy.default(),
 )

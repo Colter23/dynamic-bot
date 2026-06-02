@@ -57,6 +57,7 @@ import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SourceCursorRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.repository.SubscriptionMutationResult
+import top.colter.dynamic.repository.UpsertResult
 import kotlinx.serialization.json.JsonNull
 import top.colter.dynamic.plugin.PluginCapability
 
@@ -576,44 +577,68 @@ public class AdminService(
     }
 
     public suspend fun createSubscription(request: CreateSubscriptionRequest): CreateSubscriptionResponse {
-        val platform = request.publisherPlatform.trim().lowercase()
-        val externalId = request.publisherExternalId.trim()
-        require(platform.isNotBlank()) { "发布者平台不能为空" }
-        require(externalId.isNotBlank()) { "发布者外部 ID 不能为空" }
+        val publisherUpsert = if (request.publisherId != null) {
+            val publisher = PublisherRepository.findById(request.publisherId)
+                ?: throw NoSuchElementException("发布者不存在：publisherId=${request.publisherId}")
+            UpsertResult(publisher, created = false, updated = false)
+        } else {
+            val platform = request.publisherPlatform?.trim()?.lowercase().orEmpty()
+            val externalId = request.publisherExternalId?.trim().orEmpty()
+            require(platform.isNotBlank()) { "发布者平台不能为空" }
+            require(externalId.isNotBlank()) { "发布者外部 ID 不能为空" }
 
-        val lookupPlugin = publisherLookupResolver(platform)
-            ?: throw NoSuchElementException("未找到发布者查询插件：$platform")
-        val publisherInfo = lookupPlugin.fetchPublisherInfo(externalId)
-            ?: throw NoSuchElementException("未找到发布者：$platform:$externalId")
-
+            val lookupPlugin = publisherLookupResolver(platform)
+                ?: throw NoSuchElementException("未找到发布者查询插件：$platform")
+            val publisherInfo = lookupPlugin.fetchPublisherInfo(externalId)
+                ?: throw NoSuchElementException("未找到发布者：$platform:$externalId")
+            PublisherRepository.upsertInfo(publisherInfo.normalized())
+        }
+        val publisherPlatform = publisherUpsert.value.key.platformId.value
+        val publisherExternalId = publisherUpsert.value.key.externalId
         val autoFollowed = if (request.autoFollow) {
-            val followPlugin = publisherFollowResolver(platform)
-                ?: throw NoSuchElementException("未找到发布者关注插件：$platform")
-            ensureFollowed(followPlugin, platform, externalId)
+            val followPlugin = publisherFollowResolver(publisherPlatform)
+                ?: throw NoSuchElementException("未找到发布者关注插件：$publisherPlatform")
+            ensureFollowed(followPlugin, publisherPlatform, publisherExternalId)
         } else {
             false
         }
-        val publisherUpsert = PublisherRepository.upsertInfo(publisherInfo.normalized())
-        val subscriberPlatform = request.subscriberPlatform.trim().lowercase().also {
-            require(it.isNotBlank()) { "消息目标平台不能为空" }
+
+        val subscriberUpsert = if (request.subscriberId != null) {
+            val subscriber = SubscriberRepository.findById(request.subscriberId)
+                ?: throw NoSuchElementException("消息目标不存在：subscriberId=${request.subscriberId}")
+            UpsertResult(subscriber, created = false, updated = false)
+        } else {
+            val subscriberPlatform = request.subscriberPlatform?.trim()?.lowercase().orEmpty().also {
+                require(it.isNotBlank()) { "消息目标平台不能为空" }
+            }
+            val subscriberExternalId = request.subscriberTargetId?.trim().orEmpty().also {
+                require(it.isNotBlank()) { "消息目标 ID 不能为空" }
+            }
+            val subscriberAddress = TargetAddress.of(
+                platformId = subscriberPlatform,
+                kind = parseEnum<TargetKind>(request.targetKind.orEmpty(), "targetKind"),
+                externalId = subscriberExternalId,
+                scopeId = request.subscriberScopeId,
+                threadId = request.subscriberThreadId,
+                accountId = request.subscriberAccountId,
+            )
+            val existedSubscriber = SubscriberRepository.findByAddress(subscriberAddress)
+            val targetProfile = resolveSubscriberTarget(subscriberAddress)
+            SubscriberRepository.upsert(
+                address = subscriberAddress,
+                name = targetProfile?.name?.trim()?.takeIf { it.isNotBlank() }
+                    ?: existedSubscriber?.name
+                    ?: subscriberAddress.externalId,
+                avatar = targetProfile?.avatar,
+            )
         }
-        val subscriberExternalId = request.subscriberTargetId.trim().also {
-            require(it.isNotBlank()) { "消息目标 ID 不能为空" }
+        parseLinkParseTriggerModeOrNull(request.subscriberLinkParseTriggerMode)?.let { mode ->
+            LinkParseTargetConfigRepository.upsert(
+                address = subscriberUpsert.value.address,
+                triggerMode = mode,
+                updatedBy = "web-admin",
+            )
         }
-        val subscriberAddress = TargetAddress.of(
-            platformId = subscriberPlatform,
-            kind = parseEnum<TargetKind>(request.targetKind, "targetKind"),
-            externalId = subscriberExternalId,
-        )
-        val existedSubscriber = SubscriberRepository.findByAddress(subscriberAddress)
-        val targetProfile = resolveSubscriberTarget(subscriberAddress)
-        val subscriberUpsert = SubscriberRepository.upsert(
-            address = subscriberAddress,
-            name = targetProfile?.name?.trim()?.takeIf { it.isNotBlank() }
-                ?: existedSubscriber?.name
-                ?: subscriberAddress.externalId,
-            avatar = targetProfile?.avatar,
-        )
         requireSubscriptionPolicyAllowed(subscriberUpsert.value, request.policy)
         val previousSubscriptionCount = SubscriptionRepository.countByPublisherId(publisherUpsert.value.id)
         val subscriptionResult = SubscriptionRepository.subscribe(
