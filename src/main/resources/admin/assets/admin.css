@@ -978,6 +978,178 @@
       background: #eef8f6;
       color: var(--accent);
     }
+    .cookie-export {
+      display: grid;
+      gap: 10px;
+    }
+    .cookie-export-tabs {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .cookie-export-tab {
+      min-height: 30px;
+      padding: 5px 10px;
+      border-color: var(--line);
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 13px;
+      font-weight: 800;
+    }
+    .cookie-export-tab.active {
+      border-color: #9edbd4;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .cookie-export-description {
+      padding: 8px 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .cookie-export textarea {
+      min-height: 178px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .cookie-export-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .qr-login-panel {
+      display: grid;
+      justify-items: center;
+      gap: 12px;
+    }
+    .qr-login-copy {
+      display: grid;
+      gap: 4px;
+      text-align: center;
+    }
+    .qr-login-copy strong {
+      font-size: 14px;
+      line-height: 1.35;
+    }
+    .qr-login-copy span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .qr-login-copy b {
+      color: var(--accent);
+    }
+    .qr-code-box {
+      position: relative;
+      width: 240px;
+      height: 240px;
+      display: grid;
+      place-items: center;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .qr-code-box img {
+      width: 216px;
+      height: 216px;
+      display: block;
+      object-fit: contain;
+      transition: filter 0.18s ease, opacity 0.18s ease, transform 0.18s ease;
+    }
+    .qr-code-loading {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .qr-code-box.ready .qr-code-loading,
+    .qr-code-box.expired .qr-code-loading,
+    .qr-code-box.success .qr-code-loading,
+    .qr-code-box.error .qr-code-loading {
+      display: none;
+    }
+    .qr-code-box.expired img,
+    .qr-code-box.error img {
+      filter: blur(4px) grayscale(1);
+      opacity: 0.62;
+      transform: scale(1.02);
+    }
+    .qr-code-box.success {
+      border-color: #9edbd4;
+      box-shadow: 0 0 0 4px var(--accent-soft);
+    }
+    .qr-expired-overlay {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      background: rgba(255, 255, 255, 0.44);
+    }
+    .qr-refresh-button {
+      width: 52px;
+      height: 52px;
+      min-height: 52px;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      border: 1px solid #b9ded8;
+      border-radius: 999px;
+      background: #eef8f6;
+      color: var(--accent);
+      font-size: 25px;
+      line-height: 1;
+      box-shadow: 0 8px 24px rgba(24, 33, 45, 0.16);
+    }
+    .qr-status-card {
+      width: 100%;
+      display: grid;
+      gap: 4px;
+      padding: 10px 11px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+    }
+    .qr-status-card span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .qr-status-card strong {
+      color: var(--text);
+      font-size: 14px;
+      overflow-wrap: anywhere;
+    }
+    .qr-status-card.success {
+      border-color: #9edbd4;
+      background: var(--accent-soft);
+    }
+    .qr-status-card.success strong {
+      color: var(--accent);
+    }
+    .qr-status-card.expired {
+      border-color: #f0c98d;
+      background: #fff8ea;
+    }
+    .qr-status-card.expired strong {
+      color: var(--amber);
+    }
+    .qr-status-card.error {
+      border-color: #f1b8b2;
+      background: #fff1f0;
+    }
+    .qr-status-card.error strong {
+      color: var(--red);
+    }
     .card {
       display: grid;
       gap: 10px;
@@ -1106,6 +1278,7 @@
       box-shadow: var(--shadow);
     }
     .modal.small { width: min(460px, 100%); }
+    .modal.qr { width: min(420px, 100%); }
     .modal.narrow { width: min(540px, 100%); }
     .modal.medium { width: min(620px, 100%); }
     .modal.subscription { width: min(700px, 100%); }

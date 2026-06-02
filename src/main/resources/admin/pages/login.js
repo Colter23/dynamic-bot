@@ -155,8 +155,8 @@ function renderPlatformCard(item) {
     <div class="platform-login-methods">${tags(methods.map(label))}</div>
     <div class="platform-login-actions">
       <button class="login-action-qr" data-action="qr-login" data-platform="${attr(item.platformId)}"${methods.includes("QR_CODE") ? "" : " disabled"}>扫码登录</button>
-      <button class="login-action-cookie" data-action="cookie-login" data-platform="${attr(item.platformId)}"${methods.includes("COOKIE") ? "" : " disabled"}>Cookie登录</button>
-      <button class="login-action-export" data-action="export-cookie" data-platform="${attr(item.platformId)}"${exportDisabled}>导出Cookie</button>
+      <button class="login-action-cookie" data-action="cookie-login" data-platform="${attr(item.platformId)}"${methods.includes("COOKIE") ? "" : " disabled"}>Cookie 登录</button>
+      <button class="login-action-export" data-action="export-cookie" data-platform="${attr(item.platformId)}"${exportDisabled}>导出 Cookie</button>
       <button class="login-action-refresh" data-action="refresh-login" data-platform="${attr(item.platformId)}">刷新</button>
     </div>
   </article>`;
@@ -172,47 +172,320 @@ async function openCookieLogin(platform) {
   }, { size: "small" });
 }
 
+function cookieHeaderFromJson(cookieJson) {
+  try {
+    const rows = JSON.parse(cookieJson || "[]");
+    if (!Array.isArray(rows)) return "";
+    const pairs = rows.map(item => {
+      const name = String(item && item.name || "").trim();
+      const value = item && item.value != null ? String(item.value) : "";
+      return name ? `${name}=${value}` : "";
+    }).filter(Boolean);
+    return pairs.length ? pairs.join(";") + ";" : "";
+  } catch (_) {
+    return "";
+  }
+}
+
 async function openCookieExport(platform) {
   const result = await api(`/platforms/${encodeURIComponent(platform)}/login/cookie/export`);
+  const cookieJson = result.cookie || "";
+  const cookieHeader = cookieHeaderFromJson(cookieJson);
+  const formats = [
+    {
+      key: "json",
+      title: "JSON 格式",
+      description: "后端原样返回的浏览器 Cookie JSON，适合保存到 Bilibili 插件配置或再次导入后台。",
+      value: cookieJson,
+    },
+    {
+      key: "raw",
+      title: "原始 Cookie 格式",
+      description: "形如 SESSDATA=xxxx;buvid4=xxxx;，适合复制到请求头或手动 Cookie 登录。",
+      value: cookieHeader,
+    },
+  ];
   openModal(`${platform} Cookie`, `
-    <div class="field">
-      <label>Cookie</label>
-      <textarea readonly>${esc(result.cookie || "")}</textarea>
-      <span class="inline-note">${esc(result.message || "Cookie 已导出")}</span>
+    <div class="cookie-export">
+      <div class="cookie-export-tabs">
+        ${formats.map((item, index) =>
+          `<button type="button" class="cookie-export-tab${index === 0 ? " active" : ""}" data-cookie-format="${attr(item.key)}">${esc(item.title)}</button>`
+        ).join("")}
+      </div>
+      <div id="cookieExportDescription" class="cookie-export-description">${esc(formats[0].description)}</div>
+      <textarea id="cookieExportValue" readonly>${esc(formats[0].value)}</textarea>
+      <div class="cookie-export-footer">
+        <span class="inline-note">${esc(result.message || "Cookie 已导出")}</span>
+        <button type="button" id="cookieExportCopy" class="secondary compact">复制当前格式</button>
+      </div>
     </div>
   `, null, { size: "small", cancelText: "关闭" });
+
+  function selectFormat(key) {
+    const selected = formats.find(item => item.key === key) || formats[0];
+    $("cookieExportValue").value = selected.value || "";
+    $("cookieExportDescription").textContent = selected.value
+      ? selected.description
+      : `${selected.description} 当前 Cookie JSON 无法转换出该格式。`;
+    document.querySelectorAll("[data-cookie-format]").forEach(button => {
+      button.classList.toggle("active", button.dataset.cookieFormat === selected.key);
+    });
+  }
+
+  document.querySelectorAll("[data-cookie-format]").forEach(button => {
+    button.onclick = () => selectFormat(button.dataset.cookieFormat);
+  });
+  $("cookieExportCopy").onclick = async () => {
+    const value = $("cookieExportValue").value;
+    if (!value) {
+      notify("当前格式没有可复制的内容", true);
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(value);
+    } catch (_) {
+      $("cookieExportValue").select();
+      document.execCommand("copy");
+    }
+    notify("Cookie 已复制", false);
+  };
 }
 
 async function openQrLogin(platform) {
-  const start = await api(`/platforms/${encodeURIComponent(platform)}/login/qr`, { method: "POST" });
-  const blob = await apiBlob(start.imageUrl.replace("/api", ""));
-  const imageUrl = URL.createObjectURL(blob);
+  const appName = String(platform || "").toLowerCase() === "bilibili" ? "Bilibili App" : `${platform} App`;
+  let loginId = "";
+  let imageUrl = "";
   let timer = null;
-  let qrDone = false;
+  let countdownTimer = null;
+  let autoCloseTimer = null;
+  let expiresAtMs = 0;
+  let closed = false;
+  let sessionFinished = false;
+  let polling = false;
+  let refreshing = false;
+
+  function clearTimers() {
+    if (timer) clearInterval(timer);
+    if (countdownTimer) clearInterval(countdownTimer);
+    if (autoCloseTimer) clearTimeout(autoCloseTimer);
+    timer = null;
+    countdownTimer = null;
+    autoCloseTimer = null;
+  }
+
+  function releaseQrImage() {
+    if (imageUrl) URL.revokeObjectURL(imageUrl);
+    imageUrl = "";
+  }
+
+  function setQrStatus(message, stateName = "pending") {
+    const node = $("qrStatus");
+    if (!node) return;
+    node.textContent = message || "-";
+    const card = node.closest(".qr-status-card");
+    if (card) {
+      card.classList.remove("pending", "success", "expired", "error");
+      card.classList.add(stateName);
+    }
+  }
+
+  function setQrBoxState(stateName) {
+    const box = $("qrCodeBox");
+    if (!box) return;
+    box.classList.remove("loading", "ready", "expired", "success", "error");
+    box.classList.add(stateName);
+  }
+
+  function setRefreshVisible(visible) {
+    const overlay = $("qrExpiredOverlay");
+    if (overlay) overlay.hidden = !visible;
+  }
+
+  function setLoadingVisible(visible) {
+    const loading = $("qrLoading");
+    if (loading) loading.hidden = !visible;
+  }
+
+  function setCountdownText(text) {
+    const node = $("qrCountdown");
+    if (node) node.textContent = text;
+  }
+
+  function updateCountdown() {
+    if (!expiresAtMs || sessionFinished) return;
+    const remainingMs = Math.max(0, expiresAtMs - Date.now());
+    const totalSeconds = Math.ceil(remainingMs / 1000);
+    const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
+    const seconds = String(totalSeconds % 60).padStart(2, "0");
+    setCountdownText(remainingMs > 0 ? `剩余 ${minutes}:${seconds}` : "已失效");
+    if (remainingMs <= 0 && loginId) {
+      markExpired("二维码已失效，请刷新后重新扫码", true);
+    }
+  }
+
+  function resetQrView() {
+    const image = $("qrImage");
+    if (image) {
+      image.hidden = true;
+      image.removeAttribute("src");
+    }
+    setQrBoxState("loading");
+    setRefreshVisible(false);
+    setLoadingVisible(true);
+    setCountdownText("剩余 03:00");
+    setQrStatus("正在生成二维码...", "pending");
+  }
+
+  function markExpired(message, localOnly = false) {
+    if (!localOnly) sessionFinished = true;
+    clearTimers();
+    setQrBoxState("expired");
+    setRefreshVisible(true);
+    setLoadingVisible(false);
+    setQrStatus(message || "二维码已失效，请刷新后重新扫码", "expired");
+    setCountdownText("已失效");
+  }
+
+  function markFailed(message, localOnly = false) {
+    if (!localOnly) sessionFinished = true;
+    clearTimers();
+    setQrBoxState("error");
+    setRefreshVisible(true);
+    setLoadingVisible(false);
+    setQrStatus(message || "二维码登录失败，请刷新后重试", "error");
+  }
+
+  async function finishSuccess(message) {
+    sessionFinished = true;
+    clearTimers();
+    setQrBoxState("success");
+    setRefreshVisible(false);
+    setLoadingVisible(false);
+    setQrStatus(message || "登录成功，3 秒后自动关闭", "success");
+    setCountdownText("已登录");
+    autoCloseTimer = setTimeout(async () => {
+      if (closed) return;
+      closeModal();
+      invalidate("platformLogins", "dashboard");
+      await loadPlatformLogins(true).catch(handleError);
+      notify("登录成功", false);
+    }, 3000);
+  }
+
+  async function pollQrStatus(currentLoginId) {
+    if (closed || polling || !currentLoginId || currentLoginId !== loginId || sessionFinished) return;
+    polling = true;
+    try {
+      const status = await api(`/login/qr/${encodeURIComponent(currentLoginId)}`);
+      if (closed || currentLoginId !== loginId) return;
+      const statusValue = String(status.status || "PENDING");
+      if (statusValue === "PENDING") {
+        setQrStatus(status.message || "等待扫码确认", "pending");
+        return;
+      }
+      if (statusValue === "SUCCESS") {
+        await finishSuccess(status.message || "登录成功，3 秒后自动关闭");
+        return;
+      }
+      if (statusValue === "EXPIRED") {
+        markExpired(status.message || "二维码已失效，请刷新后重新扫码");
+        return;
+      }
+      if (statusValue === "CANCELED") {
+        markFailed(status.message || "二维码登录已取消");
+        return;
+      }
+      markFailed(status.message || "二维码登录失败，请刷新后重试");
+    } catch (error) {
+      if (!closed) setQrStatus(error.message || "扫码状态查询失败", "error");
+    } finally {
+      polling = false;
+    }
+  }
+
+  function startPolling() {
+    const currentLoginId = loginId;
+    updateCountdown();
+    countdownTimer = setInterval(updateCountdown, 1000);
+    timer = setInterval(() => {
+      pollQrStatus(currentLoginId).catch(handleError);
+    }, 2500);
+    pollQrStatus(currentLoginId).catch(handleError);
+  }
+
+  async function refreshQr() {
+    if (refreshing) return;
+    refreshing = true;
+    const previousLoginId = loginId;
+    const shouldCancelPrevious = previousLoginId && !sessionFinished;
+    loginId = "";
+    sessionFinished = false;
+    clearTimers();
+    releaseQrImage();
+    resetQrView();
+    const refreshButton = $("qrRefresh");
+    if (refreshButton) refreshButton.disabled = true;
+    try {
+      if (shouldCancelPrevious) {
+        await api(`/login/qr/${encodeURIComponent(previousLoginId)}`, { method: "DELETE" }).catch(() => {});
+      }
+      const start = await api(`/platforms/${encodeURIComponent(platform)}/login/qr`, { method: "POST" });
+      if (closed) return;
+      loginId = start.loginId;
+      expiresAtMs = start.expiresAtEpochSeconds ? Number(start.expiresAtEpochSeconds) * 1000 : Date.now() + 180 * 1000;
+      setQrStatus(start.message || "等待扫码确认", "pending");
+      updateCountdown();
+      const blob = await apiBlob(start.imageUrl.replace(/^\/api/, ""));
+      if (closed || loginId !== start.loginId) return;
+      imageUrl = URL.createObjectURL(blob);
+      const image = $("qrImage");
+      if (image) {
+        image.src = imageUrl;
+        image.hidden = false;
+      }
+      setQrBoxState("ready");
+      setRefreshVisible(false);
+      setLoadingVisible(false);
+      startPolling();
+    } catch (error) {
+      if (!closed) markFailed(error.message || "二维码生成失败，请稍后重试", !!loginId);
+    } finally {
+      refreshing = false;
+      if (refreshButton && refreshButton.isConnected) refreshButton.disabled = false;
+    }
+  }
+
   openModal(`${platform} 二维码登录`, `
-    <div class="form-grid">
-      <div class="field full"><img src="${attr(imageUrl)}" alt="二维码" style="width:220px;height:220px;border:1px solid var(--line);border-radius:8px;background:#fff"></div>
-      <div class="field full"><div id="qrStatus" class="message">${esc(start.message || "等待扫码")}</div></div>
+    <div class="qr-login-panel">
+      <div class="qr-login-copy">
+        <strong>请使用 ${esc(appName)} 扫码并确认登录</strong>
+        <span>三分钟内有效 · <b id="qrCountdown">剩余 03:00</b></span>
+      </div>
+      <div id="qrCodeBox" class="qr-code-box loading">
+        <div id="qrLoading" class="qr-code-loading"><span class="loading-spinner"></span><span>正在生成二维码</span></div>
+        <img id="qrImage" alt="二维码" hidden>
+        <div id="qrExpiredOverlay" class="qr-expired-overlay" hidden>
+          <button type="button" id="qrRefresh" class="qr-refresh-button" title="刷新二维码">↻</button>
+        </div>
+      </div>
+      <div class="qr-status-card pending">
+        <span>当前扫码状态</span>
+        <strong id="qrStatus">正在生成二维码...</strong>
+      </div>
     </div>
   `, null, {
     confirmHidden: true,
     cancelText: "关闭",
-    size: "small",
+    size: "qr",
     cleanup: () => {
-      URL.revokeObjectURL(imageUrl);
-      if (timer) clearInterval(timer);
-      if (!qrDone) api(`/login/qr/${encodeURIComponent(start.loginId)}`, { method: "DELETE" }).catch(() => {});
+      closed = true;
+      clearTimers();
+      releaseQrImage();
+      if (!sessionFinished && loginId) {
+        api(`/login/qr/${encodeURIComponent(loginId)}`, { method: "DELETE" }).catch(() => {});
+      }
     }
   });
-  timer = setInterval(async () => {
-    const status = await api(`/login/qr/${encodeURIComponent(start.loginId)}`);
-    $("qrStatus").textContent = status.message;
-    if (!["PENDING"].includes(status.status)) {
-      qrDone = true;
-      clearInterval(timer);
-      timer = null;
-      invalidate("platformLogins", "dashboard");
-      await loadPlatformLogins(true).catch(() => {});
-    }
-  }, 2500);
+  $("qrRefresh").onclick = () => refreshQr().catch(handleError);
+  await refreshQr();
 }
