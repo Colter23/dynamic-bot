@@ -319,6 +319,64 @@
       font-weight: 800;
       white-space: nowrap;
     }
+    .subscription-filter-bar {
+      display: flex;
+      align-items: stretch;
+      justify-content: flex-start;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 10px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+    }
+    .subscription-filter-groups {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 8px;
+      flex: 1 1 620px;
+    }
+    .subscription-filter-group {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding: 6px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .subscription-filter-group-title {
+      min-height: 28px;
+      display: inline-flex;
+      align-items: center;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .subscription-filter-group select,
+    .subscription-filter-group input {
+      width: auto;
+      min-width: 116px;
+      max-width: 170px;
+      min-height: 28px;
+      height: 28px;
+      padding: 3px 8px;
+      font-size: 13px;
+    }
+    .subscription-filter-group input {
+      flex: 1 1 118px;
+    }
+    .subscription-filter-bar .entity-filter-clear,
+    .subscription-filter-bar .entity-filter-summary {
+      height: 28px;
+      min-height: 28px;
+      align-self: center;
+    }
     .form-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -485,6 +543,36 @@
       border-radius: 8px;
       background: var(--panel-soft);
     }
+    .filter-rule-table-wrap {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .filter-rule-table {
+      min-width: 0;
+      table-layout: fixed;
+    }
+    .filter-rule-table th,
+    .filter-rule-table td {
+      padding: 8px 9px;
+    }
+    .filter-rule-table th:nth-child(1),
+    .filter-rule-table td:nth-child(1) {
+      width: 72px;
+    }
+    .filter-rule-table th:nth-child(3),
+    .filter-rule-table td:nth-child(3) {
+      width: 132px;
+    }
+    .filter-rule-table th:nth-child(4),
+    .filter-rule-table td:nth-child(4) {
+      width: 64px;
+    }
+    .filter-rule-table .primary-line,
+    .filter-rule-table .sub-line {
+      max-width: none;
+    }
     .target-choice {
       display: grid;
       grid-template-columns: 18px 30px minmax(0, 1fr);
@@ -527,6 +615,26 @@
       color: var(--muted);
       font-weight: 700;
     }
+    .batch-result {
+      padding: 10px 12px;
+      border: 1px solid #f0c98d;
+      border-radius: 8px;
+      background: #fff8ea;
+      color: var(--amber);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .batch-result.error {
+      border-color: #f1b8b2;
+      background: #fff1f0;
+      color: var(--red);
+    }
+    .batch-result ul {
+      margin: 6px 0 0;
+      padding-left: 18px;
+      font-weight: 650;
+      overflow-wrap: anywhere;
+    }
     .loading-spinner {
       width: 16px;
       height: 16px;
@@ -544,6 +652,11 @@
       border-color: #c7d8f7;
       background: #f1f6ff;
       color: #1d4ed8;
+    }
+    button.choice-refresh-button {
+      border-color: #b9ded8;
+      background: #eef8f6;
+      color: var(--accent);
     }
     button.choice-clear-button {
       border-color: #f1b8b2;
@@ -737,6 +850,26 @@
       align-items: center;
       gap: 8px;
       min-width: 0;
+    }
+    .subscription-meta-line {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      max-width: 380px;
+      min-height: 22px;
+    }
+    .subscription-meta-line .platform-tag {
+      min-height: 20px;
+      padding: 1px 6px;
+      font-size: 11px;
+    }
+    .subscription-meta-line .platform-tag-text {
+      max-width: 74px;
+    }
+    .subscription-meta-line > span:not(.platform-tag) {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .cards {
       display: grid;

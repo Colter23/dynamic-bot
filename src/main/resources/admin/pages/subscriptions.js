@@ -25,17 +25,37 @@ let tags;
 let cell;
 let mediaImage;
 let identity;
+let identityMeta;
+let platformTag;
 let themeSwatch;
 let renderTable;
 let notify;
 let openModal;
 let closeModal;
+let uniqueValues;
+let filterOptions;
+let matchesExact;
+let matchesAnyContains;
+let linkParseModeLabel;
+let linkParseModeOptions;
+let loadSubscriberTargetCandidates;
+let subscriberTargetAddressKey;
 let eventTypes;
 let blockKinds;
 let publisherKey;
 let targetKey;
 let policyEvents;
 let mentionEvents;
+let subscriptionFilterTimer;
+let createSubscriptionModalSeq = 0;
+const subscriptionFilters = {
+  publisherPlatform: "",
+  publisherKind: "",
+  publisherId: "",
+  subscriberPlatform: "",
+  subscriberKind: "",
+  subscriberId: "",
+};
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -64,11 +84,21 @@ function bindContext(nextCtx) {
     cell,
     mediaImage,
     identity,
+    identityMeta,
+    platformTag,
     themeSwatch,
     renderTable,
     notify,
     openModal,
     closeModal,
+    uniqueValues,
+    filterOptions,
+    matchesExact,
+    matchesAnyContains,
+    linkParseModeLabel,
+    linkParseModeOptions,
+    loadSubscriberTargetCandidates,
+    subscriberTargetAddressKey,
     eventTypes,
     blockKinds,
     publisherKey,
@@ -85,6 +115,10 @@ function pageRoot() {
 export async function mount(nextCtx) {
   bindContext(nextCtx);
   await loadSubscriptions(ctx.force);
+}
+
+export function unmount() {
+  clearTimeout(subscriptionFilterTimer);
 }
 
 export async function handleAction(nextCtx, { action, button, id }) {
@@ -140,30 +174,165 @@ async function ensureSubscriptions(force) {
 async function loadSubscriptions(force) {
   releaseMediaObjectUrls();
   const rows = await ensureSubscriptions(force);
+  normalizeSubscriptionFilters(rows);
+  const filteredRows = filterSubscriptions(rows);
   pageRoot().innerHTML = `
     <section class="page">
       <section class="panel full">
-        <div class="toolbar">
+        <div class="panel-head">
           <h2>订阅关系</h2>
-          <div class="toolbar-actions">
-            <button class="add-button" data-action="create-subscription">添加订阅</button>
-          </div>
+          <button class="add-button" data-action="create-subscription">添加订阅</button>
         </div>
-        ${renderTable(rows, [
-          { title: "发布者", render: s => identity(s.publisher && s.publisher.name, publisherKey(s.publisher), s.publisher && s.publisher.avatarUri, s.publisher && s.publisher.platformId, "AVATAR") },
-          { title: "消息目标", render: s => identity(s.subscriber && s.subscriber.name, targetKey(s.subscriber), s.subscriber && s.subscriber.avatarUri, s.subscriber && s.subscriber.platformId, "AVATAR") },
-          { title: "接收事件", render: s => tags(policyEvents(s.policy).map(eventLabel)) },
-          { title: "@全体", render: s => tags(mentionEvents(s.policy).map(eventLabel)) },
-          { title: "动态过滤", render: s => cell(`${s.filterRuleCount || 0} 条阻止规则`, "仅作用于动态内容") },
-          { title: "更新时间", render: s => `<span class="sub-line">${fmtTime(s.updatedAtEpochSeconds)}</span>` },
-          { title: "操作", render: s => `<div class="row-actions"><button data-action="subscription-detail" data-id="${s.id}">详情</button><button class="danger" data-action="delete-subscription" data-id="${s.id}">删除</button></div>` }
-        ])}
+        ${subscriptionFilterBar(rows, filteredRows)}
+        <div id="subscriptionTable">${subscriptionTableHtml(filteredRows)}</div>
       </section>
     </section>`;
+  bindSubscriptionFilters();
   await hydrateMediaImages($("content"));
 }
 
+function subscriptionTableHtml(rows) {
+  return renderTable(rows, [
+    { title: "发布者", render: s => subscriptionPublisherCell(s.publisher) },
+    { title: "消息目标", render: s => subscriptionTargetCell(s.subscriber) },
+    { title: "接收事件", render: s => tags(policyEvents(s.policy).map(eventLabel)) },
+    { title: "@全体", render: s => tags(mentionEvents(s.policy).map(eventLabel)) },
+    { title: "动态过滤", render: s => cell(`${s.filterRuleCount || 0} 条阻止规则`, "仅作用于动态内容") },
+    { title: "更新时间", render: s => `<span class="sub-line">${fmtTime(s.updatedAtEpochSeconds)}</span>` },
+    { title: "操作", render: s => `<div class="row-actions"><button data-action="subscription-detail" data-id="${s.id}">编辑</button><button class="danger" data-action="delete-subscription" data-id="${s.id}">删除</button></div>` }
+  ]);
+}
+
+function subscriptionPublisherCell(publisher) {
+  if (!publisher) return identity("-", "-", null);
+  return subscriptionEntityCell(
+    publisher.name,
+    publisher.avatarUri,
+    publisher.platformId,
+    "AVATAR",
+    publisher.platformId,
+    label(publisher.kind),
+    publisher.externalId,
+  );
+}
+
+function subscriptionTargetCell(target) {
+  if (!target) return identity("-", "-", null);
+  return subscriptionEntityCell(
+    target.name,
+    target.avatarUri,
+    target.platformId,
+    "AVATAR",
+    target.platformId,
+    label(target.targetKind),
+    target.externalId,
+  );
+}
+
+function subscriptionEntityCell(name, image, mediaPlatform, mediaKind, platformId, typeText, externalId) {
+  return identityMeta(name, image, mediaPlatform, mediaKind, platformId, typeText, externalId);
+}
+
+function subscriptionFilterBar(rows, filteredRows) {
+  const active = subscriptionFilterActive();
+  return `<div class="subscription-filter-bar">
+    <span class="entity-filter-title">筛选</span>
+    <div class="subscription-filter-groups">
+      <div class="subscription-filter-group">
+        <span class="subscription-filter-group-title">发布者</span>
+        <select data-subscription-filter="publisherPlatform">${filterOptions("全部平台", uniqueValues(rows, row => row.publisher && row.publisher.platformId), subscriptionFilters.publisherPlatform)}</select>
+        <select data-subscription-filter="publisherKind">${filterOptions("全部类型", uniqueValues(rows, row => row.publisher && row.publisher.kind), subscriptionFilters.publisherKind, label)}</select>
+        <input data-subscription-filter="publisherId" value="${attr(subscriptionFilters.publisherId)}" placeholder="发布者 ID / 名称">
+      </div>
+      <div class="subscription-filter-group">
+        <span class="subscription-filter-group-title">消息目标</span>
+        <select data-subscription-filter="subscriberPlatform">${filterOptions("全部平台", uniqueValues(rows, row => row.subscriber && row.subscriber.platformId), subscriptionFilters.subscriberPlatform)}</select>
+        <select data-subscription-filter="subscriberKind">${filterOptions("全部类型", uniqueValues(rows, row => row.subscriber && row.subscriber.targetKind), subscriptionFilters.subscriberKind, label)}</select>
+        <input data-subscription-filter="subscriberId" value="${attr(subscriptionFilters.subscriberId)}" placeholder="目标 ID / 名称">
+      </div>
+    </div>
+    <button type="button" class="entity-filter-clear" data-subscription-filter-reset${active ? "" : " disabled"}>清除</button>
+    <span class="entity-filter-summary" data-subscription-filter-summary>显示 ${filteredRows.length} / ${rows.length}</span>
+  </div>`;
+}
+
+function bindSubscriptionFilters() {
+  pageRoot().querySelectorAll("[data-subscription-filter]").forEach(control => {
+    const apply = () => {
+      subscriptionFilters[control.dataset.subscriptionFilter] = control.value.trim();
+      refreshSubscriptionTable();
+    };
+    if (control.tagName === "INPUT") {
+      control.oninput = () => {
+        clearTimeout(subscriptionFilterTimer);
+        subscriptionFilterTimer = setTimeout(apply, 220);
+      };
+      control.onkeydown = event => {
+        if (event.key !== "Enter") return;
+        clearTimeout(subscriptionFilterTimer);
+        apply();
+      };
+    } else {
+      control.onchange = apply;
+    }
+  });
+  const reset = pageRoot().querySelector("[data-subscription-filter-reset]");
+  if (reset) {
+    reset.onclick = () => {
+      Object.keys(subscriptionFilters).forEach(key => subscriptionFilters[key] = "");
+      pageRoot().querySelectorAll("[data-subscription-filter]").forEach(control => control.value = "");
+      refreshSubscriptionTable();
+    };
+  }
+}
+
+function refreshSubscriptionTable() {
+  const rows = state.cache.subscriptions || [];
+  const filteredRows = filterSubscriptions(rows);
+  const table = $("subscriptionTable");
+  if (table) {
+    releaseMediaObjectUrls();
+    table.innerHTML = subscriptionTableHtml(filteredRows);
+    hydrateMediaImages(table).catch(handleError);
+  }
+  const summary = pageRoot().querySelector("[data-subscription-filter-summary]");
+  if (summary) summary.textContent = `显示 ${filteredRows.length} / ${rows.length}`;
+  const reset = pageRoot().querySelector("[data-subscription-filter-reset]");
+  if (reset) reset.disabled = !subscriptionFilterActive();
+}
+
+function filterSubscriptions(rows) {
+  return (rows || []).filter(row => {
+    const publisher = row.publisher || {};
+    const subscriber = row.subscriber || {};
+    return matchesExact(publisher.platformId, subscriptionFilters.publisherPlatform) &&
+      matchesExact(publisher.kind, subscriptionFilters.publisherKind) &&
+      matchesAnyContains([publisher.externalId, publisher.name], subscriptionFilters.publisherId) &&
+      matchesExact(subscriber.platformId, subscriptionFilters.subscriberPlatform) &&
+      matchesExact(subscriber.targetKind, subscriptionFilters.subscriberKind) &&
+      matchesAnyContains([subscriber.externalId, subscriber.name], subscriptionFilters.subscriberId);
+  });
+}
+
+function normalizeSubscriptionFilters(rows) {
+  normalizeSubscriptionFilter("publisherPlatform", uniqueValues(rows, row => row.publisher && row.publisher.platformId));
+  normalizeSubscriptionFilter("publisherKind", uniqueValues(rows, row => row.publisher && row.publisher.kind));
+  normalizeSubscriptionFilter("subscriberPlatform", uniqueValues(rows, row => row.subscriber && row.subscriber.platformId));
+  normalizeSubscriptionFilter("subscriberKind", uniqueValues(rows, row => row.subscriber && row.subscriber.targetKind));
+}
+
+function normalizeSubscriptionFilter(key, values) {
+  if (subscriptionFilters[key] && !values.includes(subscriptionFilters[key])) subscriptionFilters[key] = "";
+}
+
+function subscriptionFilterActive() {
+  return Object.values(subscriptionFilters).some(Boolean);
+}
+
 async function openCreateSubscription() {
+  const modalSeq = ++createSubscriptionModalSeq;
+  let modalClosed = false;
+  const isModalActive = () => !modalClosed && createSubscriptionModalSeq === modalSeq && !!$("subNewTargetCandidateList");
   await ensureSubscriptions(false);
   if (!state.cache.publishers) state.cache.publishers = await api("/publishers");
   if (!state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
@@ -208,6 +377,7 @@ async function openCreateSubscription() {
                 <span id="subNewTargetStatus" class="field-inline-status"></span>
               </div>
               <div class="row-actions" id="subNewTargetCandidateActions">
+                <button type="button" class="secondary compact choice-tool-button choice-refresh-button" id="subNewTargetRefresh">刷新</button>
                 <button type="button" class="secondary compact choice-tool-button" id="subNewTargetSelectAll">全选</button>
                 <button type="button" class="secondary compact choice-tool-button choice-clear-button" id="subNewTargetClearAll">清空</button>
               </div>
@@ -266,8 +436,10 @@ async function openCreateSubscription() {
         </div>
         ${policyForm("subPolicy", null, "GROUP")}
       </section>
+      <div id="subCreateResult" class="batch-result" hidden></div>
     </div>
   `, async () => {
+    setCreateSubscriptionResult("");
     const selectedTargets = collectCreateSubscriptionTargets(targetCandidates);
     const selectedPublisher = collectCreateSubscriptionPublisher(publisherCandidates);
     if (!selectedPublisher) throw new Error("请选择发布者或切换到新增发布者");
@@ -304,35 +476,50 @@ async function openCreateSubscription() {
     invalidate("dashboard", "subscriptions", "publishers", "subscribers");
     await loadSubscriptions(true);
     if (failures.length) {
-      throw new Error(`已创建 ${successCount} 个，失败 ${failures.length} 个：\n${failures.join("\n")}`);
+      setCreateSubscriptionResult(`已创建 ${successCount} 个订阅，失败 ${failures.length} 个。`, failures, true);
+      throw new Error(`批量创建部分失败：已创建 ${successCount} 个，失败 ${failures.length} 个`);
     }
     closeModal();
     notify(successCount > 1 ? `已创建 ${successCount} 个订阅` : "订阅已创建", false);
-  }, { size: "subscription", confirmText: "创建" });
+  }, {
+    size: "subscription",
+    confirmText: "创建",
+    cleanup: () => {
+      modalClosed = true;
+    },
+  });
 
   const policyUpdater = wirePolicyForm("subPolicy", currentCreateSubscriptionTargetKind);
   bindCreateSubscriptionMode(policyUpdater);
   document.querySelectorAll(`input[name="subExistingTarget"]`).forEach(input => input.onchange = policyUpdater);
   const refreshTargetKinds = async () => {
+    if (!isModalActive()) return;
     const platformId = $("subNewTargetPlatform").value;
     const platform = fallbackTargets.find(item => item.platformId === platformId);
     const kinds = platform && platform.supportedTypes && platform.supportedTypes.length
       ? platform.supportedTypes
       : ["GROUP", "USER", "CHANNEL", "OTHER"];
+    if (!isModalActive()) return;
     $("subNewTargetKind").innerHTML = kinds.map(kind => `<option value="${attr(kind)}">${esc(label(kind))}</option>`).join("");
     policyUpdater();
     await refreshTargetCandidates();
   };
-  const refreshTargetCandidates = async () => {
+  const refreshTargetCandidates = async (force = false) => {
+    if (!isModalActive()) return;
     const platform = $("subNewTargetPlatform").value;
     const kind = $("subNewTargetKind").value;
     targetCandidates = [];
-    setCreateSubscriptionTargetLoading("正在获取可用目标...");
+    setCreateSubscriptionTargetLoading(force ? "正在刷新可用目标..." : "正在获取可用目标...");
     let allCandidates = [];
+    let source = "后端";
     try {
-      allCandidates = await api(`/subscriber-targets?platformId=${encodeURIComponent(platform)}&type=${encodeURIComponent(kind)}`);
+      const result = await loadSubscriberTargetCandidates(platform, kind, force);
+      if (!isModalActive()) return;
+      allCandidates = result.items;
+      source = result.stale ? "过期缓存" : result.fromCache ? "缓存" : "后端";
       targetCandidates = filterExistingSubscriptionTargets(allCandidates);
     } catch (error) {
+      if (!isModalActive()) return;
       $("subNewTargetCandidateWrap").hidden = false;
       $("subNewTargetCandidateActions").hidden = true;
       $("subNewTargetManualWrap").hidden = false;
@@ -344,29 +531,36 @@ async function openCreateSubscription() {
       $("subNewTargetCandidateWrap").hidden = false;
       $("subNewTargetCandidateActions").hidden = false;
       $("subNewTargetManualWrap").hidden = true;
-      $("subNewTargetCandidateList").innerHTML = targetCandidates.map((target, index) => subscriptionTargetChoiceHtml(target, index, false)).join("");
-      await hydrateMediaImages($("subNewTargetCandidateList"));
-      setCreateSubscriptionTargetStatus(`${targetCandidates.length} 个可添加目标，已添加目标不显示`);
+      const candidateList = $("subNewTargetCandidateList");
+      if (!candidateList) return;
+      candidateList.innerHTML = targetCandidates.map((target, index) => subscriptionTargetChoiceHtml(target, index, false)).join("");
+      await hydrateMediaImages(candidateList);
+      if (!isModalActive()) return;
+      setCreateSubscriptionTargetStatus(`${targetCandidates.length} 个可添加目标，已添加目标不显示，来自${source}`);
     } else {
       $("subNewTargetCandidateWrap").hidden = false;
       $("subNewTargetCandidateActions").hidden = true;
       $("subNewTargetManualWrap").hidden = false;
       $("subNewTargetCandidateList").innerHTML = `<div class="empty">暂无可添加目标</div>`;
-      setCreateSubscriptionTargetStatus(allCandidates.length ? "已添加过的目标已排除，可手动填写目标 ID" : "未获取到目标，请手动填写目标 ID");
+      setCreateSubscriptionTargetStatus(allCandidates.length ? `已添加过的目标已排除，可手动填写目标 ID，来自${source}` : `未获取到目标，请手动填写目标 ID，来自${source}`);
     }
   };
   const searchPublisher = async () => {
+    if (!isModalActive()) return;
     const platformId = $("subNewPublisherPlatform").value.trim();
     const queryText = $("subNewPublisherId").value.trim();
     if (!platformId) throw new Error("没有可用的发布者平台");
     if (!queryText) throw new Error("请填写发布者 ID");
     publisherCandidates = [];
     setCreateSubscriptionPublisherLoading("正在搜索发布者...");
-    publisherCandidates = await api(`/publisher-search?platformId=${encodeURIComponent(platformId)}&q=${encodeURIComponent(queryText)}`);
+    const result = await api(`/publisher-search?platformId=${encodeURIComponent(platformId)}&q=${encodeURIComponent(queryText)}`);
+    if (!isModalActive()) return;
+    publisherCandidates = result;
     if (publisherCandidates.length) {
       $("subNewPublisherResultWrap").hidden = false;
       $("subNewPublisherResultList").innerHTML = publisherCandidates.map((publisher, index) => subscriptionPublisherCandidateHtml(publisher, index, index === 0)).join("");
       await hydrateMediaImages($("subNewPublisherResultList"));
+      if (!isModalActive()) return;
       $("subNewPublisherStatus").textContent = `已找到 ${publisherCandidates.length} 个发布者，已默认选择第一个`;
     } else {
       $("subNewPublisherResultWrap").hidden = false;
@@ -379,9 +573,11 @@ async function openCreateSubscription() {
     policyUpdater();
     await refreshTargetCandidates();
   };
+  $("subNewTargetRefresh").onclick = () => refreshTargetCandidates(true).catch(handleError);
   $("subNewTargetSelectAll").onclick = () => setCreateSubscriptionTargetChecked(true);
   $("subNewTargetClearAll").onclick = () => setCreateSubscriptionTargetChecked(false);
   $("subNewPublisherSearch").onclick = () => searchPublisher().catch(error => {
+    if (!isModalActive()) return;
     $("subNewPublisherResultWrap").hidden = true;
     $("subNewPublisherStatus").textContent = error.message || String(error);
   });
@@ -389,11 +585,13 @@ async function openCreateSubscription() {
     if (event.key !== "Enter") return;
     event.preventDefault();
     searchPublisher().catch(error => {
+      if (!isModalActive()) return;
       $("subNewPublisherResultWrap").hidden = true;
       $("subNewPublisherStatus").textContent = error.message || String(error);
     });
   };
   $("subNewPublisherPlatform").onchange = () => {
+    if (!isModalActive()) return;
     publisherCandidates = [];
     $("subNewPublisherResultWrap").hidden = true;
     $("subNewPublisherStatus").textContent = "请输入发布者 ID 后搜索。";
@@ -428,22 +626,6 @@ function selectedSubscriptionMode(name) {
   return input ? input.value : "";
 }
 
-function linkParseModeLabel(value) {
-  const map = {
-    INHERIT: "使用全局回退",
-    DISABLED: "不解析",
-    MENTION_ONLY: "必须 @bot",
-    ALWAYS: "匹配链接即解析"
-  };
-  return map[value] || value || "-";
-}
-
-function linkParseModeOptions(selected) {
-  return ["INHERIT", "DISABLED", "MENTION_ONLY", "ALWAYS"].map(mode =>
-    `<option value="${mode}"${mode === selected ? " selected" : ""}>${esc(linkParseModeLabel(mode))}</option>`
-  ).join("");
-}
-
 function currentCreateSubscriptionTargetKind() {
   if (selectedSubscriptionMode("subTargetMode") === "existing") {
     const input = document.querySelector(`input[name="subExistingTarget"]:checked`);
@@ -455,6 +637,7 @@ function currentCreateSubscriptionTargetKind() {
 }
 
 function setCreateSubscriptionTargetLoading(text) {
+  if (!$("subNewTargetCandidateList")) return;
   $("subNewTargetCandidateWrap").hidden = false;
   $("subNewTargetCandidateActions").hidden = true;
   $("subNewTargetManualWrap").hidden = true;
@@ -463,7 +646,24 @@ function setCreateSubscriptionTargetLoading(text) {
 }
 
 function setCreateSubscriptionTargetStatus(text) {
+  if (!$("subNewTargetStatus")) return;
   $("subNewTargetStatus").textContent = text ? `· ${text}` : "";
+}
+
+function setCreateSubscriptionResult(summary, details = [], isError = false) {
+  const node = $("subCreateResult");
+  if (!node) return;
+  if (!summary) {
+    node.hidden = true;
+    node.innerHTML = "";
+    node.classList.remove("error");
+    return;
+  }
+  node.hidden = false;
+  node.classList.toggle("error", !!isError);
+  node.innerHTML = `<strong>${esc(summary)}</strong>${details.length
+    ? `<ul>${details.map(detail => `<li>${esc(detail)}</li>`).join("")}</ul>`
+    : ""}`;
 }
 
 function existingTargetChoiceHtml(target, index, checked) {
@@ -559,6 +759,7 @@ function subscriptionTargetLinkParseMode() {
 }
 
 function setCreateSubscriptionPublisherLoading(text) {
+  if (!$("subNewPublisherResultList")) return;
   $("subNewPublisherResultWrap").hidden = false;
   $("subNewPublisherResultList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
   $("subNewPublisherStatus").textContent = text;
@@ -606,15 +807,11 @@ function collectCreateSubscriptionPublisher(candidates) {
 
 function filterExistingSubscriptionTargets(candidates) {
   const existed = new Set((state.cache.subscribers || []).map(target =>
-    subscriptionTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId, target.accountId)
+    subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId, target.accountId)
   ));
   return (candidates || []).filter(target =>
-    !existed.has(subscriptionTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId, target.accountId))
+    !existed.has(subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId, target.accountId))
   );
-}
-
-function subscriptionTargetAddressKey(platformId, kind, externalId, scopeId, threadId, accountId) {
-  return [platformId, kind, externalId, scopeId || "", threadId || "", accountId || ""].join("\u001F");
 }
 
 function policyForm(prefix, policy, targetKind) {
@@ -664,7 +861,7 @@ async function openSubscriptionDetail(id) {
   const subscription = subscriptions.find(item => Number(item.id) === Number(id));
   if (!subscription) throw new Error("未找到订阅");
   const targetKind = subscription.subscriber && subscription.subscriber.targetKind || "OTHER";
-  openModal("订阅详情", `
+  openModal("编辑订阅", `
     <div class="grid">
       <section class="panel full">
         <div class="panel-head">
@@ -683,18 +880,24 @@ async function openSubscriptionDetail(id) {
     invalidate("dashboard", "subscriptions");
     await loadSubscriptions(true);
     notify("订阅规则已保存", false);
-  }, { size: "wide" });
+  }, { size: "subscription" });
   wirePolicyForm("editPolicy", () => targetKind);
 }
 
 function renderFilterList(subscription) {
   const rules = subscription.filterRules || [];
-  return renderTable(rules, [
-    { title: "类型", render: r => `<span class="primary-line">${esc(filterConditionTypeText(r.condition))}</span>` },
-    { title: "条件", render: r => cell(filterConditionText(r.condition), "命中即阻止") },
-    { title: "创建时间", render: r => `<span class="sub-line">${fmtTime(r.createdAtEpochSeconds)}</span>` },
-    { title: "操作", render: r => `<button class="danger" data-action="delete-filter" data-id="${r.id}" data-subscription="${subscription.id}">删除</button>` }
-  ]);
+  if (!rules.length) return `<div class="empty">暂无过滤规则</div>`;
+  return `<div class="filter-rule-table-wrap">
+    <table class="filter-rule-table">
+      <thead><tr><th>类型</th><th>条件</th><th>创建时间</th><th>操作</th></tr></thead>
+      <tbody>${rules.map(rule => `<tr>
+        <td><span class="primary-line">${esc(filterConditionTypeText(rule.condition))}</span></td>
+        <td>${cell(filterConditionText(rule.condition), "命中即阻止")}</td>
+        <td><span class="sub-line">${fmtTime(rule.createdAtEpochSeconds)}</span></td>
+        <td><button class="danger compact" data-action="delete-filter" data-id="${rule.id}" data-subscription="${subscription.id}">删除</button></td>
+      </tr>`).join("")}</tbody>
+    </table>
+  </div>`;
 }
 
 function filterConditionTypeText(condition) {

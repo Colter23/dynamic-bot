@@ -25,12 +25,19 @@ let tags;
 let cell;
 let mediaImage;
 let identity;
+let identityMeta;
 let platformTag;
 let themeSwatch;
 let renderTable;
 let notify;
 let openModal;
 let closeModal;
+let uniqueValues;
+let filterOptions;
+let linkParseModeLabel;
+let linkParseModeOptions;
+let loadSubscriberTargetCandidates;
+let subscriberTargetAddressKey;
 let eventTypes;
 let blockKinds;
 let publisherKey;
@@ -43,6 +50,8 @@ const entityFilters = {
   subscriberPlatform: "",
   subscriberState: ""
 };
+let createPublisherModalSeq = 0;
+let createSubscriberModalSeq = 0;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -71,12 +80,19 @@ function bindContext(nextCtx) {
     cell,
     mediaImage,
     identity,
+    identityMeta,
     platformTag,
     themeSwatch,
     renderTable,
     notify,
     openModal,
     closeModal,
+    uniqueValues,
+    filterOptions,
+    linkParseModeLabel,
+    linkParseModeOptions,
+    loadSubscriberTargetCandidates,
+    subscriberTargetAddressKey,
     eventTypes,
     blockKinds,
     publisherKey,
@@ -147,39 +163,9 @@ function entityStatePill(value) {
   return `<span class="pill ${value === "ACTIVE" ? "ok" : "bad"}">${esc(entityStateText(value))}</span>`;
 }
 
-function linkParseModeLabel(value) {
-  const map = {
-    INHERIT: "使用全局回退",
-    DISABLED: "不解析",
-    MENTION_ONLY: "必须 @bot",
-    ALWAYS: "匹配链接即解析"
-  };
-  return map[value] || value || "-";
-}
-
-function linkParseModeOptions(selected) {
-  return ["INHERIT", "DISABLED", "MENTION_ONLY", "ALWAYS"].map(mode =>
-    `<option value="${mode}"${mode === selected ? " selected" : ""}>${esc(linkParseModeLabel(mode))}</option>`
-  ).join("");
-}
-
 function linkParseCell(target) {
   const source = target.linkParseConfigSource === "CUSTOM" ? "当前目标配置" : "全局回退";
   return cell(linkParseModeLabel(target.effectiveLinkParseTriggerMode), source);
-}
-
-function uniqueValues(rows, key, extraValues = []) {
-  const values = new Set(extraValues.filter(Boolean));
-  (rows || []).forEach(row => {
-    if (row && row[key]) values.add(row[key]);
-  });
-  return Array.from(values).sort((a, b) => String(a).localeCompare(String(b), "zh-CN"));
-}
-
-function filterOptions(allText, values, selected, labeler = value => value) {
-  return `<option value="">${esc(allText)}</option>` + values.map(value =>
-    `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(labeler(value))}</option>`
-  ).join("");
 }
 
 function filterEntityRows(rows, platform, stateValue) {
@@ -245,7 +231,7 @@ async function loadEntities(force) {
         ${entityFilterBar("publisher", publishers, filteredPublishers)}
         ${renderTable(filteredPublishers, [
           { title: "平台", render: p => platformTag(p.platformId, p.platformId) },
-          { title: "发布者", render: p => identity(p.name, p ? `${label(p.kind)}:${p.externalId}` : "-", p.avatarUri, p.platformId, "AVATAR") },
+          { title: "发布者", render: p => entityPublisherCell(p) },
           { title: "主题色", render: p => themeSwatch(p.drawTheme) },
           { title: "头图", render: p => p.bannerUri ? mediaImage(p.bannerUri, "header-image", p.platformId, "COVER") : `<span class="sub-line">-</span>` },
           { title: "订阅", render: p => `<span class="primary-line">${p.subscriptionCount || 0}</span>` },
@@ -259,7 +245,7 @@ async function loadEntities(force) {
         ${entityFilterBar("subscriber", subscribers, filteredSubscribers)}
         ${renderTable(filteredSubscribers, [
           { title: "平台", render: s => platformTag(s.platformId, s.platformId) },
-          { title: "目标", render: s => identity(s.name, s ? `${label(s.targetKind)}:${s.externalId}` : "-", s.avatarUri, s.platformId, "AVATAR") },
+          { title: "目标", render: s => entitySubscriberCell(s) },
           { title: "订阅", render: s => `<span class="primary-line">${s.subscriptionCount || 0}</span>` },
           { title: "链接解析", render: s => linkParseCell(s) },
           { title: "状态", render: s => entityStatePill(s.state) },
@@ -272,20 +258,36 @@ async function loadEntities(force) {
   await hydrateMediaImages($("content"));
 }
 
-function liveSummary(publisher) {
-  const lives = publisher.liveStatuses || [];
-  if (!lives.length) return "无直播状态";
-  return lives.map(live => `${label(live.status)} ${live.title || live.roomId}`).join(" / ");
+function entityPublisherCell(publisher) {
+  if (!publisher) return identity("-", "-", null);
+  return identityMeta(
+    publisher.name,
+    publisher.avatarUri,
+    publisher.platformId,
+    "AVATAR",
+    publisher.platformId,
+    label(publisher.kind),
+    publisher.externalId,
+  );
 }
 
-function cursorSummary(publisher) {
-  const cursors = publisher.cursors || [];
-  if (!cursors.length) return "无游标";
-  const latest = cursors.slice().sort((a, b) => b.lastSeenAtEpochSeconds - a.lastSeenAtEpochSeconds)[0];
-  return `${latest.sourceKey} · ${eventLabel(latest.eventType)} · ${fmtTime(latest.lastSeenAtEpochSeconds)}`;
+function entitySubscriberCell(target) {
+  if (!target) return identity("-", "-", null);
+  return identityMeta(
+    target.name,
+    target.avatarUri,
+    target.platformId,
+    "AVATAR",
+    target.platformId,
+    label(target.targetKind),
+    target.externalId,
+  );
 }
 
 async function openCreatePublisher() {
+  const modalSeq = ++createPublisherModalSeq;
+  let modalClosed = false;
+  const isModalActive = () => !modalClosed && createPublisherModalSeq === modalSeq && !!$("newPublisherResultList");
   const platforms = await api("/publisher-platforms").catch(() => []);
   let publisherCandidates = [];
   openModal("添加发布者", `
@@ -326,20 +328,30 @@ async function openCreatePublisher() {
     invalidate("dashboard", "publishers", "subscriptions");
     await loadEntities(true);
     notify("发布者已添加", false);
-  }, { size: "narrow", confirmText: "添加" });
+  }, {
+    size: "narrow",
+    confirmText: "添加",
+    cleanup: () => {
+      modalClosed = true;
+    },
+  });
 
   const search = async () => {
+    if (!isModalActive()) return;
     const platformId = $("newPublisherPlatform").value.trim();
     const queryText = $("newPublisherId").value.trim();
     if (!platformId) throw new Error("没有可用的发布者平台");
     if (!queryText) throw new Error("请填写发布者 ID");
     publisherCandidates = [];
     setCreatePublisherLoading("正在搜索发布者...");
-    publisherCandidates = await api(`/publisher-search?platformId=${encodeURIComponent(platformId)}&q=${encodeURIComponent(queryText)}`);
+    const result = await api(`/publisher-search?platformId=${encodeURIComponent(platformId)}&q=${encodeURIComponent(queryText)}`);
+    if (!isModalActive()) return;
+    publisherCandidates = result;
     if (publisherCandidates.length) {
       $("newPublisherResultWrap").hidden = false;
       $("newPublisherResultList").innerHTML = publisherCandidates.map((publisher, index) => publisherCandidateHtml(publisher, index, index === 0)).join("");
       await hydrateMediaImages($("newPublisherResultList"));
+      if (!isModalActive()) return;
       $("newPublisherStatus").textContent = `已找到 ${publisherCandidates.length} 个发布者，已默认选择第一个`;
     } else {
       $("newPublisherResultWrap").hidden = false;
@@ -348,6 +360,7 @@ async function openCreatePublisher() {
     }
   };
   $("newPublisherSearch").onclick = () => search().catch(error => {
+    if (!isModalActive()) return;
     $("newPublisherResultWrap").hidden = true;
     $("newPublisherStatus").textContent = error.message || String(error);
   });
@@ -355,6 +368,7 @@ async function openCreatePublisher() {
     if (event.key !== "Enter") return;
     event.preventDefault();
     search().catch(error => {
+      if (!isModalActive()) return;
       $("newPublisherResultWrap").hidden = true;
       $("newPublisherStatus").textContent = error.message || String(error);
     });
@@ -362,6 +376,7 @@ async function openCreatePublisher() {
 }
 
 function setCreatePublisherLoading(text) {
+  if (!$("newPublisherResultList")) return;
   $("newPublisherResultWrap").hidden = false;
   $("newPublisherResultList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
   $("newPublisherStatus").textContent = text;
@@ -388,6 +403,9 @@ function collectCreatePublisherCandidate(candidates) {
 }
 
 async function openCreateSubscriber() {
+  const modalSeq = ++createSubscriberModalSeq;
+  let modalClosed = false;
+  const isModalActive = () => !modalClosed && createSubscriberModalSeq === modalSeq && !!$("newTargetCandidateList");
   if (!state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
   const targetPlatforms = await api("/subscriber-target-platforms").catch(() => []);
   const fallbackTargets = targetPlatforms.length ? targetPlatforms : [{ platformId: "onebot", pluginName: "手动", supportedTypes: ["GROUP", "USER"] }];
@@ -412,6 +430,7 @@ async function openCreateSubscriber() {
                 <span id="newTargetStatus" class="field-inline-status"></span>
               </div>
               <div class="row-actions" id="newTargetCandidateActions">
+                <button type="button" class="secondary compact choice-tool-button choice-refresh-button" id="newTargetRefresh">刷新</button>
                 <button type="button" class="secondary compact choice-tool-button" id="newTargetSelectAll">全选</button>
                 <button type="button" class="secondary compact choice-tool-button choice-clear-button" id="newTargetClearAll">清空</button>
               </div>
@@ -446,27 +465,41 @@ async function openCreateSubscriber() {
     invalidate("dashboard", "subscribers", "subscriptions");
     await loadEntities(true);
     notify(selectedTargets.length === 1 ? "消息目标已添加" : `已添加 ${selectedTargets.length} 个消息目标`, false);
-  }, { size: "medium", confirmText: "添加" });
+  }, {
+    size: "medium",
+    confirmText: "添加",
+    cleanup: () => {
+      modalClosed = true;
+    },
+  });
 
   const refreshTargetKinds = async () => {
+    if (!isModalActive()) return;
     const platformId = $("newTargetPlatform").value;
     const platform = fallbackTargets.find(item => item.platformId === platformId);
     const kinds = platform && platform.supportedTypes && platform.supportedTypes.length
       ? platform.supportedTypes
       : ["GROUP", "USER", "CHANNEL", "OTHER"];
+    if (!isModalActive()) return;
     $("newTargetKind").innerHTML = kinds.map(kind => `<option value="${attr(kind)}">${esc(label(kind))}</option>`).join("");
     await refreshTargetCandidates();
   };
-  const refreshTargetCandidates = async () => {
+  const refreshTargetCandidates = async (force = false) => {
+    if (!isModalActive()) return;
     const platform = $("newTargetPlatform").value;
     const kind = $("newTargetKind").value;
     targetCandidates = [];
-    setCreateSubscriberTargetLoading("正在获取可用目标...");
+    setCreateSubscriberTargetLoading(force ? "正在刷新可用目标..." : "正在获取可用目标...");
     let allCandidates = [];
+    let source = "后端";
     try {
-      allCandidates = await api(`/subscriber-targets?platformId=${encodeURIComponent(platform)}&type=${encodeURIComponent(kind)}`);
+      const result = await loadSubscriberTargetCandidates(platform, kind, force);
+      if (!isModalActive()) return;
+      allCandidates = result.items;
+      source = result.stale ? "过期缓存" : result.fromCache ? "缓存" : "后端";
       targetCandidates = filterExistingSubscriberTargets(allCandidates);
     } catch (error) {
+      if (!isModalActive()) return;
       $("newTargetCandidateWrap").hidden = false;
       $("newTargetCandidateActions").hidden = true;
       $("newTargetManualWrap").hidden = false;
@@ -478,25 +511,30 @@ async function openCreateSubscriber() {
       $("newTargetCandidateWrap").hidden = false;
       $("newTargetCandidateActions").hidden = false;
       $("newTargetManualWrap").hidden = true;
-      $("newTargetCandidateList").innerHTML = targetCandidates.map((target, index) => subscriberTargetChoiceHtml(target, index, false)).join("");
-      await hydrateMediaImages($("newTargetCandidateList"));
-      setTargetInlineStatus(`${targetCandidates.length} 个可添加目标，已添加目标不显示`);
+      const candidateList = $("newTargetCandidateList");
+      if (!candidateList) return;
+      candidateList.innerHTML = targetCandidates.map((target, index) => subscriberTargetChoiceHtml(target, index, false)).join("");
+      await hydrateMediaImages(candidateList);
+      if (!isModalActive()) return;
+      setTargetInlineStatus(`${targetCandidates.length} 个可添加目标，已添加目标不显示，来自${source}`);
     } else {
       $("newTargetCandidateWrap").hidden = false;
       $("newTargetCandidateActions").hidden = true;
       $("newTargetManualWrap").hidden = false;
       $("newTargetCandidateList").innerHTML = `<div class="empty">暂无可添加目标</div>`;
-      setTargetInlineStatus(allCandidates.length ? "已添加过的目标已排除，可手动填写目标 ID" : "未获取到目标，请手动填写目标 ID");
+      setTargetInlineStatus(allCandidates.length ? `已添加过的目标已排除，可手动填写目标 ID，来自${source}` : `未获取到目标，请手动填写目标 ID，来自${source}`);
     }
   };
   $("newTargetPlatform").onchange = refreshTargetKinds;
-  $("newTargetKind").onchange = refreshTargetCandidates;
+  $("newTargetKind").onchange = () => refreshTargetCandidates();
+  $("newTargetRefresh").onclick = () => refreshTargetCandidates(true).catch(handleError);
   $("newTargetSelectAll").onclick = () => setCreateSubscriberTargetChecked(true);
   $("newTargetClearAll").onclick = () => setCreateSubscriberTargetChecked(false);
   await refreshTargetKinds();
 }
 
 function setCreateSubscriberTargetLoading(text) {
+  if (!$("newTargetCandidateList")) return;
   $("newTargetCandidateWrap").hidden = false;
   $("newTargetCandidateActions").hidden = true;
   $("newTargetManualWrap").hidden = true;
@@ -505,6 +543,7 @@ function setCreateSubscriberTargetLoading(text) {
 }
 
 function setTargetInlineStatus(text) {
+  if (!$("newTargetStatus")) return;
   $("newTargetStatus").textContent = text ? `· ${text}` : "";
 }
 
@@ -538,15 +577,11 @@ function collectCreateSubscriberTargets(candidates) {
 
 function filterExistingSubscriberTargets(candidates) {
   const existed = new Set((state.cache.subscribers || []).map(target =>
-    targetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId, target.accountId)
+    subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId, target.accountId)
   ));
   return (candidates || []).filter(target =>
-    !existed.has(targetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId, target.accountId))
+    !existed.has(subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId, target.accountId))
   );
-}
-
-function targetAddressKey(platformId, kind, externalId, scopeId, threadId, accountId) {
-  return [platformId, kind, externalId, scopeId || "", threadId || "", accountId || ""].join("\u001F");
 }
 
 async function openEditPublisher(id) {

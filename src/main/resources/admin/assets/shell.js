@@ -29,6 +29,7 @@ const $ = id => document.getElementById(id);
       pageLoadSeq: 0
     };
     const pageModuleCache = {};
+    const targetCandidateCacheTtlMillis = 180 * 1000;
 
     const eventTypes = [
       ["DYNAMIC", "动态"],
@@ -122,6 +123,15 @@ const $ = id => document.getElementById(id);
     function identity(name, sub, image, platformId = "admin", kind = "AVATAR") {
       return `<div class="identity-cell">${mediaImage(image, "avatar", platformId, kind)}<div>${cell(name, sub)}</div></div>`;
     }
+    function identityMeta(name, image, mediaPlatform, mediaKind, platformId, typeText, externalId) {
+      return `<div class="identity-cell">
+        ${mediaImage(image, "avatar", mediaPlatform, mediaKind)}
+        <div>
+          <span class="primary-line">${esc(name || "-")}</span>
+          <span class="sub-line subscription-meta-line">${platformTag(platformId, platformId)}<span>${esc(typeText || "-")}</span><span>${esc(externalId || "-")}</span></span>
+        </div>
+      </div>`;
+    }
     function platformHue(value) {
       let hash = 0;
       String(value || "").split("").forEach(char => {
@@ -178,6 +188,70 @@ const $ = id => document.getElementById(id);
       });
       const text = out.toString();
       return text ? "?" + text : "";
+    }
+    function uniqueValues(rows, selector, extraValues = []) {
+      const values = new Set((extraValues || []).filter(Boolean));
+      (rows || []).forEach(row => {
+        const value = typeof selector === "function" ? selector(row) : row && row[selector];
+        if (value) values.add(value);
+      });
+      return Array.from(values).sort((a, b) => String(a).localeCompare(String(b), "zh-CN"));
+    }
+    function filterOptions(allText, values, selected, labeler = value => value) {
+      return `<option value="">${esc(allText)}</option>` + (values || []).map(value =>
+        `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(labeler(value))}</option>`
+      ).join("");
+    }
+    function matchesExact(value, filter) {
+      return !filter || String(value || "") === filter;
+    }
+    function matchesContains(value, filter) {
+      return !filter || String(value || "").toLowerCase().includes(String(filter).toLowerCase());
+    }
+    function matchesAnyContains(values, filter) {
+      return !filter || (values || []).some(value => matchesContains(value, filter));
+    }
+    function linkParseModeLabel(value) {
+      const map = {
+        INHERIT: "使用全局回退",
+        DISABLED: "不解析",
+        MENTION_ONLY: "必须 @bot",
+        ALWAYS: "匹配链接即解析"
+      };
+      return map[value] || value || "-";
+    }
+    function linkParseModeOptions(selected) {
+      return ["INHERIT", "DISABLED", "MENTION_ONLY", "ALWAYS"].map(mode =>
+        `<option value="${mode}"${mode === selected ? " selected" : ""}>${esc(linkParseModeLabel(mode))}</option>`
+      ).join("");
+    }
+    function subscriberTargetAddressKey(platformId, kind, externalId, scopeId, threadId, accountId) {
+      return [platformId, kind, externalId, scopeId || "", threadId || "", accountId || ""].join("\u001F");
+    }
+    function subscriberTargetCandidateCacheKey(platform, kind) {
+      return `${platform || ""}\u001F${kind || ""}`;
+    }
+    async function loadSubscriberTargetCandidates(platform, kind, force = false) {
+      if (!state.cache.subscriberTargetCandidates) state.cache.subscriberTargetCandidates = {};
+      const key = subscriberTargetCandidateCacheKey(platform, kind);
+      const entry = state.cache.subscriberTargetCandidates[key];
+      const now = Date.now();
+      if (!force && entry && now - entry.loadedAt < targetCandidateCacheTtlMillis) {
+        return { items: entry.items, fromCache: true, stale: false };
+      }
+      try {
+        const items = await api(`/subscriber-targets?platformId=${encodeURIComponent(platform)}&type=${encodeURIComponent(kind)}`) || [];
+        state.cache.subscriberTargetCandidates[key] = { items, loadedAt: Date.now() };
+        return { items, fromCache: false, stale: false };
+      } catch (error) {
+        if (entry && Array.isArray(entry.items)) {
+          return { items: entry.items, fromCache: true, stale: true };
+        }
+        throw error;
+      }
+    }
+    function clearSubscriberTargetCandidateCache() {
+      delete state.cache.subscriberTargetCandidates;
     }
 
     async function api(path, options = {}) {
@@ -241,8 +315,13 @@ const $ = id => document.getElementById(id);
       }));
     }
     function invalidate(...keys) {
-      if (keys.length === 0) state.cache = {};
+      if (keys.length === 0) {
+        state.cache = {};
+        return;
+      }
+      const clearTargetCandidates = keys.some(key => ["plugins", "platformLogins", "subscriberTargetPlatforms"].includes(key));
       keys.forEach(key => delete state.cache[key]);
+      if (clearTargetCandidates) clearSubscriberTargetCandidateCache();
     }
 
     function showLogin(message, isError) {
@@ -340,12 +419,23 @@ const $ = id => document.getElementById(id);
       cell,
       mediaImage,
       identity,
+      identityMeta,
       platformTag,
       themeSwatch,
       renderTable,
       notify,
       openModal,
       closeModal,
+      uniqueValues,
+      filterOptions,
+      matchesExact,
+      matchesContains,
+      matchesAnyContains,
+      linkParseModeLabel,
+      linkParseModeOptions,
+      loadSubscriberTargetCandidates,
+      clearSubscriberTargetCandidateCache,
+      subscriberTargetAddressKey,
       eventTypes,
       blockKinds,
       publisherKey,
