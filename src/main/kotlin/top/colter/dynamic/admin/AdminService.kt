@@ -92,6 +92,7 @@ public class AdminService(
     private val pluginStopper: (String) -> Unit = {
         throw IllegalStateException("插件停止功能未配置")
     },
+    private val pluginCatalogService: PluginCatalogService? = null,
     private val startedAtEpochMillis: Long = System.currentTimeMillis(),
     private val databasePathProvider: () -> String? = { PersistenceManager.currentPath() },
     private val publisherDrawThemeService: PublisherDrawThemeService = PublisherDrawThemeService(),
@@ -125,6 +126,12 @@ public class AdminService(
         pluginReloader = pluginManager::reloadPlugin,
         pluginStarter = pluginManager::startPlugin,
         pluginStopper = pluginManager::stopPlugin,
+        pluginCatalogService = PluginCatalogService(
+            configProvider = { configProvider().pluginCatalog },
+            pluginProvider = { pluginManager.getAllPlugins() },
+            pluginDirPathProvider = { pluginManager.pluginDirPath },
+            pluginInstaller = pluginManager::installOrUpdatePluginJar,
+        ),
         startedAtEpochMillis = startedAtEpochMillis,
     )
 
@@ -217,9 +224,26 @@ public class AdminService(
     }
 
     public fun plugins(): List<PluginDto> {
+        val catalogById = pluginCatalogService
+            ?.cachedCatalog()
+            ?.plugins
+            ?.associateBy { it.id }
+            .orEmpty()
         return pluginProvider()
             .sortedBy { it.descriptor.id }
-            .map { it.toDto() }
+            .map { it.toDto(catalogById[it.descriptor.id]) }
+    }
+
+    public fun pluginCatalog(force: Boolean = false): PluginCatalogResponse {
+        return requirePluginCatalogService().catalog(force = force)
+    }
+
+    public fun installCatalogPlugin(id: String): PluginCatalogOperationResponse {
+        return requirePluginCatalogService().install(id)
+    }
+
+    public fun updateCatalogPlugin(id: String): PluginCatalogOperationResponse {
+        return requirePluginCatalogService().update(id)
     }
 
     public fun reloadPlugin(id: String): PluginReloadResponse {
@@ -1011,6 +1035,10 @@ public class AdminService(
             ?: throw NoSuchElementException("未找到插件：$pluginId")
     }
 
+    private fun requirePluginCatalogService(): PluginCatalogService {
+        return pluginCatalogService ?: throw IllegalStateException("插件目录功能未配置")
+    }
+
     private fun applySubscriptionMutation(result: SubscriptionMutationResult): Boolean {
         result.event?.let { eventBus.broadcast(it) }
         return result.changed
@@ -1079,7 +1107,7 @@ public class PluginReloadFailedException(
     public val response: PluginReloadResponse,
 ) : IllegalStateException(response.error ?: response.message)
 
-private fun PluginInfo.toDto(): PluginDto = PluginDto(
+private fun PluginInfo.toDto(catalog: PluginCatalogEntryDto? = null): PluginDto = PluginDto(
     id = descriptor.id,
     name = descriptor.name,
     version = descriptor.version,
@@ -1088,6 +1116,9 @@ private fun PluginInfo.toDto(): PluginDto = PluginDto(
     error = error?.message ?: error?.javaClass?.name,
     sourceJarPath = sourceJarPath,
     loadTime = loadTime,
+    catalogVersion = catalog?.version,
+    updateAvailable = catalog?.updateAvailable ?: false,
+    catalogStatus = catalog?.catalogStatus,
 )
 
 private fun PluginInfo.errorText(): String? = error?.message ?: error?.javaClass?.name

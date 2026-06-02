@@ -138,6 +138,24 @@ public fun Application.adminModule(context: AdminServerContext) {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.plugins() }
             }
+            get("/plugin-catalog") {
+                if (!call.ensureAuthorized(context)) return@get
+                val force = call.request.queryParameters["force"]
+                    ?.trim()
+                    ?.let { it.equals("true", ignoreCase = true) || it == "1" }
+                    ?: false
+                call.respondApi { context.service.pluginCatalog(force = force) }
+            }
+            post("/plugin-catalog/{id}/install") {
+                if (!call.ensureAuthorized(context)) return@post
+                val id = call.pathString("id")
+                call.respondApi { context.service.installCatalogPlugin(id) }
+            }
+            post("/plugin-catalog/{id}/update") {
+                if (!call.ensureAuthorized(context)) return@post
+                val id = call.pathString("id")
+                call.respondApi { context.service.updateCatalogPlugin(id) }
+            }
             post("/plugins/{id}/start") {
                 if (!call.ensureAuthorized(context)) return@post
                 val id = call.pathString("id")

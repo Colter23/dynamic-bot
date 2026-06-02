@@ -54,13 +54,16 @@ import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import java.io.File
 import java.net.URLClassLoader
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
 import java.nio.file.Paths
+import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 
 private val logger = loggerFor<PluginManager>()
 
 public class PluginManager(
-    pluginDirPath: String = "plugins",
+    public val pluginDirPath: String = "plugins",
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     private val eventBus: EventBus = EventBus(),
     private val configService: ConfigService = YamlConfigService(),
@@ -264,6 +267,111 @@ public class PluginManager(
                     message = it.message ?: it::class.simpleName ?: "插件重载失败",
                     error = it.message ?: it::class.qualifiedName ?: "插件重载失败",
                 )
+            }
+        }
+    }
+
+    public fun installOrUpdatePluginJar(
+        downloadedJar: File,
+        expectedPluginId: String,
+        expectedVersion: String,
+        startAfterInstall: Boolean = true,
+        requireInstalled: Boolean = false,
+    ): PluginInstallResult {
+        synchronized(lifecycleLock) {
+            require(downloadedJar.isFile) { "插件 Jar 不存在：${downloadedJar.absolutePath}" }
+            val pluginId = expectedPluginId.trim()
+            require(pluginId.isNotBlank()) { "插件 ID 不能为空" }
+            require(expectedVersion.isNotBlank()) { "插件版本不能为空" }
+
+            val descriptor = scanner.parsePluginDescriptor(downloadedJar)
+            require(descriptor.id == pluginId) {
+                "插件 ID 与目录不一致：catalog=$pluginId，jar=${descriptor.id}"
+            }
+            require(descriptor.version == expectedVersion) {
+                "插件版本与目录不一致：catalog=$expectedVersion，jar=${descriptor.version}"
+            }
+            validateDescriptor(descriptor)
+            validateApiVersion(descriptor.apiVersion)
+
+            pluginDir.mkdirs()
+            val existing = plugins[pluginId]
+            if (requireInstalled && existing == null) {
+                throw NoSuchElementException("插件未安装：$pluginId")
+            }
+            if (!requireInstalled && existing != null) {
+                throw IllegalStateException("插件已安装，请使用更新操作：$pluginId")
+            }
+
+            val targetFile = resolveInstallTarget(existing, pluginId)
+            ensureNoConflictingJar(pluginId, targetFile)
+
+            val oldVersion = existing?.descriptor?.version
+            val oldState = existing?.state
+            val shouldStartAfterLoad = oldState == PluginState.ACTIVE || (existing == null && startAfterInstall)
+            val backupFile = targetFile.resolveSibling("${targetFile.name}.${System.currentTimeMillis()}.bak")
+            var backupCreated = false
+            var movedNewJar = false
+            var existingUnloaded = false
+
+            try {
+                ensureTargetFileReusable(pluginId, targetFile)
+                if (existing != null) {
+                    unloadPlugin(pluginId)
+                    existingUnloaded = true
+                }
+                if (targetFile.exists()) {
+                    moveFile(targetFile, backupFile)
+                    backupCreated = true
+                }
+
+                moveFile(downloadedJar, targetFile)
+                movedNewJar = true
+
+                loadPlugin(PluginScanner.ScanResult(descriptor, targetFile))
+                if (shouldStartAfterLoad) {
+                    startPlugin(pluginId)
+                    val afterStart = plugins[pluginId]
+                        ?: throw IllegalStateException("插件启动后未找到：$pluginId")
+                    if (afterStart.state != PluginState.ACTIVE) {
+                        throw IllegalStateException(
+                            afterStart.error?.message ?: "插件启动后状态异常：${afterStart.state}",
+                        )
+                    }
+                }
+
+                val info = plugins[pluginId]?.toInfo()
+                    ?: throw IllegalStateException("插件安装后未找到：$pluginId")
+                backupFile.delete()
+                logger.info {
+                    "插件安装更新完成：pluginId=$pluginId，oldVersion=${oldVersion ?: "-"}，newVersion=${descriptor.version}，state=${info.state}"
+                }
+                return PluginInstallResult(
+                    pluginId = pluginId,
+                    success = true,
+                    changed = true,
+                    pluginState = info.state,
+                    oldVersion = oldVersion,
+                    newVersion = descriptor.version,
+                    message = if (oldVersion == null) {
+                        "插件已安装：$pluginId"
+                    } else {
+                        "插件已更新：$pluginId，$oldVersion -> ${descriptor.version}"
+                    },
+                )
+            } catch (e: Throwable) {
+                logger.error(e) { "插件安装更新失败，准备回滚：pluginId=$pluginId" }
+                rollbackInstallOrUpdate(
+                    pluginId = pluginId,
+                    targetFile = targetFile,
+                    backupFile = backupFile,
+                    backupCreated = backupCreated,
+                    movedNewJar = movedNewJar,
+                    shouldUnloadCurrent = existingUnloaded || movedNewJar,
+                    shouldRestoreExisting = existingUnloaded,
+                    oldState = oldState,
+                )
+                throw e
             }
         }
     }
@@ -490,6 +598,99 @@ public class PluginManager(
         }
     }
 
+    private fun resolveInstallTarget(existing: PluginRuntime?, pluginId: String): File {
+        val pluginDirCanonical = pluginDir.canonicalFile
+        val existingFile = existing
+            ?.sourceJarPath
+            ?.takeIf { it.isNotBlank() }
+            ?.let { File(it) }
+            ?.takeIf { it.exists() }
+            ?.canonicalFile
+            ?.takeIf { file ->
+                file.parentFile?.canonicalFile == pluginDirCanonical &&
+                    file.extension.equals("jar", ignoreCase = true)
+            }
+
+        return existingFile ?: pluginDir.resolve("$pluginId.jar").canonicalFile
+    }
+
+    private fun ensureNoConflictingJar(pluginId: String, targetFile: File) {
+        val targetCanonical = targetFile.canonicalFile
+        val conflicts = scanner.scanForPlugins()
+            .filter { it.descriptor.id == pluginId && it.jarFile.canonicalFile != targetCanonical }
+        require(conflicts.isEmpty()) {
+            "插件 ID 重复：$pluginId，冲突文件=${conflicts.joinToString { it.jarFile.name }}"
+        }
+    }
+
+    private fun ensureTargetFileReusable(pluginId: String, targetFile: File) {
+        if (!targetFile.exists()) return
+        val targetDescriptor = scanner.parsePluginDescriptor(targetFile)
+        require(targetDescriptor.id == pluginId) {
+            "目标文件已存在且不是该插件：file=${targetFile.name}，pluginId=${targetDescriptor.id}"
+        }
+    }
+
+    private fun rollbackInstallOrUpdate(
+        pluginId: String,
+        targetFile: File,
+        backupFile: File,
+        backupCreated: Boolean,
+        movedNewJar: Boolean,
+        shouldUnloadCurrent: Boolean,
+        shouldRestoreExisting: Boolean,
+        oldState: PluginState?,
+    ) {
+        runCatching {
+            if (shouldUnloadCurrent && plugins.containsKey(pluginId)) {
+                unloadPlugin(pluginId)
+            }
+        }.onFailure {
+            logger.warn(it) { "插件安装更新回滚卸载新插件失败：pluginId=$pluginId" }
+        }
+
+        runCatching {
+            if (movedNewJar && targetFile.exists()) {
+                targetFile.delete()
+            }
+            if (backupCreated && backupFile.exists()) {
+                moveFile(backupFile, targetFile)
+            }
+        }.onFailure {
+            logger.warn(it) { "插件安装更新回滚文件失败：pluginId=$pluginId" }
+        }
+
+        if ((backupCreated || shouldRestoreExisting) && targetFile.exists()) {
+            runCatching {
+                val descriptor = scanner.parsePluginDescriptor(targetFile)
+                loadPlugin(PluginScanner.ScanResult(descriptor, targetFile))
+                if (oldState == PluginState.ACTIVE) {
+                    startPlugin(pluginId)
+                }
+            }.onFailure {
+                logger.warn(it) { "插件安装更新回滚加载旧插件失败：pluginId=$pluginId" }
+            }
+        }
+    }
+
+    private fun moveFile(source: File, target: File) {
+        target.parentFile?.mkdirs()
+        try {
+            Files.move(
+                source.toPath(),
+                target.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.ATOMIC_MOVE,
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(
+                source.toPath(),
+                target.toPath(),
+                StandardCopyOption.REPLACE_EXISTING,
+            )
+        }
+    }
+
     private fun stopPlugin(runtime: PluginRuntime) {
         val pluginId = runtime.descriptor.id
         commandRegistry.unregisterByOwner(pluginId)
@@ -711,4 +912,14 @@ public data class PluginReloadResult(
     val pluginState: PluginState? = null,
     val message: String,
     val error: String? = null,
+)
+
+public data class PluginInstallResult(
+    val pluginId: String,
+    val success: Boolean,
+    val changed: Boolean,
+    val pluginState: PluginState? = null,
+    val oldVersion: String? = null,
+    val newVersion: String? = null,
+    val message: String,
 )

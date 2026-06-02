@@ -77,6 +77,48 @@ public data class PluginDto(
     val error: String? = null,
     val sourceJarPath: String,
     val loadTime: Long,
+    val catalogVersion: String? = null,
+    val updateAvailable: Boolean = false,
+    val catalogStatus: String? = null,
+)
+
+@Serializable
+public data class PluginCatalogResponse(
+    val schemaVersion: Int,
+    val fetchedAtEpochMillis: Long,
+    val cacheExpiresAtEpochMillis: Long,
+    val plugins: List<PluginCatalogEntryDto>,
+)
+
+@Serializable
+public data class PluginCatalogEntryDto(
+    val id: String,
+    val name: String,
+    val version: String,
+    val description: String = "",
+    val apiVersion: String,
+    val downloadUrl: String,
+    val sha256: String,
+    val sizeBytes: Long,
+    val homepageUrl: String? = null,
+    val releaseNotesUrl: String? = null,
+    val capabilities: List<String> = emptyList(),
+    val installedVersion: String? = null,
+    val installedState: String? = null,
+    val catalogStatus: String,
+    val updateAvailable: Boolean = false,
+    val error: String? = null,
+)
+
+@Serializable
+public data class PluginCatalogOperationResponse(
+    val changed: Boolean,
+    val success: Boolean,
+    val pluginId: String,
+    val pluginState: String? = null,
+    val message: String,
+    val installedVersion: String? = null,
+    val catalogVersion: String? = null,
 )
 
 @Serializable

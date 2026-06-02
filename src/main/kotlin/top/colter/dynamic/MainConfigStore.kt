@@ -371,6 +371,36 @@ public object MainConfigForms {
                     restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
+                    path = "pluginCatalog.url",
+                    label = "插件列表地址",
+                    type = ConfigFieldType.TEXT,
+                    section = "插件目录",
+                    description = "官方插件列表 JSON 地址；必须使用 https://，留空表示关闭插件下载与更新功能。",
+                ),
+                ConfigFieldSpec(
+                    path = "pluginCatalog.cacheSeconds",
+                    label = "插件列表缓存时间（秒）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "插件目录",
+                    description = "后台拉取插件列表后的内存缓存时间；设为 0 表示每次都重新获取。",
+                    min = 0,
+                ),
+                ConfigFieldSpec(
+                    path = "pluginCatalog.downloadTimeoutSeconds",
+                    label = "插件下载超时（秒）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "插件目录",
+                    description = "下载插件 Jar 和插件列表时允许等待的时间；支持小数，例如 0.5 表示 0.5 秒。",
+                ),
+                ConfigFieldSpec(
+                    path = "pluginCatalog.maxDownloadBytes",
+                    label = "插件最大下载大小（字节）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "插件目录",
+                    description = "单个插件 Jar 允许下载的最大字节数，默认 200MB。",
+                    min = 1,
+                ),
+                ConfigFieldSpec(
                     path = "webAdmin.enabled",
                     label = "启用 Web 后台",
                     type = ConfigFieldType.BOOLEAN,
@@ -446,6 +476,13 @@ public object MainConfigForms {
         }
         DrawThemeFactory.parseThemeColors(config.draw.themeColors)
         require(config.draw.width >= 320) { "绘图宽度至少为 320" }
+        val catalogUrl = config.pluginCatalog.url.trim()
+        if (catalogUrl.isNotBlank()) {
+            require(catalogUrl.startsWith("https://", ignoreCase = true)) { "插件列表地址必须使用 https://" }
+        }
+        require(config.pluginCatalog.cacheSeconds >= 0) { "插件列表缓存时间不能为负数" }
+        require(config.pluginCatalog.downloadTimeoutSeconds > 0.0) { "插件下载超时必须大于 0 秒" }
+        require(config.pluginCatalog.maxDownloadBytes > 0) { "插件最大下载大小必须大于 0" }
         require(config.webAdmin.port in 1..65_535) { "Web 后台端口必须在 1 到 65535 之间" }
         require(config.webAdmin.host.isNotBlank()) { "Web 后台监听地址不能为空" }
         if (config.webAdmin.enabled) {

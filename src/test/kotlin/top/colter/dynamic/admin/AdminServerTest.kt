@@ -19,6 +19,7 @@ import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.PluginCatalogConfig
 import top.colter.dynamic.SubscriptionConfig
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicBlockKind
@@ -60,6 +61,7 @@ import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.testPublisherInfo
+import java.io.File
 
 class AdminServerTest {
     @Test
@@ -99,6 +101,53 @@ class AdminServerTest {
         assertEquals(HttpStatusCode.Unauthorized, unauthorized.status)
         assertEquals(HttpStatusCode.OK, authorized.status)
     }
+
+    @Test
+    fun adminApiShouldServePluginCatalog() = testApplication {
+        val catalog = """
+            {
+              "schemaVersion": 1,
+              "plugins": [
+                {
+                  "id": "demo-plugin",
+                  "name": "Demo Plugin",
+                  "version": "1.0.0",
+                  "apiVersion": "4.0.0",
+                  "downloadUrl": "https://example.com/demo-plugin.jar",
+                  "sha256": "${"a".repeat(64)}",
+                  "sizeBytes": 128,
+                  "capabilities": ["MESSAGE_SINK"]
+                }
+              ]
+            }
+        """.trimIndent().toByteArray(Charsets.UTF_8)
+        val catalogService = PluginCatalogService(
+            configProvider = { PluginCatalogConfig(url = "https://example.com/catalog.json") },
+            pluginProvider = { emptyList() },
+            pluginInstaller = { _, id, version, _, _ ->
+                top.colter.dynamic.plugin.PluginInstallResult(
+                    pluginId = id,
+                    success = true,
+                    changed = true,
+                    newVersion = version,
+                    message = "ok",
+                )
+            },
+            downloader = StaticCatalogDownloader(catalog),
+        )
+        application {
+            adminModule(staticRouteContext(pluginCatalogService = catalogService))
+        }
+
+        val response = client.get("/api/plugin-catalog") {
+            header(HttpHeaders.Authorization, "Bearer test-token")
+        }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(response.bodyAsText().contains("demo-plugin"))
+        assertTrue(response.bodyAsText().contains("NOT_INSTALLED"))
+    }
+
 
     @Test
     fun adminApiShouldServePlatformLogoFromRegisteredDrawAssets() = testApplication {
@@ -524,6 +573,7 @@ class AdminServerTest {
 
     private fun staticRouteContext(
         drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
+        pluginCatalogService: PluginCatalogService? = null,
     ): AdminServerContext {
         return AdminServerContext(
             token = "test-token",
@@ -532,6 +582,7 @@ class AdminServerTest {
                 publisherLookupResolver = { null },
                 publisherFollowResolver = { null },
                 configProvider = { MainDynamicConfig() },
+                pluginCatalogService = pluginCatalogService,
             ),
             loginService = AdminLoginService(
                 loginProviderResolver = { null },
@@ -568,6 +619,25 @@ class AdminServerTest {
 
         override suspend fun listMessageTargets(kind: TargetKind?): List<MessageTargetCandidate> {
             return targets.filter { kind == null || it.address.kind == kind }
+        }
+    }
+
+    private class StaticCatalogDownloader(
+        private val catalogBytes: ByteArray,
+    ) : PluginCatalogDownloader {
+        override fun downloadToByteArray(url: String, timeoutSeconds: Double, maxBytes: Long): ByteArray {
+            return catalogBytes
+        }
+
+        override fun downloadToFile(
+            url: String,
+            destination: File,
+            timeoutSeconds: Double,
+            maxBytes: Long,
+        ): PluginCatalogDownloadResult {
+            destination.parentFile?.mkdirs()
+            destination.writeBytes(ByteArray(0))
+            return PluginCatalogDownloadResult(bytesRead = 0, sha256 = "")
         }
     }
 }

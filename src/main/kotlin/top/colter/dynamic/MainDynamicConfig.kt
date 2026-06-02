@@ -10,6 +10,7 @@ public data class MainDynamicConfig(
     val imageCache: ImageCacheConfig = ImageCacheConfig(),
     val delivery: DeliveryConfig = DeliveryConfig(),
     val draw: DrawSettings = DrawSettings(),
+    val pluginCatalog: PluginCatalogConfig = PluginCatalogConfig(),
     val webAdmin: WebAdminConfig = WebAdminConfig(),
 ) {
     public companion object {
@@ -35,6 +36,18 @@ public data class WebAdminConfig(
     val port: Int = 8080,
     val token: String = "",
 )
+
+public data class PluginCatalogConfig(
+    val url: String = DEFAULT_URL,
+    val cacheSeconds: Long = 600,
+    val downloadTimeoutSeconds: Double = 60.0,
+    val maxDownloadBytes: Long = 200L * 1024L * 1024L,
+) {
+    public companion object {
+        public const val DEFAULT_URL: String =
+            "https://raw.githubusercontent.com/Colter23/dynamic-bot/main/plugins/catalog.json"
+    }
+}
 
 public data class SubscriptionConfig(
     val autoFollowPublisherOnSubscribe: Boolean = true,

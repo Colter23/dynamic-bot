@@ -40,13 +40,19 @@ public class PluginScanner(
             ?: emptyList()
     }
 
-    private fun parsePluginDescriptor(jarFile: File): PluginDescriptor {
-        JarFile(jarFile).use { jar ->
-            val entry = jar.getEntry("plugin.yml")
-                ?: throw IllegalArgumentException("未找到 plugin.yml：${jarFile.name}")
+    public fun parsePluginDescriptor(jarFile: File): PluginDescriptor {
+        return parsePluginDescriptor(jarFile, objectMapper)
+    }
 
-            jar.getInputStream(entry).use { input ->
-                return objectMapper.readValue(input, PluginDescriptor::class.java)
+    public companion object {
+        public fun parsePluginDescriptor(jarFile: File, objectMapper: ObjectMapper): PluginDescriptor {
+            JarFile(jarFile).use { jar ->
+                val entry = jar.getEntry("plugin.yml")
+                    ?: throw IllegalArgumentException("未找到 plugin.yml：${jarFile.name}")
+
+                jar.getInputStream(entry).use { input ->
+                    return objectMapper.readValue(input, PluginDescriptor::class.java)
+                }
             }
         }
     }

@@ -36,6 +36,26 @@ class MainConfigStoreTest {
     }
 
     @Test
+    fun pluginCatalogConfigShouldBeExposedAndRequireHttpsUrl() {
+        val paths = MainConfigForms.formSpec.fields.map { it.path }
+
+        assertTrue("pluginCatalog.url" in paths)
+        assertTrue("pluginCatalog.cacheSeconds" in paths)
+        assertTrue("pluginCatalog.downloadTimeoutSeconds" in paths)
+        assertTrue("pluginCatalog.maxDownloadBytes" in paths)
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            MainConfigForms.validate(
+                MainDynamicConfig(
+                    pluginCatalog = PluginCatalogConfig(url = "http://example.com/catalog.json"),
+                ),
+            )
+        }
+
+        assertTrue(error.message!!.contains("https"))
+    }
+
+    @Test
     fun validateShouldRejectInvalidThemeColorsWithChineseMessage() {
         val error = assertFailsWith<IllegalArgumentException> {
             MainConfigForms.validate(MainDynamicConfig(draw = DrawSettings(themeColors = "#FE65A6;")))
