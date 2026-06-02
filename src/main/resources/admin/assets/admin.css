@@ -329,7 +329,7 @@
     }
     .target-choice {
       display: grid;
-      grid-template-columns: 18px minmax(0, 1fr);
+      grid-template-columns: 18px 30px minmax(0, 1fr);
       align-items: center;
       gap: 9px;
       padding: 9px 10px;
@@ -343,6 +343,15 @@
       height: 16px;
       min-height: 0;
       padding: 0;
+    }
+    .target-choice-avatar {
+      width: 28px;
+      height: 28px;
+      display: block;
+      border-radius: 7px;
+      object-fit: cover;
+      border: 1px solid var(--line);
+      background: var(--panel-soft);
     }
     .target-choice-text {
       display: block;

@@ -152,7 +152,7 @@ async function loadSubscriptions(force) {
         </div>
         ${renderTable(rows, [
           { title: "发布者", render: s => identity(s.publisher && s.publisher.name, publisherKey(s.publisher), s.publisher && s.publisher.avatarUri, s.publisher && s.publisher.platformId, "AVATAR") },
-          { title: "消息目标", render: s => cell(s.subscriber && s.subscriber.name, targetKey(s.subscriber)) },
+          { title: "消息目标", render: s => identity(s.subscriber && s.subscriber.name, targetKey(s.subscriber), s.subscriber && s.subscriber.avatarUri, s.subscriber && s.subscriber.platformId, "AVATAR") },
           { title: "接收事件", render: s => tags(policyEvents(s.policy).map(eventLabel)) },
           { title: "@全体", render: s => tags(mentionEvents(s.policy).map(eventLabel)) },
           { title: "动态过滤", render: s => cell(`${s.filterRuleCount || 0} 条阻止规则`, "仅作用于动态内容") },
@@ -291,6 +291,7 @@ async function openCreateSubscription() {
       $("subTargetCandidateWrap").hidden = false;
       $("subTargetManualWrap").hidden = true;
       $("subTargetCandidateList").innerHTML = targetCandidates.map((target, index) => targetChoiceHtml(target, index === 0)).join("");
+      await hydrateMediaImages($("subTargetCandidateList"));
       $("subTargetStatus").textContent = `已获取 ${targetCandidates.length} 个目标，已默认选择第一个`;
     } else {
       $("subTargetCandidateWrap").hidden = true;
@@ -326,6 +327,7 @@ function targetChoiceHtml(target, checked) {
   ].filter(Boolean).join(" · ");
   return `<label class="target-choice">
     <input type="checkbox" name="subTargetCandidate" value="${attr(target.externalId)}" data-label="${attr(title)}"${checked ? " checked" : ""}>
+    ${mediaImage(target.avatarUri, "target-choice-avatar", target.platformId, "AVATAR")}
     <span class="target-choice-text" title="${attr(parts)}">${esc(parts)}</span>
   </label>`;
 }

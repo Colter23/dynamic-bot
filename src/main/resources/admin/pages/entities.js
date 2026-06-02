@@ -173,7 +173,7 @@ async function loadEntities(force) {
       <section class="panel full">
         <div class="panel-head"><h2>消息目标</h2><button data-action="create-subscriber">添加</button></div>
         ${renderTable(subscribers, [
-          { title: "目标", render: s => cell(s.name, targetKey(s)) },
+          { title: "目标", render: s => identity(s.name, targetKey(s), s.avatarUri, s.platformId, "AVATAR") },
           { title: "订阅", render: s => `<span class="primary-line">${s.subscriptionCount || 0}</span>` },
           { title: "链接解析", render: s => linkParseCell(s) },
           { title: "状态", render: s => entityStatePill(s.state) },
