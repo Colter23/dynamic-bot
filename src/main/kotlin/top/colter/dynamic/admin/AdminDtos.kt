@@ -133,6 +133,26 @@ public data class PublisherDto(
 )
 
 @Serializable
+public data class PublisherPlatformDto(
+    val platformId: String,
+    val pluginId: String,
+    val pluginName: String,
+    val pluginState: String,
+)
+
+@Serializable
+public data class PublisherCandidateDto(
+    val platformId: String,
+    val kind: String,
+    val externalId: String,
+    val name: String,
+    val avatarUri: String,
+    val bannerUri: String? = null,
+    val sourcePluginId: String,
+    val sourcePluginName: String,
+)
+
+@Serializable
 public data class PublisherDrawThemeDto(
     val mode: String,
     val backgroundColors: List<String>,
@@ -320,6 +340,12 @@ public data class UpdatePublisherRequest(
     val state: String? = null,
     val themeColors: String? = null,
     val clearTheme: Boolean = false,
+)
+
+@Serializable
+public data class CreatePublisherRequest(
+    val platformId: String,
+    val externalId: String,
 )
 
 @Serializable

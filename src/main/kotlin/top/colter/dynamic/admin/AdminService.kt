@@ -40,6 +40,7 @@ import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.plugin.PublisherLoginProvider
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
+import top.colter.dynamic.core.plugin.PluginDescriptor
 import top.colter.dynamic.draw.DefaultPublisherThemeInitializer
 import top.colter.dynamic.draw.DrawThemePalette
 import top.colter.dynamic.draw.PublisherDrawThemeService
@@ -57,11 +58,13 @@ import top.colter.dynamic.repository.SourceCursorRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.repository.SubscriptionMutationResult
 import kotlinx.serialization.json.JsonNull
+import top.colter.dynamic.plugin.PluginCapability
 
 public class AdminService(
     private val pluginProvider: () -> List<PluginInfo>,
     private val messageSinkProvider: () -> List<PluginHandle<MessageSinkPlugin>> = { emptyList() },
     private val publisherLoginProvider: () -> List<PluginHandle<PublisherLoginProvider>> = { emptyList() },
+    private val publisherLookupProvider: () -> List<PluginHandle<PublisherLookupPlugin>> = { emptyList() },
     private val publisherLookupResolver: (String) -> PublisherLookupPlugin?,
     private val publisherFollowResolver: (String) -> PublisherFollowPlugin?,
     private val configurablePluginProvider: () -> List<PluginHandle<ConfigurablePlugin<*>>> = { emptyList() },
@@ -100,6 +103,7 @@ public class AdminService(
         pluginProvider = { pluginManager.getAllPlugins() },
         messageSinkProvider = { pluginManager.getMessageSinkPlugins() },
         publisherLoginProvider = { pluginManager.getPublisherLoginProviders() },
+        publisherLookupProvider = { pluginManager.getPublisherLookupPlugins() },
         publisherLookupResolver = { platformId -> pluginManager.findPublisherLookupPlugin(platformId) },
         publisherFollowResolver = { platformId -> pluginManager.findPublisherFollowPlugin(platformId) },
         configurablePluginProvider = { pluginManager.getConfigurablePlugins() },
@@ -323,6 +327,50 @@ public class AdminService(
                     drawTheme = drawThemes[publisher.id],
                 )
             }
+    }
+
+    public fun publisherPlatforms(): List<PublisherPlatformDto> {
+        return publisherLookupProvider()
+            .map { handle ->
+                val info = handle.info
+                val plugin = handle.instance
+                PublisherPlatformDto(
+                    platformId = plugin.platformId.value,
+                    pluginId = info.descriptor.id,
+                    pluginName = info.descriptor.name,
+                    pluginState = info.state.name,
+                )
+            }
+            .sortedWith(compareBy<PublisherPlatformDto> { it.platformId }.thenBy { it.pluginId })
+    }
+
+    public suspend fun searchPublishers(platformId: String?, query: String?): List<PublisherCandidateDto> {
+        val platform = platformId?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("发布者平台不能为空")
+        val externalId = query?.trim()?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("发布者 ID 不能为空")
+        val handle = publisherLookupProvider()
+            .firstOrNull { it.instance.platformId.value.equals(platform, ignoreCase = true) }
+        val plugin = handle?.instance ?: publisherLookupResolver(platform)
+            ?: throw NoSuchElementException("未找到发布者查询插件：$platform")
+        val publisherInfo = plugin.fetchPublisherInfo(externalId)?.normalized() ?: return emptyList()
+        val pluginInfo = handle?.info ?: fallbackPublisherPluginInfo(platform)
+        return listOf(publisherInfo.toCandidateDto(pluginInfo))
+    }
+
+    public suspend fun createPublisher(request: CreatePublisherRequest): PublisherDto {
+        val platform = request.platformId.trim().lowercase().also {
+            require(it.isNotBlank()) { "发布者平台不能为空" }
+        }
+        val externalId = request.externalId.trim().also {
+            require(it.isNotBlank()) { "发布者 ID 不能为空" }
+        }
+        val (publisherInfo, _) = fetchPublisherInfo(platform, externalId)
+        val upsert = PublisherRepository.upsertInfo(publisherInfo.normalized())
+        val publisher = upsert.value
+        return PublisherRepository.findById(publisher.id)?.toDto(
+            drawTheme = PublisherDrawThemeRepository.findByPublisherId(publisher.id),
+        ) ?: publisher.toDto()
     }
 
     public fun updatePublisher(id: Int, request: UpdatePublisherRequest): PublisherDto {
@@ -855,6 +903,31 @@ public class AdminService(
         }
     }
 
+    private suspend fun fetchPublisherInfo(platform: String, externalId: String): Pair<PublisherInfo, PluginInfo> {
+        val handle = publisherLookupProvider()
+            .firstOrNull { it.instance.platformId.value.equals(platform, ignoreCase = true) }
+        val plugin = handle?.instance ?: publisherLookupResolver(platform)
+            ?: throw NoSuchElementException("未找到发布者查询插件：$platform")
+        val publisherInfo = plugin.fetchPublisherInfo(externalId)?.normalized()
+            ?: throw NoSuchElementException("未找到发布者：$platform:$externalId")
+        val pluginInfo = handle?.info ?: fallbackPublisherPluginInfo(platform)
+        return publisherInfo to pluginInfo
+    }
+
+    private fun fallbackPublisherPluginInfo(platform: String): PluginInfo {
+        return PluginInfo(
+            descriptor = PluginDescriptor(
+                id = platform,
+                name = platform,
+                version = "",
+                mainClass = "",
+            ),
+            capabilities = setOf(PluginCapability.PUBLISHER_LOOKUP),
+            state = PluginState.ACTIVE,
+            sourceJarPath = "",
+        )
+    }
+
     private suspend fun resolveSubscriberTarget(address: TargetAddress): MessageTargetCandidate? {
         for (handle in messageSinkProvider()) {
             val sink = handle.instance
@@ -920,6 +993,17 @@ private fun Publisher.toDto(
     drawTheme = drawTheme?.palette?.toDto(),
     liveStatuses = liveStatuses.sortedBy { it.roomId }.map { it.toDto() },
     cursors = cursors.sortedWith(compareBy<SourceCursor> { it.sourceKey }.thenBy { it.eventType.value }).map { it.toDto() },
+)
+
+private fun PublisherInfo.toCandidateDto(info: PluginInfo): PublisherCandidateDto = PublisherCandidateDto(
+    platformId = platformId.value,
+    kind = kind.name,
+    externalId = externalId,
+    name = name,
+    avatarUri = avatar.uri,
+    bannerUri = banner?.uri,
+    sourcePluginId = info.descriptor.id,
+    sourcePluginName = info.descriptor.name,
 )
 
 private fun DrawThemePalette.toDto(): PublisherDrawThemeDto = PublisherDrawThemeDto(

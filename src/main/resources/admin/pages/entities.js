@@ -101,6 +101,10 @@ export async function handleAction(nextCtx, { action, id }) {
     await openEditPublisher(id);
     return true;
   }
+  if (action === "create-publisher") {
+    await openCreatePublisher();
+    return true;
+  }
   if (action === "create-subscriber") {
     await openCreateSubscriber();
     return true;
@@ -237,7 +241,7 @@ async function loadEntities(force) {
   pageRoot().innerHTML = `
     <section class="page">
       <section class="panel full">
-        <div class="panel-head"><h2>发布者</h2></div>
+        <div class="panel-head"><h2>发布者</h2><button class="add-button" data-action="create-publisher">添加</button></div>
         ${entityFilterBar("publisher", publishers, filteredPublishers)}
         ${renderTable(filteredPublishers, [
           { title: "平台", render: p => platformTag(p.platformId, p.platformId) },
@@ -251,7 +255,7 @@ async function loadEntities(force) {
         ])}
       </section>
       <section class="panel full">
-        <div class="panel-head"><h2>消息目标</h2><button data-action="create-subscriber">添加</button></div>
+        <div class="panel-head"><h2>消息目标</h2><button class="add-button" data-action="create-subscriber">添加</button></div>
         ${entityFilterBar("subscriber", subscribers, filteredSubscribers)}
         ${renderTable(filteredSubscribers, [
           { title: "平台", render: s => platformTag(s.platformId, s.platformId) },
@@ -281,7 +285,110 @@ function cursorSummary(publisher) {
   return `${latest.sourceKey} · ${eventLabel(latest.eventType)} · ${fmtTime(latest.lastSeenAtEpochSeconds)}`;
 }
 
+async function openCreatePublisher() {
+  const platforms = await api("/publisher-platforms").catch(() => []);
+  let publisherCandidates = [];
+  openModal("添加发布者", `
+    <div class="subscription-create">
+      <section class="panel subscription-card">
+        <div class="panel-head">
+          <div>
+            <h2>发布者</h2>
+            <p>先按平台和 ID 搜索发布者，再从结果中选择添加。</p>
+          </div>
+        </div>
+        <div class="form-grid single publisher-create-form">
+          <div class="field"><label>发布者平台</label><select id="newPublisherPlatform">${platforms.length
+            ? platforms.map(p => `<option value="${attr(p.platformId)}">${esc(p.platformId)} · ${esc(p.pluginName || p.pluginId || "")}</option>`).join("")
+            : `<option value="">无可用发布者平台</option>`}</select></div>
+          <div class="field">
+            <label>发布者 ID<span class="required-mark">*</span></label>
+            <div class="publisher-search-row">
+              <input id="newPublisherId" placeholder="当前支持 UID 搜索">
+              <button type="button" class="publisher-search-button" id="newPublisherSearch">搜索</button>
+            </div>
+          </div>
+          <div class="field full" id="newPublisherResultWrap" hidden>
+            <div class="field-head"><label>搜索结果</label></div>
+            <div id="newPublisherResultList" class="target-choice-list"></div>
+          </div>
+          <div class="field full"><span id="newPublisherStatus" class="inline-note">请输入发布者 ID 后搜索。</span></div>
+        </div>
+      </section>
+    </div>
+  `, async () => {
+    const selected = collectCreatePublisherCandidate(publisherCandidates);
+    const platformId = $("newPublisherPlatform").value.trim();
+    const externalId = selected ? selected.externalId : $("newPublisherId").value.trim();
+    if (!platformId || !externalId) throw new Error("请选择平台并填写发布者 ID");
+    await api("/publishers", { method: "POST", body: JSON.stringify({ platformId, externalId }) });
+    closeModal();
+    invalidate("dashboard", "publishers", "subscriptions");
+    await loadEntities(true);
+    notify("发布者已添加", false);
+  }, { size: "narrow", confirmText: "添加" });
+
+  const search = async () => {
+    const platformId = $("newPublisherPlatform").value.trim();
+    const queryText = $("newPublisherId").value.trim();
+    if (!platformId) throw new Error("没有可用的发布者平台");
+    if (!queryText) throw new Error("请填写发布者 ID");
+    publisherCandidates = [];
+    setCreatePublisherLoading("正在搜索发布者...");
+    publisherCandidates = await api(`/publisher-search?platformId=${encodeURIComponent(platformId)}&q=${encodeURIComponent(queryText)}`);
+    if (publisherCandidates.length) {
+      $("newPublisherResultWrap").hidden = false;
+      $("newPublisherResultList").innerHTML = publisherCandidates.map((publisher, index) => publisherCandidateHtml(publisher, index, index === 0)).join("");
+      await hydrateMediaImages($("newPublisherResultList"));
+      $("newPublisherStatus").textContent = `已找到 ${publisherCandidates.length} 个发布者，已默认选择第一个`;
+    } else {
+      $("newPublisherResultWrap").hidden = false;
+      $("newPublisherResultList").innerHTML = `<div class="empty">未找到发布者</div>`;
+      $("newPublisherStatus").textContent = "未找到发布者，请确认平台和 UID";
+    }
+  };
+  $("newPublisherSearch").onclick = () => search().catch(error => {
+    $("newPublisherResultWrap").hidden = true;
+    $("newPublisherStatus").textContent = error.message || String(error);
+  });
+  $("newPublisherId").onkeydown = event => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    search().catch(error => {
+      $("newPublisherResultWrap").hidden = true;
+      $("newPublisherStatus").textContent = error.message || String(error);
+    });
+  };
+}
+
+function setCreatePublisherLoading(text) {
+  $("newPublisherResultWrap").hidden = false;
+  $("newPublisherResultList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
+  $("newPublisherStatus").textContent = text;
+}
+
+function publisherCandidateHtml(publisher, index, checked) {
+  const title = publisher.name || publisher.externalId;
+  const parts = [
+    title,
+    label(publisher.kind),
+    publisher.externalId,
+  ].filter(Boolean).join(" · ");
+  return `<label class="target-choice">
+    <input type="radio" name="newPublisherCandidate" value="${attr(publisher.externalId)}" data-index="${attr(index)}"${checked ? " checked" : ""}>
+    ${mediaImage(publisher.avatarUri, "target-choice-avatar", publisher.platformId, "AVATAR")}
+    <span class="target-choice-text" title="${attr(parts)}">${esc(parts)}</span>
+  </label>`;
+}
+
+function collectCreatePublisherCandidate(candidates) {
+  if (!candidates.length || $("newPublisherResultWrap").hidden) return null;
+  const input = document.querySelector(`input[name="newPublisherCandidate"]:checked`);
+  return input ? candidates[Number(input.dataset.index)] : null;
+}
+
 async function openCreateSubscriber() {
+  if (!state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
   const targetPlatforms = await api("/subscriber-target-platforms").catch(() => []);
   const fallbackTargets = targetPlatforms.length ? targetPlatforms : [{ platformId: "onebot", pluginName: "手动", supportedTypes: ["GROUP", "USER"] }];
   let targetCandidates = [];
@@ -300,17 +407,19 @@ async function openCreateSubscriber() {
           <div class="field"><label>目标类型</label><select id="newTargetKind"></select></div>
           <div class="field full" id="newTargetCandidateWrap">
             <div class="field-head">
-              <label>可用目标</label>
-              <div class="row-actions">
-                <button type="button" class="secondary compact" id="newTargetSelectAll">全选</button>
-                <button type="button" class="secondary compact" id="newTargetClearAll">清空</button>
+              <div class="field-title-line">
+                <label>可用目标</label>
+                <span id="newTargetStatus" class="field-inline-status"></span>
+              </div>
+              <div class="row-actions" id="newTargetCandidateActions">
+                <button type="button" class="secondary compact choice-tool-button" id="newTargetSelectAll">全选</button>
+                <button type="button" class="secondary compact choice-tool-button choice-clear-button" id="newTargetClearAll">清空</button>
               </div>
             </div>
             <div id="newTargetCandidateList" class="target-choice-list"></div>
           </div>
           <div class="field full" id="newTargetManualWrap"><label>目标 ID</label><input id="newTargetManual" placeholder="插件无法枚举目标时手动填写"></div>
           <div class="field full"><label>链接解析</label><select id="newTargetLinkParse">${linkParseModeOptions("INHERIT")}</select><span class="inline-note">使用全局回退时，会跟随主配置里的回退触发方式。</span></div>
-          <div class="field full"><span id="newTargetStatus" class="inline-note"></span></div>
         </div>
       </section>
     </div>
@@ -353,26 +462,31 @@ async function openCreateSubscriber() {
     const kind = $("newTargetKind").value;
     targetCandidates = [];
     setCreateSubscriberTargetLoading("正在获取可用目标...");
+    let allCandidates = [];
     try {
-      targetCandidates = await api(`/subscriber-targets?platformId=${encodeURIComponent(platform)}&type=${encodeURIComponent(kind)}`);
+      allCandidates = await api(`/subscriber-targets?platformId=${encodeURIComponent(platform)}&type=${encodeURIComponent(kind)}`);
+      targetCandidates = filterExistingSubscriberTargets(allCandidates);
     } catch (error) {
-      $("newTargetCandidateWrap").hidden = true;
+      $("newTargetCandidateWrap").hidden = false;
+      $("newTargetCandidateActions").hidden = true;
       $("newTargetManualWrap").hidden = false;
-      $("newTargetCandidateList").innerHTML = "";
-      $("newTargetStatus").textContent = "目标列表获取失败，请手动填写目标 ID";
+      $("newTargetCandidateList").innerHTML = `<div class="empty">目标列表获取失败</div>`;
+      setTargetInlineStatus("目标列表获取失败，请手动填写目标 ID");
       return;
     }
     if (targetCandidates.length) {
       $("newTargetCandidateWrap").hidden = false;
+      $("newTargetCandidateActions").hidden = false;
       $("newTargetManualWrap").hidden = true;
-      $("newTargetCandidateList").innerHTML = targetCandidates.map((target, index) => subscriberTargetChoiceHtml(target, index, index === 0)).join("");
+      $("newTargetCandidateList").innerHTML = targetCandidates.map((target, index) => subscriberTargetChoiceHtml(target, index, false)).join("");
       await hydrateMediaImages($("newTargetCandidateList"));
-      $("newTargetStatus").textContent = `已获取 ${targetCandidates.length} 个目标，已默认选择第一个`;
+      setTargetInlineStatus(`${targetCandidates.length} 个可添加目标，已添加目标不显示`);
     } else {
-      $("newTargetCandidateWrap").hidden = true;
+      $("newTargetCandidateWrap").hidden = false;
+      $("newTargetCandidateActions").hidden = true;
       $("newTargetManualWrap").hidden = false;
-      $("newTargetCandidateList").innerHTML = "";
-      $("newTargetStatus").textContent = $("newTargetStatus").textContent || "未获取到目标，请手动填写目标 ID";
+      $("newTargetCandidateList").innerHTML = `<div class="empty">暂无可添加目标</div>`;
+      setTargetInlineStatus(allCandidates.length ? "已添加过的目标已排除，可手动填写目标 ID" : "未获取到目标，请手动填写目标 ID");
     }
   };
   $("newTargetPlatform").onchange = refreshTargetKinds;
@@ -384,16 +498,20 @@ async function openCreateSubscriber() {
 
 function setCreateSubscriberTargetLoading(text) {
   $("newTargetCandidateWrap").hidden = false;
+  $("newTargetCandidateActions").hidden = true;
   $("newTargetManualWrap").hidden = true;
   $("newTargetCandidateList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
-  $("newTargetStatus").textContent = text;
+  setTargetInlineStatus("");
+}
+
+function setTargetInlineStatus(text) {
+  $("newTargetStatus").textContent = text ? `· ${text}` : "";
 }
 
 function subscriberTargetChoiceHtml(target, index, checked) {
   const title = target.name || target.externalId;
   const parts = [
     title,
-    target.platformId,
     label(target.targetKind),
     target.externalId,
   ].filter(Boolean).join(" · ");
@@ -416,6 +534,19 @@ function collectCreateSubscriberTargets(candidates) {
   return Array.from(document.querySelectorAll(`input[name="newTargetCandidate"]:checked`))
     .map(input => candidates[Number(input.dataset.index)])
     .filter(Boolean);
+}
+
+function filterExistingSubscriberTargets(candidates) {
+  const existed = new Set((state.cache.subscribers || []).map(target =>
+    targetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId, target.accountId)
+  ));
+  return (candidates || []).filter(target =>
+    !existed.has(targetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId, target.accountId))
+  );
+}
+
+function targetAddressKey(platformId, kind, externalId, scopeId, threadId, accountId) {
+  return [platformId, kind, externalId, scopeId || "", threadId || "", accountId || ""].join("\u001F");
 }
 
 async function openEditPublisher(id) {

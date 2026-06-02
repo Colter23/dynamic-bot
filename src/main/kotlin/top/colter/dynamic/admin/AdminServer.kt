@@ -210,6 +210,23 @@ public fun Application.adminModule(context: AdminServerContext) {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.publishers() }
             }
+            post("/publishers") {
+                if (!call.ensureAuthorized(context)) return@post
+                call.respondApi { context.service.createPublisher(call.receive()) }
+            }
+            get("/publisher-platforms") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi { context.service.publisherPlatforms() }
+            }
+            get("/publisher-search") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi {
+                    context.service.searchPublishers(
+                        platformId = call.request.queryParameters["platformId"],
+                        query = call.request.queryParameters["q"],
+                    )
+                }
+            }
             patch("/publishers/{id}") {
                 if (!call.ensureAuthorized(context)) return@patch
                 val id = call.pathInt("id")

@@ -384,6 +384,10 @@ public class PluginManager(
         return activeExtensionHandles()
     }
 
+    public fun getPublisherLookupPlugins(): List<PluginHandle<PublisherLookupPlugin>> {
+        return activeExtensionHandles()
+    }
+
     public fun getDynamicLinkResolvers(): List<DynamicLinkResolver> {
         return activeExtensionHandles<DynamicLinkResolver>().map { it.instance }
     }

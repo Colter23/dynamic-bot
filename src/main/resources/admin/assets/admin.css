@@ -53,6 +53,11 @@
       border-color: transparent;
     }
     button.danger { background: var(--red); color: #fff; }
+    button.add-button {
+      border-color: #b9cffc;
+      background: #eef4ff;
+      color: #1d4ed8;
+    }
     input, select, textarea {
       width: 100%;
       min-height: 36px;
@@ -334,10 +339,47 @@
       align-items: center;
       gap: 8px;
     }
+    .field-title-line {
+      min-width: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+    .field-inline-status {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
     .field label {
       color: var(--muted);
       font-size: 12px;
       font-weight: 700;
+    }
+    .required-mark {
+      margin-left: 3px;
+      color: var(--red);
+      font-weight: 900;
+    }
+    .publisher-create-form {
+      max-width: 100%;
+    }
+    .publisher-search-row {
+      width: 100%;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 8px;
+      align-items: center;
+    }
+    .publisher-search-row input {
+      min-width: 0;
+    }
+    .publisher-search-button {
+      min-height: 36px;
+      padding: 7px 12px;
+      border-color: #b9ded8;
+      background: #eef8f6;
+      color: var(--accent);
     }
     .checks {
       display: flex;
@@ -447,6 +489,16 @@
       min-height: 28px;
       padding: 4px 8px;
       font-size: 12px;
+    }
+    button.choice-tool-button {
+      border-color: #c7d8f7;
+      background: #f1f6ff;
+      color: #1d4ed8;
+    }
+    button.choice-clear-button {
+      border-color: #f1b8b2;
+      background: #fff1f0;
+      color: #b42318;
     }
     @keyframes spin {
       to { transform: rotate(360deg); }
@@ -769,6 +821,7 @@
       box-shadow: var(--shadow);
     }
     .modal.small { width: min(460px, 100%); }
+    .modal.narrow { width: min(540px, 100%); }
     .modal.medium { width: min(620px, 100%); }
     .modal.image { width: min(900px, 100%); }
     .modal.wide { width: min(980px, 100%); }
