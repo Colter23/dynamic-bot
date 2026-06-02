@@ -151,6 +151,7 @@ public data class SubscriberDto(
     val threadId: String? = null,
     val accountId: String? = null,
     val name: String,
+    val avatarUri: String? = null,
     val state: String,
     val createTime: Long,
     val createUser: Int,
@@ -178,6 +179,7 @@ public data class SubscriberTargetDto(
     val threadId: String? = null,
     val accountId: String? = null,
     val name: String,
+    val avatarUri: String? = null,
     val sourcePluginId: String,
     val sourcePluginName: String,
 )

@@ -12,6 +12,7 @@ import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
 import top.colter.dynamic.core.data.EntityState
+import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.table.SubscriberTable
@@ -24,6 +25,7 @@ public object SubscriberRepository {
                 it[id] = subscriber.id
                 it.writeAddress(subscriber.address)
                 it[name] = subscriber.name
+                it[avatar] = subscriber.avatar
                 it[state] = subscriber.state
                 it[createTime] = Instant.fromEpochSeconds(subscriber.createTime)
                 it[createUser] = subscriber.createUser
@@ -36,6 +38,7 @@ public object SubscriberRepository {
             SubscriberTable.update({ SubscriberTable.id eq subscriber.id }) {
                 it.writeAddress(subscriber.address)
                 it[name] = subscriber.name
+                it[avatar] = subscriber.avatar
                 it[state] = subscriber.state
                 it[createTime] = Instant.fromEpochSeconds(subscriber.createTime)
                 it[createUser] = subscriber.createUser
@@ -86,6 +89,7 @@ public object SubscriberRepository {
     public fun upsert(
         address: TargetAddress,
         name: String,
+        avatar: MediaRef? = null,
         state: EntityState = EntityState.ACTIVE,
         createUser: Int = 0,
     ): UpsertResult<Subscriber> {
@@ -94,6 +98,7 @@ public object SubscriberRepository {
             val updatedSubscriber = existed.copy(
                 address = address,
                 name = name,
+                avatar = avatar ?: existed.avatar,
                 state = state,
             )
             val changed = updatedSubscriber != existed
@@ -106,6 +111,7 @@ public object SubscriberRepository {
             val id = SubscriberTable.insertAndGetId {
                 it.writeAddress(address)
                 it[SubscriberTable.name] = name
+                it[SubscriberTable.avatar] = avatar
                 it[SubscriberTable.state] = state
                 it[createTime] = now
                 it[SubscriberTable.createUser] = createUser
@@ -115,6 +121,7 @@ public object SubscriberRepository {
                     id = id,
                     address = address,
                     name = name,
+                    avatar = avatar,
                     state = state,
                     createTime = now.epochSeconds,
                     createUser = createUser,
@@ -156,6 +163,7 @@ public fun ResultRow.toSubscriber(): Subscriber = Subscriber(
         accountId = this[SubscriberTable.accountId],
     ),
     name = this[SubscriberTable.name],
+    avatar = this[SubscriberTable.avatar],
     state = this[SubscriberTable.state],
     createTime = this[SubscriberTable.createTime].epochSeconds,
     createUser = this[SubscriberTable.createUser],

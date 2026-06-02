@@ -5,6 +5,7 @@ import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.dao.id.IntIdTable
 import org.jetbrains.exposed.v1.datetime.timestamp
 import top.colter.dynamic.core.data.EntityState
+import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.tools.nowInstant
 
@@ -17,6 +18,7 @@ public object SubscriberTable : IntIdTable("subscriber") {
     public val threadId: Column<String?> = varchar(name = "thread_id", length = 120).nullable()
     public val accountId: Column<String?> = varchar(name = "account_id", length = 120).nullable()
     public val name: Column<String> = varchar(name = "name", length = 255)
+    public val avatar: Column<MediaRef?> = registerColumn("avatar", mediaRefColumn()).nullable()
     public val state: Column<EntityState> = enumerationByName<EntityState>("state", 20).default(EntityState.ACTIVE)
     public val createTime: Column<Instant> = timestamp(name = "create_time").clientDefault { nowInstant() }
     public val createUser: Column<Int> = integer(name = "create_user")

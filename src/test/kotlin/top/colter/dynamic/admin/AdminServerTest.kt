@@ -128,10 +128,11 @@ class AdminServerTest {
     @Test
     fun createSubscriptionShouldDeriveSubscriberNameFromMessageTargetCandidate() = runBlocking {
         initDb("admin-create-subscription-target-name")
+        val avatar = MediaRef("https://example.com/onebot-group.png", MediaKind.AVATAR)
         val service = service(
             plugin = FakePublisherFollowPlugin(),
             sink = FakeMessageSinkPlugin(
-                listOf(MessageTargetCandidate(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "测试群")),
+                listOf(MessageTargetCandidate(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "测试群", avatar)),
             ),
         )
 
@@ -146,6 +147,8 @@ class AdminServerTest {
         )
 
         assertEquals("测试群", response.subscription.subscriber?.name)
+        assertEquals(avatar.uri, response.subscription.subscriber?.avatarUri)
+        assertEquals(avatar, SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100"))?.avatar)
     }
 
     @Test
@@ -245,12 +248,30 @@ class AdminServerTest {
     }
 
     @Test
-    fun createSubscriberShouldPersistTargetAndLinkParseMode() = runBlocking {
-        initDb("admin-create-subscriber-link-parse")
+    fun subscriberTargetsShouldIncludeCandidateAvatar() = runBlocking {
+        initDb("admin-subscriber-target-avatar")
+        val avatar = MediaRef("https://example.com/group-avatar.png", MediaKind.AVATAR)
         val service = service(
             plugin = FakePublisherFollowPlugin(),
             sink = FakeMessageSinkPlugin(
-                listOf(MessageTargetCandidate(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "测试群")),
+                listOf(MessageTargetCandidate(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "测试群", avatar)),
+            ),
+        )
+
+        val target = service.subscriberTargets(platformId = "onebot", type = "GROUP").single()
+
+        assertEquals("测试群", target.name)
+        assertEquals(avatar.uri, target.avatarUri)
+    }
+
+    @Test
+    fun createSubscriberShouldPersistTargetAndLinkParseMode() = runBlocking {
+        initDb("admin-create-subscriber-link-parse")
+        val avatar = MediaRef("https://example.com/group-avatar.png", MediaKind.AVATAR)
+        val service = service(
+            plugin = FakePublisherFollowPlugin(),
+            sink = FakeMessageSinkPlugin(
+                listOf(MessageTargetCandidate(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "测试群", avatar)),
             ),
         )
 
@@ -264,9 +285,11 @@ class AdminServerTest {
         )
 
         assertEquals("测试群", created.name)
+        assertEquals(avatar.uri, created.avatarUri)
         assertEquals("ALWAYS", created.linkParseTriggerMode)
         assertEquals("CUSTOM", created.linkParseConfigSource)
         assertEquals(LinkParseTriggerMode.ALWAYS, LinkParseTargetConfigRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100"))?.triggerMode)
+        assertEquals(avatar, SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100"))?.avatar)
     }
 
     @Test

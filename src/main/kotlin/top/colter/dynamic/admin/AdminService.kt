@@ -443,15 +443,18 @@ public class AdminService(
             accountId = request.accountId,
         )
         val existed = SubscriberRepository.findByAddress(address)
+        val targetProfile = resolveSubscriberTarget(address)
         val name = request.name?.trim()?.takeIf { it.isNotBlank() }
+            ?: targetProfile?.name?.trim()?.takeIf { it.isNotBlank() }
             ?: existed?.name
-            ?: resolveSubscriberDisplayName(address)
+            ?: address.externalId
         val entityState = request.state?.let { parseEnum<EntityState>(it, "state") }
             ?: existed?.state
             ?: EntityState.ACTIVE
         val upsert = SubscriberRepository.upsert(
             address = address,
             name = name,
+            avatar = targetProfile?.avatar,
             state = entityState,
         )
         parseLinkParseTriggerModeOrNull(request.linkParseTriggerMode)?.let { mode ->
@@ -554,9 +557,14 @@ public class AdminService(
             kind = parseEnum<TargetKind>(request.targetKind, "targetKind"),
             externalId = subscriberExternalId,
         )
+        val existedSubscriber = SubscriberRepository.findByAddress(subscriberAddress)
+        val targetProfile = resolveSubscriberTarget(subscriberAddress)
         val subscriberUpsert = SubscriberRepository.upsert(
             address = subscriberAddress,
-            name = resolveSubscriberDisplayName(subscriberAddress),
+            name = targetProfile?.name?.trim()?.takeIf { it.isNotBlank() }
+                ?: existedSubscriber?.name
+                ?: subscriberAddress.externalId,
+            avatar = targetProfile?.avatar,
         )
         requireSubscriptionPolicyAllowed(subscriberUpsert.value, request.policy)
         val previousSubscriptionCount = SubscriptionRepository.countByPublisherId(publisherUpsert.value.id)
@@ -847,20 +855,15 @@ public class AdminService(
         }
     }
 
-    private suspend fun resolveSubscriberDisplayName(address: TargetAddress): String {
+    private suspend fun resolveSubscriberTarget(address: TargetAddress): MessageTargetCandidate? {
         for (handle in messageSinkProvider()) {
             val sink = handle.instance
             if (!sink.platformId.value.equals(address.platformId.value, ignoreCase = true)) continue
             if (sink.supportedTargetKinds.isNotEmpty() && address.kind !in sink.supportedTargetKinds) continue
-            val candidate = sink.listMessageTargets(address.kind).firstOrNull { target ->
-                target.address.platformId.value.equals(address.platformId.value, ignoreCase = true) &&
-                    target.address.kind == address.kind &&
-                    target.address.externalId == address.externalId
-            }
-            val name = candidate?.name?.trim()?.takeIf { it.isNotBlank() }
-            if (name != null) return name
+            val candidate = sink.resolveMessageTarget(address) ?: continue
+            if (candidate.address == address) return candidate
         }
-        return address.externalId
+        return null
     }
 }
 
@@ -940,6 +943,7 @@ private fun Subscriber.toDto(
     threadId = address.threadId,
     accountId = address.accountId,
     name = name,
+    avatarUri = avatar?.uri,
     state = state.name,
     createTime = createTime,
     createUser = createUser,
@@ -957,6 +961,7 @@ private fun MessageTargetCandidate.toDto(info: PluginInfo): SubscriberTargetDto 
     threadId = address.threadId,
     accountId = address.accountId,
     name = name,
+    avatarUri = avatar?.uri,
     sourcePluginId = info.descriptor.id,
     sourcePluginName = info.descriptor.name,
 )
