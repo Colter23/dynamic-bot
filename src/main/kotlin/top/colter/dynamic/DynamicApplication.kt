@@ -201,6 +201,7 @@ public object DynamicApplication : CoroutineScope {
             configService = configService,
             commandRegistry = commandRegistry,
             eventBus = eventBus,
+            drawAssetRegistry = drawAssetRegistry,
             stopRequester = { reason -> requestStop(reason) },
             startedAtEpochMillis = startedAtEpochMillis,
         )

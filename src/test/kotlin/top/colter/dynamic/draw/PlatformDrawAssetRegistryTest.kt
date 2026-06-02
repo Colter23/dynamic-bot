@@ -68,6 +68,30 @@ class PlatformDrawAssetRegistryTest {
     }
 
     @Test
+    fun `registry should expose raw plugin asset resource`() {
+        val registry = PlatformDrawAssetRegistry()
+        registry.registerPluginAssets(
+            pluginId = "test-plugin",
+            descriptors = listOf(
+                PlatformDrawAssetDescriptor(
+                    platformId = "bilibili",
+                    key = PlatformDrawAssetKeys.PRIMARY_LOGO,
+                    kind = PlatformDrawAssetKind.LOGO,
+                    resourcePath = "image/banner.jpg",
+                    mimeType = "image/jpeg",
+                ),
+            ),
+            classLoader = classLoader,
+        )
+
+        val resource = assertNotNull(registry.asset(PlatformId.of("bilibili"), PlatformDrawAssetKeys.PRIMARY_LOGO))
+
+        assertEquals("image/jpeg", resource.mimeType)
+        assertEquals("image/banner.jpg", resource.resourcePath)
+        assertTrue(resource.bytes.isNotEmpty())
+    }
+
+    @Test
     fun `registry should render svg asset with requested size`() {
         val registry = PlatformDrawAssetRegistry()
         registry.registerPluginAssets(

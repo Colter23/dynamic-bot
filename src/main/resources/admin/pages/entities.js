@@ -25,6 +25,7 @@ let tags;
 let cell;
 let mediaImage;
 let identity;
+let platformTag;
 let themeSwatch;
 let renderTable;
 let notify;
@@ -64,6 +65,7 @@ function bindContext(nextCtx) {
     cell,
     mediaImage,
     identity,
+    platformTag,
     themeSwatch,
     renderTable,
     notify,
@@ -161,7 +163,8 @@ async function loadEntities(force) {
       <section class="panel full">
         <div class="panel-head"><h2>发布者</h2><button class="secondary" data-action="refresh-current">刷新</button></div>
         ${renderTable(publishers, [
-          { title: "发布者", render: p => identity(p.name, publisherKey(p), p.avatarUri, p.platformId, "AVATAR") },
+          { title: "平台", render: p => platformTag(p.platformId, p.platformId) },
+          { title: "发布者", render: p => identity(p.name, p ? `${label(p.kind)}:${p.externalId}` : "-", p.avatarUri, p.platformId, "AVATAR") },
           { title: "主题色", render: p => themeSwatch(p.drawTheme) },
           { title: "头图", render: p => p.bannerUri ? mediaImage(p.bannerUri, "header-image", p.platformId, "COVER") : `<span class="sub-line">-</span>` },
           { title: "订阅", render: p => `<span class="primary-line">${p.subscriptionCount || 0}</span>` },
@@ -173,7 +176,8 @@ async function loadEntities(force) {
       <section class="panel full">
         <div class="panel-head"><h2>消息目标</h2><button data-action="create-subscriber">添加</button></div>
         ${renderTable(subscribers, [
-          { title: "目标", render: s => identity(s.name, targetKey(s), s.avatarUri, s.platformId, "AVATAR") },
+          { title: "平台", render: s => platformTag(s.platformId, s.platformId) },
+          { title: "目标", render: s => identity(s.name, s ? `${label(s.targetKind)}:${s.externalId}` : "-", s.avatarUri, s.platformId, "AVATAR") },
           { title: "订阅", render: s => `<span class="primary-line">${s.subscriptionCount || 0}</span>` },
           { title: "链接解析", render: s => linkParseCell(s) },
           { title: "状态", render: s => entityStatePill(s.state) },

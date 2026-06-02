@@ -9,6 +9,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -38,7 +39,11 @@ import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.core.plugin.MessageTargetCandidate
+import top.colter.dynamic.core.plugin.PlatformDrawAssetDescriptor
+import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
+import top.colter.dynamic.core.plugin.PlatformDrawAssetKind
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
+import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.plugin.PluginCapability
 import top.colter.dynamic.plugin.PluginHandle
@@ -91,6 +96,35 @@ class AdminServerTest {
 
         assertEquals(HttpStatusCode.Unauthorized, unauthorized.status)
         assertEquals(HttpStatusCode.OK, authorized.status)
+    }
+
+    @Test
+    fun adminApiShouldServePlatformLogoFromRegisteredDrawAssets() = testApplication {
+        val registry = PlatformDrawAssetRegistry().apply {
+            registerPluginAssets(
+                pluginId = "bilibili-plugin",
+                descriptors = listOf(
+                    PlatformDrawAssetDescriptor(
+                        platformId = "bilibili",
+                        key = PlatformDrawAssetKeys.PRIMARY_LOGO,
+                        kind = PlatformDrawAssetKind.LOGO,
+                        resourcePath = "image/banner.jpg",
+                        mimeType = "image/jpeg",
+                    ),
+                ),
+                classLoader = javaClass.classLoader,
+            )
+        }
+        application {
+            adminModule(staticRouteContext(drawAssetRegistry = registry))
+        }
+
+        val response = client.get("/api/platforms/bilibili/logo") {
+            header(HttpHeaders.Authorization, "Bearer test-token")
+        }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        assertTrue(response.bodyAsBytes().isNotEmpty())
     }
 
     @Test
@@ -462,7 +496,9 @@ class AdminServerTest {
         )
     }
 
-    private fun staticRouteContext(): AdminServerContext {
+    private fun staticRouteContext(
+        drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
+    ): AdminServerContext {
         return AdminServerContext(
             token = "test-token",
             service = AdminService(
@@ -474,6 +510,7 @@ class AdminServerTest {
             loginService = AdminLoginService(
                 loginProviderResolver = { null },
             ),
+            drawAssetRegistry = drawAssetRegistry,
         )
     }
 

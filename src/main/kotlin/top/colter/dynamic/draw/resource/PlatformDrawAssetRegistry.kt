@@ -21,6 +21,12 @@ public object EmptyPlatformDrawAssetResolver : PlatformDrawAssetResolver {
     override fun image(platformId: PlatformId, key: String, width: Int?, height: Int?): Image? = null
 }
 
+public data class PlatformDrawAssetResource(
+    val bytes: ByteArray,
+    val mimeType: String?,
+    val resourcePath: String,
+)
+
 public class PlatformDrawAssetRegistry : PlatformDrawAssetResolver {
     private val assets: ConcurrentHashMap<AssetKey, RegisteredAsset> = ConcurrentHashMap()
     private val imageCache: ConcurrentHashMap<ImageCacheKey, Image> = ConcurrentHashMap()
@@ -89,14 +95,34 @@ public class PlatformDrawAssetRegistry : PlatformDrawAssetResolver {
         }.getOrNull()
     }
 
+    public fun asset(platformId: PlatformId, key: String): PlatformDrawAssetResource? {
+        val normalizedKey = AssetKey(platformId.value, key.trim())
+        val asset = assets[normalizedKey] ?: return null
+        return runCatching {
+            PlatformDrawAssetResource(
+                bytes = asset.loadBytes(),
+                mimeType = asset.descriptor.mimeType,
+                resourcePath = asset.descriptor.resourcePath,
+            )
+        }.onFailure {
+            platformDrawAssetLogger.warn(it) {
+                "平台绘图资源加载失败：pluginId=${asset.pluginId}，${normalizedKey.display()}，resourcePath=${asset.descriptor.resourcePath}"
+            }
+        }.getOrNull()
+    }
+
     private fun RegisteredAsset.loadImage(width: Int?, height: Int?): Image {
-        val bytes = classLoader.getResourceAsStream(descriptor.resourcePath)?.use { it.readBytes() }
-            ?: error("插件绘图资源不存在：pluginId=$pluginId，resourcePath=${descriptor.resourcePath}")
+        val bytes = loadBytes()
         return if (descriptor.isSvg()) {
             loadSVG(bytes).makeImage(width ?: DEFAULT_SVG_SIZE, height ?: DEFAULT_SVG_SIZE)
         } else {
             Image.makeFromEncoded(bytes)
         }
+    }
+
+    private fun RegisteredAsset.loadBytes(): ByteArray {
+        return classLoader.getResourceAsStream(descriptor.resourcePath)?.use { it.readBytes() }
+            ?: error("插件绘图资源不存在：pluginId=$pluginId，resourcePath=${descriptor.resourcePath}")
     }
 
     private fun PlatformDrawAssetDescriptor.normalized(): PlatformDrawAssetDescriptor {

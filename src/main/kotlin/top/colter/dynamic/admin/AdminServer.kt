@@ -34,7 +34,11 @@ import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.PlatformId
+import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.config.YamlConfigService
+import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
+import top.colter.dynamic.draw.resource.PlatformDrawAssetResource
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.plugin.PluginManager
 
@@ -46,6 +50,7 @@ public class AdminServer(
     private val configService: ConfigService = YamlConfigService(),
     private val commandRegistry: CommandRegistry = CommandRegistry(),
     private val eventBus: EventBus = EventBus(),
+    private val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
     private val stopRequester: ((String) -> Unit)? = null,
     private val startedAtEpochMillis: Long = System.currentTimeMillis(),
 ) {
@@ -69,6 +74,7 @@ public class AdminServer(
                 loginProviderResolver = { platformId -> pluginManager.findPublisherLoginProvider(platformId) },
             ),
             mediaService = AdminMediaService(configProvider = configProvider),
+            drawAssetRegistry = drawAssetRegistry,
             stopRequester = stopRequester,
         )
         engine = embeddedServer(Netty, host = config.host, port = config.port) {
@@ -88,6 +94,7 @@ public data class AdminServerContext(
     val service: AdminService,
     val loginService: AdminLoginService,
     val mediaService: AdminMediaService = AdminMediaService(),
+    val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
     val stopRequester: ((String) -> Unit)? = null,
 )
 
@@ -180,6 +187,10 @@ public fun Application.adminModule(context: AdminServerContext) {
                         kind = call.request.queryParameters["kind"].toMediaKind(),
                     )
                 }
+            }
+            get("/platforms/{platformId}/logo") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondPlatformLogo(context.drawAssetRegistry, call.pathString("platformId"))
             }
             post("/system/stop") {
                 if (!call.ensureAuthorized(context)) return@post
@@ -383,6 +394,48 @@ private suspend fun ApplicationCall.respondMedia(block: suspend () -> AdminMedia
         respond(HttpStatusCode.BadGateway, ErrorResponse(e.message ?: "图片加载失败"))
     } catch (e: Exception) {
         respond(HttpStatusCode.BadGateway, ErrorResponse(e.message ?: "图片加载失败"))
+    }
+}
+
+private suspend fun ApplicationCall.respondPlatformLogo(
+    registry: PlatformDrawAssetRegistry,
+    platformId: String,
+) {
+    respondMedia {
+        val asset = registry.asset(PlatformId.of(platformId), PlatformDrawAssetKeys.PRIMARY_LOGO)
+            ?: throw NoSuchElementException("平台 Logo 不存在：$platformId")
+        AdminMediaResult(
+            bytes = asset.bytes,
+            contentType = platformAssetContentType(asset),
+        )
+    }
+}
+
+private fun platformAssetContentType(asset: PlatformDrawAssetResource): ContentType {
+    return contentTypeFromMime(asset.mimeType)
+        ?: contentTypeFromAssetPath(asset.resourcePath)
+        ?: ContentType.Application.OctetStream
+}
+
+private fun contentTypeFromMime(value: String?): ContentType? {
+    val mediaType = value
+        ?.substringBefore(';')
+        ?.trim()
+        ?.lowercase()
+        ?.takeIf { it.contains('/') }
+        ?: return null
+    val parts = mediaType.split('/', limit = 2)
+    return ContentType(parts[0], parts[1])
+}
+
+private fun contentTypeFromAssetPath(path: String): ContentType? {
+    return when (path.substringBefore('?').substringBefore('#').substringAfterLast('.', "").lowercase()) {
+        "png" -> ContentType.Image.PNG
+        "jpg", "jpeg" -> ContentType.Image.JPEG
+        "gif" -> ContentType.Image.GIF
+        "webp" -> ContentType("image", "webp")
+        "svg" -> ContentType("image", "svg+xml")
+        else -> null
     }
 }
 

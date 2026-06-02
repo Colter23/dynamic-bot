@@ -113,16 +113,31 @@ const $ = id => document.getElementById(id);
     function identity(name, sub, image, platformId = "admin", kind = "AVATAR") {
       return `<div class="identity-cell">${mediaImage(image, "avatar", platformId, kind)}<div>${cell(name, sub)}</div></div>`;
     }
+    function platformHue(value) {
+      let hash = 0;
+      String(value || "").split("").forEach(char => {
+        hash = ((hash << 5) - hash) + char.charCodeAt(0);
+        hash |= 0;
+      });
+      return Math.abs(hash) % 360;
+    }
+    function platformTag(platformId, text) {
+      const value = String(platformId || "").trim();
+      const labelText = text || value || "-";
+      const style = `--platform-hue:${platformHue(value || labelText)}`;
+      return `<span class="platform-tag" style="${attr(style)}"><span class="platform-tag-text">${esc(labelText)}</span></span>`;
+    }
     function themeSwatch(theme) {
       if (!theme || !Array.isArray(theme.backgroundColors) || theme.backgroundColors.length === 0) {
         return `<span class="sub-line">使用全局主题</span>`;
       }
       const colors = theme.backgroundColors.filter(Boolean);
+      const mode = String(theme.mode || "").toUpperCase();
+      const modeText = mode === "DARK" ? "暗色" : mode === "LIGHT" ? "亮色" : "主题";
+      const modeClass = mode === "DARK" ? "dark" : "light";
       const gradient = colors.length === 1 ? colors[0] : `linear-gradient(90deg, ${colors.map(attr).join(", ")})`;
       return `<div class="theme-cell">
-        <span class="theme-swatch" style="background:${gradient}" title="${attr(colors.join(";"))}"></span>
-        <span class="theme-colors">${colors.map(color => `<span class="theme-dot" style="background:${attr(color)}" title="${attr(color)}"></span>`).join("")}</span>
-        <span class="sub-line">${esc(theme.mode || "")}</span>
+        <span class="theme-swatch ${modeClass}" style="background:${gradient}" title="${attr(`${modeText} ${colors.join("; ")}`)}"></span>
       </div>`;
     }
     function renderTable(rows, columns) {
@@ -316,6 +331,7 @@ const $ = id => document.getElementById(id);
       cell,
       mediaImage,
       identity,
+      platformTag,
       themeSwatch,
       renderTable,
       notify,
