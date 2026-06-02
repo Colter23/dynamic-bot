@@ -40,6 +40,7 @@ import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.plugin.PublisherLoginProvider
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
+import top.colter.dynamic.core.plugin.PublisherLoginMethod
 import top.colter.dynamic.core.plugin.PluginDescriptor
 import top.colter.dynamic.draw.DefaultPublisherThemeInitializer
 import top.colter.dynamic.draw.DrawThemePalette
@@ -58,6 +59,12 @@ import top.colter.dynamic.repository.SourceCursorRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.repository.SubscriptionMutationResult
 import top.colter.dynamic.repository.UpsertResult
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonNull
 import top.colter.dynamic.plugin.PluginCapability
 
@@ -90,6 +97,8 @@ public class AdminService(
     private val publisherDrawThemeService: PublisherDrawThemeService = PublisherDrawThemeService(),
     private val publisherThemeInitializer: PublisherThemeInitializer = DefaultPublisherThemeInitializer(configProvider = configProvider),
 ) {
+    private val loginStateCache: ConcurrentHashMap<String, CachedLoginState> = ConcurrentHashMap()
+
     public constructor(
         pluginManager: PluginManager,
         configProvider: () -> MainDynamicConfig,
@@ -285,31 +294,132 @@ public class AdminService(
         }
     }
 
-    public suspend fun platformLogins(): List<PlatformLoginDto> {
-        return publisherLoginProvider()
+    public suspend fun platformLogins(force: Boolean = false): List<PlatformLoginDto> = coroutineScope {
+        publisherLoginProvider()
             .map { handle ->
-                val info = handle.info
-                val plugin = handle.instance
-                    val loginState = runCatching { plugin.checkLoginState() }
-                    .getOrElse { error ->
-                        PublisherLoginResult(
-                            status = PublisherLoginStatus.FAILED,
-                            message = error.message ?: "登录状态检查失败",
-                        )
-                    }
-                PlatformLoginDto(
-                    platformId = plugin.platformId.value,
-                    pluginId = info.descriptor.id,
-                    pluginName = info.descriptor.name,
-                    pluginVersion = info.descriptor.version,
-                    pluginState = info.state.name,
-                    supportedLoginMethods = plugin.supportedLoginMethods.map { it.name }.sorted(),
-                    status = loginState.status.name,
-                    message = loginState.message,
-                    account = loginState.account?.toDto(),
-                )
+                async { handle.toPlatformLoginDto(force) }
             }
+            .awaitAll()
             .sortedBy { it.platformId }
+    }
+
+    private suspend fun PluginHandle<PublisherLoginProvider>.toPlatformLoginDto(force: Boolean): PlatformLoginDto {
+        val pluginInfo = this.info
+        val plugin = this.instance
+        val cacheKey = "${pluginInfo.descriptor.id}:${plugin.platformId.value}"
+        val loginState = if (pluginInfo.state == PluginState.ACTIVE) {
+            cachedLoginState(cacheKey, plugin, force)
+        } else {
+            CachedLoginState(
+                result = PublisherLoginResult(
+                    status = PublisherLoginStatus.FAILED,
+                    message = "插件未运行：${pluginInfo.state.name}",
+                ),
+                checkedAtEpochMillis = System.currentTimeMillis(),
+            )
+        }
+        return PlatformLoginDto(
+            platformId = plugin.platformId.value,
+            pluginId = pluginInfo.descriptor.id,
+            pluginName = pluginInfo.descriptor.name,
+            pluginVersion = pluginInfo.descriptor.version,
+            pluginState = pluginInfo.state.name,
+            supportedLoginMethods = plugin.supportedLoginMethods.map { it.name }.sorted(),
+            status = loginState.result.status.name,
+            message = loginState.result.message,
+            checkedAtEpochMillis = loginState.checkedAtEpochMillis,
+            actions = plugin.loginActions(pluginInfo.state),
+            account = loginState.result.account?.toDto(),
+        )
+    }
+
+    private suspend fun cachedLoginState(
+        cacheKey: String,
+        plugin: PublisherLoginProvider,
+        force: Boolean,
+    ): CachedLoginState {
+        val now = System.currentTimeMillis()
+        if (!force) {
+            loginStateCache[cacheKey]
+                ?.takeIf { now - it.checkedAtEpochMillis <= LOGIN_STATE_CACHE_TTL_MS }
+                ?.let { return it }
+        }
+
+        val result = try {
+            withTimeoutOrNull(LOGIN_STATE_TIMEOUT_MS) {
+                plugin.checkLoginState()
+            } ?: PublisherLoginResult(
+                status = PublisherLoginStatus.FAILED,
+                message = "登录状态检查超时",
+            )
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            PublisherLoginResult(
+                status = PublisherLoginStatus.FAILED,
+                message = e.message ?: "登录状态检查失败",
+            )
+        }
+        val checked = CachedLoginState(result, System.currentTimeMillis())
+        loginStateCache[cacheKey] = checked
+        return checked
+    }
+
+    private fun PublisherLoginProvider.loginActions(pluginState: PluginState): List<PlatformLoginActionDto> {
+        val active = pluginState == PluginState.ACTIVE
+        val inactiveReason = if (active) null else "插件未运行：${pluginState.name}"
+        fun action(
+            key: String,
+            label: String,
+            description: String,
+            available: Boolean,
+            unavailableReason: String,
+            sensitive: Boolean = false,
+        ): PlatformLoginActionDto {
+            val reason = inactiveReason ?: if (available) null else unavailableReason
+            return PlatformLoginActionDto(
+                key = key,
+                label = label,
+                description = description,
+                enabled = active && available,
+                reason = reason,
+                sensitive = sensitive,
+            )
+        }
+
+        return listOf(
+            action(
+                key = "QR_LOGIN",
+                label = "扫码登录",
+                description = "使用平台 App 扫码并确认登录。",
+                available = PublisherLoginMethod.QR_CODE in supportedLoginMethods,
+                unavailableReason = "当前平台不支持扫码登录",
+                sensitive = true,
+            ),
+            action(
+                key = "COOKIE_LOGIN",
+                label = "Cookie 登录",
+                description = "粘贴浏览器 Cookie 或插件支持的 Cookie JSON 进行登录。",
+                available = PublisherLoginMethod.COOKIE in supportedLoginMethods,
+                unavailableReason = "当前平台不支持 Cookie 登录",
+                sensitive = true,
+            ),
+            action(
+                key = "COOKIE_EXPORT",
+                label = "导出 Cookie",
+                description = "导出当前保存的浏览器 Cookie JSON。",
+                available = supportsCookieExport,
+                unavailableReason = "当前平台不支持 Cookie 导出",
+                sensitive = true,
+            ),
+            action(
+                key = "REFRESH_STATUS",
+                label = "刷新",
+                description = "重新检查当前账号登录状态。",
+                available = true,
+                unavailableReason = "",
+            ),
+        )
     }
 
     public fun publishers(): List<PublisherDto> {
@@ -1155,6 +1265,11 @@ private fun Map<String, Int>.toStateCounts(total: Long): List<StateCountDto> {
     return listOf(StateCountDto("TOTAL", total)) + counts
 }
 
+private data class CachedLoginState(
+    val result: PublisherLoginResult,
+    val checkedAtEpochMillis: Long,
+)
+
 private inline fun <reified T : Enum<T>> parseEnum(value: String, fieldName: String): T {
     val normalized = value.trim()
     return enumValues<T>().firstOrNull { it.name.equals(normalized, ignoreCase = true) }
@@ -1185,3 +1300,6 @@ private fun requireSubscriptionPolicyAllowed(subscriber: Subscriber, policy: Sub
 private fun PublisherInfo.normalized(): PublisherInfo = copy(
     key = PublisherKey.of(platformId.value, kind, externalId),
 )
+
+private const val LOGIN_STATE_CACHE_TTL_MS: Long = 15_000
+private const val LOGIN_STATE_TIMEOUT_MS: Long = 5_000

@@ -204,7 +204,11 @@ public fun Application.adminModule(context: AdminServerContext) {
             }
             get("/platform-logins") {
                 if (!call.ensureAuthorized(context)) return@get
-                call.respondApi { context.service.platformLogins() }
+                val force = call.request.queryParameters["force"]
+                    ?.trim()
+                    ?.let { it.equals("true", ignoreCase = true) || it == "1" }
+                    ?: false
+                call.respondApi { context.service.platformLogins(force = force) }
             }
             get("/publishers") {
                 if (!call.ensureAuthorized(context)) return@get

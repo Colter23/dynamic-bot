@@ -945,9 +945,6 @@
       font-size: 15px;
       overflow-wrap: anywhere;
     }
-    .platform-login-methods .tag-list {
-      gap: 6px;
-    }
     .platform-login-actions {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -977,6 +974,11 @@
       border-color: #b9ded8;
       background: #eef8f6;
       color: var(--accent);
+    }
+    .platform-login-actions .login-action-unknown {
+      border-color: var(--line-strong);
+      background: var(--panel-soft);
+      color: var(--muted);
     }
     .cookie-export {
       display: grid;

@@ -7,36 +7,17 @@ let apiBlob;
 let state;
 let ui;
 let invalidate;
-let setPage;
-let loadPage;
 let handleError;
 let hydrateMediaImages;
-let releaseMediaObjectUrls;
-let query;
 let esc;
 let attr;
 let fmtTime;
-let fmtBytes;
-let fmtDuration;
-let label;
-let eventLabel;
 let pill;
-let tags;
-let cell;
 let mediaImage;
-let identity;
 let platformTag;
-let themeSwatch;
-let renderTable;
 let notify;
 let openModal;
 let closeModal;
-let eventTypes;
-let blockKinds;
-let publisherKey;
-let targetKey;
-let policyEvents;
-let mentionEvents;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -46,37 +27,18 @@ function bindContext(nextCtx) {
   state = ctx.state;
   ui = ctx.ui;
   invalidate = ctx.invalidate;
-  setPage = ctx.setPage;
-  loadPage = ctx.loadPage;
   handleError = ctx.handleError;
   hydrateMediaImages = ctx.hydrateMediaImages;
-  releaseMediaObjectUrls = ctx.releaseMediaObjectUrls;
-  query = ctx.query;
   ({
     esc,
     attr,
     fmtTime,
-    fmtBytes,
-    fmtDuration,
-    label,
-    eventLabel,
     pill,
-    tags,
-    cell,
     mediaImage,
-    identity,
     platformTag,
-    themeSwatch,
-    renderTable,
     notify,
     openModal,
     closeModal,
-    eventTypes,
-    blockKinds,
-    publisherKey,
-    targetKey,
-    policyEvents,
-    mentionEvents,
   } = ui);
 }
 
@@ -119,7 +81,7 @@ export async function handleAction(nextCtx, { action, button }) {
 }
 
 async function loadPlatformLogins(force) {
-  if (force || !state.cache.platformLogins) state.cache.platformLogins = await api("/platform-logins");
+  if (force || !state.cache.platformLogins) state.cache.platformLogins = await api(force ? "/platform-logins?force=true" : "/platform-logins");
   const rows = state.cache.platformLogins;
   pageRoot().innerHTML = `
     <section class="page platform-login-page">
@@ -131,11 +93,11 @@ async function loadPlatformLogins(force) {
 }
 
 function renderPlatformCard(item) {
-  const methods = item.supportedLoginMethods || [];
   const accountName = item.account && item.account.name || "未显示账号";
   const accountId = item.account && item.account.userId || "";
   const accountAvatar = item.account && item.account.avatarUri;
-  const exportDisabled = methods.includes("COOKIE") ? "" : " disabled title=\"当前平台不支持 Cookie 导出\"";
+  const checkedText = item.checkedAtEpochMillis ? `检查：${fmtTime(item.checkedAtEpochMillis, true)}` : "";
+  const accountMeta = [accountId, item.message, checkedText].filter(Boolean).join(" · ") || "暂无账号信息";
   return `<article class="platform-login-card">
     <div class="platform-login-head">
       <div class="platform-login-title">
@@ -149,17 +111,30 @@ function renderPlatformCard(item) {
       <div>
         <span>当前账号</span>
         <strong>${esc(accountName)}</strong>
-        <small>${esc([accountId, item.message].filter(Boolean).join(" · ") || "暂无账号信息")}</small>
+        <small>${esc(accountMeta)}</small>
       </div>
     </div>
-    <div class="platform-login-methods">${tags(methods.map(label))}</div>
-    <div class="platform-login-actions">
-      <button class="login-action-qr" data-action="qr-login" data-platform="${attr(item.platformId)}"${methods.includes("QR_CODE") ? "" : " disabled"}>扫码登录</button>
-      <button class="login-action-cookie" data-action="cookie-login" data-platform="${attr(item.platformId)}"${methods.includes("COOKIE") ? "" : " disabled"}>Cookie 登录</button>
-      <button class="login-action-export" data-action="export-cookie" data-platform="${attr(item.platformId)}"${exportDisabled}>导出 Cookie</button>
-      <button class="login-action-refresh" data-action="refresh-login" data-platform="${attr(item.platformId)}">刷新</button>
-    </div>
+    <div class="platform-login-actions">${renderLoginActions(item)}</div>
   </article>`;
+}
+
+function renderLoginActions(item) {
+  const actions = item.actions || [];
+  if (!actions.length) return `<span class="sub-line">暂无可用操作</span>`;
+  return actions.map(action => renderLoginActionButton(item.platformId, action)).join("");
+}
+
+function renderLoginActionButton(platform, action) {
+  const map = {
+    QR_LOGIN: { domAction: "qr-login", className: "login-action-qr" },
+    COOKIE_LOGIN: { domAction: "cookie-login", className: "login-action-cookie" },
+    COOKIE_EXPORT: { domAction: "export-cookie", className: "login-action-export" },
+    REFRESH_STATUS: { domAction: "refresh-login", className: "login-action-refresh" },
+  };
+  const config = map[action.key] || { domAction: "", className: "login-action-unknown" };
+  const enabled = !!action.enabled && !!config.domAction;
+  const title = action.reason || action.description || action.label || "";
+  return `<button class="${attr(config.className)}" data-action="${attr(config.domAction)}" data-platform="${attr(platform)}"${enabled ? "" : " disabled"}${title ? ` title="${attr(title)}"` : ""}>${esc(action.label || action.key || "操作")}</button>`;
 }
 
 async function openCookieLogin(platform) {
@@ -252,13 +227,13 @@ async function openCookieExport(platform) {
 }
 
 async function openQrLogin(platform) {
-  const appName = String(platform || "").toLowerCase() === "bilibili" ? "Bilibili App" : `${platform} App`;
   let loginId = "";
   let imageUrl = "";
   let timer = null;
   let countdownTimer = null;
   let autoCloseTimer = null;
   let expiresAtMs = 0;
+  let statusPollIntervalMs = 2500;
   let closed = false;
   let sessionFinished = false;
   let polling = false;
@@ -311,8 +286,22 @@ async function openQrLogin(platform) {
     if (node) node.textContent = text;
   }
 
+  function setInstruction(text) {
+    const node = $("qrInstruction");
+    if (node) node.textContent = text || "请扫码并确认登录";
+  }
+
+  function setValidityHint(text) {
+    const node = $("qrValidity");
+    if (node) node.textContent = text || "请在二维码有效期内完成操作";
+  }
+
   function updateCountdown() {
-    if (!expiresAtMs || sessionFinished) return;
+    if (sessionFinished) return;
+    if (!expiresAtMs) {
+      setCountdownText("有效期未知");
+      return;
+    }
     const remainingMs = Math.max(0, expiresAtMs - Date.now());
     const totalSeconds = Math.ceil(remainingMs / 1000);
     const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
@@ -332,13 +321,20 @@ async function openQrLogin(platform) {
     setQrBoxState("loading");
     setRefreshVisible(false);
     setLoadingVisible(true);
-    setCountdownText("剩余 03:00");
+    setInstruction("正在准备扫码登录");
+    setValidityHint("请在二维码有效期内完成操作");
+    setCountdownText("等待二维码");
     setQrStatus("正在生成二维码...", "pending");
   }
 
   function markExpired(message, localOnly = false) {
-    if (!localOnly) sessionFinished = true;
-    clearTimers();
+    if (localOnly) {
+      if (countdownTimer) clearInterval(countdownTimer);
+      countdownTimer = null;
+    } else {
+      sessionFinished = true;
+      clearTimers();
+    }
     setQrBoxState("expired");
     setRefreshVisible(true);
     setLoadingVisible(false);
@@ -409,7 +405,7 @@ async function openQrLogin(platform) {
     countdownTimer = setInterval(updateCountdown, 1000);
     timer = setInterval(() => {
       pollQrStatus(currentLoginId).catch(handleError);
-    }, 2500);
+    }, statusPollIntervalMs);
     pollQrStatus(currentLoginId).catch(handleError);
   }
 
@@ -432,7 +428,11 @@ async function openQrLogin(platform) {
       const start = await api(`/platforms/${encodeURIComponent(platform)}/login/qr`, { method: "POST" });
       if (closed) return;
       loginId = start.loginId;
-      expiresAtMs = start.expiresAtEpochSeconds ? Number(start.expiresAtEpochSeconds) * 1000 : Date.now() + 180 * 1000;
+      expiresAtMs = start.expiresAtEpochSeconds ? Number(start.expiresAtEpochSeconds) * 1000 : 0;
+      const nextPollInterval = Number(start.statusPollIntervalMillis || 2500);
+      statusPollIntervalMs = Number.isFinite(nextPollInterval) && nextPollInterval > 0 ? Math.max(1000, nextPollInterval) : 2500;
+      setInstruction(start.instruction || start.message || "请扫码并确认登录");
+      setValidityHint(start.validityHint || "请在二维码有效期内完成操作");
       setQrStatus(start.message || "等待扫码确认", "pending");
       updateCountdown();
       const blob = await apiBlob(start.imageUrl.replace(/^\/api/, ""));
@@ -458,8 +458,8 @@ async function openQrLogin(platform) {
   openModal(`${platform} 二维码登录`, `
     <div class="qr-login-panel">
       <div class="qr-login-copy">
-        <strong>请使用 ${esc(appName)} 扫码并确认登录</strong>
-        <span>三分钟内有效 · <b id="qrCountdown">剩余 03:00</b></span>
+        <strong id="qrInstruction">正在准备扫码登录</strong>
+        <span><span id="qrValidity">请在二维码有效期内完成操作</span> · <b id="qrCountdown">等待二维码</b></span>
       </div>
       <div id="qrCodeBox" class="qr-code-box loading">
         <div id="qrLoading" class="qr-code-loading"><span class="loading-spinner"></span><span>正在生成二维码</span></div>

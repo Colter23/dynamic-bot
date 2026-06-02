@@ -109,7 +109,19 @@ public data class PlatformLoginDto(
     val supportedLoginMethods: List<String>,
     val status: String,
     val message: String,
+    val checkedAtEpochMillis: Long,
+    val actions: List<PlatformLoginActionDto>,
     val account: LoginAccountDto? = null,
+)
+
+@Serializable
+public data class PlatformLoginActionDto(
+    val key: String,
+    val label: String,
+    val description: String = "",
+    val enabled: Boolean,
+    val reason: String? = null,
+    val sensitive: Boolean = false,
 )
 
 @Serializable
@@ -440,6 +452,9 @@ public data class QrLoginStartResponse(
     val status: String,
     val message: String? = null,
     val expiresAtEpochSeconds: Long? = null,
+    val instruction: String? = null,
+    val validityHint: String? = null,
+    val statusPollIntervalMillis: Long? = null,
 )
 
 @Serializable
