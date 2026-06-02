@@ -25,6 +25,7 @@ let tags;
 let cell;
 let mediaImage;
 let identity;
+let platformTag;
 let themeSwatch;
 let renderTable;
 let notify;
@@ -64,6 +65,7 @@ function bindContext(nextCtx) {
     cell,
     mediaImage,
     identity,
+    platformTag,
     themeSwatch,
     renderTable,
     notify,
@@ -98,8 +100,19 @@ export async function handleAction(nextCtx, { action, button }) {
     return true;
   }
   if (action === "refresh-login") {
-    invalidate("platformLogins", "dashboard");
-    await loadPlatformLogins(true);
+    const platform = button.dataset.platform;
+    button.disabled = true;
+    try {
+      invalidate("platformLogins", "dashboard");
+      await loadPlatformLogins(true);
+      notify(`${platform || "平台"} 登录状态已刷新`, false);
+    } finally {
+      if (button.isConnected) button.disabled = false;
+    }
+    return true;
+  }
+  if (action === "export-cookie") {
+    await openCookieExport(button.dataset.platform);
     return true;
   }
   return false;
@@ -109,26 +122,42 @@ async function loadPlatformLogins(force) {
   if (force || !state.cache.platformLogins) state.cache.platformLogins = await api("/platform-logins");
   const rows = state.cache.platformLogins;
   pageRoot().innerHTML = `
-    <section class="page">
-      <div class="cards">
+    <section class="page platform-login-page">
+      <div class="platform-login-grid">
         ${rows.length ? rows.map(renderPlatformCard).join("") : `<div class="empty">暂无可登录平台</div>`}
       </div>
     </section>`;
+  await hydrateMediaImages(pageRoot());
 }
 
 function renderPlatformCard(item) {
   const methods = item.supportedLoginMethods || [];
-  return `<article class="card">
-    <div class="card-head">
-      <div>${cell(item.platformId, `${item.pluginName} · ${item.pluginVersion}`)}</div>
+  const accountName = item.account && item.account.name || "未显示账号";
+  const accountId = item.account && item.account.userId || "";
+  const accountAvatar = item.account && item.account.avatarUri;
+  const exportDisabled = methods.includes("COOKIE") ? "" : " disabled title=\"当前平台不支持 Cookie 导出\"";
+  return `<article class="platform-login-card">
+    <div class="platform-login-head">
+      <div class="platform-login-title">
+        ${platformTag(item.platformId, item.platformId)}
+        <span>${esc(item.pluginName || item.pluginId || "未知插件")}${item.pluginVersion ? ` · ${esc(item.pluginVersion)}` : ""}</span>
+      </div>
       ${pill(item.status)}
     </div>
-    <div>${tags(methods.map(label))}</div>
-    <div>${cell(item.account && item.account.name || "未显示账号", item.message || "")}</div>
-    <div class="row-actions">
-      <button data-action="cookie-login" data-platform="${attr(item.platformId)}"${methods.includes("COOKIE") ? "" : " disabled"}>Cookie</button>
-      <button class="secondary" data-action="qr-login" data-platform="${attr(item.platformId)}"${methods.includes("QR_CODE") ? "" : " disabled"}>二维码</button>
-      <button class="secondary" data-action="refresh-login" data-platform="${attr(item.platformId)}">刷新</button>
+    <div class="platform-login-account">
+      ${mediaImage(accountAvatar, "platform-login-avatar avatar", item.platformId, "AVATAR")}
+      <div>
+        <span>当前账号</span>
+        <strong>${esc(accountName)}</strong>
+        <small>${esc([accountId, item.message].filter(Boolean).join(" · ") || "暂无账号信息")}</small>
+      </div>
+    </div>
+    <div class="platform-login-methods">${tags(methods.map(label))}</div>
+    <div class="platform-login-actions">
+      <button class="login-action-qr" data-action="qr-login" data-platform="${attr(item.platformId)}"${methods.includes("QR_CODE") ? "" : " disabled"}>扫码登录</button>
+      <button class="login-action-cookie" data-action="cookie-login" data-platform="${attr(item.platformId)}"${methods.includes("COOKIE") ? "" : " disabled"}>Cookie登录</button>
+      <button class="login-action-export" data-action="export-cookie" data-platform="${attr(item.platformId)}"${exportDisabled}>导出Cookie</button>
+      <button class="login-action-refresh" data-action="refresh-login" data-platform="${attr(item.platformId)}">刷新</button>
     </div>
   </article>`;
 }
@@ -141,6 +170,17 @@ async function openCookieLogin(platform) {
     await loadPlatformLogins(true);
     notify(result.message || "登录请求已提交", result.status !== "SUCCESS");
   }, { size: "small" });
+}
+
+async function openCookieExport(platform) {
+  const result = await api(`/platforms/${encodeURIComponent(platform)}/login/cookie/export`);
+  openModal(`${platform} Cookie`, `
+    <div class="field">
+      <label>Cookie</label>
+      <textarea readonly>${esc(result.cookie || "")}</textarea>
+      <span class="inline-note">${esc(result.message || "Cookie 已导出")}</span>
+    </div>
+  `, null, { size: "small", cancelText: "关闭" });
 }
 
 async function openQrLogin(platform) {

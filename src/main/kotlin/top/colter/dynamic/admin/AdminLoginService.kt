@@ -48,8 +48,25 @@ public class AdminLoginService(
                     status = PublisherLoginStatus.FAILED,
                     message = error.message ?: "Cookie 登录失败",
                 )
-            }
+        }
         return result.toDto()
+    }
+
+    public suspend fun exportCookie(platformId: String): CookieExportResponse {
+        val platform = platformId.trim().lowercase()
+        val plugin = resolvePlugin(platform)
+        require(plugin.supportedLoginMethods.contains(PublisherLoginMethod.COOKIE)) {
+            "$platform 不支持 Cookie 登录"
+        }
+        val cookie = runCatching { plugin.exportCookie() }
+            .getOrElse { error -> throw IllegalStateException(error.message ?: "导出 Cookie 失败") }
+            ?.trim()
+            ?: ""
+        require(cookie.isNotBlank()) { "当前没有可导出的 Cookie" }
+        return CookieExportResponse(
+            platformId = platform,
+            cookie = cookie,
+        )
     }
 
     public suspend fun startQrLogin(platformId: String): QrLoginStartResponse {
@@ -227,4 +244,5 @@ private fun PublisherLoginResult.toDto(): LoginResultDto = LoginResultDto(
 private fun PublisherLoginAccount.toDto(): LoginAccountDto = LoginAccountDto(
     userId = userId,
     name = name,
+    avatarUri = avatar?.uri,
 )

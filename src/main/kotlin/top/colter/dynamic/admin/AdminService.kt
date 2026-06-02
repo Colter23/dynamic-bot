@@ -994,6 +994,7 @@ private fun PluginReloadResult.toResponse(): PluginReloadResponse = PluginReload
 private fun top.colter.dynamic.core.plugin.PublisherLoginAccount.toDto(): LoginAccountDto = LoginAccountDto(
     userId = userId,
     name = name,
+    avatarUri = avatar?.uri,
 )
 
 private fun Publisher.toDto(

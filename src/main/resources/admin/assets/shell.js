@@ -123,12 +123,13 @@ const $ = id => document.getElementById(id);
     function identity(name, sub, image, platformId = "admin", kind = "AVATAR") {
       return `<div class="identity-cell">${mediaImage(image, "avatar", platformId, kind)}<div>${cell(name, sub)}</div></div>`;
     }
-    function identityMeta(name, image, mediaPlatform, mediaKind, platformId, typeText, externalId) {
+    function identityMeta(name, image, mediaPlatform, mediaKind, platformId, typeText, externalId, options = {}) {
+      const platformPart = options.showPlatform === false ? "" : platformTag(platformId, platformId);
       return `<div class="identity-cell">
         ${mediaImage(image, "avatar", mediaPlatform, mediaKind)}
         <div>
           <span class="primary-line">${esc(name || "-")}</span>
-          <span class="sub-line subscription-meta-line">${platformTag(platformId, platformId)}<span>${esc(typeText || "-")}</span><span>${esc(externalId || "-")}</span></span>
+          <span class="sub-line subscription-meta-line">${platformPart}<span>${esc(typeText || "-")}</span><span>${esc(externalId || "-")}</span></span>
         </div>
       </div>`;
     }

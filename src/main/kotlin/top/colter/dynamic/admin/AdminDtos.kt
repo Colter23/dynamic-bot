@@ -415,6 +415,15 @@ public data class CookieLoginRequest(
 public data class LoginAccountDto(
     val userId: String? = null,
     val name: String? = null,
+    val avatarUri: String? = null,
+)
+
+@Serializable
+public data class CookieExportResponse(
+    val platformId: String,
+    val cookie: String,
+    val format: String = "JSON",
+    val message: String = "Cookie 已导出",
 )
 
 @Serializable

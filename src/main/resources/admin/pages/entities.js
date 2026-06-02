@@ -268,6 +268,7 @@ function entityPublisherCell(publisher) {
     publisher.platformId,
     label(publisher.kind),
     publisher.externalId,
+    { showPlatform: false },
   );
 }
 
@@ -281,6 +282,7 @@ function entitySubscriberCell(target) {
     target.platformId,
     label(target.targetKind),
     target.externalId,
+    { showPlatform: false },
   );
 }
 

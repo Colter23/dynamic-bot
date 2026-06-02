@@ -333,6 +333,11 @@ public fun Application.adminModule(context: AdminServerContext) {
                 val request = call.receive<CookieLoginRequest>()
                 call.respondApi { context.loginService.loginByCookie(platform, request.cookie) }
             }
+            get("/platforms/{platform}/login/cookie/export") {
+                if (!call.ensureAuthorized(context)) return@get
+                val platform = call.pathString("platform")
+                call.respondApi { context.loginService.exportCookie(platform) }
+            }
             post("/platforms/{platform}/login/qr") {
                 if (!call.ensureAuthorized(context)) return@post
                 val platform = call.pathString("platform")
