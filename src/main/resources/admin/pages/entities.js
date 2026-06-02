@@ -37,6 +37,12 @@ let publisherKey;
 let targetKey;
 let policyEvents;
 let mentionEvents;
+const entityFilters = {
+  publisherPlatform: "",
+  publisherState: "",
+  subscriberPlatform: "",
+  subscriberState: ""
+};
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -127,6 +133,12 @@ function entityStateText(value) {
   return map[value] || value || "-";
 }
 
+function entityStateOptions(selected) {
+  return ["ACTIVE", "DISABLED"].map(value =>
+    `<option value="${value}"${value === selected ? " selected" : ""}>${esc(entityStateText(value))}</option>`
+  ).join("");
+}
+
 function entityStatePill(value) {
   return `<span class="pill ${value === "ACTIVE" ? "ok" : "bad"}">${esc(entityStateText(value))}</span>`;
 }
@@ -152,17 +164,82 @@ function linkParseCell(target) {
   return cell(linkParseModeLabel(target.effectiveLinkParseTriggerMode), source);
 }
 
+function uniqueValues(rows, key, extraValues = []) {
+  const values = new Set(extraValues.filter(Boolean));
+  (rows || []).forEach(row => {
+    if (row && row[key]) values.add(row[key]);
+  });
+  return Array.from(values).sort((a, b) => String(a).localeCompare(String(b), "zh-CN"));
+}
+
+function filterOptions(allText, values, selected, labeler = value => value) {
+  return `<option value="">${esc(allText)}</option>` + values.map(value =>
+    `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(labeler(value))}</option>`
+  ).join("");
+}
+
+function filterEntityRows(rows, platform, stateValue) {
+  return (rows || []).filter(row =>
+    (!platform || row.platformId === platform) &&
+    (!stateValue || row.state === stateValue)
+  );
+}
+
+function normalizeEntityFilters(scope, rows) {
+  const platformKey = `${scope}Platform`;
+  if (entityFilters[platformKey] && !uniqueValues(rows, "platformId").includes(entityFilters[platformKey])) {
+    entityFilters[platformKey] = "";
+  }
+}
+
+function entityFilterBar(scope, rows, filteredRows) {
+  const platformKey = `${scope}Platform`;
+  const stateKey = `${scope}State`;
+  const disabled = entityFilters[platformKey] || entityFilters[stateKey] ? "" : " disabled";
+  return `<div class="entity-filter-bar">
+    <span class="entity-filter-title">筛选</span>
+    <div class="entity-filter-controls">
+      <select data-entity-filter="${attr(platformKey)}">${filterOptions("全部平台", uniqueValues(rows, "platformId"), entityFilters[platformKey])}</select>
+      <select data-entity-filter="${attr(stateKey)}">${filterOptions("全部状态", uniqueValues(rows, "state", ["ACTIVE", "DISABLED"]), entityFilters[stateKey], entityStateText)}</select>
+      <button type="button" class="entity-filter-clear" data-entity-filter-reset="${attr(scope)}"${disabled}>清除</button>
+    </div>
+    <span class="entity-filter-summary">显示 ${filteredRows.length} / ${rows.length}</span>
+  </div>`;
+}
+
+function bindEntityFilters() {
+  pageRoot().querySelectorAll("[data-entity-filter]").forEach(select => {
+    select.onchange = () => {
+      entityFilters[select.dataset.entityFilter] = select.value;
+      loadEntities(false).catch(handleError);
+    };
+  });
+  pageRoot().querySelectorAll("[data-entity-filter-reset]").forEach(button => {
+    button.onclick = () => {
+      const scope = button.dataset.entityFilterReset;
+      entityFilters[`${scope}Platform`] = "";
+      entityFilters[`${scope}State`] = "";
+      loadEntities(false).catch(handleError);
+    };
+  });
+}
+
 async function loadEntities(force) {
   releaseMediaObjectUrls();
   if (force || !state.cache.publishers) state.cache.publishers = await api("/publishers");
   if (force || !state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
   const publishers = state.cache.publishers;
   const subscribers = state.cache.subscribers;
+  normalizeEntityFilters("publisher", publishers);
+  normalizeEntityFilters("subscriber", subscribers);
+  const filteredPublishers = filterEntityRows(publishers, entityFilters.publisherPlatform, entityFilters.publisherState);
+  const filteredSubscribers = filterEntityRows(subscribers, entityFilters.subscriberPlatform, entityFilters.subscriberState);
   pageRoot().innerHTML = `
     <section class="page">
       <section class="panel full">
-        <div class="panel-head"><h2>发布者</h2><button class="secondary" data-action="refresh-current">刷新</button></div>
-        ${renderTable(publishers, [
+        <div class="panel-head"><h2>发布者</h2></div>
+        ${entityFilterBar("publisher", publishers, filteredPublishers)}
+        ${renderTable(filteredPublishers, [
           { title: "平台", render: p => platformTag(p.platformId, p.platformId) },
           { title: "发布者", render: p => identity(p.name, p ? `${label(p.kind)}:${p.externalId}` : "-", p.avatarUri, p.platformId, "AVATAR") },
           { title: "主题色", render: p => themeSwatch(p.drawTheme) },
@@ -175,7 +252,8 @@ async function loadEntities(force) {
       </section>
       <section class="panel full">
         <div class="panel-head"><h2>消息目标</h2><button data-action="create-subscriber">添加</button></div>
-        ${renderTable(subscribers, [
+        ${entityFilterBar("subscriber", subscribers, filteredSubscribers)}
+        ${renderTable(filteredSubscribers, [
           { title: "平台", render: s => platformTag(s.platformId, s.platformId) },
           { title: "目标", render: s => identity(s.name, s ? `${label(s.targetKind)}:${s.externalId}` : "-", s.avatarUri, s.platformId, "AVATAR") },
           { title: "订阅", render: s => `<span class="primary-line">${s.subscriptionCount || 0}</span>` },
@@ -186,6 +264,7 @@ async function loadEntities(force) {
         ])}
       </section>
     </section>`;
+  bindEntityFilters();
   await hydrateMediaImages($("content"));
 }
 
@@ -208,37 +287,57 @@ async function openCreateSubscriber() {
   let targetCandidates = [];
 
   openModal("添加消息目标", `
-    <div class="form-grid">
-      <div class="field"><label>目标平台</label><select id="newTargetPlatform">${fallbackTargets.map(p => `<option value="${attr(p.platformId)}">${esc(p.platformId)} · ${esc(p.pluginName || p.pluginId || "")}</option>`).join("")}</select></div>
-      <div class="field"><label>目标类型</label><select id="newTargetKind"></select></div>
-      <div class="field full" id="newTargetCandidateWrap"><label>可用目标</label><select id="newTargetCandidate"></select></div>
-      <div class="field full" id="newTargetManualWrap"><label>目标 ID</label><input id="newTargetManual"></div>
-      <div class="field full"><label>链接解析</label><select id="newTargetLinkParse">${linkParseModeOptions("INHERIT")}</select><span class="inline-note">使用全局回退时，会跟随主配置里的回退触发方式。</span></div>
-      <div class="field full"><span id="newTargetStatus" class="inline-note"></span></div>
+    <div class="subscription-create">
+      <section class="panel subscription-card">
+        <div class="panel-head">
+          <div>
+            <h2>消息目标</h2>
+            <p>选择即时通讯平台目标，可一次添加多个。</p>
+          </div>
+        </div>
+        <div class="form-grid">
+          <div class="field"><label>目标平台</label><select id="newTargetPlatform">${fallbackTargets.map(p => `<option value="${attr(p.platformId)}">${esc(p.platformId)} · ${esc(p.pluginName || p.pluginId || "")}</option>`).join("")}</select></div>
+          <div class="field"><label>目标类型</label><select id="newTargetKind"></select></div>
+          <div class="field full" id="newTargetCandidateWrap">
+            <div class="field-head">
+              <label>可用目标</label>
+              <div class="row-actions">
+                <button type="button" class="secondary compact" id="newTargetSelectAll">全选</button>
+                <button type="button" class="secondary compact" id="newTargetClearAll">清空</button>
+              </div>
+            </div>
+            <div id="newTargetCandidateList" class="target-choice-list"></div>
+          </div>
+          <div class="field full" id="newTargetManualWrap"><label>目标 ID</label><input id="newTargetManual" placeholder="插件无法枚举目标时手动填写"></div>
+          <div class="field full"><label>链接解析</label><select id="newTargetLinkParse">${linkParseModeOptions("INHERIT")}</select><span class="inline-note">使用全局回退时，会跟随主配置里的回退触发方式。</span></div>
+          <div class="field full"><span id="newTargetStatus" class="inline-note"></span></div>
+        </div>
+      </section>
     </div>
   `, async () => {
-    const selectedIndex = targetCandidates.length && !$("newTargetCandidateWrap").hidden ? Number($("newTargetCandidate").value) : -1;
-    const selectedTarget = Number.isInteger(selectedIndex) && selectedIndex >= 0 ? targetCandidates[selectedIndex] : null;
-    const payload = {
-      platformId: $("newTargetPlatform").value.trim(),
-      targetKind: $("newTargetKind").value,
-      externalId: selectedTarget ? selectedTarget.externalId : $("newTargetManual").value.trim()
-    };
-    if (selectedTarget) {
-      payload.scopeId = selectedTarget.scopeId || null;
-      payload.threadId = selectedTarget.threadId || null;
-      payload.accountId = selectedTarget.accountId || null;
-      payload.name = selectedTarget.name || null;
-    }
+    const selectedTargets = collectCreateSubscriberTargets(targetCandidates);
+    const platformId = $("newTargetPlatform").value.trim();
+    const targetKind = $("newTargetKind").value;
     const mode = $("newTargetLinkParse").value;
-    if (mode !== "INHERIT") payload.linkParseTriggerMode = mode;
-    if (!payload.platformId || !payload.externalId) throw new Error("请填写必要字段");
-    await api("/subscribers", { method: "POST", body: JSON.stringify(payload) });
+    if (!platformId || !targetKind || selectedTargets.length === 0) throw new Error("请选择或填写消息目标");
+    for (const target of selectedTargets) {
+      const payload = {
+        platformId,
+        targetKind,
+        externalId: target.externalId
+      };
+      if (target.scopeId) payload.scopeId = target.scopeId;
+      if (target.threadId) payload.threadId = target.threadId;
+      if (target.accountId) payload.accountId = target.accountId;
+      if (target.name) payload.name = target.name;
+      if (mode !== "INHERIT") payload.linkParseTriggerMode = mode;
+      await api("/subscribers", { method: "POST", body: JSON.stringify(payload) });
+    }
     closeModal();
     invalidate("dashboard", "subscribers", "subscriptions");
     await loadEntities(true);
-    notify("消息目标已添加", false);
-  }, { size: "small", confirmText: "添加" });
+    notify(selectedTargets.length === 1 ? "消息目标已添加" : `已添加 ${selectedTargets.length} 个消息目标`, false);
+  }, { size: "medium", confirmText: "添加" });
 
   const refreshTargetKinds = async () => {
     const platformId = $("newTargetPlatform").value;
@@ -252,29 +351,71 @@ async function openCreateSubscriber() {
   const refreshTargetCandidates = async () => {
     const platform = $("newTargetPlatform").value;
     const kind = $("newTargetKind").value;
-    $("newTargetStatus").textContent = "正在获取目标...";
     targetCandidates = [];
+    setCreateSubscriberTargetLoading("正在获取可用目标...");
     try {
       targetCandidates = await api(`/subscriber-targets?platformId=${encodeURIComponent(platform)}&type=${encodeURIComponent(kind)}`);
     } catch (error) {
+      $("newTargetCandidateWrap").hidden = true;
+      $("newTargetManualWrap").hidden = false;
+      $("newTargetCandidateList").innerHTML = "";
       $("newTargetStatus").textContent = "目标列表获取失败，请手动填写目标 ID";
+      return;
     }
     if (targetCandidates.length) {
       $("newTargetCandidateWrap").hidden = false;
       $("newTargetManualWrap").hidden = true;
-      $("newTargetCandidate").innerHTML = targetCandidates.map((target, index) =>
-        `<option value="${index}">${esc(target.name || target.externalId)} · ${esc(target.externalId)}</option>`
-      ).join("");
-      $("newTargetStatus").textContent = `已获取 ${targetCandidates.length} 个目标`;
+      $("newTargetCandidateList").innerHTML = targetCandidates.map((target, index) => subscriberTargetChoiceHtml(target, index, index === 0)).join("");
+      await hydrateMediaImages($("newTargetCandidateList"));
+      $("newTargetStatus").textContent = `已获取 ${targetCandidates.length} 个目标，已默认选择第一个`;
     } else {
       $("newTargetCandidateWrap").hidden = true;
       $("newTargetManualWrap").hidden = false;
+      $("newTargetCandidateList").innerHTML = "";
       $("newTargetStatus").textContent = $("newTargetStatus").textContent || "未获取到目标，请手动填写目标 ID";
     }
   };
   $("newTargetPlatform").onchange = refreshTargetKinds;
   $("newTargetKind").onchange = refreshTargetCandidates;
+  $("newTargetSelectAll").onclick = () => setCreateSubscriberTargetChecked(true);
+  $("newTargetClearAll").onclick = () => setCreateSubscriberTargetChecked(false);
   await refreshTargetKinds();
+}
+
+function setCreateSubscriberTargetLoading(text) {
+  $("newTargetCandidateWrap").hidden = false;
+  $("newTargetManualWrap").hidden = true;
+  $("newTargetCandidateList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
+  $("newTargetStatus").textContent = text;
+}
+
+function subscriberTargetChoiceHtml(target, index, checked) {
+  const title = target.name || target.externalId;
+  const parts = [
+    title,
+    target.platformId,
+    label(target.targetKind),
+    target.externalId,
+  ].filter(Boolean).join(" · ");
+  return `<label class="target-choice">
+    <input type="checkbox" name="newTargetCandidate" value="${attr(target.externalId)}" data-index="${attr(index)}"${checked ? " checked" : ""}>
+    ${mediaImage(target.avatarUri, "target-choice-avatar", target.platformId, "AVATAR")}
+    <span class="target-choice-text" title="${attr(parts)}">${esc(parts)}</span>
+  </label>`;
+}
+
+function setCreateSubscriberTargetChecked(checked) {
+  document.querySelectorAll(`input[name="newTargetCandidate"]`).forEach(input => input.checked = checked);
+}
+
+function collectCreateSubscriberTargets(candidates) {
+  if (candidates.length === 0 || $("newTargetCandidateWrap").hidden) {
+    const manual = $("newTargetManual").value.trim();
+    return manual ? [{ externalId: manual, name: manual }] : [];
+  }
+  return Array.from(document.querySelectorAll(`input[name="newTargetCandidate"]:checked`))
+    .map(input => candidates[Number(input.dataset.index)])
+    .filter(Boolean);
 }
 
 async function openEditPublisher(id) {
@@ -282,7 +423,7 @@ async function openEditPublisher(id) {
   const item = state.cache.publishers.find(row => Number(row.id) === Number(id));
   openModal("编辑发布者", `
     <div class="form-grid">
-      <div class="field"><label>状态</label><select id="entityState"><option${item.state === "ACTIVE" ? " selected" : ""}>ACTIVE</option><option${item.state === "DISABLED" ? " selected" : ""}>DISABLED</option></select></div>
+      <div class="field"><label>状态</label><select id="entityState">${entityStateOptions(item.state)}</select></div>
       <div class="field full"><label>头图</label><input id="entityHeader" value="${attr(item.bannerUri || "")}"></div>
       <div class="field full"><label>主题色</label><div class="command-permission-toolbar"><input id="entityThemeColors" placeholder="#FE65A6;#BFFAFF"><button type="button" class="secondary" id="entityClearThemeButton"${item.drawTheme ? "" : " disabled"}>清除主题色</button></div><span class="inline-note">多个颜色用英文分号分隔；留空表示不修改。</span></div>
     </div>
@@ -295,7 +436,7 @@ async function openEditPublisher(id) {
     invalidate("publishers", "subscriptions", "dashboard");
     await loadEntities(true);
     notify("发布者已保存", false);
-  });
+  }, { size: "medium" });
   $("entityClearThemeButton").onclick = async () => {
     await api(`/publishers/${id}`, { method: "PATCH", body: JSON.stringify({ clearTheme: true }) });
     closeModal();
@@ -310,8 +451,8 @@ async function openEditSubscriber(id) {
   const item = state.cache.subscribers.find(row => Number(row.id) === Number(id));
   const currentLinkParse = item.linkParseConfigSource === "CUSTOM" ? item.linkParseTriggerMode : "INHERIT";
   openModal("编辑消息目标", `
-    <div class="form-grid">
-      <div class="field"><label>状态</label><select id="entityState"><option${item.state === "ACTIVE" ? " selected" : ""}>ACTIVE</option><option${item.state === "DISABLED" ? " selected" : ""}>DISABLED</option></select></div>
+    <div class="form-grid single">
+      <div class="field"><label>状态</label><select id="entityState">${entityStateOptions(item.state)}</select></div>
       <div class="field"><label>链接解析</label><select id="subscriberLinkParse">${linkParseModeOptions(currentLinkParse)}</select></div>
       <div class="field full"><span class="inline-note">选择“使用全局回退”会删除当前消息目标的单独链接解析配置。当前生效：${esc(linkParseModeLabel(item.effectiveLinkParseTriggerMode))}</span></div>
     </div>
@@ -327,5 +468,5 @@ async function openEditSubscriber(id) {
     invalidate("subscribers", "subscriptions", "dashboard");
     await loadEntities(true);
     notify("消息目标已保存", false);
-  });
+  }, { size: "small" });
 }

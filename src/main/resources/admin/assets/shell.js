@@ -103,12 +103,21 @@ const $ = id => document.getElementById(id);
     function cell(title, sub) {
       return `<span class="primary-line">${esc(title || "-")}</span><span class="sub-line">${esc(sub || "")}</span>`;
     }
+    function previewImageAttrs(className) {
+      const tokens = String(className || "").split(/\s+/);
+      const title = tokens.includes("header-image") ? "头图预览" : tokens.includes("avatar") ? "头像预览" : "";
+      return title ? {
+        className: `${className} previewable-media`,
+        attrs: ` data-preview-image="true" data-preview-title="${attr(title)}" title="点击预览" tabindex="0"`
+      } : { className, attrs: "" };
+    }
     function mediaImage(uri, className = "avatar", platformId = "admin", kind = "OTHER") {
       if (!uri) return `<span class="${attr(className)} media-placeholder" aria-hidden="true"></span>`;
+      const preview = previewImageAttrs(className);
       if (/^(data|blob):/i.test(uri)) {
-        return `<img class="${attr(className)}" src="${attr(uri)}" alt="" onerror="this.style.visibility='hidden'">`;
+        return `<img class="${attr(preview.className)}" src="${attr(uri)}" alt=""${preview.attrs} onerror="this.style.visibility='hidden'">`;
       }
-      return `<img class="${attr(className)}" alt="" data-media-uri="${attr(uri)}" data-media-platform="${attr(platformId || "admin")}" data-media-kind="${attr(kind || "OTHER")}" onerror="this.style.visibility='hidden'">`;
+      return `<img class="${attr(preview.className)}" alt="" data-media-uri="${attr(uri)}" data-media-platform="${attr(platformId || "admin")}" data-media-kind="${attr(kind || "OTHER")}"${preview.attrs} onerror="this.style.visibility='hidden'">`;
     }
     function identity(name, sub, image, platformId = "admin", kind = "AVATAR") {
       return `<div class="identity-cell">${mediaImage(image, "avatar", platformId, kind)}<div>${cell(name, sub)}</div></div>`;
@@ -399,10 +408,27 @@ const $ = id => document.getElementById(id);
       }
     }
 
+    function openImagePreview(image) {
+      if (!image || image.hidden || image.style.visibility === "hidden") return;
+      const src = image.currentSrc || image.src;
+      if (!src) return;
+      const title = image.dataset.previewTitle || "图片预览";
+      openModal(title, `<div class="image-preview"><img src="${attr(src)}" alt="${attr(title)}"></div>`, null, {
+        size: "image",
+        cancelText: "关闭"
+      });
+    }
+
 
 
 
     document.addEventListener("click", async event => {
+      const previewImage = event.target.closest("img[data-preview-image]");
+      if (previewImage) {
+        event.preventDefault();
+        openImagePreview(previewImage);
+        return;
+      }
       const button = event.target.closest("[data-action]");
       if (!button) return;
       const action = button.dataset.action;
@@ -434,6 +460,13 @@ const $ = id => document.getElementById(id);
       } catch (error) {
         handleError(error);
       }
+    });
+    document.addEventListener("keydown", event => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      const previewImage = event.target.closest?.("img[data-preview-image]");
+      if (!previewImage) return;
+      event.preventDefault();
+      openImagePreview(previewImage);
     });
 
     document.querySelectorAll("[data-nav]").forEach(button => button.onclick = () => setPage(button.dataset.nav));
