@@ -8,6 +8,7 @@ import top.colter.dynamic.draw.layout.minimal.MinimalDrawLayoutSuite
 
 public sealed interface DrawScene {
     data class DynamicScene(val update: SourceUpdate) : DrawScene
+    data class LiveScene(val update: SourceUpdate) : DrawScene
 }
 
 public interface DrawLayoutSuite {

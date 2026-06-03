@@ -12,6 +12,7 @@ internal object DefaultDrawLayoutSuite : DrawLayoutSuite {
     override fun render(scene: DrawScene, config: DrawConfig): Image {
         return when (scene) {
             is DrawScene.DynamicScene -> renderDefaultDynamic(scene.update, config)
+            is DrawScene.LiveScene -> renderDefaultLive(scene.update, config)
         }
     }
 }

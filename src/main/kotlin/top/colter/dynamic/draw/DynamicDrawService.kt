@@ -5,20 +5,13 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import org.jetbrains.skia.EncodedImageFormat
 import top.colter.dynamic.MainDynamicConfig
-import top.colter.dynamic.core.data.DynamicContent
-import top.colter.dynamic.core.data.DynamicMediaCard
-import top.colter.dynamic.core.data.DynamicMediaCardKind
-import top.colter.dynamic.core.data.DynamicLabel
 import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.LivePayload
-import top.colter.dynamic.core.data.MediaCardBlock
-import top.colter.dynamic.core.data.MediaCardStyle
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.SourceUpdate
-import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.draw.image.CachedDynamicImageLoader
 import top.colter.dynamic.draw.image.DynamicImageLoader
 import top.colter.dynamic.draw.resource.EmptyPlatformDrawAssetResolver
@@ -39,16 +32,15 @@ public class DefaultDynamicDrawService(
     }
 
     override suspend fun render(update: SourceUpdate, storedPublisher: Publisher?): MediaRef {
-        val drawableUpdate = update.toDrawableDynamicUpdate()
         val config = configProvider()
-        runtimeImageLoader.load(drawableUpdate)
+        runtimeImageLoader.load(update)
         val theme = themeService.resolveTheme(
-            update = drawableUpdate,
+            update = update,
             storedPublisher = storedPublisher,
             settings = config.draw,
         )
         val path = renderToFile(
-            update = drawableUpdate,
+            update = update,
             config = config,
             theme = theme,
         )
@@ -65,7 +57,7 @@ public class DefaultDynamicDrawService(
             .resolve(update.publisher.externalId.ifBlank { "unknown" })
         Files.createDirectories(outputDir)
 
-        val data = renderDynamicImage(
+        val data = renderImage(
             update = update,
             config = DrawConfig(
                 platform = PlatformDescriptor(
@@ -87,43 +79,14 @@ public class DefaultDynamicDrawService(
         return outputPath
     }
 
+    private fun renderImage(update: SourceUpdate, config: DrawConfig): org.jetbrains.skia.Image {
+        return when (update.payload) {
+            is DynamicPayload -> renderDynamicImage(update, config)
+            is LivePayload -> renderLiveImage(update, config)
+        }
+    }
+
     private fun safeFileName(value: String): String {
         return value.replace(Regex("[^a-zA-Z0-9._-]+"), "_").trim('_').ifBlank { "dynamic" }
     }
-}
-
-public fun SourceUpdate.toDrawableDynamicUpdate(): SourceUpdate {
-    val live = payload as? LivePayload ?: return this
-    val liveTitle = live.title.ifBlank { "Live" }
-    val contentText = listOfNotNull(
-        liveTitle,
-        live.area?.takeIf { it.isNotBlank() },
-        link?.takeIf { it.isNotBlank() },
-    ).joinToString("\n")
-    val card = live.cover?.let {
-        MediaCardBlock(
-            style = MediaCardStyle.LARGE,
-            card = DynamicMediaCard(
-                kind = DynamicMediaCardKind.LIVE,
-                sourceKind = "live",
-                id = live.roomId,
-                title = liveTitle,
-                description = live.area.orEmpty(),
-                badge = "LIVE",
-                cover = it,
-                link = link,
-            ),
-        )
-    }
-
-    return copy(
-        payload = DynamicPayload(
-            labels = listOf(DynamicLabel("LIVE")),
-            title = liveTitle,
-            blocks = buildList {
-                add(TextBlock(DynamicContent.text(contentText)))
-                card?.let(::add)
-            },
-        ),
-    )
 }

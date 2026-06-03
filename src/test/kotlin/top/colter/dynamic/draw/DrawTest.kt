@@ -18,6 +18,8 @@ import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.DynamicReferenceKind
 import top.colter.dynamic.core.data.ImageGridBlock
 import top.colter.dynamic.core.data.ImageItem
+import top.colter.dynamic.core.data.LivePayload
+import top.colter.dynamic.core.data.LiveStatus
 import top.colter.dynamic.core.data.MediaCardBlock
 import top.colter.dynamic.core.data.MediaCardStyle
 import top.colter.dynamic.core.data.MediaKind
@@ -25,6 +27,7 @@ import top.colter.dynamic.core.data.MediaReference
 import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.RepostBlock
+import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.core.data.mediaReferences
@@ -253,6 +256,26 @@ class DrawTest {
         )
     }
 
+    @Test
+    fun `test live started layout`() {
+        val update = testDynamicUpdate(
+            publisher = demoPublisher("live"),
+            eventType = SourceEventType.LIVE_STARTED,
+            externalId = "live-started",
+            payload = LivePayload(
+                roomId = "456",
+                title = "Live started demo",
+                area = "Games",
+                cover = testMedia("https://example.com/live-cover.jpg", MediaKind.COVER),
+                status = LiveStatus.OPEN,
+                previousStatus = LiveStatus.CLOSE,
+                startedAtEpochSeconds = 1L,
+            ),
+        )
+
+        renderLiveToOutput("live_started_layout.png", update)
+    }
+
     private fun textBlock(text: String): TextBlock {
         return TextBlock(DynamicContent.text(text))
     }
@@ -339,6 +362,16 @@ class DrawTest {
     ) {
         cacheMedia(update)
         val img = renderDynamicImage(update = update, config = config)
+        testOutput.resolve(fileName).writeBytes(img.encodeToData()!!.bytes)
+    }
+
+    private fun renderLiveToOutput(
+        fileName: String,
+        update: SourceUpdate,
+        config: DrawConfig = drawConfig(),
+    ) {
+        cacheMedia(update)
+        val img = renderLiveImage(update = update, config = config)
         testOutput.resolve(fileName).writeBytes(img.encodeToData()!!.bytes)
     }
 
