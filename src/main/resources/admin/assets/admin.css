@@ -737,7 +737,7 @@
     .pill {
       display: inline-flex;
       align-items: center;
-      min-height: 24px;
+      min-height: 22px;
       padding: 3px 8px;
       border-radius: 999px;
       background: #edf1f5;
@@ -1668,11 +1668,108 @@
       border-color: var(--line-strong);
       font-size: 15px;
     }
+    .logs-page {
+      height: calc(100dvh - 112px);
+      min-height: 480px;
+      grid-template-rows: minmax(0, 1fr);
+    }
+    .log-panel {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 10px;
+      overflow: hidden;
+      animation: plugin-card-in 0.18s ease both;
+    }
+    .log-panel-head {
+      margin-bottom: 0;
+    }
+    .log-status {
+      min-height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-align: right;
+    }
+    .log-filter-bar {
+      margin-bottom: 0;
+    }
+    .log-filter-bar .entity-filter-controls input {
+      width: auto;
+      min-width: 168px;
+      max-width: 260px;
+      min-height: 28px;
+      height: 28px;
+      padding: 3px 8px;
+      font-size: 13px;
+    }
+    .log-filter-bar .entity-filter-controls button {
+      min-height: 28px;
+      padding: 3px 9px;
+      font-size: 12px;
+    }
+    .log-pause-button {
+      border-color: #d7c3f4;
+      background: #f6f1ff;
+      color: #6d3bb5;
+    }
+    .log-table-region,
+    .logs-table-host {
+      min-height: 0;
+      height: 100%;
+    }
+    .logs-table-wrap {
+      height: 100%;
+      max-height: 100%;
+      overflow: auto;
+    }
+    .logs-table {
+      min-width: 980px;
+      table-layout: fixed;
+    }
+    .logs-table th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    .logs-table th,
+    .logs-table td {
+      padding: 6px 8px;
+      vertical-align: top;
+    }
+    .logs-table th:nth-child(1),
+    .logs-table td:nth-child(1) {
+      width: 152px;
+    }
+    .logs-table th:nth-child(2),
+    .logs-table td:nth-child(2) {
+      width: 82px;
+    }
+    .logs-table th:nth-child(3),
+    .logs-table td:nth-child(3) {
+      width: 280px;
+    }
+    .log-time,
+    .log-logger {
+      max-width: none;
+      font-size: 12px;
+    }
     .log-row {
       font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-      font-size: 12px;
+      font-size: 13px;
+      line-height: 1.35;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
+    }
+    .log-empty {
+      height: 100%;
+      display: grid;
+      place-items: center;
     }
     .empty {
       padding: 18px;
@@ -1809,6 +1906,29 @@
       }
       .plugin-detail-grid {
         grid-template-columns: 1fr;
+      }
+      .logs-page {
+        height: calc(100dvh - 132px);
+        min-height: 520px;
+      }
+      .log-panel-head {
+        flex-direction: column;
+      }
+      .log-status {
+        justify-content: flex-start;
+        text-align: left;
+      }
+      .log-filter-bar .entity-filter-controls input,
+      .log-filter-bar .entity-filter-controls select {
+        width: 100%;
+        max-width: none;
+      }
+      .logs-table {
+        min-width: 760px;
+      }
+      .logs-table th:nth-child(3),
+      .logs-table td:nth-child(3) {
+        width: 210px;
       }
       table { min-width: 720px; }
     }
