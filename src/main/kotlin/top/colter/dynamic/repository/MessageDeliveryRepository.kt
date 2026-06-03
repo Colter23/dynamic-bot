@@ -1,10 +1,17 @@
 ﻿package top.colter.dynamic.repository
 
 import kotlin.time.Instant
+import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.ResultRow
+import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.inList
+import org.jetbrains.exposed.v1.core.less
+import org.jetbrains.exposed.v1.core.lessEq
+import org.jetbrains.exposed.v1.core.or
 import org.jetbrains.exposed.v1.core.statements.UpdateBuilder
+import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
@@ -83,21 +90,23 @@ public object MessageDeliveryRepository {
         lockTtlMs: Long,
     ): List<MessageDeliveryRequest> {
         if (limit <= 0) return emptyList()
-        val now = Instant.fromEpochSeconds(nowEpochSeconds)
+        val now = nowInstant()
         val lockedUntil = Instant.fromEpochMilliseconds(
             nowEpochSeconds * 1000 + lockTtlMs.coerceAtLeast(1),
         )
+        val candidateLimit = (limit * 100).coerceIn(limit, 5_000)
 
         val claimedIds = transaction {
             val candidates = MessageDeliveryTable
                 .selectAll()
                 .where { MessageDeliveryTable.status eq DeliveryStatus.PENDING }
+                .orderBy(MessageDeliveryTable.nextAttemptAt to SortOrder.ASC, MessageDeliveryTable.id to SortOrder.ASC)
+                .limit(candidateLimit)
                 .map { it.toMessageDelivery() }
                 .filter { delivery ->
                     val next = delivery.nextAttemptAtEpochSeconds
                     next == null || next <= nowEpochSeconds
                 }
-                .sortedWith(compareBy<MessageDelivery> { it.nextAttemptAtEpochSeconds ?: 0 }.thenBy { it.id })
                 .take(limit)
 
             candidates.mapNotNull { delivery ->
@@ -119,25 +128,24 @@ public object MessageDeliveryRepository {
     }
 
     public fun markSendingExpired(nowEpochSeconds: Long): Int {
+        val now = Instant.fromEpochMilliseconds(nowEpochSeconds * 1_000 + 999)
         val expiredIds = transaction {
             MessageDeliveryTable
                 .selectAll()
-                .where { MessageDeliveryTable.status eq DeliveryStatus.SENDING }
-                .map { it.toMessageDelivery() }
-                .filter { delivery ->
-                    val lockedUntil = delivery.lockedUntilEpochSeconds
-                    lockedUntil != null && lockedUntil <= nowEpochSeconds
+                .where {
+                    (MessageDeliveryTable.status eq DeliveryStatus.SENDING) and
+                        (MessageDeliveryTable.lockedUntil lessEq now)
                 }
-                .map { it.id }
+                .map { it[MessageDeliveryTable.id].value }
         }
         if (expiredIds.isEmpty()) return 0
-        val now = nowInstant()
+        val updatedInstant = nowInstant()
         return transaction {
             expiredIds.sumOf { deliveryId ->
                 MessageDeliveryTable.update({ MessageDeliveryTable.id eq deliveryId }) {
                     it[status] = DeliveryStatus.PENDING
                     it[lockedUntil] = null
-                    it[updatedAt] = now
+                    it[updatedAt] = updatedInstant
                 }
             }
         }
@@ -214,26 +222,77 @@ public object MessageDeliveryRepository {
         val safeLimit = limit.coerceIn(1, 200)
         val normalizedPlatformId = platformId?.trim()?.takeIf { it.isNotBlank() }
         val normalizedQuery = query?.trim()?.takeIf { it.isNotBlank() }
+        val candidateLimit = if (normalizedQuery == null) safeLimit else (safeLimit * 25).coerceIn(safeLimit, 5_000)
         return transaction {
-            MessageDeliveryTable
-                .selectAll()
-                .let { query ->
-                    if (status == null) query else query.where { MessageDeliveryTable.status eq status }
-                }
+            val filter = deliveryFilter(status, normalizedPlatformId, targetKind)
+            (filter?.let { MessageDeliveryTable.selectAll().where { it } } ?: MessageDeliveryTable.selectAll())
+                .orderBy(MessageDeliveryTable.updatedAt to SortOrder.DESC, MessageDeliveryTable.id to SortOrder.DESC)
+                .limit(candidateLimit)
                 .map { it.toMessageDelivery() }
-                .filter { delivery ->
-                    normalizedPlatformId == null ||
-                        delivery.target.platformId.value.equals(normalizedPlatformId, ignoreCase = true)
-                }
-                .filter { delivery ->
-                    targetKind == null || delivery.target.kind == targetKind
-                }
                 .filter { delivery ->
                     normalizedQuery == null || delivery.matchesDeliveryQuery(normalizedQuery)
                 }
-                .sortedWith(compareByDescending<MessageDelivery> { it.updatedAtEpochSeconds }.thenByDescending { it.id })
                 .take(safeLimit)
         }
+    }
+
+    public fun cleanupHistory(
+        cutoffEpochSeconds: Long,
+        batchSize: Int = 1_000,
+        maxBatches: Int = 20,
+    ): MessageHistoryCleanupResult {
+        val safeBatchSize = batchSize.coerceIn(1, 10_000)
+        val safeMaxBatches = maxBatches.coerceIn(1, 1_000)
+        val cutoff = Instant.fromEpochSeconds(cutoffEpochSeconds)
+        var deletedDeliveries = 0
+        var deletedMessages = 0
+
+        repeat(safeMaxBatches) {
+            val batch = transaction {
+                MessageDeliveryTable
+                    .selectAll()
+                    .where {
+                        ((MessageDeliveryTable.status eq DeliveryStatus.SENT) or
+                            (MessageDeliveryTable.status eq DeliveryStatus.FAILED)) and
+                            (MessageDeliveryTable.updatedAt less cutoff)
+                    }
+                    .orderBy(MessageDeliveryTable.updatedAt to SortOrder.ASC, MessageDeliveryTable.id to SortOrder.ASC)
+                    .limit(safeBatchSize)
+                    .map { it[MessageDeliveryTable.id].value to it[MessageDeliveryTable.messageId] }
+            }
+            if (batch.isEmpty()) return MessageHistoryCleanupResult(deletedDeliveries, deletedMessages)
+
+            val messageIds = batch.map { it.second }.distinct()
+            val removedDeliveries = transaction {
+                MessageDeliveryTable.deleteWhere {
+                    (MessageDeliveryTable.messageId inList messageIds) and
+                        ((MessageDeliveryTable.status eq DeliveryStatus.SENT) or
+                            (MessageDeliveryTable.status eq DeliveryStatus.FAILED)) and
+                        (MessageDeliveryTable.updatedAt less cutoff)
+                }
+            }
+            deletedDeliveries += removedDeliveries
+
+            val orphanMessageIds = transaction {
+                messageIds.filter { messageId ->
+                    MessageDeliveryTable
+                        .selectAll()
+                        .where { MessageDeliveryTable.messageId eq messageId }
+                        .count() == 0L
+                }
+            }
+            if (orphanMessageIds.isNotEmpty()) {
+                deletedMessages += transaction {
+                    MessageOutboxTable.deleteWhere { MessageOutboxTable.messageId inList orphanMessageIds }
+                }
+            }
+
+            if (removedDeliveries < safeBatchSize) {
+                return MessageHistoryCleanupResult(deletedDeliveries, deletedMessages)
+            }
+        }
+
+        return MessageHistoryCleanupResult(deletedDeliveries, deletedMessages)
     }
 
     public fun findMessage(messageId: String): Message? {
@@ -280,15 +339,18 @@ public object MessageDeliveryRepository {
 
     private fun findRequestsByDeliveryIds(deliveryIds: List<Int>): List<MessageDeliveryRequest> {
         if (deliveryIds.isEmpty()) return emptyList()
-        val requestedIds = deliveryIds.toSet()
         return transaction {
-            val deliveries = MessageDeliveryTable
-                .selectAll()
-                .map { it.toMessageDelivery() }
-                .filter { it.id in requestedIds }
-                .sortedBy { deliveryIds.indexOf(it.id) }
+            val deliveries = deliveryIds.mapNotNull { deliveryId ->
+                MessageDeliveryTable
+                    .selectAll()
+                    .where { MessageDeliveryTable.id eq deliveryId }
+                    .firstOrNull()
+                    ?.toMessageDelivery()
+            }
+            if (deliveries.isEmpty()) return@transaction emptyList()
             val messagesById = MessageOutboxTable
                 .selectAll()
+                .where { MessageOutboxTable.messageId inList deliveries.map { it.messageId }.distinct() }
                 .associate { it[MessageOutboxTable.messageId] to it[MessageOutboxTable.message] }
             deliveries.mapNotNull { delivery ->
                 messagesById[delivery.messageId]?.let { message ->
@@ -309,6 +371,24 @@ public object MessageDeliveryRepository {
             .where { MessageDeliveryTable.messageId eq messageId }
             .map { it.toMessageDelivery() }
     }
+}
+
+public data class MessageHistoryCleanupResult(
+    val deletedDeliveries: Int,
+    val deletedMessages: Int,
+)
+
+private fun deliveryFilter(
+    status: DeliveryStatus?,
+    platformId: String?,
+    targetKind: TargetKind?,
+): Op<Boolean>? {
+    val filters = buildList {
+        status?.let { add(MessageDeliveryTable.status eq it) }
+        platformId?.let { add(MessageDeliveryTable.platformId eq it) }
+        targetKind?.let { add(MessageDeliveryTable.targetKind eq it) }
+    }
+    return filters.reduceOrNull { acc, op -> acc and op }
 }
 
 private fun MessageDelivery.matchesDeliveryQuery(query: String): Boolean {

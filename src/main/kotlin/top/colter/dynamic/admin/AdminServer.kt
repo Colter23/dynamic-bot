@@ -26,6 +26,7 @@ import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import java.security.MessageDigest
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
 import top.colter.dynamic.MainDynamicConfig
@@ -58,9 +59,13 @@ public class AdminServer(
     private val startedAtEpochMillis: Long = System.currentTimeMillis(),
 ) {
     private var engine: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
+    private var loginService: AdminLoginService? = null
 
     public fun start() {
         if (engine != null) return
+        val adminLoginService = AdminLoginService(
+            loginProviderResolver = { platformId -> pluginManager.findPublisherLoginProvider(platformId) },
+        )
         val context = AdminServerContext(
             token = config.token,
             tokenProvider = { configProvider().webAdmin.token },
@@ -73,9 +78,7 @@ public class AdminServer(
                 eventBus = eventBus,
                 startedAtEpochMillis = startedAtEpochMillis,
             ),
-            loginService = AdminLoginService(
-                loginProviderResolver = { platformId -> pluginManager.findPublisherLoginProvider(platformId) },
-            ),
+            loginService = adminLoginService,
             mediaService = AdminMediaService(configProvider = configProvider),
             drawAssetRegistry = drawAssetRegistry,
             stopRequester = stopRequester,
@@ -83,11 +86,14 @@ public class AdminServer(
         engine = embeddedServer(Netty, host = config.host, port = config.port) {
             adminModule(context)
         }.start(wait = false)
+        loginService = adminLoginService
     }
 
     public fun stop() {
         engine?.stop(gracePeriodMillis = 1_000, timeoutMillis = 5_000)
         engine = null
+        loginService?.let { runBlocking { it.close() } }
+        loginService = null
     }
 }
 

@@ -7,9 +7,11 @@ import java.util.concurrent.atomic.AtomicInteger
 import javax.imageio.ImageIO
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.exists
+import kotlin.io.path.writeBytes
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.test.fail
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.ImageCacheConfig
@@ -17,6 +19,7 @@ import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.draw.image.CachedDynamicImageLoader
 import top.colter.dynamic.draw.image.DynamicImageCache
+import top.colter.dynamic.draw.image.HttpImageDownloader
 import top.colter.dynamic.draw.image.ImageDownloader
 import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testPublisherInfo
@@ -28,7 +31,7 @@ class CachedDynamicImageLoaderTest {
         val root = createTempDirectory("dynamic-loader-hit")
         val downloadCount = AtomicInteger()
         val bytes = pngBytes(Color.GREEN)
-        val loader = loader(root.toString()) { _, _ ->
+        val loader = loader(root.toString()) { _, _, _ ->
             downloadCount.incrementAndGet()
             bytes
         }
@@ -48,7 +51,7 @@ class CachedDynamicImageLoaderTest {
         val root = createTempDirectory("dynamic-loader-merge")
         val downloadCount = AtomicInteger()
         val bytes = pngBytes(Color.YELLOW)
-        val loader = loader(root.toString(), maxConcurrentDownloads = 4) { _, _ ->
+        val loader = loader(root.toString(), maxConcurrentDownloads = 4) { _, _, _ ->
             downloadCount.incrementAndGet()
             delay(50)
             bytes
@@ -64,22 +67,51 @@ class CachedDynamicImageLoaderTest {
     fun loadShouldUsePlaceholderWhenDownloadFails(): Unit = runBlocking {
         val root = createTempDirectory("dynamic-loader-failure")
         val image = MediaRef("https://example.com/failure.png", MediaKind.AVATAR)
-        val loader = loader(root.toString()) { _, _ -> error("boom") }
+        val loader = loader(root.toString()) { _, _, _ -> error("boom") }
 
         loader.load(dynamic(avatar = image))
 
         assertTrue(DynamicImageCache.image(image).width > 0)
     }
 
+    @Test
+    fun loadShouldPassConfiguredMaxImageBytesToDownloader(): Unit = runBlocking {
+        val root = createTempDirectory("dynamic-loader-max-bytes")
+        var observedMaxBytes = 0L
+        val loader = loader(root.toString(), maxImageBytes = 123) { _, _, maxBytes ->
+            observedMaxBytes = maxBytes
+            pngBytes(Color.CYAN)
+        }
+
+        loader.load(dynamic(avatar = MediaRef("https://example.com/limited.png", MediaKind.AVATAR)))
+
+        assertEquals(123, observedMaxBytes)
+    }
+
+    @Test
+    fun httpDownloaderShouldRejectOversizedLocalFiles(): Unit = runBlocking {
+        val root = createTempDirectory("dynamic-loader-local-limit")
+        val file = root.resolve("large.bin")
+        file.writeBytes(ByteArray(16))
+
+        try {
+            HttpImageDownloader().download(file.toString(), timeoutMs = 1_000, maxBytes = 8)
+            fail("oversized file should be rejected")
+        } catch (_: IllegalArgumentException) {
+        }
+    }
+
     private fun loader(
         sourceRoot: String,
         maxConcurrentDownloads: Int = 8,
+        maxImageBytes: Long = 20L * 1024L * 1024L,
         downloader: ImageDownloader,
     ): CachedDynamicImageLoader {
         return CachedDynamicImageLoader(
             config = ImageCacheConfig(
                 sourceRoot = sourceRoot,
                 maxConcurrentDownloads = maxConcurrentDownloads,
+                maxImageBytes = maxImageBytes,
             ),
             downloader = downloader,
         )

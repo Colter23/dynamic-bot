@@ -33,5 +33,7 @@ public object MessageDeliveryTable : IntIdTable("message_delivery") {
         uniqueIndex(messageId, targetKey)
         index(isUnique = false, status)
         index(isUnique = false, nextAttemptAt)
+        index(isUnique = false, updatedAt)
+        index(isUnique = false, platformId, targetKind)
     }
 }

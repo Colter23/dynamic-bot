@@ -4,6 +4,7 @@ import io.github.oshai.kotlinlogging.KLogger
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.coroutines.CoroutineContext
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -18,6 +19,7 @@ internal val eventBusLogger: KLogger = loggerFor<EventBus>()
 
 public class EventBus(
     parentContext: CoroutineContext = Dispatchers.Default,
+    maxInFlightEvents: Int = DEFAULT_MAX_IN_FLIGHT_EVENTS,
 ) {
     public data class ListenerEntry(
         val token: ListenerToken,
@@ -26,6 +28,10 @@ public class EventBus(
 
     @PublishedApi
     internal val eventMap: MutableMap<String, CopyOnWriteArrayList<ListenerEntry>> = ConcurrentHashMap()
+    @PublishedApi
+    internal val inFlightEvents: AtomicInteger = AtomicInteger(0)
+    @PublishedApi
+    internal val maxInFlightEventsLimit: Int = maxInFlightEvents.coerceAtLeast(1)
     private val scopeLock: Any = Any()
     private var parentContext: CoroutineContext = parentContext
 
@@ -63,6 +69,7 @@ public class EventBus(
         synchronized(scopeLock) {
             eventScope.cancel("事件总线已关闭")
             eventMap.clear()
+            inFlightEvents.set(0)
             parentContext = Dispatchers.Default
             eventScope = createScope(parentContext)
         }
@@ -71,13 +78,25 @@ public class EventBus(
     public inline fun <reified E : Any> broadcast(event: E) {
         val eventName = eventKey<E>()
         eventMap[eventName]?.forEach { entry ->
+            val nextInFlight = inFlightEvents.incrementAndGet()
+            if (nextInFlight > maxInFlightEventsLimit) {
+                inFlightEvents.decrementAndGet()
+                eventBusLogger.warn {
+                    "事件分发队列已满，已丢弃事件：event=$eventName，listener=${entry.token.id}，inFlight=$nextInFlight"
+                }
+                return@forEach
+            }
             eventScope.launch {
-                runCatching { entry.listener.onMessage(event) }
-                    .onFailure {
-                        eventBusLogger.error(it) {
-                            "事件分发失败：event=$eventName，listener=${entry.token.id}"
+                try {
+                    runCatching { entry.listener.onMessage(event) }
+                        .onFailure {
+                            eventBusLogger.error(it) {
+                                "事件分发失败：event=$eventName，listener=${entry.token.id}"
+                            }
                         }
-                    }
+                } finally {
+                    inFlightEvents.decrementAndGet()
+                }
             }
         }
     }
@@ -95,6 +114,10 @@ public class EventBus(
         val parentJob = baseContext[Job]
         val job = if (parentJob != null) SupervisorJob(parentJob) else SupervisorJob()
         return CoroutineScope(baseContext + job)
+    }
+
+    public companion object {
+        public const val DEFAULT_MAX_IN_FLIGHT_EVENTS: Int = 4_096
     }
 }
 

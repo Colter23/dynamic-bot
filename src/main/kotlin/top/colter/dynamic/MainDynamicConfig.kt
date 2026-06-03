@@ -82,6 +82,8 @@ public data class ImageCacheConfig(
     val downloadTimeoutSeconds: Double = 10.0,
     val maxImageBytes: Long = 20L * 1024L * 1024L,
     val maxConcurrentDownloads: Int = 8,
+    val memoryMaxBytes: Long = 128L * 1024L * 1024L,
+    val memoryMaxEntries: Int = 512,
     val cleanupCron: String = "0 4 * * *",
     val sourceCleanup: ImageCleanupConfig = ImageCleanupConfig(),
     val renderedCleanup: ImageCleanupConfig = ImageCleanupConfig(),
@@ -97,6 +99,8 @@ public data class DeliveryConfig(
     val retryDelaySeconds: Double = 30.0,
     val dispatchConcurrency: Int = 4,
     val lockTtlSeconds: Double = 120.0,
+    val historyRetentionDays: Long = 30,
+    val cleanupCron: String = "30 4 * * *",
 )
 
 public data class DrawSettings(

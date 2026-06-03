@@ -248,6 +248,28 @@ public object MainConfigForms {
                     restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
+                    path = "imageCache.memoryMaxBytes",
+                    label = "图片内存缓存上限（字节）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "图片缓存",
+                    description = "原图字节在进程内热缓存的最大总量；超出后按最近最少使用淘汰，磁盘缓存不受影响。",
+                    min = 0,
+                    numberKind = ConfigNumberKind.INTEGER,
+                    restartRequired = true,
+                    restartTarget = "主程序",
+                ),
+                ConfigFieldSpec(
+                    path = "imageCache.memoryMaxEntries",
+                    label = "图片内存缓存最大条数",
+                    type = ConfigFieldType.NUMBER,
+                    section = "图片缓存",
+                    description = "原图字节在进程内最多保留多少个 URI；设为 0 表示不保留图片字节热缓存。",
+                    min = 0,
+                    numberKind = ConfigNumberKind.INTEGER,
+                    restartRequired = true,
+                    restartTarget = "主程序",
+                ),
+                ConfigFieldSpec(
                     path = "imageCache.cleanupCron",
                     label = "清理任务 Cron",
                     type = ConfigFieldType.TEXT,
@@ -332,6 +354,27 @@ public object MainConfigForms {
                     section = "消息投递",
                     description = "投递任务被领取后多久未完成会恢复为待投递；支持小数，例如 0.5 表示 0.5 秒。",
                     min = 0,
+                ),
+                ConfigFieldSpec(
+                    path = "delivery.historyRetentionDays",
+                    label = "消息记录保留天数",
+                    type = ConfigFieldType.NUMBER,
+                    section = "消息投递",
+                    description = "已成功或最终失败的投递记录超过该天数后会被定期清理；0 表示下次清理时删除所有终态记录。",
+                    min = 0,
+                    numberKind = ConfigNumberKind.INTEGER,
+                    restartRequired = true,
+                    restartTarget = "主程序",
+                ),
+                ConfigFieldSpec(
+                    path = "delivery.cleanupCron",
+                    label = "消息记录清理 Cron",
+                    type = ConfigFieldType.TEXT,
+                    section = "消息投递",
+                    description = "消息记录清理任务的 Cron 表达式，默认每天凌晨 4:30 执行。",
+                    required = true,
+                    restartRequired = true,
+                    restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
                     path = "draw.layout",
@@ -500,6 +543,8 @@ public object MainConfigForms {
         require(config.imageCache.downloadTimeoutSeconds > 0.0) { "图片下载超时必须大于 0 秒" }
         require(config.imageCache.maxImageBytes > 0) { "单张图片大小上限必须大于 0" }
         require(config.imageCache.maxConcurrentDownloads >= 1) { "最大并发下载数至少为 1" }
+        require(config.imageCache.memoryMaxBytes >= 0) { "图片内存缓存上限不能为负数" }
+        require(config.imageCache.memoryMaxEntries >= 0) { "图片内存缓存最大条数不能为负数" }
         require(config.imageCache.cleanupCron.isNotBlank()) { "清理任务 Cron 不能为空" }
         require(config.imageCache.sourceCleanup.maxIdleDays >= 0) { "原图最大闲置天数不能为负数" }
         require(config.imageCache.renderedCleanup.maxIdleDays >= 0) { "渲染图片最大闲置天数不能为负数" }
@@ -507,6 +552,8 @@ public object MainConfigForms {
         require(config.delivery.retryDelaySeconds > 0.0) { "投递重试间隔必须大于 0 秒" }
         require(config.delivery.dispatchConcurrency >= 1) { "投递并发数至少为 1" }
         require(config.delivery.lockTtlSeconds > 0.0) { "投递锁超时必须大于 0 秒" }
+        require(config.delivery.historyRetentionDays >= 0) { "消息记录保留天数不能为负数" }
+        require(config.delivery.cleanupCron.isNotBlank()) { "消息记录清理 Cron 不能为空" }
         require(config.draw.layout.isNotBlank()) { "绘图布局不能为空" }
         require(DrawLayoutRegistry.hasSuite(config.draw.layout)) {
             "绘图布局必须是 ${DrawLayoutRegistry.options().joinToString("|") { it.value }} 之一"
@@ -541,7 +588,10 @@ public object MainConfigForms {
         if (previous.imageCache != next.imageCache) {
             targets += "主程序"
         }
-        if (previous.delivery.retryDelaySeconds != next.delivery.retryDelaySeconds) {
+        if (previous.delivery.retryDelaySeconds != next.delivery.retryDelaySeconds ||
+            previous.delivery.historyRetentionDays != next.delivery.historyRetentionDays ||
+            previous.delivery.cleanupCron != next.delivery.cleanupCron
+        ) {
             targets += "主程序"
         }
         if (previous.draw.font != next.draw.font) {

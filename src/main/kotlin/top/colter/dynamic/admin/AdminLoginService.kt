@@ -17,6 +17,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.core.plugin.PublisherLoginProvider
@@ -33,6 +35,8 @@ public class AdminLoginService(
 ) {
     private val sessions: ConcurrentHashMap<String, QrLoginSession> = ConcurrentHashMap()
     private val jobs: ConcurrentHashMap<String, Job> = ConcurrentHashMap()
+    @Volatile
+    private var cleanupJob: Job? = null
 
     public suspend fun loginByCookie(platformId: String, cookie: String): LoginResultDto {
         val platform = platformId.trim().lowercase()
@@ -70,7 +74,9 @@ public class AdminLoginService(
     }
 
     public suspend fun startQrLogin(platformId: String): QrLoginStartResponse {
+        ensureCleanupJob()
         cleanupSessions()
+        trimSessions()
         val platform = platformId.trim().lowercase()
         val plugin = resolvePlugin(platform)
         require(plugin.supportedLoginMethods.contains(PublisherLoginMethod.QR_CODE)) {
@@ -196,6 +202,14 @@ public class AdminLoginService(
         return ActionResultResponse(changed = changed, message = if (changed) "二维码登录已取消" else "二维码登录已结束")
     }
 
+    public suspend fun close() {
+        cleanupJob?.cancelAndJoin()
+        cleanupJob = null
+        jobs.values.toList().forEach { it.cancelAndJoin() }
+        jobs.clear()
+        sessions.clear()
+    }
+
     private fun updateSession(loginId: String, result: PublisherLoginResult) {
         val current = sessions[loginId] ?: return
         sessions[loginId] = current.copy(
@@ -225,12 +239,39 @@ public class AdminLoginService(
         }
     }
 
+    private fun trimSessions() {
+        val overflow = sessions.size - MAX_QR_SESSIONS + 1
+        if (overflow <= 0) return
+        sessions.entries
+            .sortedBy { it.value.createdAtEpochMillis }
+            .take(overflow)
+            .forEach { (loginId, session) ->
+                sessions.remove(loginId, session)
+                jobs.remove(loginId)?.cancel()
+            }
+    }
+
+    private fun ensureCleanupJob() {
+        if (cleanupJob?.isActive == true) return
+        synchronized(this) {
+            if (cleanupJob?.isActive == true) return
+            cleanupJob = loginScope.launch {
+                while (isActive) {
+                    delay(QR_SESSION_CLEANUP_INTERVAL_MS)
+                    cleanupSessions()
+                }
+            }
+        }
+    }
+
 }
 
 private const val QR_CHALLENGE_TIMEOUT_MS: Long = 10_000
 private const val QR_SESSION_FINISHED_TTL_MS: Long = 60_000
 private const val QR_SESSION_EXPIRE_GRACE_MS: Long = 30_000
 private const val QR_SESSION_FALLBACK_TTL_MS: Long = 10 * 60 * 1000
+private const val QR_SESSION_CLEANUP_INTERVAL_MS: Long = 30_000
+private const val MAX_QR_SESSIONS: Int = 32
 private val TERMINAL_QR_STATUSES: Set<String> = setOf(
     PublisherLoginStatus.SUCCESS.name,
     PublisherLoginStatus.CANCELED.name,

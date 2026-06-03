@@ -41,6 +41,7 @@ import top.colter.dynamic.link.DynamicLinkAutoParseListener
 import top.colter.dynamic.link.DynamicLinkForwarder
 import top.colter.dynamic.link.DeliveryLinkParseProgressMessenger
 import top.colter.dynamic.listener.SourceUpdateProcessor
+import top.colter.dynamic.repository.MessageDeliveryRepository
 
 private val logger = loggerFor<DynamicApplication>()
 
@@ -131,13 +132,19 @@ public object DynamicApplication : CoroutineScope {
     }
 
     private fun registerCoreListeners(config: MainDynamicConfig) {
-        DynamicImageCache.configure(Paths.get(config.imageCache.sourceRoot))
+        DynamicImageCache.configure(
+            sourceRoot = Paths.get(config.imageCache.sourceRoot),
+            maxMemoryBytes = config.imageCache.memoryMaxBytes,
+            maxMemoryEntries = config.imageCache.memoryMaxEntries,
+            maxReadBytes = config.imageCache.maxImageBytes,
+        )
         registerImageCleanupTask(config)
         deliveryDispatcher = DeliveryDispatcher(
             sinkProvider = { pluginManager.getMessageSinkPlugins() },
             configProvider = { configStore.current().delivery },
         )
         registerDeliveryDispatchTask(config)
+        registerDeliveryCleanupTask(config)
         sourceUpdateProcessor = SourceUpdateProcessor(
             configProvider = configStore::current,
             configService = configService,
@@ -248,6 +255,7 @@ public object DynamicApplication : CoroutineScope {
                             logger.debug { "渲染图缓存无需清理" }
                         }
                     }
+                    DynamicImageCache.clearMemory()
                 },
             ),
         )
@@ -263,6 +271,27 @@ public object DynamicApplication : CoroutineScope {
                 ),
                 action = {
                     deliveryDispatcher.dispatchDue()
+                },
+            ),
+        )
+    }
+
+    private fun registerDeliveryCleanupTask(config: MainDynamicConfig) {
+        taskScheduler.start(
+            TaskDefinition(
+                id = "main-delivery-cleanup",
+                schedule = TaskSchedule.Cron(config.delivery.cleanupCron),
+                action = {
+                    val cutoff = System.currentTimeMillis() / 1000 -
+                        config.delivery.historyRetentionDays.coerceAtLeast(0) * 24 * 60 * 60
+                    val result = MessageDeliveryRepository.cleanupHistory(cutoffEpochSeconds = cutoff)
+                    if (result.deletedDeliveries > 0 || result.deletedMessages > 0) {
+                        logger.info {
+                            "消息记录已清理：投递=${result.deletedDeliveries}，消息=${result.deletedMessages}"
+                        }
+                    } else {
+                        logger.debug { "消息记录无需清理" }
+                    }
                 },
             ),
         )

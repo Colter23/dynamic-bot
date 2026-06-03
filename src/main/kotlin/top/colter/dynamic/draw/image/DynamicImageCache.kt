@@ -5,7 +5,6 @@ import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.net.URI
 import java.net.URLDecoder
-import java.security.MessageDigest
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.InvalidPathException
@@ -13,7 +12,8 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
 import java.nio.file.attribute.FileTime
-import java.util.concurrent.ConcurrentHashMap
+import java.security.MessageDigest
+import java.util.LinkedHashMap
 import javax.imageio.ImageIO
 import org.jetbrains.skia.Image
 import top.colter.dynamic.core.data.MediaKind
@@ -21,40 +21,74 @@ import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.draw.DynamicImageResolver
 
 public object DynamicImageCache : DynamicImageResolver {
-    private val images: ConcurrentHashMap<String, ByteArray> = ConcurrentHashMap()
-    private val imageFiles: ConcurrentHashMap<String, Path> = ConcurrentHashMap()
+    private val lock = Any()
+    private val images = LinkedHashMap<String, MemoryImage>(16, 0.75f, true)
+    private val imageFiles = LinkedHashMap<String, Path>(16, 0.75f, true)
 
     @Volatile
     private var sourceRoot: Path = Paths.get("data", "images", "source")
+    private var maxMemoryBytes: Long = DEFAULT_MAX_MEMORY_BYTES
+    private var maxMemoryEntries: Int = DEFAULT_MAX_MEMORY_ENTRIES
+    private var maxReadBytes: Long = DEFAULT_MAX_READ_BYTES
+    private var currentMemoryBytes: Long = 0L
 
     private val placeholderBytes: ByteArray by lazy { createPlaceholderBytes() }
 
-    public fun configure(sourceRoot: Path) {
-        this.sourceRoot = sourceRoot.toAbsolutePath().normalize()
+    public fun configure(
+        sourceRoot: Path,
+        maxMemoryBytes: Long = DEFAULT_MAX_MEMORY_BYTES,
+        maxMemoryEntries: Int = DEFAULT_MAX_MEMORY_ENTRIES,
+        maxReadBytes: Long = DEFAULT_MAX_READ_BYTES,
+    ) {
+        val normalizedRoot = sourceRoot.toAbsolutePath().normalize()
+        synchronized(lock) {
+            val rootChanged = this.sourceRoot != normalizedRoot
+            this.sourceRoot = normalizedRoot
+            this.maxMemoryBytes = maxMemoryBytes.coerceAtLeast(0)
+            this.maxMemoryEntries = maxMemoryEntries.coerceAtLeast(0)
+            this.maxReadBytes = maxReadBytes.coerceAtLeast(1)
+            if (rootChanged) {
+                clearLocked()
+            } else {
+                trimMemoryLocked()
+                trimFileIndexLocked()
+            }
+        }
+    }
+
+    public fun clearMemory() {
+        synchronized(lock) {
+            images.clear()
+            currentMemoryBytes = 0L
+        }
     }
 
     public fun contains(image: MediaRef): Boolean {
-        return images.containsKey(image.uri) || imageFiles[image.uri]?.existsAndTouch() == true
+        val cachedPath = synchronized(lock) {
+            if (images.containsKey(image.uri)) return true
+            imageFiles[image.uri]
+        }
+        return cachedPath?.existsAndTouch() == true
     }
 
     public fun put(image: MediaRef, bytes: ByteArray) {
-        images[image.uri] = bytes
+        storeMemory(image.uri, bytes)
     }
 
     public fun putPlaceholder(image: MediaRef) {
-        images[image.uri] = placeholderBytes
+        storeMemory(image.uri, placeholderBytes)
     }
 
     public fun bytes(image: MediaRef): ByteArray {
-        images[image.uri]?.let { return it }
+        memory(image.uri)?.let { return it }
 
-        imageFiles[image.uri]?.readAndTouch()?.let { bytes ->
-            images[image.uri] = bytes
+        trackedFile(image.uri)?.readAndTouch(maxReadBytes)?.let { bytes ->
+            storeMemory(image.uri, bytes)
             return bytes
         }
 
         readLocalFile(image.uri)?.let { bytes ->
-            images[image.uri] = bytes
+            storeMemory(image.uri, bytes)
             return bytes
         }
 
@@ -67,9 +101,9 @@ public object DynamicImageCache : DynamicImageResolver {
 
     public fun loadFromDisk(image: MediaRef, platformId: String, imageType: MediaKind): Boolean {
         val path = pathFor(platformId, imageType, image.uri)
-        val bytes = path.readAndTouch() ?: return false
-        imageFiles[image.uri] = path
-        images[image.uri] = bytes
+        val bytes = path.readAndTouch(maxReadBytes) ?: return false
+        trackFile(image.uri, path)
+        storeMemory(image.uri, bytes)
         return true
     }
 
@@ -95,8 +129,8 @@ public object DynamicImageCache : DynamicImageResolver {
         }
 
         path.touch()
-        imageFiles[image.uri] = path
-        images[image.uri] = path.readAndTouch() ?: bytes
+        trackFile(image.uri, path)
+        storeMemory(image.uri, path.readAndTouch(maxReadBytes) ?: bytes)
         return path
     }
 
@@ -162,6 +196,63 @@ public object DynamicImageCache : DynamicImageResolver {
             .ifBlank { "unknown" }
     }
 
+    private fun memory(uri: String): ByteArray? = synchronized(lock) {
+        images[uri]?.bytes
+    }
+
+    private fun storeMemory(uri: String, bytes: ByteArray) {
+        synchronized(lock) {
+            val previous = images.remove(uri)
+            if (previous != null) currentMemoryBytes -= previous.size
+
+            val size = bytes.size.toLong()
+            if (maxMemoryEntries > 0 && size <= maxMemoryBytes) {
+                images[uri] = MemoryImage(bytes, size)
+                currentMemoryBytes += size
+            }
+            trimMemoryLocked()
+        }
+    }
+
+    private fun trackedFile(uri: String): Path? = synchronized(lock) {
+        imageFiles[uri]
+    }
+
+    private fun trackFile(uri: String, path: Path) {
+        synchronized(lock) {
+            imageFiles[uri] = path
+            trimFileIndexLocked()
+        }
+    }
+
+    private fun trimMemoryLocked() {
+        while (images.isNotEmpty() && (images.size > maxMemoryEntries || currentMemoryBytes > maxMemoryBytes)) {
+            val iterator = images.entries.iterator()
+            val removed = iterator.next()
+            currentMemoryBytes -= removed.value.size
+            iterator.remove()
+        }
+        if (maxMemoryEntries == 0 || maxMemoryBytes == 0L) {
+            images.clear()
+            currentMemoryBytes = 0L
+        }
+    }
+
+    private fun trimFileIndexLocked() {
+        val maxFileEntries = (maxMemoryEntries.coerceAtLeast(1) * FILE_INDEX_MULTIPLIER).coerceAtLeast(MIN_FILE_INDEX_ENTRIES)
+        while (imageFiles.size > maxFileEntries) {
+            val iterator = imageFiles.entries.iterator()
+            iterator.next()
+            iterator.remove()
+        }
+    }
+
+    private fun clearLocked() {
+        images.clear()
+        imageFiles.clear()
+        currentMemoryBytes = 0L
+    }
+
     private fun readLocalFile(uri: String): ByteArray? {
         val path = runCatching {
             val parsed = URI(uri)
@@ -171,12 +262,14 @@ public object DynamicImageCache : DynamicImageResolver {
             Paths.get(uri)
         }.getOrNull() ?: return null
 
-        return path.readAndTouch()
+        return path.readAndTouch(maxReadBytes)
     }
 
-    private fun Path.readAndTouch(): ByteArray? {
+    private fun Path.readAndTouch(maxBytes: Long): ByteArray? {
         if (!Files.isRegularFile(this)) return null
         return runCatching {
+            val size = Files.size(this)
+            require(size <= maxBytes) { "图片文件超过大小限制：size=$size，maxBytes=$maxBytes" }
             touch()
             Files.readAllBytes(this)
         }.getOrNull()
@@ -223,4 +316,15 @@ public object DynamicImageCache : DynamicImageResolver {
             output.toByteArray()
         }
     }
+
+    private data class MemoryImage(
+        val bytes: ByteArray,
+        val size: Long,
+    )
+
+    private const val DEFAULT_MAX_MEMORY_BYTES: Long = 128L * 1024L * 1024L
+    private const val DEFAULT_MAX_MEMORY_ENTRIES: Int = 512
+    private const val DEFAULT_MAX_READ_BYTES: Long = 20L * 1024L * 1024L
+    private const val FILE_INDEX_MULTIPLIER: Int = 8
+    private const val MIN_FILE_INDEX_ENTRIES: Int = 512
 }

@@ -324,7 +324,12 @@ public class AdminService(
     }
 
     public suspend fun platformLogins(force: Boolean = false): List<PlatformLoginDto> = coroutineScope {
-        publisherLoginProvider()
+        val handles = publisherLoginProvider()
+        val activeCacheKeys = handles
+            .map { handle -> "${handle.info.descriptor.id}:${handle.instance.platformId.value}" }
+            .toSet()
+        loginStateCache.keys.removeIf { it !in activeCacheKeys }
+        handles
             .map { handle ->
                 async { handle.toPlatformLoginDto(force) }
             }

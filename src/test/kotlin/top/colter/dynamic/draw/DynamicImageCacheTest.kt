@@ -77,6 +77,25 @@ class DynamicImageCacheTest {
         assertTrue(image.height > 0)
     }
 
+    @Test
+    fun memoryCacheShouldEvictLeastRecentlyUsedEntries() {
+        val root = createTempDirectory("dynamic-image-cache-memory")
+        DynamicImageCache.configure(
+            sourceRoot = root,
+            maxMemoryBytes = 4,
+            maxMemoryEntries = 1,
+            maxReadBytes = 1024,
+        )
+        val first = MediaRef("memory:first", MediaKind.IMAGE)
+        val second = MediaRef("memory:second", MediaKind.IMAGE)
+
+        DynamicImageCache.put(first, byteArrayOf(1, 2))
+        DynamicImageCache.put(second, byteArrayOf(3, 4))
+
+        assertFalse(DynamicImageCache.contains(first))
+        assertTrue(DynamicImageCache.contains(second))
+    }
+
     private fun pngBytes(color: Color): ByteArray {
         val image = BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB)
         val graphics = image.createGraphics()

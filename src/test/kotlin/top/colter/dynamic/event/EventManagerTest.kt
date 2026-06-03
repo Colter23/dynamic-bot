@@ -8,6 +8,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -65,6 +66,37 @@ class EventBusTest {
 
         assertTrue(count.get() >= 20)
 
+        scope.cancel()
+        eventBus.shutdown()
+    }
+
+    @Test
+    fun broadcastShouldDropEventsWhenInFlightLimitIsReached() = runBlocking {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val eventBus = EventBus(maxInFlightEvents = 1)
+        eventBus.configureScope(scope)
+
+        val release = CompletableDeferred<Unit>()
+        val count = java.util.concurrent.atomic.AtomicInteger(0)
+        eventBus.subscribe(
+            object : Listener<TestEvent> {
+                override suspend fun onMessage(event: TestEvent) {
+                    count.incrementAndGet()
+                    release.await()
+                }
+            }
+        )
+
+        eventBus.broadcast(TestEvent("first"))
+        withTimeout(1_000) {
+            while (count.get() == 0) delay(10)
+        }
+        eventBus.broadcast(TestEvent("second"))
+        delay(100)
+
+        assertEquals(1, count.get())
+
+        release.complete(Unit)
         scope.cancel()
         eventBus.shutdown()
     }

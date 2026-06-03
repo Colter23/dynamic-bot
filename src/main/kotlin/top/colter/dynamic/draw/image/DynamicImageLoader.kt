@@ -1,17 +1,23 @@
 package top.colter.dynamic.draw.image
 
+import java.io.ByteArrayOutputStream
+import java.io.InputStream
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
 import java.time.Duration
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.CompletableDeferred
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
+import kotlin.math.roundToLong
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -24,9 +30,6 @@ import top.colter.dynamic.core.data.MediaReference
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.mediaReferences
 import top.colter.dynamic.core.tools.loggerFor
-import kotlin.coroutines.resume
-import kotlin.coroutines.resumeWithException
-import kotlin.math.roundToLong
 
 private val logger = loggerFor<CachedDynamicImageLoader>()
 
@@ -41,7 +44,12 @@ public class CachedDynamicImageLoader(
     private val inFlight: ConcurrentHashMap<String, CompletableDeferred<Unit>> = ConcurrentHashMap()
 
     init {
-        DynamicImageCache.configure(Paths.get(config.sourceRoot))
+        DynamicImageCache.configure(
+            sourceRoot = Paths.get(config.sourceRoot),
+            maxMemoryBytes = config.memoryMaxBytes,
+            maxMemoryEntries = config.memoryMaxEntries,
+            maxReadBytes = config.maxImageBytes,
+        )
     }
 
     override suspend fun load(update: SourceUpdate) {
@@ -80,7 +88,11 @@ public class CachedDynamicImageLoader(
         }
 
         try {
-            val bytes = downloader.download(image.uri, secondsToMillis(config.downloadTimeoutSeconds, minimumMillis = 1))
+            val bytes = downloader.download(
+                image.uri,
+                secondsToMillis(config.downloadTimeoutSeconds, minimumMillis = 1),
+                config.maxImageBytes,
+            )
             DynamicImageCache.store(image, platformId, imageType, bytes)
             waiter.complete(Unit)
         } catch (e: CancellationException) {
@@ -97,7 +109,7 @@ public class CachedDynamicImageLoader(
 }
 
 public fun interface ImageDownloader {
-    public suspend fun download(uri: String, timeoutMs: Long): ByteArray
+    public suspend fun download(uri: String, timeoutMs: Long, maxBytes: Long): ByteArray
 }
 
 public class HttpImageDownloader(
@@ -105,28 +117,62 @@ public class HttpImageDownloader(
         .followRedirects(HttpClient.Redirect.NORMAL)
         .build(),
 ) : ImageDownloader {
-    override suspend fun download(uri: String, timeoutMs: Long): ByteArray {
-        val parsed = URI(uri)
-        return when (parsed.scheme?.lowercase()) {
-            "http", "https" -> downloadHttp(uri, timeoutMs)
-            "file" -> Files.readAllBytes(Paths.get(parsed))
-            null -> Files.readAllBytes(Paths.get(uri))
-            else -> error("不支持的图片地址协议：${parsed.scheme}")
+    override suspend fun download(uri: String, timeoutMs: Long, maxBytes: Long): ByteArray {
+        val parsed = runCatching { URI(uri) }.getOrNull()
+        return when (parsed?.scheme?.lowercase()) {
+            "http", "https" -> downloadHttp(uri, timeoutMs, maxBytes)
+            "file" -> readFileLimited(Paths.get(parsed), maxBytes)
+            null -> readFileLimited(Paths.get(uri), maxBytes)
+            else -> readLocalPathOrThrow(uri, parsed.scheme, maxBytes)
         }
     }
 
-    private suspend fun downloadHttp(uri: String, timeoutMs: Long): ByteArray {
+    private suspend fun downloadHttp(uri: String, timeoutMs: Long, maxBytes: Long): ByteArray {
         val request = HttpRequest.newBuilder(URI(uri))
             .timeout(Duration.ofMillis(timeoutMs))
             .GET()
             .build()
         val response = client
-            .sendAsync(request, HttpResponse.BodyHandlers.ofByteArray())
+            .sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
             .await()
         if (response.statusCode() !in 200..299) {
+            response.body().close()
             error("图片下载失败：HTTP ${response.statusCode()}")
         }
-        return response.body()
+        response.headers().firstValueAsLong("Content-Length")
+            .takeIf { it.isPresent && it.asLong > maxBytes }
+            ?.let { error("图片超过大小限制：size=${it.asLong}，maxBytes=$maxBytes") }
+        return response.body().use { input -> readBytesLimited(input, maxBytes) }
+    }
+
+    private fun readFileLimited(path: Path, maxBytes: Long): ByteArray {
+        val size = Files.size(path)
+        require(size <= maxBytes) { "图片文件超过大小限制：size=$size，maxBytes=$maxBytes" }
+        return Files.newInputStream(path).use { input -> readBytesLimited(input, maxBytes) }
+    }
+
+    private fun readLocalPathOrThrow(uri: String, scheme: String?, maxBytes: Long): ByteArray {
+        val path = runCatching { Paths.get(uri) }.getOrNull()
+        if (path != null && Files.isRegularFile(path)) {
+            return readFileLimited(path, maxBytes)
+        }
+        error("不支持的图片地址协议：$scheme")
+    }
+
+    private fun readBytesLimited(input: InputStream, maxBytes: Long): ByteArray {
+        val output = ByteArrayOutputStream()
+        val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+        var total = 0L
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            total += read
+            if (total > maxBytes) {
+                throw IllegalStateException("图片超过大小限制：maxBytes=$maxBytes")
+            }
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
     }
 }
 

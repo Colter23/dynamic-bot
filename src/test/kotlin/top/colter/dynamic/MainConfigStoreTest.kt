@@ -56,6 +56,26 @@ class MainConfigStoreTest {
     }
 
     @Test
+    fun imageCacheAndDeliveryRetentionConfigShouldBeExposedAndValidated() {
+        val paths = MainConfigForms.formSpec.fields.map { it.path }
+
+        assertTrue("imageCache.memoryMaxBytes" in paths)
+        assertTrue("imageCache.memoryMaxEntries" in paths)
+        assertTrue("delivery.historyRetentionDays" in paths)
+        assertTrue("delivery.cleanupCron" in paths)
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            MainConfigForms.validate(
+                MainDynamicConfig(
+                    imageCache = ImageCacheConfig(memoryMaxBytes = -1),
+                ),
+            )
+        }
+
+        assertTrue(error.message!!.contains("图片内存缓存"))
+    }
+
+    @Test
     fun webAdminConfigShouldExposeLogBufferCapacity() {
         val paths = MainConfigForms.formSpec.fields.map { it.path }
 

@@ -2,6 +2,8 @@
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.Message
@@ -62,5 +64,38 @@ class MessageDeliveryRepositoryTest {
 
         assertEquals(1, MessageDeliveryRepository.markSendingExpired(nowEpochSeconds = now + 10))
         assertEquals(DeliveryStatus.PENDING, MessageDeliveryRepository.findByMessageId(message.id).single().status)
+    }
+
+    @Test
+    fun cleanupHistoryShouldRemoveOnlyTerminalDeliveriesAndOrphanMessages() {
+        initTestDatabase("dynamic-bot-core-delivery-cleanup-db")
+
+        val group = testTargetAddress("onebot", TargetKind.GROUP, "10001")
+        val user = testTargetAddress("onebot", TargetKind.USER, "20001")
+        val message = Message(
+            id = "message-cleanup",
+            time = 1L,
+            targets = listOf(group, user),
+            batches = listOf(MessageBatch(listOf(MessageContent.Text("hello")))),
+        )
+
+        MessageDeliveryRepository.enqueue(message)
+        assertTrue(MessageDeliveryRepository.markSent(message.id, group))
+
+        val cutoff = System.currentTimeMillis() / 1000 + 1
+        val partial = MessageDeliveryRepository.cleanupHistory(cutoffEpochSeconds = cutoff)
+
+        assertEquals(1, partial.deletedDeliveries)
+        assertEquals(0, partial.deletedMessages)
+        assertEquals(listOf(DeliveryStatus.PENDING), MessageDeliveryRepository.findByMessageId(message.id).map { it.status })
+        assertNotNull(MessageDeliveryRepository.findMessage(message.id))
+
+        assertTrue(MessageDeliveryRepository.markFailed(message.id, user, "network"))
+        val terminal = MessageDeliveryRepository.cleanupHistory(cutoffEpochSeconds = cutoff)
+
+        assertEquals(1, terminal.deletedDeliveries)
+        assertEquals(1, terminal.deletedMessages)
+        assertTrue(MessageDeliveryRepository.findByMessageId(message.id).isEmpty())
+        assertNull(MessageDeliveryRepository.findMessage(message.id))
     }
 }

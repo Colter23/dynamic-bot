@@ -16,16 +16,22 @@ public class ImageFileCleaner(
         var deletedFiles = 0
         var deletedBytes = 0L
 
-        walk(root).filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) }.forEach { file ->
-            val lastModifiedMillis = runCatching { Files.getLastModifiedTime(file, LinkOption.NOFOLLOW_LINKS).toMillis() }
-                .getOrNull()
-                ?: return@forEach
-            if (lastModifiedMillis >= thresholdMillis) return@forEach
+        runCatching {
+            Files.walk(root).use { stream ->
+                stream
+                    .filter { Files.isRegularFile(it, LinkOption.NOFOLLOW_LINKS) }
+                    .forEach { file ->
+                        val lastModifiedMillis = runCatching {
+                            Files.getLastModifiedTime(file, LinkOption.NOFOLLOW_LINKS).toMillis()
+                        }.getOrNull() ?: return@forEach
+                        if (lastModifiedMillis >= thresholdMillis) return@forEach
 
-            val size = runCatching { Files.size(file) }.getOrDefault(0L)
-            if (runCatching { Files.deleteIfExists(file) }.getOrDefault(false)) {
-                deletedFiles += 1
-                deletedBytes += size
+                        val size = runCatching { Files.size(file) }.getOrDefault(0L)
+                        if (runCatching { Files.deleteIfExists(file) }.getOrDefault(false)) {
+                            deletedFiles += 1
+                            deletedBytes += size
+                        }
+                    }
             }
         }
 
