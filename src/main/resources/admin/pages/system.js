@@ -7,6 +7,9 @@ let fmtBytes;
 let fmtDuration;
 let cell;
 let esc;
+let beginPageRequest;
+let isCurrentPageRequest;
+let invalidatePageRequests;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -14,6 +17,9 @@ function bindContext(nextCtx) {
   api = ctx.api;
   state = ctx.state;
   ({ esc, fmtTime, fmtBytes, fmtDuration, cell } = ctx.ui);
+  beginPageRequest = ctx.beginPageRequest;
+  isCurrentPageRequest = ctx.isCurrentPageRequest;
+  invalidatePageRequests = ctx.invalidatePageRequests;
 }
 
 function pageRoot() {
@@ -25,13 +31,19 @@ export async function mount(nextCtx) {
   await loadSystem(ctx.force);
 }
 
+export function unmount() {
+  invalidatePageRequests("system");
+}
+
 export async function handleAction(nextCtx, _payload) {
   bindContext(nextCtx);
   return false;
 }
 
 async function loadSystem(force) {
+  const request = beginPageRequest("system");
   if (force || !state.cache.system) state.cache.system = await api("/system/status");
+  if (!isCurrentPageRequest(request)) return;
   const s = state.cache.system;
   const memoryPercent = Math.max(0, Math.min(100, Math.round((Number(s.usedMemoryBytes || 0) / Math.max(Number(s.maxMemoryBytes || 1), 1)) * 100)));
   const memoryMax = fmtBytes(s.maxMemoryBytes);

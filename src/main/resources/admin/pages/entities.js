@@ -32,6 +32,7 @@ let renderTable;
 let notify;
 let openModal;
 let closeModal;
+let confirmDanger;
 let uniqueValues;
 let filterOptions;
 let linkParseModeLabel;
@@ -44,6 +45,9 @@ let publisherKey;
 let targetKey;
 let policyEvents;
 let mentionEvents;
+let beginPageRequest;
+let isCurrentPageRequest;
+let invalidatePageRequests;
 const entityFilters = {
   publisherPlatform: "",
   publisherState: "",
@@ -87,6 +91,7 @@ function bindContext(nextCtx) {
     notify,
     openModal,
     closeModal,
+    confirmDanger,
     uniqueValues,
     filterOptions,
     linkParseModeLabel,
@@ -100,6 +105,9 @@ function bindContext(nextCtx) {
     policyEvents,
     mentionEvents,
   } = ui);
+  beginPageRequest = ctx.beginPageRequest;
+  isCurrentPageRequest = ctx.isCurrentPageRequest;
+  invalidatePageRequests = ctx.invalidatePageRequests;
 }
 
 function pageRoot() {
@@ -109,6 +117,10 @@ function pageRoot() {
 export async function mount(nextCtx) {
   bindContext(nextCtx);
   await loadEntities(ctx.force);
+}
+
+export function unmount() {
+  invalidatePageRequests("entities");
 }
 
 export async function handleAction(nextCtx, { action, id }) {
@@ -130,7 +142,7 @@ export async function handleAction(nextCtx, { action, id }) {
     return true;
   }
   if (action === "delete-publisher") {
-    if (!confirm("确定删除这个发布者及关联订阅吗？")) return true;
+    if (!(await confirmDanger("删除发布者", "确定删除这个发布者及关联订阅吗？相关订阅也会一并移除。", { confirmText: "删除" }))) return true;
     const result = await api(`/publishers/${id}`, { method: "DELETE" });
     invalidate("dashboard", "publishers", "subscriptions");
     await loadEntities(true);
@@ -138,7 +150,7 @@ export async function handleAction(nextCtx, { action, id }) {
     return true;
   }
   if (action === "delete-subscriber") {
-    if (!confirm("确定删除这个消息目标及关联订阅吗？")) return true;
+    if (!(await confirmDanger("删除消息目标", "确定删除这个消息目标及关联订阅吗？相关订阅也会一并移除。", { confirmText: "删除" }))) return true;
     const result = await api(`/subscribers/${id}`, { method: "DELETE" });
     invalidate("dashboard", "subscribers", "subscriptions");
     await loadEntities(true);
@@ -215,9 +227,11 @@ function bindEntityFilters() {
 }
 
 async function loadEntities(force) {
+  const request = beginPageRequest("entities");
   releaseMediaObjectUrls();
   if (force || !state.cache.publishers) state.cache.publishers = await api("/publishers");
   if (force || !state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
+  if (!isCurrentPageRequest(request)) return;
   const publishers = state.cache.publishers;
   const subscribers = state.cache.subscribers;
   normalizeEntityFilters("publisher", publishers);

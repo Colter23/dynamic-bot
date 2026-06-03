@@ -28,6 +28,7 @@ const $ = id => document.getElementById(id);
       pendingConfigRestarts: {},
       activePageModule: null,
       pageLoadSeq: 0,
+      pageRequestSeq: {},
       restoringHash: false
     };
     const pageModuleCache = {};
@@ -347,7 +348,7 @@ const $ = id => document.getElementById(id);
     }
     async function stopApplication() {
       if (!(await canLeaveActivePage())) return false;
-      if (!confirm("确定停止主项目吗？")) return false;
+      if (!(await confirmDanger("停止主项目", "确定停止主项目吗？当前进程会开始退出，后台也会断开连接。", { confirmText: "停止主项目" }))) return false;
       const result = await api("/system/stop", { method: "POST" });
       notify(result.message, false);
       return true;
@@ -362,6 +363,7 @@ const $ = id => document.getElementById(id);
         restoreCurrentHash();
         return false;
       }
+      if (nextPage !== state.page) closeModal();
       state.page = nextPage;
       if (location.hash.replace("#", "") !== state.page) {
         state.restoringHash = true;
@@ -387,6 +389,7 @@ const $ = id => document.getElementById(id);
       return await Promise.resolve(pageModule.canLeave(pageContext(false)));
     }
     async function unmountActivePage() {
+      invalidatePageRequests(state.page);
       const pageModule = state.activePageModule;
       state.activePageModule = null;
       if (pageModule?.unmount) {
@@ -424,6 +427,7 @@ const $ = id => document.getElementById(id);
     function pageContext(force) {
       return {
         root: pageRoot(),
+        page: state.page,
         force,
         api,
         apiBlob,
@@ -435,7 +439,10 @@ const $ = id => document.getElementById(id);
         handleError,
         hydrateMediaImages,
         releaseMediaObjectUrls,
-        query
+        query,
+        beginPageRequest,
+        isCurrentPageRequest,
+        invalidatePageRequests
       };
     }
     const ui = {
@@ -458,6 +465,7 @@ const $ = id => document.getElementById(id);
       notify,
       openModal,
       closeModal,
+      confirmDanger,
       uniqueValues,
       filterOptions,
       matchesExact,
@@ -493,6 +501,25 @@ const $ = id => document.getElementById(id);
       return policy && Array.isArray(policy.mentionAllEvents) ? policy.mentionAllEvents : [];
     }
 
+    function beginPageRequest(page = state.page) {
+      const key = page || state.page;
+      const seq = (state.pageRequestSeq[key] || 0) + 1;
+      state.pageRequestSeq[key] = seq;
+      return { page: key, seq };
+    }
+
+    function isCurrentPageRequest(token) {
+      return !!token &&
+        state.page === token.page &&
+        state.pageRequestSeq[token.page] === token.seq &&
+        !!pageRoot()?.isConnected;
+    }
+
+    function invalidatePageRequests(page = state.page) {
+      const key = page || state.page;
+      state.pageRequestSeq[key] = (state.pageRequestSeq[key] || 0) + 1;
+    }
+
 
 
 
@@ -505,6 +532,7 @@ const $ = id => document.getElementById(id);
       $("modalBody").innerHTML = body;
       $("modalBox").className = "modal " + (options.size || "");
       $("modalConfirm").hidden = options.confirmHidden || !onSubmit;
+      $("modalConfirm").className = options.confirmClass || "";
       $("modalConfirm").textContent = options.confirmText || "保存";
       $("modalCancel").textContent = options.cancelText || "取消";
       setModalMessage("", false);
@@ -517,6 +545,32 @@ const $ = id => document.getElementById(id);
       $("modalBackdrop").hidden = true;
       $("modalBody").innerHTML = "";
       setModalMessage("", false);
+    }
+    function confirmDanger(title, message, options = {}) {
+      return new Promise(resolve => {
+        let settled = false;
+        const finish = value => {
+          if (settled) return;
+          settled = true;
+          resolve(value);
+        };
+        openModal(title || "确认操作", `
+          <div class="confirm-panel">
+            <strong>${esc(options.heading || title || "确认操作")}</strong>
+            <p>${esc(message || "确定执行这个操作吗？")}</p>
+          </div>
+        `, async () => {
+          settled = true;
+          resolve(true);
+          closeModal();
+        }, {
+          size: options.size || "small",
+          confirmText: options.confirmText || "确认",
+          cancelText: options.cancelText || "取消",
+          confirmClass: options.confirmClass || "danger",
+          cleanup: () => finish(false)
+        });
+      });
     }
     async function submitModal() {
       if (!state.modalSubmit) return closeModal();

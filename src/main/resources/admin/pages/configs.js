@@ -15,7 +15,11 @@ let renderTable;
 let notify;
 let openModal;
 let closeModal;
+let confirmDanger;
 let loadSubscriberTargetCandidates;
+let beginPageRequest;
+let isCurrentPageRequest;
+let invalidatePageRequests;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -34,8 +38,12 @@ function bindContext(nextCtx) {
     notify,
     openModal,
     closeModal,
+    confirmDanger,
     loadSubscriberTargetCandidates,
   } = ctx.ui);
+  beginPageRequest = ctx.beginPageRequest;
+  isCurrentPageRequest = ctx.isCurrentPageRequest;
+  invalidatePageRequests = ctx.invalidatePageRequests;
 }
 
 function pageRoot() {
@@ -68,23 +76,24 @@ export async function unmount(nextCtx) {
   bindContext(nextCtx);
   window.removeEventListener("beforeunload", configBeforeUnload);
   state.currentConfigDirty = false;
+  invalidatePageRequests("configs");
 }
 
-export function canLeave(nextCtx) {
+export async function canLeave(nextCtx) {
   bindContext(nextCtx);
-  return canDiscardConfigChanges();
+  return await canDiscardConfigChanges();
 }
 
 export async function handleAction(nextCtx, { action, button, id }) {
   bindContext(nextCtx);
   if (action === "select-config") {
-    if (!canDiscardConfigChanges()) return true;
+    if (!(await canDiscardConfigChanges())) return true;
     state.selectedConfigId = id;
     await loadConfigs(false);
     return true;
   }
   if (action === "refresh-config-detail") {
-    if (!canDiscardConfigChanges()) return true;
+    if (!(await canDiscardConfigChanges())) return true;
     await withButtonLoading(button, "刷新中...", async () => {
       await renderConfigDetail(id);
       notify("配置已刷新", false);
@@ -122,7 +131,7 @@ export async function handleAction(nextCtx, { action, button, id }) {
     return true;
   }
   if (action === "clear-command-permissions") {
-    if (!confirm("确定清空所有权限规则吗？")) return true;
+    if (!(await confirmDanger("清空权限规则", "确定清空所有命令权限规则吗？保存配置后才会正式生效。", { confirmText: "清空" }))) return true;
     setCommandPermissionRules([]);
     return true;
   }
@@ -136,7 +145,9 @@ function configBeforeUnload(event) {
 }
 
 async function loadConfigs(force) {
+  const request = beginPageRequest("configs");
   if (force || !state.cache.configs) state.cache.configs = await api("/configs");
+  if (!isCurrentPageRequest(request)) return;
   const rows = state.cache.configs;
   const selected = rows.find(item => item.id === state.selectedConfigId) || rows[0] || null;
   state.selectedConfigId = selected ? selected.id : "";
@@ -159,11 +170,12 @@ async function loadConfigs(force) {
         </section>
       </div>
     </section>`;
-  if (selected) await renderConfigDetail(selected.id);
+  if (selected) await renderConfigDetail(selected.id, request);
 }
 
-async function renderConfigDetail(id) {
+async function renderConfigDetail(id, request = beginPageRequest("configs")) {
   const detail = await api(`/configs/${encodeURIComponent(id)}`);
+  if (!isCurrentPageRequest(request)) return;
   state.currentConfigDetail = detail;
   const sections = configSections(detail);
   const sectionEntries = Object.entries(sections);
@@ -265,10 +277,10 @@ function configDirtyChanged(detail) {
   return (detail.schema.fields || []).some(field => configFieldChanged(detail, field));
 }
 
-function canDiscardConfigChanges() {
+async function canDiscardConfigChanges() {
   const detail = state.currentConfigDetail;
   if (!detail || !state.currentConfigDirty) return true;
-  return confirm("当前配置有未保存的修改，确定放弃这些修改吗？");
+  return await confirmDanger("放弃未保存修改", "当前配置有未保存的修改，确定放弃这些修改吗？", { confirmText: "放弃修改" });
 }
 
 function updateConfigDirtyState(detail) {

@@ -518,9 +518,13 @@ function catalogCard(item) {
 
 function catalogLinks(item) {
   const links = [];
-  if (item.homepageUrl) links.push(`<a class="plugin-link" href="${attr(item.homepageUrl)}" target="_blank" rel="noreferrer">主页</a>`);
-  if (item.releaseNotesUrl) links.push(`<a class="plugin-link" href="${attr(item.releaseNotesUrl)}" target="_blank" rel="noreferrer">更新说明</a>`);
+  if (isSafeExternalUrl(item.homepageUrl)) links.push(`<a class="plugin-link" href="${attr(item.homepageUrl)}" target="_blank" rel="noreferrer noopener">主页</a>`);
+  if (isSafeExternalUrl(item.releaseNotesUrl)) links.push(`<a class="plugin-link" href="${attr(item.releaseNotesUrl)}" target="_blank" rel="noreferrer noopener">更新说明</a>`);
   return links.length ? links.join("") : `<span class="sub-line">无外部链接</span>`;
+}
+
+function isSafeExternalUrl(value) {
+  return /^https?:\/\//i.test(String(value || "").trim());
 }
 
 function catalogOperationButton(item) {

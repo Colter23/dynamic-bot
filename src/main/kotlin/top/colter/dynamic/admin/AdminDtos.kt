@@ -19,15 +19,6 @@ public data class ActionResultResponse(
 )
 
 @Serializable
-public data class OverviewResponse(
-    val commandCount: Int,
-    val subscriptionCount: Long,
-    val deliveryPending: Long,
-    val deliveryFailed: Long,
-    val plugins: List<PluginDto>,
-)
-
-@Serializable
 public data class DashboardResponse(
     val generatedAtEpochMillis: Long,
     val system: SystemStatusDto,

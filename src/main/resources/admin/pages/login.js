@@ -18,6 +18,9 @@ let platformTag;
 let notify;
 let openModal;
 let closeModal;
+let beginPageRequest;
+let isCurrentPageRequest;
+let invalidatePageRequests;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -40,6 +43,9 @@ function bindContext(nextCtx) {
     openModal,
     closeModal,
   } = ui);
+  beginPageRequest = ctx.beginPageRequest;
+  isCurrentPageRequest = ctx.isCurrentPageRequest;
+  invalidatePageRequests = ctx.invalidatePageRequests;
 }
 
 function pageRoot() {
@@ -49,6 +55,10 @@ function pageRoot() {
 export async function mount(nextCtx) {
   bindContext(nextCtx);
   await loadPlatformLogins(ctx.force);
+}
+
+export function unmount() {
+  invalidatePageRequests("login");
 }
 
 export async function handleAction(nextCtx, { action, button }) {
@@ -81,7 +91,9 @@ export async function handleAction(nextCtx, { action, button }) {
 }
 
 async function loadPlatformLogins(force) {
+  const request = beginPageRequest("login");
   if (force || !state.cache.platformLogins) state.cache.platformLogins = await api(force ? "/platform-logins?force=true" : "/platform-logins");
+  if (!isCurrentPageRequest(request)) return;
   const rows = state.cache.platformLogins;
   pageRoot().innerHTML = `
     <section class="page platform-login-page">

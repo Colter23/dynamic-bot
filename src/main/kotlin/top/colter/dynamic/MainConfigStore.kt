@@ -226,6 +226,17 @@ public object MainConfigForms {
                     restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
+                    path = "imageCache.maxImageBytes",
+                    label = "单张图片大小上限（字节）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "图片缓存",
+                    description = "后台预览和图片缓存允许读取或下载的单张图片最大体积，用于避免异常大图占满内存。",
+                    min = 1,
+                    numberKind = ConfigNumberKind.INTEGER,
+                    restartRequired = true,
+                    restartTarget = "主程序",
+                ),
+                ConfigFieldSpec(
                     path = "imageCache.maxConcurrentDownloads",
                     label = "最大并发下载数",
                     type = ConfigFieldType.NUMBER,
@@ -487,6 +498,7 @@ public object MainConfigForms {
         require(config.imageCache.sourceRoot.isNotBlank()) { "原图缓存目录不能为空" }
         require(config.imageCache.renderedRoot.isNotBlank()) { "渲染图片目录不能为空" }
         require(config.imageCache.downloadTimeoutSeconds > 0.0) { "图片下载超时必须大于 0 秒" }
+        require(config.imageCache.maxImageBytes > 0) { "单张图片大小上限必须大于 0" }
         require(config.imageCache.maxConcurrentDownloads >= 1) { "最大并发下载数至少为 1" }
         require(config.imageCache.cleanupCron.isNotBlank()) { "清理任务 Cron 不能为空" }
         require(config.imageCache.sourceCleanup.maxIdleDays >= 0) { "原图最大闲置天数不能为负数" }

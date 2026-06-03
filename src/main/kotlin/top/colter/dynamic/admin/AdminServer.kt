@@ -129,10 +129,6 @@ public fun Application.adminModule(context: AdminServerContext) {
         }
 
         route("/api") {
-            get("/overview") {
-                if (!call.ensureAuthorized(context)) return@get
-                call.respondApi { context.service.overview() }
-            }
             get("/dashboard") {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.dashboard() }

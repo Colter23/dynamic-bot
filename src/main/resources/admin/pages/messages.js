@@ -16,6 +16,9 @@ let renderTable;
 let notify;
 let openModal;
 let platformTag;
+let beginPageRequest;
+let isCurrentPageRequest;
+let invalidatePageRequests;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -36,6 +39,9 @@ function bindContext(nextCtx) {
     openModal,
     platformTag,
   } = ctx.ui);
+  beginPageRequest = ctx.beginPageRequest;
+  isCurrentPageRequest = ctx.isCurrentPageRequest;
+  invalidatePageRequests = ctx.invalidatePageRequests;
 }
 
 function pageRoot() {
@@ -66,6 +72,7 @@ export async function mount(nextCtx) {
 
 export async function unmount(nextCtx) {
   bindContext(nextCtx);
+  invalidatePageRequests("messages");
   document.getElementById("content")?.classList.remove("content-messages");
   pageRoot()?.classList.remove("messages-page-host");
 }
@@ -218,6 +225,7 @@ function resetDeliveryFilterControls() {
 }
 
 async function refreshDeliveries(button, force) {
+  const request = beginPageRequest("messages");
   readDeliveryFilterControls();
   const filters = deliveryFilters();
   const originalText = button?.textContent;
@@ -235,12 +243,15 @@ async function refreshDeliveries(button, force) {
       q: filters.q,
       limit: filters.limit,
     }));
+    if (!isCurrentPageRequest(request)) return;
     state.deliveryRows = rows || [];
     state.cache.deliveries = state.deliveryRows;
     renderDeliveries();
   } finally {
-    state.deliveriesLoading = false;
-    renderDeliveryStatus();
+    if (isCurrentPageRequest(request)) {
+      state.deliveriesLoading = false;
+      renderDeliveryStatus();
+    }
     if (button?.isConnected) {
       button.disabled = false;
       if (originalText) button.textContent = originalText;

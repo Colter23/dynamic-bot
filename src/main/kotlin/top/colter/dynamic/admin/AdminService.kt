@@ -135,16 +135,6 @@ public class AdminService(
         startedAtEpochMillis = startedAtEpochMillis,
     )
 
-    public fun overview(): OverviewResponse {
-        return OverviewResponse(
-            commandCount = commandRegistry.listCommands().size,
-            subscriptionCount = SubscriptionRepository.countAll(),
-            deliveryPending = MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING),
-            deliveryFailed = MessageDeliveryRepository.countByStatus(DeliveryStatus.FAILED),
-            plugins = plugins(),
-        )
-    }
-
     public suspend fun dashboard(): DashboardResponse {
         val pluginDtos = plugins()
         return DashboardResponse(

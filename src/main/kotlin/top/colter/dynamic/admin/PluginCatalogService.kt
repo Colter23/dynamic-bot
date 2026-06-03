@@ -274,6 +274,8 @@ public class PluginCatalogService(
             require(item.apiVersion.isNotBlank()) { "插件 ${item.id} 的 apiVersion 不能为空" }
             require(item.downloadUrl.isNotBlank()) { "插件 ${item.id} 的 downloadUrl 不能为空" }
             requireHttpsUrl(item.downloadUrl, "插件 ${item.id} 的下载地址")
+            item.homepageUrl?.takeIf { it.isNotBlank() }?.let { requireHttpUrl(it, "插件 ${item.id} 的主页地址") }
+            item.releaseNotesUrl?.takeIf { it.isNotBlank() }?.let { requireHttpUrl(it, "插件 ${item.id} 的更新说明地址") }
             require(SHA256_REGEX.matches(item.sha256)) { "插件 ${item.id} 的 sha256 无效" }
             require(item.sizeBytes > 0) { "插件 ${item.id} 的 sizeBytes 必须大于 0" }
         }
@@ -441,6 +443,13 @@ private enum class PluginCatalogStatus {
 private fun requireHttpsUrl(url: String, label: String) {
     val scheme = runCatching { URI(url).scheme }.getOrNull()
     require(scheme.equals("https", ignoreCase = true)) { "$label 必须使用 https://" }
+}
+
+private fun requireHttpUrl(url: String, label: String) {
+    val scheme = runCatching { URI(url).scheme }.getOrNull()
+    require(scheme.equals("https", ignoreCase = true) || scheme.equals("http", ignoreCase = true)) {
+        "$label 必须使用 http:// 或 https://"
+    }
 }
 
 private fun timeoutMillis(seconds: Double): Int {

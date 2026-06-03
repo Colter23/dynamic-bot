@@ -32,6 +32,7 @@ let renderTable;
 let notify;
 let openModal;
 let closeModal;
+let confirmDanger;
 let uniqueValues;
 let filterOptions;
 let matchesExact;
@@ -46,6 +47,9 @@ let publisherKey;
 let targetKey;
 let policyEvents;
 let mentionEvents;
+let beginPageRequest;
+let isCurrentPageRequest;
+let invalidatePageRequests;
 let subscriptionFilterTimer;
 let createSubscriptionModalSeq = 0;
 const subscriptionFilters = {
@@ -91,6 +95,7 @@ function bindContext(nextCtx) {
     notify,
     openModal,
     closeModal,
+    confirmDanger,
     uniqueValues,
     filterOptions,
     matchesExact,
@@ -106,6 +111,9 @@ function bindContext(nextCtx) {
     policyEvents,
     mentionEvents,
   } = ui);
+  beginPageRequest = ctx.beginPageRequest;
+  isCurrentPageRequest = ctx.isCurrentPageRequest;
+  invalidatePageRequests = ctx.invalidatePageRequests;
 }
 
 function pageRoot() {
@@ -119,6 +127,7 @@ export async function mount(nextCtx) {
 
 export function unmount() {
   clearTimeout(subscriptionFilterTimer);
+  invalidatePageRequests("subscriptions");
 }
 
 export async function handleAction(nextCtx, { action, button, id }) {
@@ -132,7 +141,7 @@ export async function handleAction(nextCtx, { action, button, id }) {
     return true;
   }
   if (action === "delete-subscription") {
-    if (!confirm("确定删除这个订阅吗？")) return true;
+    if (!(await confirmDanger("删除订阅", "确定删除这个订阅吗？该订阅下的动态过滤规则也会一并移除。", { confirmText: "删除" }))) return true;
     const result = await api(`/subscriptions/${id}`, { method: "DELETE" });
     invalidate("dashboard", "subscriptions", "publishers", "subscribers");
     await loadSubscriptions(true);
@@ -144,22 +153,24 @@ export async function handleAction(nextCtx, { action, button, id }) {
     return true;
   }
   if (action === "clear-filters") {
-    if (!confirm("确定清空这个订阅的过滤规则吗？")) return true;
+    if (!(await confirmDanger("清空过滤规则", "确定清空这个订阅的全部过滤规则吗？", { confirmText: "清空" }))) return true;
     const result = await api(`/subscriptions/${id}/filter-rules`, { method: "DELETE" });
     invalidate("subscriptions", "dashboard");
     const subscriptions = await ensureSubscriptions(true);
     const subscription = subscriptions.find(item => Number(item.id) === Number(id));
-    $("filterList").innerHTML = renderFilterList(subscription);
+    const filterList = $("filterList");
+    if (filterList) filterList.innerHTML = renderFilterList(subscription);
     notify(result.message || "过滤规则已清空", false);
     return true;
   }
   if (action === "delete-filter") {
-    if (!confirm("确定删除这条过滤规则吗？")) return true;
+    if (!(await confirmDanger("删除过滤规则", "确定删除这条过滤规则吗？", { confirmText: "删除" }))) return true;
     await api(`/filter-rules/${id}`, { method: "DELETE" });
     invalidate("subscriptions", "dashboard");
     const subscriptions = await ensureSubscriptions(true);
     const subscription = subscriptions.find(item => Number(item.id) === Number(button.dataset.subscription));
-    $("filterList").innerHTML = renderFilterList(subscription);
+    const filterList = $("filterList");
+    if (filterList) filterList.innerHTML = renderFilterList(subscription);
     notify("过滤规则已删除", false);
     return true;
   }
@@ -172,8 +183,10 @@ async function ensureSubscriptions(force) {
 }
 
 async function loadSubscriptions(force) {
+  const request = beginPageRequest("subscriptions");
   releaseMediaObjectUrls();
   const rows = await ensureSubscriptions(force);
+  if (!isCurrentPageRequest(request)) return;
   normalizeSubscriptionFilters(rows);
   const filteredRows = filterSubscriptions(rows);
   pageRoot().innerHTML = `

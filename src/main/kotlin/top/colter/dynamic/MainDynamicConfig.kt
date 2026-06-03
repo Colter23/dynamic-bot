@@ -80,6 +80,7 @@ public data class ImageCacheConfig(
     val sourceRoot: String = "data/images/source",
     val renderedRoot: String = "data/images/draw",
     val downloadTimeoutSeconds: Double = 10.0,
+    val maxImageBytes: Long = 20L * 1024L * 1024L,
     val maxConcurrentDownloads: Int = 8,
     val cleanupCron: String = "0 4 * * *",
     val sourceCleanup: ImageCleanupConfig = ImageCleanupConfig(),

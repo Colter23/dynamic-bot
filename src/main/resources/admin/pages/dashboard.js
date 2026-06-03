@@ -12,6 +12,9 @@ let pill;
 let tags;
 let cell;
 let platformTag;
+let beginPageRequest;
+let isCurrentPageRequest;
+let invalidatePageRequests;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -19,6 +22,9 @@ function bindContext(nextCtx) {
   api = ctx.api;
   state = ctx.state;
   ({ esc, attr, fmtTime, fmtBytes, fmtDuration, label, pill, tags, cell, platformTag } = ctx.ui);
+  beginPageRequest = ctx.beginPageRequest;
+  isCurrentPageRequest = ctx.isCurrentPageRequest;
+  invalidatePageRequests = ctx.invalidatePageRequests;
 }
 
 function pageRoot() {
@@ -30,12 +36,18 @@ export async function mount(nextCtx) {
   await loadDashboard(ctx.force);
 }
 
+export function unmount() {
+  invalidatePageRequests("dashboard");
+}
+
 export async function handleAction() {
   return false;
 }
 
 async function loadDashboard(force) {
+  const request = beginPageRequest("dashboard");
   if (force || !state.cache.dashboard) state.cache.dashboard = await api("/dashboard");
+  if (!isCurrentPageRequest(request)) return;
   const data = state.cache.dashboard;
   const deliveryCounts = countMap(data.deliveryStatusCounts);
   const pluginCounts = countMap(data.pluginStateCounts);
