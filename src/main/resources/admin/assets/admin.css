@@ -195,13 +195,16 @@
     }
     #content.content-logs,
     #content.content-messages,
-    #content:has(.logs-page) {
+    #content:has(.logs-page),
+    #content:has(.messages-page) {
       display: grid;
       overflow: hidden;
     }
     #content.content-logs .page-host,
     #content.content-messages .page-host,
-    #content:has(.logs-page) .page-host {
+    #content:has(.logs-page) .page-host,
+    #content:has(.messages-page) .page-host {
+      min-width: 0;
       min-height: 0;
       display: grid;
     }
@@ -274,6 +277,8 @@
       margin-bottom: 10px;
     }
     .entity-filter-bar {
+      min-width: 0;
+      max-width: 100%;
       display: flex;
       align-items: center;
       justify-content: flex-start;
@@ -295,6 +300,8 @@
       white-space: nowrap;
     }
     .entity-filter-controls {
+      min-width: 0;
+      max-width: 100%;
       display: flex;
       align-items: center;
       gap: 8px;
@@ -323,6 +330,7 @@
       opacity: 0.55;
     }
     .entity-filter-summary {
+      max-width: 100%;
       min-height: 28px;
       display: inline-flex;
       align-items: center;
@@ -335,6 +343,8 @@
       font-size: 12px;
       font-weight: 800;
       white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .subscription-filter-bar {
       display: flex;
@@ -1734,11 +1744,13 @@
       font-size: 15px;
     }
     .messages-page {
+      min-width: 0;
       height: 100%;
       min-height: 0;
       grid-template-rows: minmax(0, 1fr);
     }
     .message-panel {
+      min-width: 0;
       min-height: 0;
       display: grid;
       grid-template-rows: auto auto minmax(0, 1fr);
@@ -1762,7 +1774,11 @@
       text-align: right;
     }
     .message-filter-bar {
+      min-width: 0;
       margin-bottom: 0;
+    }
+    .message-filter-bar .entity-filter-controls {
+      min-width: 0;
     }
     .message-filter-bar .entity-filter-controls input,
     .message-filter-bar .entity-filter-controls select {
@@ -1785,10 +1801,14 @@
     }
     .message-table-region,
     .messages-table-host {
+      min-width: 0;
       min-height: 0;
       height: 100%;
     }
     .messages-table-wrap {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
       height: 100%;
       max-height: 100%;
       overflow: auto;
@@ -1908,11 +1928,13 @@
       place-items: center;
     }
     .logs-page {
+      min-width: 0;
       height: 100%;
       min-height: 0;
       grid-template-rows: minmax(0, 1fr);
     }
     .log-panel {
+      min-width: 0;
       min-height: 0;
       display: grid;
       grid-template-rows: auto auto minmax(0, 1fr);
@@ -1936,7 +1958,11 @@
       text-align: right;
     }
     .log-filter-bar {
+      min-width: 0;
       margin-bottom: 0;
+    }
+    .log-filter-bar .entity-filter-controls {
+      min-width: 0;
     }
     .log-filter-bar .entity-filter-controls input {
       width: auto;
@@ -1959,10 +1985,14 @@
     }
     .log-table-region,
     .logs-table-host {
+      min-width: 0;
       min-height: 0;
       height: 100%;
     }
     .logs-table-wrap {
+      width: 100%;
+      max-width: 100%;
+      min-width: 0;
       height: 100%;
       max-height: 100%;
       overflow: auto;
@@ -2197,10 +2227,37 @@
         justify-content: flex-start;
         text-align: left;
       }
+      .message-filter-bar,
+      .log-filter-bar {
+        align-items: stretch;
+      }
+      .message-filter-bar .entity-filter-title,
+      .log-filter-bar .entity-filter-title {
+        width: 100%;
+      }
+      .message-filter-bar .entity-filter-controls,
+      .log-filter-bar .entity-filter-controls {
+        width: 100%;
+        flex: 1 1 100%;
+      }
       .message-filter-bar .entity-filter-controls input,
       .message-filter-bar .entity-filter-controls select {
         width: 100%;
+        min-width: 0;
         max-width: none;
+      }
+      .message-filter-bar .entity-filter-controls input#deliveryFilterKeyword {
+        min-width: 0;
+        max-width: none;
+      }
+      .message-filter-bar .entity-filter-controls button,
+      .log-filter-bar .entity-filter-controls button {
+        flex: 1 1 auto;
+      }
+      .message-filter-bar .entity-filter-summary,
+      .log-filter-bar .entity-filter-summary {
+        width: 100%;
+        margin-left: 0;
       }
       .messages-table {
         min-width: 860px;
@@ -2223,6 +2280,7 @@
       .log-filter-bar .entity-filter-controls input,
       .log-filter-bar .entity-filter-controls select {
         width: 100%;
+        min-width: 0;
         max-width: none;
       }
       .logs-table {
