@@ -24,37 +24,53 @@ public data class AdminLogSnapshot(
     val entries: List<AdminLogRecord>,
     val nextSince: Long,
     val capacity: Int,
+    val retainedCount: Int,
 )
 
 public object AdminLogBuffer {
-    public const val DEFAULT_CAPACITY: Int = 1_000
+    public const val DEFAULT_CAPACITY: Int = 2_000
+    public const val MIN_CAPACITY: Int = 1
+    public const val MAX_CAPACITY: Int = 100_000
+    public const val MAX_MESSAGE_CHARS: Int = 4_000
+    public const val MAX_THROWABLE_CHARS: Int = 16_000
+
+    private const val TRUNCATED_SUFFIX: String = "\n... 已截断，完整内容请查看控制台日志"
 
     private val sequence = AtomicLong(0)
     private val entries = ArrayDeque<AdminLogRecord>()
 
+    @Volatile
+    private var capacity: Int = DEFAULT_CAPACITY
+
+    @Synchronized
+    public fun configureCapacity(nextCapacity: Int) {
+        capacity = nextCapacity.coerceIn(MIN_CAPACITY, MAX_CAPACITY)
+        trimToCapacity()
+    }
+
     @Synchronized
     public fun append(record: AdminLogRecord) {
-        entries.addLast(record)
-        while (entries.size > DEFAULT_CAPACITY) {
-            entries.removeFirst()
-        }
+        entries.addLast(record.truncated())
+        trimToCapacity()
     }
 
     @Synchronized
     public fun snapshot(
         since: Long? = null,
         level: String? = null,
+        levels: Set<String>? = null,
         logger: String? = null,
         query: String? = null,
         limit: Int = 300,
     ): AdminLogSnapshot {
-        val normalizedLevel = level?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+        val normalizedLevels = normalizeLevels(levels) ?: parseLevels(level)
         val normalizedLogger = logger?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
         val normalizedQuery = query?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
-        val safeLimit = limit.coerceIn(1, DEFAULT_CAPACITY)
+        val currentCapacity = capacity
+        val safeLimit = limit.coerceIn(1, currentCapacity)
         val filtered = entries.asSequence()
             .filter { record -> since == null || record.seq > since }
-            .filter { record -> normalizedLevel == null || record.level == normalizedLevel }
+            .filter { record -> normalizedLevels == null || record.level.uppercase() in normalizedLevels }
             .filter { record -> normalizedLogger == null || record.loggerName.lowercase().contains(normalizedLogger) }
             .filter { record ->
                 normalizedQuery == null ||
@@ -66,16 +82,51 @@ public object AdminLogBuffer {
         return AdminLogSnapshot(
             entries = filtered,
             nextSince = entries.lastOrNull()?.seq ?: (since ?: 0),
-            capacity = DEFAULT_CAPACITY,
+            capacity = currentCapacity,
+            retainedCount = entries.size,
         )
     }
 
     public fun nextSequence(): Long = sequence.incrementAndGet()
 
     @Synchronized
-    public fun clearForTest() {
+    public fun clearForTest(capacity: Int = DEFAULT_CAPACITY) {
         entries.clear()
         sequence.set(0)
+        configureCapacity(capacity)
+    }
+
+    @Synchronized
+    private fun trimToCapacity() {
+        while (entries.size > capacity) {
+            entries.removeFirst()
+        }
+    }
+
+    private fun parseLevels(level: String?): Set<String>? {
+        val raw = level?.trim()?.takeIf { it.isNotBlank() } ?: return null
+        return normalizeLevels(raw.split(Regex("[,，\\s]+")).toSet())
+    }
+
+    private fun normalizeLevels(levels: Set<String>?): Set<String>? {
+        val normalized = levels
+            ?.mapNotNull { it.trim().uppercase().takeIf(String::isNotBlank) }
+            ?.toSet()
+            ?: return null
+        return normalized.takeIf { it.isNotEmpty() }
+    }
+
+    private fun AdminLogRecord.truncated(): AdminLogRecord {
+        return copy(
+            message = message.truncateLogText(MAX_MESSAGE_CHARS),
+            throwable = throwable?.truncateLogText(MAX_THROWABLE_CHARS),
+        )
+    }
+
+    private fun String.truncateLogText(maxChars: Int): String {
+        if (length <= maxChars) return this
+        val keepChars = (maxChars - TRUNCATED_SUFFIX.length).coerceAtLeast(1)
+        return take(keepChars) + TRUNCATED_SUFFIX
     }
 }
 

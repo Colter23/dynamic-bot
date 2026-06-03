@@ -13,7 +13,9 @@ let attr;
 let fmtTime;
 let pill;
 let renderTable;
+let notify;
 let handleError;
+let logRequestSeq = 0;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -22,7 +24,7 @@ function bindContext(nextCtx) {
   state = ctx.state;
   query = ctx.query;
   handleError = ctx.handleError;
-  ({ esc, attr, fmtTime, pill, renderTable } = ctx.ui);
+  ({ esc, attr, fmtTime, pill, renderTable, notify } = ctx.ui);
 }
 
 function pageRoot() {
@@ -36,6 +38,10 @@ function logFilters() {
   return state.logFilters;
 }
 
+function isAutoPinLatest() {
+  return state.logsAutoPinLatest !== false;
+}
+
 export async function mount(nextCtx) {
   bindContext(nextCtx);
   await loadLogsPage(ctx.force);
@@ -44,9 +50,11 @@ export async function mount(nextCtx) {
 export async function unmount(nextCtx) {
   bindContext(nextCtx);
   stopLogPolling();
+  document.getElementById("content")?.classList.remove("content-logs");
+  pageRoot()?.classList.remove("logs-page-host");
 }
 
-export async function handleAction(nextCtx, { action, button }) {
+export async function handleAction(nextCtx, { action, button, id }) {
   bindContext(nextCtx);
   if (action === "apply-log-filter") {
     await applyLogFilter(button);
@@ -64,7 +72,22 @@ export async function handleAction(nextCtx, { action, button }) {
   if (action === "toggle-log-pause") {
     state.logsPaused = !state.logsPaused;
     renderLogStatus();
-    updatePauseButton();
+    updateToolbarButtons();
+    return true;
+  }
+  if (action === "toggle-log-autopin") {
+    state.logsAutoPinLatest = !isAutoPinLatest();
+    renderLogStatus();
+    updateToolbarButtons();
+    if (isAutoPinLatest()) scrollLogsToTop();
+    return true;
+  }
+  if (action === "jump-log-latest") {
+    scrollLogsToTop();
+    return true;
+  }
+  if (action === "copy-log-message" || action === "copy-log-logger") {
+    await copyLogValue(action, id);
     return true;
   }
   return false;
@@ -75,6 +98,9 @@ async function loadLogsPage(force) {
     state.logRows = [];
     state.logSince = 0;
   }
+  if (state.logsAutoPinLatest === undefined) state.logsAutoPinLatest = true;
+  document.getElementById("content")?.classList.add("content-logs");
+  pageRoot()?.classList.add("logs-page-host");
   renderLayout();
   bindLogControls();
   renderLogs();
@@ -98,16 +124,15 @@ function renderLayout() {
           <span class="entity-filter-title">筛选</span>
           <div class="entity-filter-controls">
             <select id="logLevel" data-log-filter="level">
-              <option value="">全部级别</option>
-              ${["ERROR", "WARN", "INFO", "DEBUG"].map(level => `
-                <option value="${level}"${filters.level === level ? " selected" : ""}>${level}</option>
-              `).join("")}
+              ${logLevelOptions(filters.level)}
             </select>
             <input id="logLogger" data-log-filter="logger" value="${attr(filters.logger)}" placeholder="模块 / logger">
             <input id="logQuery" data-log-filter="q" value="${attr(filters.q)}" placeholder="关键词">
             <button type="button" class="entity-filter-clear" data-action="apply-log-filter">筛选</button>
             <button type="button" class="choice-clear-button compact" data-action="reset-log-filter">清除</button>
             <button type="button" class="choice-refresh-button compact" data-action="refresh-logs">刷新</button>
+            <button type="button" class="secondary compact log-jump-button" data-action="jump-log-latest">最新</button>
+            <button type="button" class="secondary compact log-autopin-button" data-action="toggle-log-autopin"></button>
             <button type="button" class="secondary compact log-pause-button" data-action="toggle-log-pause"></button>
           </div>
           <span id="logFilterSummary" class="entity-filter-summary"></span>
@@ -117,8 +142,19 @@ function renderLayout() {
         </div>
       </section>
     </section>`;
-  updatePauseButton();
+  updateToolbarButtons();
   renderLogStatus();
+}
+
+function logLevelOptions(selected) {
+  return [
+    ["", "全部级别"],
+    ["ERROR,WARN", "错误与警告"],
+    ["ERROR", "ERROR"],
+    ["WARN", "WARN"],
+    ["INFO", "INFO"],
+    ["DEBUG", "DEBUG"],
+  ].map(([value, label]) => `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(label)}</option>`).join("");
 }
 
 function bindLogControls() {
@@ -158,6 +194,8 @@ function resetLogFilterControls() {
 }
 
 async function refreshLogs(force, button) {
+  const seq = ++logRequestSeq;
+  const scrollState = !force && !isAutoPinLatest() ? currentLogScrollState() : null;
   const filters = logFilters();
   const params = {
     level: filters.level,
@@ -166,6 +204,7 @@ async function refreshLogs(force, button) {
     limit: LOG_LIMIT,
   };
   if (!force && state.logSince) params.since = state.logSince;
+
   const originalText = button?.textContent;
   if (button) {
     button.disabled = true;
@@ -173,21 +212,33 @@ async function refreshLogs(force, button) {
   }
   state.logsLoading = true;
   renderLogStatus();
+
   try {
     const response = await api("/logs" + query(params));
-    state.logSince = response.nextSince || state.logSince;
+    if (!isCurrentLogRequest(seq)) return;
+
+    state.logSince = Math.max(Number(state.logSince || 0), Number(response.nextSince || 0));
+    state.logCapacity = Number(response.capacity || 0);
+    state.logRetainedCount = Number(response.retainedCount || 0);
     if (force) {
-      state.logRows = response.entries || [];
+      state.logRows = (response.entries || []).slice(-LOG_KEEP_LIMIT);
     } else {
-      const known = new Set(state.logRows.map(row => row.seq));
-      state.logRows = state.logRows
+      const known = new Set((state.logRows || []).map(row => row.seq));
+      state.logRows = (state.logRows || [])
         .concat((response.entries || []).filter(row => !known.has(row.seq)))
         .slice(-LOG_KEEP_LIMIT);
     }
     renderLogs();
+    if (isAutoPinLatest()) {
+      scrollLogsToTop();
+    } else if (scrollState) {
+      restoreLogScrollState(scrollState);
+    }
   } finally {
-    state.logsLoading = false;
-    renderLogStatus();
+    if (isCurrentLogRequest(seq)) {
+      state.logsLoading = false;
+      renderLogStatus();
+    }
     if (button?.isConnected) {
       button.disabled = false;
       if (originalText) button.textContent = originalText;
@@ -195,12 +246,15 @@ async function refreshLogs(force, button) {
   }
 }
 
+function isCurrentLogRequest(seq) {
+  return seq === logRequestSeq && state.page === "logs" && !!pageRoot()?.isConnected;
+}
+
 function renderLogs() {
   const target = $("logsTable");
   if (!target) return;
   const rows = (state.logRows || []).slice().reverse();
-  const summary = $("logFilterSummary");
-  if (summary) summary.textContent = `显示 ${rows.length} 条`;
+  renderLogSummary(rows.length);
   if (!rows.length) {
     target.innerHTML = `<div class="empty log-empty">暂无日志</div>`;
     return;
@@ -209,10 +263,29 @@ function renderLogs() {
     { title: "时间", render: row => `<span class="sub-line log-time">${fmtTime(row.timestampEpochMillis, true)}</span>` },
     { title: "级别", render: row => pill(row.level) },
     { title: "模块", render: row => `<span class="sub-line log-logger">${esc(row.loggerName)}</span>` },
-    { title: "内容", render: row => `<div class="log-row">${esc(row.message)}${row.throwable ? "\n" + esc(row.throwable) : ""}</div>` },
+    { title: "内容", render: row => `<div class="log-row">${esc(logText(row))}</div>` },
+    { title: "操作", render: row => `
+      <div class="log-copy-actions">
+        <button type="button" class="log-action-button" data-action="copy-log-message" data-id="${attr(row.seq)}">复制内容</button>
+        <button type="button" class="log-action-button logger" data-action="copy-log-logger" data-id="${attr(row.seq)}">复制模块</button>
+      </div>` },
   ])
     .replace('class="table-wrap"', 'class="table-wrap logs-table-wrap"')
     .replace("<table>", '<table class="logs-table">');
+}
+
+function logText(row) {
+  return `${row.message || ""}${row.throwable ? "\n" + row.throwable : ""}`;
+}
+
+function renderLogSummary(visibleCount) {
+  const summary = $("logFilterSummary");
+  if (!summary) return;
+  const capacity = Number(state.logCapacity || 0);
+  const retained = Number(state.logRetainedCount || 0);
+  summary.textContent = capacity > 0
+    ? `显示 ${visibleCount} 条 / 缓冲 ${retained}/${capacity}`
+    : `显示 ${visibleCount} 条`;
 }
 
 function renderLogStatus() {
@@ -224,23 +297,69 @@ function renderLogStatus() {
   target.innerHTML = `
     ${state.logsLoading ? '<span class="loading-spinner" aria-hidden="true"></span>' : ""}
     <span class="pill ${modeTone}">${mode}</span>
+    <span class="pill ${isAutoPinLatest() ? "info" : ""}">${isAutoPinLatest() ? "最新在顶部" : "手动定位"}</span>
     <span>${state.logsLoading ? "正在读取" : `最近 ${latest ? fmtTime(latest.timestampEpochMillis, true) : "-"}`}</span>`;
 }
 
-function updatePauseButton() {
-  const button = pageRoot().querySelector(".log-pause-button");
-  if (!button) return;
-  button.textContent = state.logsPaused ? "继续" : "暂停";
+function updateToolbarButtons() {
+  const pauseButton = pageRoot().querySelector(".log-pause-button");
+  if (pauseButton) pauseButton.textContent = state.logsPaused ? "继续" : "暂停";
+  const autoPinButton = pageRoot().querySelector(".log-autopin-button");
+  if (autoPinButton) autoPinButton.textContent = isAutoPinLatest() ? "取消定位" : "固定最新";
+}
+
+function scrollLogsToTop() {
+  const wrap = pageRoot().querySelector(".logs-table-wrap");
+  if (wrap) wrap.scrollTop = 0;
+}
+
+function currentLogScrollState() {
+  const wrap = pageRoot().querySelector(".logs-table-wrap");
+  return wrap ? { top: wrap.scrollTop, height: wrap.scrollHeight } : null;
+}
+
+function restoreLogScrollState(previous) {
+  const wrap = pageRoot().querySelector(".logs-table-wrap");
+  if (!wrap || !previous) return;
+  wrap.scrollTop = previous.top + (wrap.scrollHeight - previous.height);
+}
+
+async function copyLogValue(action, id) {
+  const row = (state.logRows || []).find(item => String(item.seq) === String(id));
+  if (!row) throw new Error("日志记录不存在");
+  const text = action === "copy-log-logger" ? (row.loggerName || "") : logText(row);
+  await copyText(text);
+  notify(action === "copy-log-logger" ? "模块名已复制" : "日志内容已复制", false);
+}
+
+async function copyText(text) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
 }
 
 function startLogPolling() {
-  stopLogPolling();
+  stopLogPolling(false);
   state.logTimer = setInterval(() => {
-    if (!state.logsPaused && state.page === "logs") refreshLogs(false).catch(handleError);
+    if (!state.logsPaused && !state.logsLoading && state.page === "logs") {
+      refreshLogs(false).catch(handleError);
+    }
   }, 2500);
 }
 
-function stopLogPolling() {
+function stopLogPolling(invalidateRequest = true) {
   if (state.logTimer) clearInterval(state.logTimer);
   state.logTimer = null;
+  state.logsLoading = false;
+  if (invalidateRequest) logRequestSeq += 1;
 }

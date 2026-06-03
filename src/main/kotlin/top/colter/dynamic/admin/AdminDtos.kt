@@ -341,6 +341,7 @@ public data class AdminLogResponse(
     val entries: List<AdminLogEntryDto>,
     val nextSince: Long,
     val capacity: Int,
+    val retainedCount: Int,
 )
 
 @Serializable

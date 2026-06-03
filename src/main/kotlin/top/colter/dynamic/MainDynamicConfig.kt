@@ -35,6 +35,7 @@ public data class WebAdminConfig(
     val host: String = "127.0.0.1",
     val port: Int = 8080,
     val token: String = "",
+    val logBufferCapacity: Int = 2_000,
 )
 
 public data class PluginCatalogConfig(

@@ -100,9 +100,11 @@
     }
     .login-form { display: grid; gap: 10px; }
     .app-shell {
+      height: 100vh;
       min-height: 100vh;
       display: grid;
       grid-template-columns: 246px minmax(0, 1fr);
+      overflow: hidden;
     }
     .sidebar {
       position: sticky;
@@ -151,8 +153,9 @@
     }
     .workspace {
       min-width: 0;
+      min-height: 0;
       display: grid;
-      grid-template-rows: auto 1fr;
+      grid-template-rows: auto minmax(0, 1fr);
     }
     .topbar {
       position: sticky;
@@ -186,7 +189,19 @@
     .menu-button { display: none; }
     main {
       min-width: 0;
+      min-height: 0;
+      overflow: auto;
       padding: 18px;
+    }
+    #content.content-logs,
+    #content:has(.logs-page) {
+      display: grid;
+      overflow: hidden;
+    }
+    #content.content-logs .page-host,
+    #content:has(.logs-page) .page-host {
+      min-height: 0;
+      display: grid;
     }
     .page {
       display: grid;
@@ -1669,8 +1684,8 @@
       font-size: 15px;
     }
     .logs-page {
-      height: calc(100dvh - 112px);
-      min-height: 480px;
+      height: 100%;
+      min-height: 0;
       grid-template-rows: minmax(0, 1fr);
     }
     .log-panel {
@@ -1754,6 +1769,10 @@
     .logs-table td:nth-child(3) {
       width: 280px;
     }
+    .logs-table th:nth-child(5),
+    .logs-table td:nth-child(5) {
+      width: 150px;
+    }
     .log-time,
     .log-logger {
       max-width: none;
@@ -1765,6 +1784,35 @@
       line-height: 1.35;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
+    }
+    .log-copy-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .log-action-button {
+      min-height: 26px;
+      padding: 3px 7px;
+      border-color: #b9cffc;
+      background: #eef4ff;
+      color: #1d4ed8;
+      font-size: 12px;
+    }
+    .log-action-button.logger {
+      border-color: #d7c3f4;
+      background: #f6f1ff;
+      color: #6d3bb5;
+    }
+    .log-jump-button {
+      border-color: #b9cffc;
+      background: #eef4ff;
+      color: #1d4ed8;
+    }
+    .log-autopin-button {
+      border-color: #f0c98d;
+      background: #fff8ea;
+      color: var(--amber);
     }
     .log-empty {
       height: 100%;
@@ -1908,8 +1956,8 @@
         grid-template-columns: 1fr;
       }
       .logs-page {
-        height: calc(100dvh - 132px);
-        min-height: 520px;
+        height: 100%;
+        min-height: 0;
       }
       .log-panel-head {
         flex-direction: column;

@@ -9,6 +9,7 @@ import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.admin.AdminLogBuffer
 import top.colter.dynamic.draw.DrawLayoutRegistry
 import top.colter.dynamic.draw.DrawThemeFactory
 
@@ -30,6 +31,7 @@ public class MainConfigStore(
         if (withToken != loaded) {
             configService.save(MainDynamicConfig.CONFIG_ID, withToken)
         }
+        AdminLogBuffer.configureCapacity(withToken.webAdmin.logBufferCapacity)
         currentConfig = withToken
         return withToken
     }
@@ -47,6 +49,7 @@ public class MainConfigStore(
         }
 
         configService.save(MainDynamicConfig.CONFIG_ID, next)
+        AdminLogBuffer.configureCapacity(next.webAdmin.logBufferCapacity)
         currentConfig = next
 
         val restartTargets = MainConfigForms.restartTargets(previous, next)
@@ -438,6 +441,15 @@ public object MainConfigForms {
                     description = "登录 Web 后台使用的访问令牌，留空会在首次启动时自动生成。",
                     secret = true,
                 ),
+                ConfigFieldSpec(
+                    path = "webAdmin.logBufferCapacity",
+                    label = "日志缓冲容量",
+                    type = ConfigFieldType.NUMBER,
+                    section = "Web 后台",
+                    description = "Web 后台在内存中保留的最近日志条数；只影响当前进程的实时日志页面，不读取历史日志文件。",
+                    min = 100,
+                    max = AdminLogBuffer.MAX_CAPACITY.toLong(),
+                ),
             ),
         )
 
@@ -485,6 +497,9 @@ public object MainConfigForms {
         require(config.pluginCatalog.maxDownloadBytes > 0) { "插件最大下载大小必须大于 0" }
         require(config.webAdmin.port in 1..65_535) { "Web 后台端口必须在 1 到 65535 之间" }
         require(config.webAdmin.host.isNotBlank()) { "Web 后台监听地址不能为空" }
+        require(config.webAdmin.logBufferCapacity in 100..AdminLogBuffer.MAX_CAPACITY) {
+            "日志缓冲容量必须在 100 到 ${AdminLogBuffer.MAX_CAPACITY} 之间"
+        }
         if (config.webAdmin.enabled) {
             require(config.webAdmin.token.isNotBlank()) { "启用 Web 后台时 token 不能为空" }
         }

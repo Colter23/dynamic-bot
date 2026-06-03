@@ -532,6 +532,16 @@ class AdminServerTest {
         AdminLogBuffer.append(
             AdminLogRecord(
                 seq = AdminLogBuffer.nextSequence(),
+                timestampEpochMillis = 150,
+                level = "WARN",
+                loggerName = "test.warn",
+                threadName = "test",
+                message = "careful",
+            )
+        )
+        AdminLogBuffer.append(
+            AdminLogRecord(
+                seq = AdminLogBuffer.nextSequence(),
                 timestampEpochMillis = 200,
                 level = "ERROR",
                 loggerName = "test.error",
@@ -542,10 +552,107 @@ class AdminServerTest {
         val service = service(FakePublisherFollowPlugin())
 
         val errors = service.logs(level = "ERROR", limit = 10)
+        val warningsAndErrors = service.logs(level = "ERROR,WARN", limit = 10)
         val afterFirst = service.logs(since = 1, limit = 10)
 
         assertEquals(listOf("boom"), errors.entries.map { it.message })
-        assertEquals(listOf("boom"), afterFirst.entries.map { it.message })
+        assertEquals(listOf("careful", "boom"), warningsAndErrors.entries.map { it.message })
+        assertEquals(listOf("careful", "boom"), afterFirst.entries.map { it.message })
+    }
+
+    @Test
+    fun logsShouldTrimCapacityCoerceLimitAndMatchThrowableKeyword() {
+        AdminLogBuffer.clearForTest(capacity = 3)
+        try {
+            repeat(5) { index ->
+                AdminLogBuffer.append(
+                    AdminLogRecord(
+                        seq = AdminLogBuffer.nextSequence(),
+                        timestampEpochMillis = index.toLong(),
+                        level = "INFO",
+                        loggerName = "test.capacity",
+                        threadName = "test",
+                        message = "message-$index",
+                        throwable = if (index == 4) "needle throwable stack" else null,
+                    )
+                )
+            }
+            val service = service(FakePublisherFollowPlugin())
+
+            val all = service.logs(limit = 100)
+            val coercedLimit = service.logs(limit = 0)
+            val keyword = service.logs(query = "needle", limit = 10)
+
+            assertEquals(3, all.capacity)
+            assertEquals(3, all.retainedCount)
+            assertEquals(listOf("message-2", "message-3", "message-4"), all.entries.map { it.message })
+            assertEquals(listOf("message-4"), coercedLimit.entries.map { it.message })
+            assertEquals(listOf("message-4"), keyword.entries.map { it.message })
+        } finally {
+            AdminLogBuffer.clearForTest()
+        }
+    }
+
+    @Test
+    fun logsShouldTruncateLongMessageAndThrowableBeforeBuffering() {
+        AdminLogBuffer.clearForTest()
+        try {
+            AdminLogBuffer.append(
+                AdminLogRecord(
+                    seq = AdminLogBuffer.nextSequence(),
+                    timestampEpochMillis = 100,
+                    level = "ERROR",
+                    loggerName = "test.truncate",
+                    threadName = "test",
+                    message = "m".repeat(AdminLogBuffer.MAX_MESSAGE_CHARS + 200),
+                    throwable = "t".repeat(AdminLogBuffer.MAX_THROWABLE_CHARS + 200),
+                )
+            )
+            val entry = service(FakePublisherFollowPlugin()).logs(limit = 10).entries.single()
+
+            assertTrue(entry.message.length <= AdminLogBuffer.MAX_MESSAGE_CHARS)
+            assertTrue(entry.message.contains("已截断"))
+            assertTrue(entry.throwable!!.length <= AdminLogBuffer.MAX_THROWABLE_CHARS)
+            assertTrue(entry.throwable.contains("已截断"))
+        } finally {
+            AdminLogBuffer.clearForTest()
+        }
+    }
+
+    @Test
+    fun dashboardShouldReadRecentWarningsAndErrorsFromFullLogBuffer() = runBlocking {
+        initDb("admin-dashboard-log-buffer")
+        AdminLogBuffer.clearForTest(capacity = 100)
+        try {
+            AdminLogBuffer.append(
+                AdminLogRecord(
+                    seq = AdminLogBuffer.nextSequence(),
+                    timestampEpochMillis = 100,
+                    level = "ERROR",
+                    loggerName = "test.dashboard",
+                    threadName = "test",
+                    message = "early boom",
+                )
+            )
+            repeat(50) { index ->
+                AdminLogBuffer.append(
+                    AdminLogRecord(
+                        seq = AdminLogBuffer.nextSequence(),
+                        timestampEpochMillis = 200 + index.toLong(),
+                        level = "INFO",
+                        loggerName = "test.dashboard",
+                        threadName = "test",
+                        message = "info-$index",
+                    )
+                )
+            }
+
+            val dashboard = service(FakePublisherFollowPlugin()).dashboard()
+
+            assertEquals(listOf("early boom"), dashboard.recentLogs.map { it.message })
+        } finally {
+            AdminLogBuffer.clearForTest()
+        }
     }
 
     @Test

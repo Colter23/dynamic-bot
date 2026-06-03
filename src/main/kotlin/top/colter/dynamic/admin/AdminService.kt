@@ -162,9 +162,7 @@ public class AdminService(
                 .map { (status, count) -> StateCountDto(status.name, count) },
             plugins = pluginDtos,
             platformLogins = platformLogins(),
-            recentLogs = logs(limit = 40).entries
-                .filter { it.level == "WARN" || it.level == "ERROR" }
-                .takeLast(8),
+            recentLogs = AdminLogBuffer.snapshot(level = "WARN,ERROR", limit = 8).entries.map { it.toDto() },
             recentDeliveries = deliveries(status = "FAILED", limit = 8),
         )
     }
@@ -210,6 +208,7 @@ public class AdminService(
             entries = snapshot.entries.map { it.toDto() },
             nextSince = snapshot.nextSince,
             capacity = snapshot.capacity,
+            retainedCount = snapshot.retainedCount,
         )
     }
 

@@ -56,6 +56,23 @@ class MainConfigStoreTest {
     }
 
     @Test
+    fun webAdminConfigShouldExposeLogBufferCapacity() {
+        val paths = MainConfigForms.formSpec.fields.map { it.path }
+
+        assertTrue("webAdmin.logBufferCapacity" in paths)
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            MainConfigForms.validate(
+                MainDynamicConfig(
+                    webAdmin = WebAdminConfig(token = "token", logBufferCapacity = 10),
+                ),
+            )
+        }
+
+        assertTrue(error.message!!.contains("日志缓冲容量"))
+    }
+
+    @Test
     fun validateShouldRejectInvalidThemeColorsWithChineseMessage() {
         val error = assertFailsWith<IllegalArgumentException> {
             MainConfigForms.validate(MainDynamicConfig(draw = DrawSettings(themeColors = "#FE65A6;")))

@@ -183,7 +183,7 @@ public fun Application.adminModule(context: AdminServerContext) {
                 call.respondApi {
                     context.service.logs(
                         since = call.optionalQueryLong("since"),
-                        level = call.request.queryParameters["level"],
+                        level = call.request.queryParameters["level"] ?: call.request.queryParameters["levels"],
                         logger = call.request.queryParameters["logger"],
                         query = call.request.queryParameters["q"],
                         limit = call.optionalQueryInt("limit"),
