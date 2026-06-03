@@ -69,6 +69,7 @@ internal class DynamicLinkAutoParseListener(
                 else -> Unit
             }
         }
+        logForwardResult(event, result)
     }
 
     private fun reply(event: CommandEvent, message: String, status: CommandStatus) {
@@ -102,13 +103,31 @@ internal class DynamicLinkAutoParseListener(
         if (!event.rawText.contains("http://") && !event.rawText.contains("https://")) return
         val context = event.context
         when (triggerMode) {
-            LinkParseTriggerMode.DISABLED -> autoParseLogger.info {
+            LinkParseTriggerMode.DISABLED -> autoParseLogger.debug {
                 "链接自动解析未触发：当前消息目标已关闭链接解析 target=${context.target.stableValue()}"
             }
-            LinkParseTriggerMode.MENTION_ONLY -> autoParseLogger.info {
+            LinkParseTriggerMode.MENTION_ONLY -> autoParseLogger.debug {
                 "链接自动解析未触发：需要在同一条消息中 @ 当前 bot target=${context.target.stableValue()} botAccountId=${context.botAccountId ?: "未知"} mentionedAccountIds=${context.mentionedAccountIds.joinToString(",").ifBlank { "无" }}"
             }
             LinkParseTriggerMode.ALWAYS -> Unit
+        }
+    }
+
+    private fun logForwardResult(event: CommandEvent, result: DynamicLinkForwardResult) {
+        val target = event.context.target.stableValue()
+        when (result) {
+            is DynamicLinkForwardResult.Forwarded -> autoParseLogger.info {
+                "链接自动解析已提交：target=$target，platform=${result.parsedLink.platformId.value}，update=${result.parsedLink.updateId}"
+            }
+            is DynamicLinkForwardResult.Duplicate -> autoParseLogger.debug {
+                "链接自动解析跳过重复动态：target=$target，platform=${result.parsedLink.platformId.value}，update=${result.parsedLink.updateId}"
+            }
+            is DynamicLinkForwardResult.Failed -> autoParseLogger.warn {
+                "链接自动解析失败：target=$target，原因=${result.reason}"
+            }
+            DynamicLinkForwardResult.NoSupportedLink -> autoParseLogger.debug {
+                "链接自动解析未找到支持的链接：target=$target"
+            }
         }
     }
 

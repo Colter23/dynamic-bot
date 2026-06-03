@@ -27,6 +27,9 @@ import top.colter.dynamic.core.plugin.PublisherLoginMethod
 import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
+import top.colter.dynamic.core.tools.loggerFor
+
+private val logger = loggerFor<AdminLoginService>()
 
 public class AdminLoginService(
     private val loginProviderResolver: (String) -> PublisherLoginProvider?,
@@ -53,6 +56,7 @@ public class AdminLoginService(
                     message = error.message ?: "Cookie 登录失败",
                 )
         }
+        logLoginResult("后台 Cookie 登录", platform, result)
         return result.toDto()
     }
 
@@ -67,6 +71,7 @@ public class AdminLoginService(
             ?.trim()
             ?: ""
         require(cookie.isNotBlank()) { "当前没有可导出的 Cookie" }
+        logger.info { "后台 Cookie 已导出：platform=$platform" }
         return CookieExportResponse(
             platformId = platform,
             cookie = cookie,
@@ -164,6 +169,7 @@ public class AdminLoginService(
                 sessions.remove(loginId)
                 throw IllegalStateException(message)
             }
+        logger.info { "后台二维码登录已启动：platform=$platform，loginId=$loginId" }
         return QrLoginStartResponse(
             loginId = loginId,
             imageUrl = "/api/login/qr/$loginId/image",
@@ -199,6 +205,7 @@ public class AdminLoginService(
             message = "二维码登录已取消",
             updatedAtEpochMillis = System.currentTimeMillis(),
         )
+        logger.info { "后台二维码登录已取消：platform=${session.platform}，loginId=$loginId" }
         return ActionResultResponse(changed = changed, message = if (changed) "二维码登录已取消" else "二维码登录已结束")
     }
 
@@ -212,12 +219,16 @@ public class AdminLoginService(
 
     private fun updateSession(loginId: String, result: PublisherLoginResult) {
         val current = sessions[loginId] ?: return
+        val statusChanged = current.status != result.status.name
         sessions[loginId] = current.copy(
             status = result.status.name,
             message = result.message,
             account = result.account,
             updatedAtEpochMillis = System.currentTimeMillis(),
         )
+        if (statusChanged && result.status.name in TERMINAL_QR_STATUSES) {
+            logLoginResult("后台二维码登录", current.platform, result, loginId)
+        }
     }
 
     private fun findSession(loginId: String): QrLoginSession {
@@ -264,6 +275,26 @@ public class AdminLoginService(
         }
     }
 
+}
+
+private fun logLoginResult(action: String, platform: String, result: PublisherLoginResult, loginId: String? = null) {
+    val account = result.account?.displayLabel() ?: "-"
+    val suffix = loginId?.let { "，loginId=$it" } ?: ""
+    val message = "$action 完成：platform=$platform，status=${result.status}，account=$account$suffix"
+    when (result.status) {
+        PublisherLoginStatus.SUCCESS -> logger.info { message }
+        PublisherLoginStatus.PENDING -> logger.debug { message }
+        PublisherLoginStatus.CANCELED,
+        PublisherLoginStatus.EXPIRED,
+        PublisherLoginStatus.FAILED,
+        PublisherLoginStatus.UNSUPPORTED -> logger.warn { message }
+    }
+}
+
+private fun PublisherLoginAccount.displayLabel(): String {
+    return listOfNotNull(name, userId?.let { "($it)" })
+        .joinToString(" ")
+        .ifBlank { "-" }
 }
 
 private const val QR_CHALLENGE_TIMEOUT_MS: Long = 10_000

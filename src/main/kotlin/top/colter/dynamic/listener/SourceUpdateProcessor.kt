@@ -54,7 +54,7 @@ public class SourceUpdateProcessor(
 
     public suspend fun process(request: SourceUpdatePublishRequest): SourceUpdatePublishResult {
         return runCatching {
-            logger.info {
+            logger.debug {
                 "开始处理来源更新：source=${request.sourcePlugin}，event=${request.update.eventType.value}，update=${request.update.key.stableValue()}"
             }
             when (request.update.payload) {
@@ -80,7 +80,7 @@ public class SourceUpdateProcessor(
         } else {
             applySubscriptionRules(normalizedUpdate, targets.filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds))
         }
-        logger.info {
+        logger.debug {
             "来源更新订阅匹配完成：update=${normalizedUpdate.key.stableValue()}，候选目标=${targets.size}，可投递=${deliverableTargets.size}"
         }
         if (deliverableTargets.isEmpty()) {
@@ -103,7 +103,7 @@ public class SourceUpdateProcessor(
         val targets = resolveTargets(request.deliveryTarget, storedPublisher)
             .filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds)
             .let { applySubscriptionRules(normalizedUpdate, it) }
-        logger.info {
+        logger.debug {
             "直播来源更新订阅匹配完成：update=${normalizedUpdate.key.stableValue()}，可投递=${targets.size}"
         }
         if (targets.isEmpty()) {
@@ -243,7 +243,7 @@ public class SourceUpdateProcessor(
                 SourceUpdatePublishResult.enqueued(newDeliveryCount)
             }
             results.isNotEmpty() -> {
-                logger.info { "来源更新投递任务已存在：update=${update.key.stableValue()}" }
+                logger.debug { "来源更新投递任务已存在：update=${update.key.stableValue()}" }
                 SourceUpdatePublishResult.duplicate()
             }
             else -> SourceUpdatePublishResult.ignored("没有可投递目标")
@@ -269,7 +269,7 @@ public class SourceUpdateProcessor(
         )
         val result = MessageDeliveryRepository.enqueue(message)
         if (result.newDeliveries.isNotEmpty()) {
-            logger.info {
+            logger.debug {
                 "消息已入队：messageId=${message.id}，variant=$renderVariant，新增投递=${result.newDeliveries.size}，已存在=${result.existingDeliveries.size}，目标=${message.targets.targetSummary()}"
             }
         } else {

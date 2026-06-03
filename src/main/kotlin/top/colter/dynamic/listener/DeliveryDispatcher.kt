@@ -49,7 +49,7 @@ public class DeliveryDispatcher(
         if (requests.isEmpty()) return@coroutineScope DeliveryDispatchStats(0, 0, 0, 0)
 
         val concurrency = config.dispatchConcurrency.coerceAtLeast(1)
-        logger.info { "开始投递消息：领取=${requests.size}，并发=$concurrency" }
+        logger.debug { "开始投递消息：领取=${requests.size}，并发=$concurrency" }
 
         val semaphore = Semaphore(concurrency)
         val results = requests.map { request ->
@@ -160,7 +160,7 @@ public class DeliveryDispatcher(
         sink: MessageSinkPlugin,
         config: DeliveryConfig,
     ): DeliveryOutcome {
-        logger.info {
+        logger.debug {
             "正在发送消息：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，attempt=${request.delivery.attempts}"
         }
         val result = runCatching { sink.sendMessage(request) }
@@ -170,7 +170,7 @@ public class DeliveryDispatcher(
         return when (result) {
             is MessageSendResult.Sent -> {
                 MessageDeliveryRepository.markSent(request.delivery.id, result.sinkMessageId)
-                logger.info {
+                logger.debug {
                     "消息发送成功：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，sinkMessageId=${result.sinkMessageId ?: "-"}"
                 }
                 DeliveryOutcome.SENT

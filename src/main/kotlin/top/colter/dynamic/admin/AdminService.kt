@@ -67,6 +67,9 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonNull
 import top.colter.dynamic.plugin.PluginCapability
+import top.colter.dynamic.core.tools.loggerFor
+
+private val logger = loggerFor<AdminService>()
 
 public class AdminService(
     private val pluginProvider: () -> List<PluginInfo>,
@@ -513,6 +516,9 @@ public class AdminService(
         val (publisherInfo, _) = fetchPublisherInfo(platform, externalId)
         val upsert = PublisherRepository.upsertInfo(publisherInfo.normalized())
         val publisher = upsert.value
+        logger.info {
+            "后台发布者已${upsert.operationLabel()}：publisherId=${publisher.id}，platform=$platform，externalId=$externalId"
+        }
         return PublisherRepository.findById(publisher.id)?.toDto(
             drawTheme = PublisherDrawThemeRepository.findByPublisherId(publisher.id),
         ) ?: publisher.toDto()
@@ -535,6 +541,7 @@ public class AdminService(
             }
         }
         val drawTheme = PublisherDrawThemeRepository.findByPublisherId(id)
+        logger.info { "后台发布者已更新：publisherId=$id，platform=${updated.platformId.value}，state=${updated.state}" }
         return PublisherRepository.findById(id)?.toDto(drawTheme = drawTheme) ?: updated.toDto(drawTheme = drawTheme)
     }
 
@@ -551,6 +558,11 @@ public class AdminService(
         PublisherLiveStatusRepository.deleteByPublisherId(publisher.id)
         PublisherDrawThemeRepository.deleteByPublisherId(publisher.id)
         val removed = PublisherRepository.deleteById(publisher.id)
+        if (removed) {
+            logger.info {
+                "后台发布者已删除：publisherId=${publisher.id}，platform=${publisher.platformId.value}，externalId=${publisher.externalId}，关联订阅=$removedSubscriptions"
+            }
+        }
         return ActionResultResponse(
             changed = removed,
             message = if (removed) {
@@ -658,6 +670,9 @@ public class AdminService(
             )
         }
         val linkParseConfig = LinkParseTargetConfigRepository.findByAddress(address)
+        logger.info {
+            "后台消息目标已${upsert.operationLabel()}：subscriberId=${upsert.value.id}，target=${address.stableValue()}，state=${upsert.value.state}"
+        }
         return upsert.value.toDto(
             linkParseTriggerMode = linkParseConfig?.triggerMode,
             fallbackTriggerMode = configProvider().linkParsing.fallbackTriggerMode,
@@ -683,6 +698,9 @@ public class AdminService(
             }
         }
         val linkParseConfig = LinkParseTargetConfigRepository.findByAddress(updated.address)
+        logger.info {
+            "后台消息目标已更新：subscriberId=$id，target=${updated.address.stableValue()}，state=${updated.state}"
+        }
         return (SubscriberRepository.findById(id) ?: updated).toDto(
             linkParseTriggerMode = linkParseConfig?.triggerMode,
             fallbackTriggerMode = configProvider().linkParsing.fallbackTriggerMode,
@@ -697,9 +715,14 @@ public class AdminService(
                 applySubscriptionMutation(
                     SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId),
                 )
-            }
+        }
         LinkParseTargetConfigRepository.deleteByAddress(subscriber.address)
         val removed = SubscriberRepository.deleteById(subscriber.id)
+        if (removed) {
+            logger.info {
+                "后台消息目标已删除：subscriberId=${subscriber.id}，target=${subscriber.address.stableValue()}，关联订阅=$removedSubscriptions"
+            }
+        }
         return ActionResultResponse(
             changed = removed,
             message = if (removed) {
@@ -809,6 +832,9 @@ public class AdminService(
             publisherId = publisherUpsert.value.id,
         ) ?: throw IllegalStateException("订阅创建失败")
 
+        logger.info {
+            "后台订阅已${if (subscriptionResult.changed) "创建" else "更新"}：subscriptionId=${subscription.id}，publisherId=${publisherUpsert.value.id}，subscriberId=${subscriberUpsert.value.id}，autoFollowed=$autoFollowed"
+        }
         return CreateSubscriptionResponse(
             subscription = subscription.toDto(
                 mapOf(publisherUpsert.value.id to publisherUpsert.value),
@@ -830,6 +856,9 @@ public class AdminService(
             ?: throw NoSuchElementException("未找到消息目标：${subscription.subscriberId}")
         requireSubscriptionPolicyAllowed(subscriber, request.policy)
         val updated = SubscriptionRepository.updatePolicy(subscription.id, request.policy)
+        logger.info {
+            "后台订阅规则已更新：subscriptionId=${updated.id}，publisherId=${updated.publisherId}，subscriberId=${updated.subscriberId}"
+        }
         return updated.toDto(
             publishers = PublisherRepository.findById(updated.publisherId)?.let { mapOf(it.id to it) }.orEmpty(),
             subscribers = mapOf(subscriber.id to subscriber),
@@ -847,6 +876,11 @@ public class AdminService(
         if (removed && publisher != null && configProvider().subscription.unfollowWhenNoSubscribers) {
             if (SubscriptionRepository.countByPublisherId(publisher.id) == 0L) {
                 publisherFollowResolver(publisher.platformId.value)?.unfollowPublisher(publisher.externalId)
+            }
+        }
+        if (removed) {
+            logger.info {
+                "后台订阅已删除：subscriptionId=$id，publisherId=${subscription.publisherId}，subscriberId=${subscription.subscriberId}"
             }
         }
         return ActionResultResponse(removed, if (removed) "订阅已删除" else "订阅未变化")
@@ -869,12 +903,16 @@ public class AdminService(
             subscriptionId = subscriptionId,
             condition = request.condition,
         )
+        logger.info {
+            "后台过滤规则已${if (result.created) "创建" else "确认"}：ruleId=${result.value.id}，subscriptionId=$subscriptionId"
+        }
         return result.value.toDto()
     }
 
     public fun deleteFilterRule(id: Int): ActionResultResponse {
         val removed = DynamicFilterRuleRepository.removeById(id)
         if (!removed) throw NoSuchElementException("未找到过滤规则：$id")
+        logger.info { "后台过滤规则已删除：ruleId=$id" }
         return ActionResultResponse(true, "过滤规则已删除")
     }
 
@@ -883,6 +921,9 @@ public class AdminService(
             "未找到订阅：$subscriptionId"
         }
         val removed = DynamicFilterRuleRepository.clearBySubscriptionId(subscriptionId)
+        if (removed > 0) {
+            logger.info { "后台过滤规则已清空：subscriptionId=$subscriptionId，数量=$removed" }
+        }
         return ActionResultResponse(removed > 0, "过滤规则已清空：数量=$removed")
     }
 
@@ -982,6 +1023,11 @@ public class AdminService(
         )
         val result = mainConfigUpdater(next)
         val saved = configProvider()
+        if (result.changed) {
+            logger.info {
+                "后台配置已保存：configId=${MainDynamicConfig.CONFIG_ID}，restartRequired=${result.restartRequired}，restartTargets=${result.restartTargets.ifEmpty { listOf("-") }}"
+            }
+        }
         return UpdateConfigResponse(
             changed = result.changed,
             restartRequired = result.restartRequired,
@@ -1028,6 +1074,11 @@ public class AdminService(
             ConfigApplyResult(changed = false, message = "${plugin.configName}配置未变化")
         }
         val saved = if (changed) next else current
+        if (result.changed) {
+            logger.info {
+                "后台配置已保存：configId=${plugin.configId}，pluginId=${info.descriptor.id}，restartRequired=${result.restartRequired}，restartTargets=${result.restartTargets.ifEmpty { listOf("-") }}"
+            }
+        }
         return UpdateConfigResponse(
             changed = result.changed,
             restartRequired = result.restartRequired,
@@ -1315,6 +1366,14 @@ private data class CachedLoginState(
     val result: PublisherLoginResult,
     val checkedAtEpochMillis: Long,
 )
+
+private fun UpsertResult<*>.operationLabel(): String {
+    return when {
+        created -> "创建"
+        updated -> "更新"
+        else -> "确认"
+    }
+}
 
 private inline fun <reified T : Enum<T>> parseEnum(value: String, fieldName: String): T {
     val normalized = value.trim()
