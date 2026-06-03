@@ -5,6 +5,7 @@ import top.colter.dynamic.core.config.ConfigFieldOption
 import top.colter.dynamic.core.config.ConfigFieldSpec
 import top.colter.dynamic.core.config.ConfigFieldType
 import top.colter.dynamic.core.config.ConfigFormSpec
+import top.colter.dynamic.core.config.ConfigNumberKind
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.data.CommandRole
@@ -112,6 +113,7 @@ public object MainConfigForms {
                     type = ConfigFieldType.JSON,
                     section = "命令",
                     description = "未命中规则时为普通用户；命中多条规则时取最高权限。平台、目标、发送者等字段支持 * 通配。",
+                    component = "COMMAND_PERMISSION_TABLE",
                 ),
                 ConfigFieldSpec(
                     path = "subscription.autoFollowPublisherOnSubscribe",
@@ -154,6 +156,7 @@ public object MainConfigForms {
                     section = "链接解析",
                     description = "一条聊天消息内最多自动处理多少个动态链接，超出部分会被忽略。",
                     min = 1,
+                    numberKind = ConfigNumberKind.INTEGER,
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.replyOnFailure",
@@ -229,6 +232,7 @@ public object MainConfigForms {
                     section = "图片缓存",
                     description = "同一条动态中允许同时下载的图片数量，过高可能增加网络和内存压力。",
                     min = 1,
+                    numberKind = ConfigNumberKind.INTEGER,
                     restartRequired = true,
                     restartTarget = "主程序",
                 ),
@@ -258,6 +262,7 @@ public object MainConfigForms {
                     section = "图片缓存",
                     description = "原图缓存超过该天数未被访问后会被清理；0 表示只要命中清理任务即可删除。",
                     min = 0,
+                    numberKind = ConfigNumberKind.INTEGER,
                     restartRequired = true,
                     restartTarget = "主程序",
                 ),
@@ -277,6 +282,7 @@ public object MainConfigForms {
                     section = "图片缓存",
                     description = "渲染图片超过该天数未被访问后会被清理；0 表示只要命中清理任务即可删除。",
                     min = 0,
+                    numberKind = ConfigNumberKind.INTEGER,
                     restartRequired = true,
                     restartTarget = "主程序",
                 ),
@@ -287,6 +293,7 @@ public object MainConfigForms {
                     section = "消息投递",
                     description = "消息发送失败后最多尝试投递的次数，达到上限后会标记为失败。",
                     min = 1,
+                    numberKind = ConfigNumberKind.INTEGER,
                 ),
                 ConfigFieldSpec(
                     path = "delivery.retryDelaySeconds",
@@ -305,6 +312,7 @@ public object MainConfigForms {
                     section = "消息投递",
                     description = "同一轮投递任务允许并发发送的消息数量。",
                     min = 1,
+                    numberKind = ConfigNumberKind.INTEGER,
                 ),
                 ConfigFieldSpec(
                     path = "delivery.lockTtlSeconds",
@@ -354,6 +362,7 @@ public object MainConfigForms {
                     section = "绘图",
                     description = "生成动态图片的基础宽度，过小会压缩内容，过大可能增加渲染耗时。",
                     min = 320,
+                    numberKind = ConfigNumberKind.INTEGER,
                 ),
                 ConfigFieldSpec(
                     path = "draw.font.text",
@@ -387,6 +396,7 @@ public object MainConfigForms {
                     section = "插件目录",
                     description = "后台拉取插件列表后的内存缓存时间；设为 0 表示每次都重新获取。",
                     min = 0,
+                    numberKind = ConfigNumberKind.INTEGER,
                 ),
                 ConfigFieldSpec(
                     path = "pluginCatalog.downloadTimeoutSeconds",
@@ -402,6 +412,7 @@ public object MainConfigForms {
                     section = "插件目录",
                     description = "单个插件 Jar 允许下载的最大字节数，默认 200MB。",
                     min = 1,
+                    numberKind = ConfigNumberKind.INTEGER,
                 ),
                 ConfigFieldSpec(
                     path = "webAdmin.enabled",
@@ -430,6 +441,7 @@ public object MainConfigForms {
                     description = "后台服务监听端口，访问地址为 http://监听地址:端口/admin。",
                     min = 1,
                     max = 65_535,
+                    numberKind = ConfigNumberKind.INTEGER,
                     restartRequired = true,
                     restartTarget = "Web 后台",
                 ),
@@ -449,6 +461,7 @@ public object MainConfigForms {
                     description = "Web 后台在内存中保留的最近日志条数；只影响当前进程的实时日志页面，不读取历史日志文件。",
                     min = 100,
                     max = AdminLogBuffer.MAX_CAPACITY.toLong(),
+                    numberKind = ConfigNumberKind.INTEGER,
                 ),
             ),
         )

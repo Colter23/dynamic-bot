@@ -26,7 +26,8 @@ const $ = id => document.getElementById(id);
       currentConfigDetail: null,
       pendingConfigRestarts: {},
       activePageModule: null,
-      pageLoadSeq: 0
+      pageLoadSeq: 0,
+      restoringHash: false
     };
     const pageModuleCache = {};
     const targetCandidateCacheTtlMillis = 180 * 1000;
@@ -345,15 +346,37 @@ const $ = id => document.getElementById(id);
     }
 
     function setPage(page) {
-      state.page = pages[page] ? page : "dashboard";
-      location.hash = state.page;
+      return setPageAsync(page).catch(handleError);
+    }
+    async function setPageAsync(page) {
+      const nextPage = pages[page] ? page : "dashboard";
+      if (nextPage !== state.page && !(await canLeaveActivePage())) {
+        restoreCurrentHash();
+        return false;
+      }
+      state.page = nextPage;
+      if (location.hash.replace("#", "") !== state.page) {
+        state.restoringHash = true;
+        location.hash = state.page;
+      }
       document.body.classList.remove("sidebar-open");
       document.querySelectorAll("[data-nav]").forEach(button => {
         button.classList.toggle("active", button.dataset.nav === state.page);
       });
       $("pageTitle").textContent = pages[state.page][0];
       $("pageSubtitle").textContent = pages[state.page][1];
-      loadPage(state.page, false).catch(handleError);
+      await loadPage(state.page, false);
+      return true;
+    }
+    function restoreCurrentHash() {
+      if (location.hash.replace("#", "") === state.page) return;
+      state.restoringHash = true;
+      location.hash = state.page;
+    }
+    async function canLeaveActivePage() {
+      const pageModule = state.activePageModule;
+      if (!pageModule?.canLeave) return true;
+      return await Promise.resolve(pageModule.canLeave(pageContext(false)));
     }
     async function unmountActivePage() {
       const pageModule = state.activePageModule;
@@ -526,10 +549,11 @@ const $ = id => document.getElementById(id);
       const id = button.dataset.id;
       try {
         if (action === "goto") {
-          setPage(button.dataset.page);
+          await setPage(button.dataset.page);
           return;
         }
         if (action === "refresh-current") {
+          if (!(await canLeaveActivePage())) return;
           const keysByPage = {
             dashboard: ["dashboard"],
             plugins: ["plugins"],
@@ -562,6 +586,10 @@ const $ = id => document.getElementById(id);
 
     document.querySelectorAll("[data-nav]").forEach(button => button.onclick = () => setPage(button.dataset.nav));
     window.addEventListener("hashchange", () => {
+      if (state.restoringHash) {
+        state.restoringHash = false;
+        return;
+      }
       const page = location.hash.replace("#", "") || "dashboard";
       if (page !== state.page) setPage(page);
     });
@@ -580,8 +608,11 @@ const $ = id => document.getElementById(id);
         $("loginButton").disabled = false;
       }
     };
-    $("logout").onclick = () => logout();
+    $("logout").onclick = async () => {
+      if (await canLeaveActivePage()) logout();
+    };
     $("refreshPage").onclick = async () => {
+      if (!(await canLeaveActivePage())) return;
       invalidate();
       await loadPage(state.page, true).catch(handleError);
     };
@@ -593,6 +624,7 @@ const $ = id => document.getElementById(id);
       if (event.target === $("modalBackdrop")) closeModal();
     });
     $("stopApplication").onclick = async () => {
+      if (!(await canLeaveActivePage())) return;
       if (!confirm("确定停止主项目吗？")) return;
       const result = await api("/system/stop", { method: "POST" });
       notify(result.message, false);

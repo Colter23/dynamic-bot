@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.databind.node.JsonNodeFactory
 import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
+import java.math.BigDecimal
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
@@ -16,6 +17,7 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import top.colter.dynamic.core.config.ConfigFieldSpec
+import top.colter.dynamic.core.config.ConfigNumberKind
 import top.colter.dynamic.core.config.ConfigFieldType
 import top.colter.dynamic.core.config.ConfigFormSpec
 import kotlin.reflect.KClass
@@ -78,7 +80,7 @@ internal object AdminConfigJson {
             val value = values[field.path] ?: return@forEach
             if (field.secret && isBlankSecret(value)) return@forEach
             if (field.required) {
-                require(!isBlankValue(value)) { "${field.path} must not be blank" }
+                require(!isBlankValue(value)) { "${field.displayName()}不能为空" }
             }
             when (field.type) {
                 ConfigFieldType.NUMBER -> validateNumber(field, value)
@@ -93,13 +95,23 @@ internal object AdminConfigJson {
     }
 
     private fun validateNumber(field: ConfigFieldSpec, value: JsonElement) {
-        val number = jsonText(value)?.toDoubleOrNull()
-            ?: throw IllegalArgumentException("${field.path} must be a number")
+        val text = jsonText(value)?.trim()?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("${field.displayName()}必须是数字")
+        val number = try {
+            BigDecimal(text)
+        } catch (e: NumberFormatException) {
+            throw IllegalArgumentException("${field.displayName()}必须是数字")
+        }
+        if (field.numberKind == ConfigNumberKind.INTEGER) {
+            require(number.stripTrailingZeros().scale() <= 0) {
+                "${field.displayName()}必须是整数"
+            }
+        }
         field.min?.let { min ->
-            require(number >= min) { "${field.path} must be at least $min" }
+            require(number >= BigDecimal.valueOf(min)) { "${field.displayName()}不能小于 $min" }
         }
         field.max?.let { max ->
-            require(number <= max) { "${field.path} must be at most $max" }
+            require(number <= BigDecimal.valueOf(max)) { "${field.displayName()}不能大于 $max" }
         }
     }
 
@@ -107,14 +119,16 @@ internal object AdminConfigJson {
         val text = jsonText(value) ?: ""
         if (text.isBlank() && !field.required) return
         val allowed = field.options.map { it.value }.toSet()
-        require(text in allowed) { "${field.path} must be one of ${allowed.joinToString("|")}" }
+        require(text in allowed) { "${field.displayName()}必须是 ${allowed.joinToString("|")} 之一" }
     }
 
     private fun validateBoolean(field: ConfigFieldSpec, value: JsonElement) {
         if (value is JsonPrimitive && value.booleanOrNull != null) return
         val text = jsonText(value)?.lowercase()
-        require(text == "true" || text == "false") { "${field.path} must be true or false" }
+        require(text == "true" || text == "false") { "${field.displayName()}必须是 true 或 false" }
     }
+
+    private fun ConfigFieldSpec.displayName(): String = label.takeIf { it.isNotBlank() } ?: path
 
     private fun jsonElementAt(node: JsonNode, path: String): JsonElement? {
         var current: JsonNode = node

@@ -3,81 +3,39 @@ const $ = id => document.getElementById(id);
 let ctx;
 let root;
 let api;
-let apiBlob;
 let state;
-let ui;
 let invalidate;
-let setPage;
-let loadPage;
 let handleError;
-let hydrateMediaImages;
-let releaseMediaObjectUrls;
-let query;
 let esc;
 let attr;
-let fmtTime;
-let fmtBytes;
-let fmtDuration;
 let label;
-let eventLabel;
 let pill;
-let tags;
 let cell;
-let mediaImage;
-let identity;
-let themeSwatch;
 let renderTable;
 let notify;
 let openModal;
 let closeModal;
-let eventTypes;
-let blockKinds;
-let publisherKey;
-let targetKey;
-let policyEvents;
-let mentionEvents;
 let loadSubscriberTargetCandidates;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
   root = ctx.root;
   api = ctx.api;
-  apiBlob = ctx.apiBlob;
   state = ctx.state;
-  ui = ctx.ui;
   invalidate = ctx.invalidate;
-  setPage = ctx.setPage;
-  loadPage = ctx.loadPage;
   handleError = ctx.handleError;
-  hydrateMediaImages = ctx.hydrateMediaImages;
-  releaseMediaObjectUrls = ctx.releaseMediaObjectUrls;
-  query = ctx.query;
   ({
     esc,
     attr,
-    fmtTime,
-    fmtBytes,
-    fmtDuration,
     label,
-    eventLabel,
     pill,
-    tags,
     cell,
-    mediaImage,
-    identity,
-    themeSwatch,
     renderTable,
     notify,
     openModal,
     closeModal,
-    eventTypes,
-    blockKinds,
-    publisherKey,
-    targetKey,
-    policyEvents,
-    mentionEvents,
     loadSubscriberTargetCandidates,
-  } = ui);
+  } = ctx.ui);
 }
 
 function pageRoot() {
@@ -102,16 +60,19 @@ async function withButtonLoading(button, loadingText, task) {
 
 export async function mount(nextCtx) {
   bindContext(nextCtx);
-  document.addEventListener("click", configNavigationGuard, true);
   window.addEventListener("beforeunload", configBeforeUnload);
   await loadConfigs(ctx.force);
 }
 
 export async function unmount(nextCtx) {
   bindContext(nextCtx);
-  document.removeEventListener("click", configNavigationGuard, true);
   window.removeEventListener("beforeunload", configBeforeUnload);
   state.currentConfigDirty = false;
+}
+
+export function canLeave(nextCtx) {
+  bindContext(nextCtx);
+  return canDiscardConfigChanges();
 }
 
 export async function handleAction(nextCtx, { action, button, id }) {
@@ -166,15 +127,6 @@ export async function handleAction(nextCtx, { action, button, id }) {
     return true;
   }
   return false;
-}
-
-function configNavigationGuard(event) {
-  if (!state.currentConfigDirty) return;
-  const leaving = event.target.closest?.("[data-nav], #refreshPage, #logout, #stopApplication");
-  if (!leaving) return;
-  if (canDiscardConfigChanges()) return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
 }
 
 function configBeforeUnload(event) {
@@ -477,7 +429,7 @@ async function toggleConfigSecret(button) {
 }
 
 function configFieldHtml(detail, field) {
-  if (field.path === "command.permissions") return commandPermissionsFieldHtml(detail, field);
+  if (field.component === "COMMAND_PERMISSION_TABLE") return commandPermissionsFieldHtml(detail, field);
   const raw = detail.values[field.path];
   const value = displayConfigValue(raw);
   const fieldLabel = `${esc(field.label)}${field.required ? `<span class="required-mark">*</span>` : ""}${field.restartRequired ? ` <span class="restart-mark" title="保存后需重启">⚠️</span>` : ""}`;
@@ -495,8 +447,9 @@ function configFieldHtml(detail, field) {
   if (field.type === "SECRET") {
     return secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml);
   }
-  const inputType = field.type === "NUMBER" ? "number" : (field.type === "SECRET" ? "password" : "text");
-  const numberAttrs = field.type === "NUMBER" ? ` step="any"${field.min !== undefined && field.min !== null ? ` min="${attr(field.min)}"` : ""}${field.max !== undefined && field.max !== null ? ` max="${attr(field.max)}"` : ""}` : "";
+  const inputType = field.type === "NUMBER" ? "number" : "text";
+  const step = field.numberKind === "INTEGER" ? "1" : "any";
+  const numberAttrs = field.type === "NUMBER" ? ` step="${step}"${field.numberKind === "INTEGER" ? ' inputmode="numeric"' : ""}${field.min !== undefined && field.min !== null ? ` min="${attr(field.min)}"` : ""}${field.max !== undefined && field.max !== null ? ` max="${attr(field.max)}"` : ""}` : "";
   return `<div class="field" data-config-field-path="${attr(field.path)}">${labelHtml}<input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="${inputType}"${numberAttrs} value="${attr(value)}">${descriptionHtml}</div>`;
 }
 

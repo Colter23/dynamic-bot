@@ -1005,8 +1005,13 @@ public class AdminService(
         )
         val changed = current != next
         val result = if (changed) {
-            plugin.applyConfig(next).also {
+            try {
                 configService.save(plugin.configId, next)
+                plugin.applyConfig(next)
+            } catch (e: Exception) {
+                runCatching { configService.save(plugin.configId, current) }
+                runCatching { plugin.applyConfig(current) }
+                throw e
             }
         } else {
             ConfigApplyResult(changed = false, message = "${plugin.configName}配置未变化")
