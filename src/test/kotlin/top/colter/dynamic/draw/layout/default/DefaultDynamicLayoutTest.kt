@@ -2,7 +2,6 @@ package top.colter.dynamic.draw.layout.default
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertTrue
 import top.colter.dynamic.core.data.DynamicBlockRole
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicMediaCard
@@ -13,35 +12,35 @@ import top.colter.dynamic.core.data.TextBlock
 
 class DefaultDynamicLayoutTest {
     @Test
-    fun `root layout should lift additional blocks outside body card`() {
-        val body = TextBlock(DynamicContent.text("正文"))
+    fun `layout should keep additional blocks inside body card and place them at bottom`() {
+        val body = TextBlock(DynamicContent.text("body"))
         val additional = additionalCard()
 
-        val groups = splitDynamicBlocksForLayout(listOf(body, additional), DynamicRenderMode.ROOT)
+        val blocks = orderDynamicBlocksForLayout(listOf(additional, body))
 
-        assertEquals(listOf(body), groups.bodyBlocks)
-        assertEquals(listOf(additional), groups.additionalBlocks)
+        assertEquals(listOf(body, additional), blocks)
     }
 
     @Test
-    fun `forward layout should keep additional blocks inside forwarded card`() {
-        val body = TextBlock(DynamicContent.text("正文"))
-        val additional = additionalCard()
+    fun `layout should preserve relative order inside body and additional groups`() {
+        val body1 = TextBlock(DynamicContent.text("body1"))
+        val body2 = TextBlock(DynamicContent.text("body2"))
+        val additional1 = additionalCard("additional1")
+        val additional2 = additionalCard("additional2")
 
-        val groups = splitDynamicBlocksForLayout(listOf(body, additional), DynamicRenderMode.FORWARD)
+        val blocks = orderDynamicBlocksForLayout(listOf(additional1, body1, additional2, body2))
 
-        assertEquals(listOf(body, additional), groups.bodyBlocks)
-        assertTrue(groups.additionalBlocks.isEmpty())
+        assertEquals(listOf(body1, body2, additional1, additional2), blocks)
     }
 
-    private fun additionalCard(): MediaCardBlock {
+    private fun additionalCard(title: String = "additional"): MediaCardBlock {
         return MediaCardBlock(
             role = DynamicBlockRole.ADDITIONAL,
             style = MediaCardStyle.SMALL,
             card = DynamicMediaCard(
                 kind = DynamicMediaCardKind.LINK,
                 sourceKind = "bilibili.additional.common",
-                title = "附加卡片",
+                title = title,
             ),
         )
     }
