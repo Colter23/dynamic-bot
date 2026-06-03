@@ -139,6 +139,32 @@ class PluginCatalogServiceTest {
         val response = service.catalog()
 
         assertEquals("demo-plugin", response.plugins.single().id)
+        assertEquals("LOCAL_FALLBACK", response.source)
+        assertTrue(response.warning!!.contains("远程插件目录获取失败"))
+    }
+
+    @Test
+    fun officialPluginCatalogFileShouldBeValidAndUseVersionedReleaseArtifacts() {
+        val file = File("plugins/catalog.json")
+        assertTrue(file.isFile, "缺少官方插件目录文件：${file.absolutePath}")
+        val service = service(catalogBytes = file.readBytes())
+
+        val response = service.catalog()
+
+        assertEquals("REMOTE", response.source)
+        assertTrue(response.plugins.isNotEmpty())
+        response.plugins.forEach { plugin ->
+            assertTrue(
+                plugin.downloadUrl.contains("/v${plugin.version}/"),
+                "插件 ${plugin.id} 的下载地址缺少版本 tag：${plugin.downloadUrl}",
+            )
+            assertTrue(
+                plugin.downloadUrl.substringAfterLast('/').contains(plugin.version),
+                "插件 ${plugin.id} 的下载文件名未包含版本号：${plugin.downloadUrl}",
+            )
+            assertTrue(plugin.sha256.matches(Regex("^[a-fA-F0-9]{64}$")))
+            assertTrue(plugin.sizeBytes > 0)
+        }
     }
 
     @Test

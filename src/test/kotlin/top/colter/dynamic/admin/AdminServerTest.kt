@@ -10,6 +10,7 @@ import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import io.ktor.client.request.get
 import io.ktor.client.request.header
+import io.ktor.client.request.post
 import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
@@ -146,6 +147,44 @@ class AdminServerTest {
         assertEquals(HttpStatusCode.OK, response.status)
         assertTrue(response.bodyAsText().contains("demo-plugin"))
         assertTrue(response.bodyAsText().contains("NOT_INSTALLED"))
+    }
+
+    @Test
+    fun adminApiShouldReturnUnifiedJsonForUnexpectedErrors() = testApplication {
+        val info = PluginInfo(
+            descriptor = PluginDescriptor(
+                id = "demo-plugin",
+                name = "Demo",
+                version = "1.0.0",
+                mainClass = "Demo",
+            ),
+            capabilities = setOf(PluginCapability.MESSAGE_SINK),
+            state = PluginState.LOADED,
+            sourceJarPath = "plugins/demo.jar",
+        )
+        val service = AdminService(
+            pluginProvider = { listOf(info) },
+            publisherLookupResolver = { null },
+            publisherFollowResolver = { null },
+            configProvider = { MainDynamicConfig() },
+            pluginStarter = { throw RuntimeException("boom") },
+        )
+        application {
+            adminModule(
+                AdminServerContext(
+                    token = "test-token",
+                    service = service,
+                    loginService = AdminLoginService(loginProviderResolver = { null }),
+                )
+            )
+        }
+
+        val response = client.post("/api/plugins/demo-plugin/start") {
+            header(HttpHeaders.Authorization, "Bearer test-token")
+        }
+
+        assertEquals(HttpStatusCode.InternalServerError, response.status)
+        assertTrue(response.bodyAsText().contains("boom"))
     }
 
 

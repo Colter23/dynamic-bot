@@ -383,15 +383,23 @@ async function refreshCatalog(button) {
 }
 
 async function checkPluginUpdates(button) {
+  const originalText = button?.textContent;
   if (button) button.disabled = true;
+  if (button) button.textContent = "检查中...";
   catalogModalError = null;
-  const result = await fetchCatalog(true);
-  catalogModalError = result.error;
-  renderPage();
-  if (button && button.isConnected) button.disabled = false;
-  if (result.error) throw result.error;
-  const updateCount = catalogEntriesFromCache().filter(item => item.catalogStatus === "UPDATE_AVAILABLE").length;
-  notify(updateCount ? `发现 ${updateCount} 个可更新插件` : "当前没有可更新插件", false);
+  try {
+    const result = await fetchCatalog(true);
+    catalogModalError = result.error;
+    renderPage();
+    if (result.error) throw result.error;
+    const updateCount = catalogEntriesFromCache().filter(item => item.catalogStatus === "UPDATE_AVAILABLE").length;
+    notify(updateCount ? `发现 ${updateCount} 个可更新插件` : "当前没有可更新插件", false);
+  } finally {
+    if (button && button.isConnected) {
+      button.disabled = false;
+      if (originalText) button.textContent = originalText;
+    }
+  }
 }
 
 function renderCatalogModalBody() {
@@ -424,15 +432,18 @@ function catalogStatusBanner(catalog) {
     return `<div class="plugin-catalog-banner"><strong>官方插件目录尚未加载</strong><span>点击刷新目录后可安装或更新插件。</span></div>`;
   }
   const timeText = catalog.fetchedAtEpochMillis ? fmtTime(catalog.fetchedAtEpochMillis, true) : "-";
-  return `<div class="plugin-catalog-banner ok">
+  const sourceText = catalog.source === "LOCAL_FALLBACK" ? "本地兜底目录" : "官方远程目录";
+  const bannerClass = catalog.warning ? "warn" : "ok";
+  return `<div class="plugin-catalog-banner ${bannerClass}">
     <strong>官方插件目录已加载</strong>
-    <span>${esc((catalog.plugins || []).length)} 个插件 / 获取时间 ${esc(timeText)}</span>
+    <span>${esc((catalog.plugins || []).length)} 个插件 / ${esc(sourceText)} / 获取时间 ${esc(timeText)}</span>
+    ${catalog.warning ? `<span>${esc(catalog.warning)}</span>` : ""}
   </div>`;
 }
 
 function catalogFilterBar(rows, filteredRows) {
   const active = pluginFilters.catalogStatus || pluginFilters.catalogCapability || pluginFilters.catalogKeyword;
-  const statusValues = ["NOT_INSTALLED", "UPDATE_AVAILABLE", "INSTALLED", "INCOMPATIBLE", "DOWNLOAD_DISABLED"]
+  const statusValues = ["NOT_INSTALLED", "UPDATE_AVAILABLE", "INSTALLED", "INCOMPATIBLE"]
     .filter(value => rows.some(item => item.catalogStatus === value));
   return `<div class="entity-filter-bar plugin-filter-bar">
     <span class="entity-filter-title">筛选</span>
@@ -522,9 +533,6 @@ function catalogOperationButton(item) {
   if (item.catalogStatus === "INCOMPATIBLE") {
     return `<button class="secondary" disabled>不兼容</button>`;
   }
-  if (item.catalogStatus === "DOWNLOAD_DISABLED") {
-    return `<button class="secondary" disabled>不可下载</button>`;
-  }
   return `<button class="secondary" disabled>已安装</button>`;
 }
 
@@ -547,6 +555,7 @@ async function runPluginLifecycleAction(action, id, button) {
 async function openCatalogOperation(id, mode) {
   const item = catalogEntryById(id);
   if (!item) throw new Error("未找到官方插件条目");
+  const returnToCatalog = Boolean($("pluginCatalogModalBody"));
   const title = mode === "update" ? "更新插件" : "安装插件";
   const confirmText = mode === "update" ? "确认更新" : "确认安装";
   const endpoint = mode === "update" ? "update" : "install";
@@ -573,11 +582,19 @@ async function openCatalogOperation(id, mode) {
       </div>
     </div>
   `, async () => {
-    const result = await api(`/plugin-catalog/${encodeURIComponent(item.id)}/${endpoint}`, { method: "POST" });
-    closeModal();
-    invalidate("plugins", "pluginCatalog", "dashboard", "platformLogins", "configs");
-    await reloadAfterOperation(true);
-    notify(result.message || `${title}已完成`, false);
+    const confirmButton = $("modalConfirm");
+    const originalText = confirmButton?.textContent;
+    if (confirmButton) confirmButton.textContent = mode === "update" ? "正在更新..." : "正在安装...";
+    try {
+      const result = await api(`/plugin-catalog/${encodeURIComponent(item.id)}/${endpoint}`, { method: "POST" });
+      closeModal();
+      invalidate("plugins", "pluginCatalog", "dashboard", "platformLogins", "configs");
+      await reloadAfterOperation(true);
+      notify(result.message || `${title}已完成`, false);
+      if (returnToCatalog) await openCatalogModal(false);
+    } finally {
+      if (confirmButton?.isConnected && originalText) confirmButton.textContent = originalText;
+    }
   }, { size: "medium", confirmText });
 }
 
@@ -709,7 +726,6 @@ function catalogStatusText(value) {
     INSTALLED: "已安装",
     UPDATE_AVAILABLE: "可更新",
     INCOMPATIBLE: "不兼容",
-    DOWNLOAD_DISABLED: "不可下载",
   };
   return map[value] || value || "-";
 }
@@ -725,7 +741,7 @@ function catalogStatusPill(value) {
 function catalogToneClass(value) {
   if (value === "UPDATE_AVAILABLE") return "needs-update";
   if (value === "NOT_INSTALLED") return "installable";
-  if (value === "INCOMPATIBLE" || value === "DOWNLOAD_DISABLED") return "blocked";
+  if (value === "INCOMPATIBLE") return "blocked";
   return "installed";
 }
 

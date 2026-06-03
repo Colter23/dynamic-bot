@@ -36,11 +36,14 @@ import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
+import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.draw.resource.PlatformDrawAssetResource
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.plugin.PluginManager
+
+private val logger = loggerFor<AdminServer>()
 
 public class AdminServer(
     private val config: WebAdminConfig,
@@ -419,6 +422,9 @@ private suspend inline fun <reified T : Any> ApplicationCall.respondApi(crossinl
         respond(HttpStatusCode.Conflict, e.response)
     } catch (e: IllegalStateException) {
         respond(HttpStatusCode.Conflict, ErrorResponse(e.message ?: "当前状态不允许执行该操作"))
+    } catch (e: Exception) {
+        logger.error(e) { "Web 后台 API 处理失败：${request.path()}" }
+        respond(HttpStatusCode.InternalServerError, ErrorResponse(e.message ?: "后台接口处理失败"))
     }
 }
 

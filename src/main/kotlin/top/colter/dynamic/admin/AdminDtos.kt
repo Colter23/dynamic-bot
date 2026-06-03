@@ -87,6 +87,9 @@ public data class PluginCatalogResponse(
     val schemaVersion: Int,
     val fetchedAtEpochMillis: Long,
     val cacheExpiresAtEpochMillis: Long,
+    val source: String,
+    val sourceUrl: String? = null,
+    val warning: String? = null,
     val plugins: List<PluginCatalogEntryDto>,
 )
 

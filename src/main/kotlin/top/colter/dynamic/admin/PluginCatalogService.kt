@@ -111,24 +111,36 @@ public class PluginCatalogService(
                 ?.takeIf { !force && it.url == url && retryNow < it.expiresAt(config) }
                 ?.let { return@synchronized it }
 
-            val bytes = try {
-                downloader.downloadToByteArray(
-                    url = url,
-                    timeoutSeconds = config.downloadTimeoutSeconds,
-                    maxBytes = CATALOG_MAX_BYTES,
+            val content = try {
+                CatalogContent(
+                    bytes = downloader.downloadToByteArray(
+                        url = url,
+                        timeoutSeconds = config.downloadTimeoutSeconds,
+                        maxBytes = CATALOG_MAX_BYTES,
+                    ),
+                    source = "REMOTE",
+                    sourceUrl = url,
+                    warning = null,
                 )
             } catch (e: Exception) {
-                localDefaultCatalogBytes(config)?.let { it }
+                localDefaultCatalogContent(config, e)
                     ?: throw IllegalStateException("插件目录获取失败：${e.message ?: e::class.simpleName ?: "未知错误"}", e)
             }
-            val text = bytes.toString(Charsets.UTF_8)
+            val text = content.bytes.toString(Charsets.UTF_8)
             val document = try {
                 json.decodeFromString<PluginCatalogDocument>(text)
             } catch (e: SerializationException) {
                 throw IllegalArgumentException("插件目录 JSON 格式无效：${e.message}", e)
             }
             validateCatalog(document)
-            CachedCatalog(url = url, document = document, fetchedAtEpochMillis = clock())
+            CachedCatalog(
+                url = url,
+                document = document,
+                fetchedAtEpochMillis = clock(),
+                source = content.source,
+                sourceUrl = content.sourceUrl,
+                warning = content.warning,
+            )
                 .also { cachedCatalog = it }
         }
     }
@@ -189,6 +201,9 @@ public class PluginCatalogService(
             schemaVersion = document.schemaVersion,
             fetchedAtEpochMillis = fetchedAtEpochMillis,
             cacheExpiresAtEpochMillis = expiresAt(config),
+            source = source,
+            sourceUrl = sourceUrl,
+            warning = warning,
             plugins = document.plugins
                 .map { it.toDto(installedById[it.id]) }
                 .sortedBy { it.id },
@@ -221,7 +236,6 @@ public class PluginCatalogService(
             error = when (status) {
                 PluginCatalogStatus.INCOMPATIBLE ->
                     "插件 API 版本不兼容：catalog=$apiVersion，current=$CORE_PLUGIN_API_VERSION"
-                PluginCatalogStatus.DOWNLOAD_DISABLED -> "插件下载地址不可用"
                 else -> null
             },
         )
@@ -229,7 +243,6 @@ public class PluginCatalogService(
 
     private fun PluginCatalogItem.catalogStatus(installed: PluginInfo?): PluginCatalogStatus {
         if (apiVersion != CORE_PLUGIN_API_VERSION) return PluginCatalogStatus.INCOMPATIBLE
-        if (downloadUrl.isBlank()) return PluginCatalogStatus.DOWNLOAD_DISABLED
         if (installed == null) return PluginCatalogStatus.NOT_INSTALLED
         return if (comparePluginVersions(version, installed.descriptor.version) > 0) {
             PluginCatalogStatus.UPDATE_AVAILABLE
@@ -266,10 +279,17 @@ public class PluginCatalogService(
         }
     }
 
-    private fun localDefaultCatalogBytes(config: PluginCatalogConfig): ByteArray? {
+    private fun localDefaultCatalogContent(config: PluginCatalogConfig, cause: Exception): CatalogContent? {
         if (config.url.trim() != PluginCatalogConfig.DEFAULT_URL) return null
         val file = File(pluginDirPathProvider()).resolve("catalog.json")
-        return file.takeIf { it.isFile }?.readBytes()
+        if (!file.isFile) return null
+        val causeText = cause.message ?: cause::class.simpleName ?: "未知错误"
+        return CatalogContent(
+            bytes = file.readBytes(),
+            source = "LOCAL_FALLBACK",
+            sourceUrl = file.absolutePath,
+            warning = "远程插件目录获取失败，已使用本地插件目录：$causeText",
+        )
     }
 
     private fun CachedCatalog.expiresAt(config: PluginCatalogConfig): Long {
@@ -399,6 +419,16 @@ private data class CachedCatalog(
     val url: String,
     val document: PluginCatalogDocument,
     val fetchedAtEpochMillis: Long,
+    val source: String,
+    val sourceUrl: String?,
+    val warning: String?,
+)
+
+private data class CatalogContent(
+    val bytes: ByteArray,
+    val source: String,
+    val sourceUrl: String?,
+    val warning: String?,
 )
 
 private enum class PluginCatalogStatus {
@@ -406,7 +436,6 @@ private enum class PluginCatalogStatus {
     INSTALLED,
     UPDATE_AVAILABLE,
     INCOMPATIBLE,
-    DOWNLOAD_DISABLED,
 }
 
 private fun requireHttpsUrl(url: String, label: String) {
