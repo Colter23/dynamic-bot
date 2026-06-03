@@ -75,6 +75,7 @@ class AdminServerTest {
         val css = client.get("/admin/assets/admin.css")
         val js = client.get("/admin/assets/shell.js")
         val page = client.get("/admin/pages/dashboard.html")
+        val messagesPage = client.get("/admin/pages/messages.html")
         val illegal = client.get("/admin/pages/%2e%2e/x")
 
         assertEquals(HttpStatusCode.OK, shell.status)
@@ -85,6 +86,8 @@ class AdminServerTest {
         assertTrue(js.bodyAsText().contains("/admin/pages/dashboard.js"))
         assertEquals(HttpStatusCode.OK, page.status)
         assertTrue(page.bodyAsText().contains("data-page-root"))
+        assertEquals(HttpStatusCode.OK, messagesPage.status)
+        assertTrue(messagesPage.bodyAsText().contains("data-page=\"messages\""))
         assertTrue(illegal.status.value in 400..404)
     }
 
@@ -510,9 +513,18 @@ class AdminServerTest {
         MessageDeliveryRepository.markFailed(delivery.id, "network")
 
         val deliveries = service.deliveries(status = "FAILED", limit = 10)
+        val filtered = service.deliveries(
+            platformId = "onebot",
+            targetKind = "GROUP",
+            query = "network",
+            limit = 10,
+        )
+        val missed = service.deliveries(query = "missing", limit = 10)
         val dashboard = service.dashboard()
 
         assertEquals("FAILED", deliveries.single().status)
+        assertEquals(deliveries.single().id, filtered.single().id)
+        assertTrue(missed.isEmpty())
         assertTrue(dashboard.deliveryStatusCounts.any { it.state == DeliveryStatus.FAILED.name && it.count == 1L })
     }
 

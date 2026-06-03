@@ -195,6 +195,10 @@ public fun Application.adminModule(context: AdminServerContext) {
                 call.respondApi {
                     context.service.deliveries(
                         status = call.request.queryParameters["status"],
+                        platformId = call.request.queryParameters["platformId"],
+                        targetKind = call.request.queryParameters["targetKind"]
+                            ?: call.request.queryParameters["type"],
+                        query = call.request.queryParameters["q"],
                         limit = call.optionalQueryInt("limit"),
                     )
                 }

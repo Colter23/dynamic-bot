@@ -14,6 +14,7 @@ import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageDelivery
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.TargetAddress
+import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.table.MessageDeliveryTable
 import top.colter.dynamic.table.MessageOutboxTable
@@ -203,8 +204,16 @@ public object MessageDeliveryRepository {
         return DeliveryStatus.entries.associateWith(::countByStatus)
     }
 
-    public fun findRecent(status: DeliveryStatus? = null, limit: Int = 50): List<MessageDelivery> {
+    public fun findRecent(
+        status: DeliveryStatus? = null,
+        platformId: String? = null,
+        targetKind: TargetKind? = null,
+        query: String? = null,
+        limit: Int = 50,
+    ): List<MessageDelivery> {
         val safeLimit = limit.coerceIn(1, 200)
+        val normalizedPlatformId = platformId?.trim()?.takeIf { it.isNotBlank() }
+        val normalizedQuery = query?.trim()?.takeIf { it.isNotBlank() }
         return transaction {
             MessageDeliveryTable
                 .selectAll()
@@ -212,6 +221,16 @@ public object MessageDeliveryRepository {
                     if (status == null) query else query.where { MessageDeliveryTable.status eq status }
                 }
                 .map { it.toMessageDelivery() }
+                .filter { delivery ->
+                    normalizedPlatformId == null ||
+                        delivery.target.platformId.value.equals(normalizedPlatformId, ignoreCase = true)
+                }
+                .filter { delivery ->
+                    targetKind == null || delivery.target.kind == targetKind
+                }
+                .filter { delivery ->
+                    normalizedQuery == null || delivery.matchesDeliveryQuery(normalizedQuery)
+                }
                 .sortedWith(compareByDescending<MessageDelivery> { it.updatedAtEpochSeconds }.thenByDescending { it.id })
                 .take(safeLimit)
         }
@@ -290,6 +309,25 @@ public object MessageDeliveryRepository {
             .where { MessageDeliveryTable.messageId eq messageId }
             .map { it.toMessageDelivery() }
     }
+}
+
+private fun MessageDelivery.matchesDeliveryQuery(query: String): Boolean {
+    return listOfNotNull(
+        id.toString(),
+        messageId,
+        sourceUpdateKey?.stableValue(),
+        renderVariant,
+        target.platformId.value,
+        target.kind.name,
+        target.externalId,
+        target.scopeId,
+        target.threadId,
+        target.accountId,
+        target.stableValue(),
+        status.name,
+        sinkMessageId,
+        lastError,
+    ).any { it.contains(query, ignoreCase = true) }
 }
 
 private fun UpdateBuilder<*>.writeTarget(target: TargetAddress) {

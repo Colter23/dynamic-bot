@@ -194,11 +194,13 @@
       padding: 18px;
     }
     #content.content-logs,
+    #content.content-messages,
     #content:has(.logs-page) {
       display: grid;
       overflow: hidden;
     }
     #content.content-logs .page-host,
+    #content.content-messages .page-host,
     #content:has(.logs-page) .page-host {
       min-height: 0;
       display: grid;
@@ -1731,6 +1733,180 @@
       border-color: var(--line-strong);
       font-size: 15px;
     }
+    .messages-page {
+      height: 100%;
+      min-height: 0;
+      grid-template-rows: minmax(0, 1fr);
+    }
+    .message-panel {
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      gap: 10px;
+      overflow: hidden;
+      animation: plugin-card-in 0.18s ease both;
+    }
+    .message-panel-head {
+      margin-bottom: 0;
+    }
+    .message-record-status {
+      min-height: 28px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-align: right;
+    }
+    .message-filter-bar {
+      margin-bottom: 0;
+    }
+    .message-filter-bar .entity-filter-controls input,
+    .message-filter-bar .entity-filter-controls select {
+      width: auto;
+      min-width: 136px;
+      max-width: 230px;
+      min-height: 28px;
+      height: 28px;
+      padding: 3px 8px;
+      font-size: 13px;
+    }
+    .message-filter-bar .entity-filter-controls input#deliveryFilterKeyword {
+      min-width: 190px;
+      max-width: 300px;
+    }
+    .message-filter-bar .entity-filter-controls button {
+      min-height: 28px;
+      padding: 3px 9px;
+      font-size: 12px;
+    }
+    .message-table-region,
+    .messages-table-host {
+      min-height: 0;
+      height: 100%;
+    }
+    .messages-table-wrap {
+      height: 100%;
+      max-height: 100%;
+      overflow: auto;
+    }
+    .messages-table {
+      min-width: 1120px;
+      table-layout: fixed;
+    }
+    .messages-table th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    .messages-table th,
+    .messages-table td {
+      padding: 7px 9px;
+      vertical-align: top;
+    }
+    .messages-table th:nth-child(1),
+    .messages-table td:nth-child(1) {
+      width: 370px;
+    }
+    .messages-table th:nth-child(2),
+    .messages-table td:nth-child(2) {
+      width: 90px;
+    }
+    .messages-table th:nth-child(3),
+    .messages-table td:nth-child(3) {
+      width: 230px;
+    }
+    .messages-table th:nth-child(4),
+    .messages-table td:nth-child(4) {
+      width: 100px;
+    }
+    .messages-table th:nth-child(5),
+    .messages-table td:nth-child(5) {
+      width: 72px;
+      text-align: center;
+    }
+    .messages-table th:nth-child(6),
+    .messages-table td:nth-child(6) {
+        width: 100px;
+    }
+    .messages-table th:nth-child(7),
+    .messages-table td:nth-child(7) {
+      width: 150px;
+    }
+    .messages-table th:nth-child(8),
+    .messages-table td:nth-child(8) {
+      width: 82px;
+    }
+    .message-status-cell {
+      display: grid;
+      gap: 4px;
+      justify-items: start;
+    }
+    .message-attempts {
+      min-width: 28px;
+      min-height: 24px;
+      display: inline-grid;
+      place-items: center;
+      padding: 2px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel-soft);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .message-result {
+      display: -webkit-box;
+      max-width: none;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.35;
+      overflow: hidden;
+      overflow-wrap: anywhere;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+    }
+    .message-result.bad {
+      color: var(--red);
+    }
+    .message-time {
+      max-width: none;
+    }
+    .message-action-button {
+      min-height: 26px;
+      padding: 3px 8px;
+      border-color: #b9cffc;
+      background: #eef4ff;
+      color: #1d4ed8;
+      font-size: 12px;
+    }
+    .delivery-detail {
+      display: grid;
+      gap: 12px;
+    }
+    .delivery-error-text {
+      min-height: 96px;
+      max-height: 260px;
+      margin: 0;
+      overflow: auto;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      color: var(--text);
+      font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+    }
+    .message-empty {
+      height: 100%;
+      display: grid;
+      place-items: center;
+    }
     .logs-page {
       height: 100%;
       min-height: 0;
@@ -2013,6 +2189,29 @@
       .logs-page {
         height: 100%;
         min-height: 0;
+      }
+      .message-panel-head {
+        flex-direction: column;
+      }
+      .message-record-status {
+        justify-content: flex-start;
+        text-align: left;
+      }
+      .message-filter-bar .entity-filter-controls input,
+      .message-filter-bar .entity-filter-controls select {
+        width: 100%;
+        max-width: none;
+      }
+      .messages-table {
+        min-width: 860px;
+      }
+      .messages-table th:nth-child(1),
+      .messages-table td:nth-child(1) {
+        width: 190px;
+      }
+      .messages-table th:nth-child(3),
+      .messages-table td:nth-child(3) {
+        width: 180px;
       }
       .log-panel-head {
         flex-direction: column;

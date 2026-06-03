@@ -212,13 +212,29 @@ public class AdminService(
         )
     }
 
-    public fun deliveries(status: String? = null, limit: Int? = null): List<MessageDeliveryDto> {
+    public fun deliveries(
+        status: String? = null,
+        platformId: String? = null,
+        targetKind: String? = null,
+        query: String? = null,
+        limit: Int? = null,
+    ): List<MessageDeliveryDto> {
         val deliveryStatus = status
             ?.trim()
             ?.takeIf { it.isNotBlank() }
             ?.let { parseEnum<DeliveryStatus>(it, "status") }
+        val deliveryTargetKind = targetKind
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { parseEnum<TargetKind>(it, "targetKind") }
         return MessageDeliveryRepository
-            .findRecent(status = deliveryStatus, limit = limit ?: 50)
+            .findRecent(
+                status = deliveryStatus,
+                platformId = platformId,
+                targetKind = deliveryTargetKind,
+                query = query,
+                limit = limit ?: 50,
+            )
             .map { it.toDto() }
     }
 

@@ -93,9 +93,7 @@ export async function handleAction() {
 
 async function loadSystem(force) {
   if (force || !state.cache.system) state.cache.system = await api("/system/status");
-  if (force || !state.cache.deliveries) state.cache.deliveries = await api("/deliveries?limit=80");
   const s = state.cache.system;
-  const deliveries = state.cache.deliveries;
   pageRoot().innerHTML = `
     <section class="page">
       <div class="stats">
@@ -110,17 +108,6 @@ async function loadSystem(force) {
           { title: "数据库", render: row => `<span class="sub-line">${esc(row.databasePath || "-")}</span>` },
           { title: "主配置", render: row => `<span class="sub-line">${esc(row.mainConfigPath)}</span>` },
           { title: "Java", render: row => cell(row.javaVersion, row.osName) }
-        ])}
-      </section>
-      <section class="panel full">
-        <div class="panel-head"><h2>最近投递</h2><button class="secondary" data-action="refresh-current">刷新</button></div>
-        ${renderTable(deliveries, [
-          { title: "消息", render: row => cell(row.messageId, row.sourceUpdateKey || "") },
-          { title: "目标", render: row => cell(`${row.platformId}:${label(row.targetKind)}:${row.targetId}`, row.targetKey.replace(/\u001F/g, " / ")) },
-          { title: "状态", render: row => pill(row.status) },
-          { title: "尝试", render: row => `<span class="primary-line">${row.attempts}</span>` },
-          { title: "错误", render: row => `<span class="sub-line">${esc(row.lastError || "-")}</span>` },
-          { title: "更新时间", render: row => `<span class="sub-line">${fmtTime(row.updatedAtEpochSeconds)}</span>` }
         ])}
       </section>
     </section>`;

@@ -116,7 +116,7 @@ async function loadDashboard(force) {
           ${renderLoginSummary(data.platformLogins || [])}
         </section>
         <section class="panel half">
-          <div class="panel-head"><h2>最近投递失败</h2><button class="secondary" data-action="goto" data-page="system">诊断</button></div>
+          <div class="panel-head"><h2>最近投递失败</h2><button class="secondary" data-action="goto" data-page="messages">消息记录</button></div>
           ${renderDeliveryCompact(data.recentDeliveries || [])}
         </section>
         <section class="panel half">
