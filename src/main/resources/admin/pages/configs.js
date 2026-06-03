@@ -36,6 +36,7 @@ let publisherKey;
 let targetKey;
 let policyEvents;
 let mentionEvents;
+let loadSubscriberTargetCandidates;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -75,6 +76,7 @@ function bindContext(nextCtx) {
     targetKey,
     policyEvents,
     mentionEvents,
+    loadSubscriberTargetCandidates,
   } = ui);
 }
 
@@ -82,37 +84,74 @@ function pageRoot() {
   return root;
 }
 
+async function withButtonLoading(button, loadingText, task) {
+  const originalText = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = loadingText;
+  }
+  try {
+    return await task();
+  } finally {
+    if (button?.isConnected) {
+      button.disabled = false;
+      if (originalText !== undefined) button.textContent = originalText;
+    }
+  }
+}
+
 export async function mount(nextCtx) {
   bindContext(nextCtx);
+  document.addEventListener("click", configNavigationGuard, true);
+  window.addEventListener("beforeunload", configBeforeUnload);
   await loadConfigs(ctx.force);
+}
+
+export async function unmount(nextCtx) {
+  bindContext(nextCtx);
+  document.removeEventListener("click", configNavigationGuard, true);
+  window.removeEventListener("beforeunload", configBeforeUnload);
+  state.currentConfigDirty = false;
 }
 
 export async function handleAction(nextCtx, { action, button, id }) {
   bindContext(nextCtx);
   if (action === "select-config") {
+    if (!canDiscardConfigChanges()) return true;
     state.selectedConfigId = id;
     await loadConfigs(false);
     return true;
   }
   if (action === "refresh-config-detail") {
-    await renderConfigDetail(id);
-    notify("配置已刷新", false);
+    if (!canDiscardConfigChanges()) return true;
+    await withButtonLoading(button, "刷新中...", async () => {
+      await renderConfigDetail(id);
+      notify("配置已刷新", false);
+    });
     return true;
   }
   if (action === "restart-config-plugin") {
-    await restartCurrentConfigPlugin();
+    await withButtonLoading(button, "重启中...", restartCurrentConfigPlugin);
     return true;
   }
   if (action === "save-config") {
-    await saveCurrentConfig();
+    await withButtonLoading(button, "保存中...", saveCurrentConfig);
+    return true;
+  }
+  if (action === "jump-config-section") {
+    jumpConfigSection(button.dataset.sectionId);
+    return true;
+  }
+  if (action === "toggle-config-section") {
+    toggleConfigSection(button);
     return true;
   }
   if (action === "toggle-config-secret") {
-    await toggleConfigSecret(button);
+    await withButtonLoading(button, "•••", () => toggleConfigSecret(button));
     return true;
   }
   if (action === "add-command-permission") {
-    await openCommandPermissionModal();
+    await withButtonLoading(button, "打开中...", openCommandPermissionModal);
     return true;
   }
   if (action === "delete-command-permission") {
@@ -127,6 +166,21 @@ export async function handleAction(nextCtx, { action, button, id }) {
     return true;
   }
   return false;
+}
+
+function configNavigationGuard(event) {
+  if (!state.currentConfigDirty) return;
+  const leaving = event.target.closest?.("[data-nav], #refreshPage, #logout, #stopApplication");
+  if (!leaving) return;
+  if (canDiscardConfigChanges()) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}
+
+function configBeforeUnload(event) {
+  if (!state.currentConfigDirty) return;
+  event.preventDefault();
+  event.returnValue = "";
 }
 
 async function loadConfigs(force) {
@@ -160,6 +214,7 @@ async function renderConfigDetail(id) {
   const detail = await api(`/configs/${encodeURIComponent(id)}`);
   state.currentConfigDetail = detail;
   const sections = configSections(detail);
+  const sectionEntries = Object.entries(sections);
   const hasRestartFields = configHasRestartFields(detail);
   const target = $("configDetail");
   if (!target) return;
@@ -172,20 +227,29 @@ async function renderConfigDetail(id) {
         </div>
         <div class="toolbar-actions">
           ${detail.pluginId ? `<button class="secondary" id="restartConfigPlugin" data-action="restart-config-plugin" data-plugin-id="${attr(detail.pluginId)}" hidden>重启插件</button>` : ""}
-          <button data-action="save-config" data-id="${attr(detail.id)}">保存配置</button>
+          <span id="configDirtyBadge" class="config-dirty-badge" hidden>未保存</span>
+          <button id="saveConfigButton" data-action="save-config" data-id="${attr(detail.id)}">保存配置</button>
           <button class="secondary" data-action="refresh-config-detail" data-id="${attr(detail.id)}">刷新</button>
         </div>
       </div>
       <span class="sub-line">${esc((detail.schema && detail.schema.description) || detail.description || "当前配置内容")}</span>
       ${hasRestartFields ? `<div class="restart-note">⚠️ 标记的配置项保存后需要重启才会生效</div>` : ""}
+      ${sectionEntries.length > 1 ? `<div class="config-section-nav">
+        ${sectionEntries.map(([name], index) => `<button type="button" class="config-section-nav-button" data-action="jump-config-section" data-section-id="config-section-${index}">${esc(name)}</button>`).join("")}
+      </div>` : ""}
     </section>
-    ${Object.entries(sections).map(([name, fields]) => `
-      <section class="panel config-section" data-config-section>
-        <div class="panel-head"><h2>${esc(name)}</h2></div>
-        <div class="form-grid">${fields.map(field => configFieldHtml(detail, field)).join("")}</div>
+    ${sectionEntries.map(([name, fields], index) => `
+      <section id="config-section-${index}" class="panel config-section" data-config-section data-section-name="${attr(name)}">
+        <div class="panel-head">
+          <h2>${esc(name)}</h2>
+          <button type="button" class="secondary compact config-section-toggle" data-action="toggle-config-section">收起</button>
+        </div>
+        <div class="form-grid" data-config-section-body>${fields.map(field => configFieldHtml(detail, field)).join("")}</div>
       </section>`).join("")}`;
   wireConfigRestartWatcher(detail);
   wireConfigFieldVisibility(detail);
+  restoreConfigSectionCollapse(detail);
+  updateConfigDirtyState(detail);
 }
 
 function configSections(detail) {
@@ -202,14 +266,14 @@ function configHasRestartFields(detail) {
 }
 
 function configInputFor(field) {
-  return Array.from(document.querySelectorAll("[data-config-path]")).find(item => item.dataset.configPath === field.path);
+  return Array.from(pageRoot().querySelectorAll("[data-config-path]")).find(item => item.dataset.configPath === field.path);
 }
 
 function configComparableValue(detail, field) {
   const raw = detail.values[field.path];
   if (field.type === "BOOLEAN") return raw === true;
   if (field.type === "NUMBER") return Number(raw || 0);
-  if (field.type === "JSON") return displayConfigValue(raw).trim();
+  if (field.type === "JSON") return normalizeConfigJsonValue(raw);
   return displayConfigValue(raw);
 }
 
@@ -218,15 +282,85 @@ function currentConfigComparableValue(field) {
   if (!node) return null;
   if (field.type === "BOOLEAN") return node.checked;
   if (field.type === "NUMBER") return Number(node.value || 0);
-  if (field.type === "JSON") return node.value.trim();
+  if (field.type === "JSON") return normalizeConfigJsonValue(node.value);
   if (field.type === "SECRET" && node.dataset.secretOriginal !== undefined && node.value === node.dataset.secretOriginal) return "";
   return node.value;
+}
+
+function normalizeConfigJsonValue(raw) {
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== "string") return raw;
+  const text = raw.trim();
+  if (!text) return null;
+  try {
+    return JSON.parse(text);
+  } catch (_) {
+    return text;
+  }
 }
 
 function configRestartChanged(detail) {
   return (detail.schema.fields || [])
     .filter(field => field.restartRequired)
-    .some(field => JSON.stringify(currentConfigComparableValue(field)) !== JSON.stringify(configComparableValue(detail, field)));
+    .some(field => configFieldChanged(detail, field));
+}
+
+function configFieldChanged(detail, field) {
+  return JSON.stringify(currentConfigComparableValue(field)) !== JSON.stringify(configComparableValue(detail, field));
+}
+
+function configDirtyChanged(detail) {
+  return (detail.schema.fields || []).some(field => configFieldChanged(detail, field));
+}
+
+function canDiscardConfigChanges() {
+  const detail = state.currentConfigDetail;
+  if (!detail || !state.currentConfigDirty) return true;
+  return confirm("当前配置有未保存的修改，确定放弃这些修改吗？");
+}
+
+function updateConfigDirtyState(detail) {
+  const dirty = configDirtyChanged(detail);
+  state.currentConfigDirty = dirty;
+  const badge = $("configDirtyBadge");
+  if (badge) badge.hidden = !dirty;
+  const saveButton = $("saveConfigButton");
+  if (saveButton) saveButton.disabled = !dirty;
+}
+
+function jumpConfigSection(sectionId) {
+  const section = sectionId ? pageRoot().querySelector(`#${sectionId}`) : null;
+  section?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function configCollapseKey(detail, sectionName) {
+  return `${detail.id}\u001F${sectionName}`;
+}
+
+function collapsedConfigSections() {
+  if (!state.collapsedConfigSections) state.collapsedConfigSections = {};
+  return state.collapsedConfigSections;
+}
+
+function toggleConfigSection(button) {
+  const detail = state.currentConfigDetail;
+  const section = button.closest("[data-config-section]");
+  if (!detail || !section) return;
+  const body = section.querySelector("[data-config-section-body]");
+  const collapsed = !body.hidden;
+  body.hidden = collapsed;
+  button.textContent = collapsed ? "展开" : "收起";
+  collapsedConfigSections()[configCollapseKey(detail, section.dataset.sectionName || "")] = collapsed;
+}
+
+function restoreConfigSectionCollapse(detail) {
+  pageRoot().querySelectorAll("[data-config-section]").forEach(section => {
+    const body = section.querySelector("[data-config-section-body]");
+    const button = section.querySelector(".config-section-toggle");
+    const collapsed = !!collapsedConfigSections()[configCollapseKey(detail, section.dataset.sectionName || "")];
+    if (body) body.hidden = collapsed;
+    if (button) button.textContent = collapsed ? "展开" : "收起";
+  });
 }
 
 function updateConfigRestartButton(detail) {
@@ -237,9 +371,13 @@ function updateConfigRestartButton(detail) {
 }
 
 function wireConfigRestartWatcher(detail) {
-  document.querySelectorAll("[data-config-path]").forEach(node => {
-    node.addEventListener("input", () => updateConfigRestartButton(detail));
-    node.addEventListener("change", () => updateConfigRestartButton(detail));
+  pageRoot().querySelectorAll("[data-config-path]").forEach(node => {
+    const refresh = () => {
+      updateConfigRestartButton(detail);
+      updateConfigDirtyState(detail);
+    };
+    node.addEventListener("input", refresh);
+    node.addEventListener("change", refresh);
   });
   updateConfigRestartButton(detail);
 }
@@ -259,7 +397,7 @@ function wireConfigFieldVisibility(detail) {
       const current = currentConfigValueForPath(rule.path);
       wrapper.hidden = values.length > 0 ? !values.includes(current) : !current;
     });
-    document.querySelectorAll("[data-config-section]").forEach(section => {
+    pageRoot().querySelectorAll("[data-config-section]").forEach(section => {
       const wrappers = Array.from(section.querySelectorAll("[data-config-field-path]"));
       section.hidden = wrappers.length > 0 && wrappers.every(item => item.hidden);
     });
@@ -274,7 +412,7 @@ function wireConfigFieldVisibility(detail) {
 }
 
 function configFieldWrapperFor(path) {
-  return Array.from(document.querySelectorAll("[data-config-field-path]"))
+  return Array.from(pageRoot().querySelectorAll("[data-config-field-path]"))
     .find(item => item.dataset.configFieldPath === path);
 }
 
@@ -342,7 +480,7 @@ function configFieldHtml(detail, field) {
   if (field.path === "command.permissions") return commandPermissionsFieldHtml(detail, field);
   const raw = detail.values[field.path];
   const value = displayConfigValue(raw);
-  const fieldLabel = `${esc(field.label)}${field.restartRequired ? ` <span class="restart-mark" title="保存后需重启">⚠️</span>` : ""}`;
+  const fieldLabel = `${esc(field.label)}${field.required ? `<span class="required-mark">*</span>` : ""}${field.restartRequired ? ` <span class="restart-mark" title="保存后需重启">⚠️</span>` : ""}`;
   const labelHtml = `<label for="cfg-${attr(field.path)}">${fieldLabel}</label>`;
   const descriptionHtml = configFieldDescriptionHtml(field);
   if (field.type === "BOOLEAN") {
@@ -409,7 +547,10 @@ function setCommandPermissionRules(rules) {
   if (node) node.value = JSON.stringify(normalized);
   const table = $("commandPermissionTable");
   if (table) table.innerHTML = renderCommandPermissionTable(normalized);
-  if (state.currentConfigDetail) updateConfigRestartButton(state.currentConfigDetail);
+  if (state.currentConfigDetail) {
+    updateConfigRestartButton(state.currentConfigDetail);
+    updateConfigDirtyState(state.currentConfigDetail);
+  }
 }
 
 function normalizeCommandPermissionRule(rule) {
@@ -455,7 +596,7 @@ function wildcardText(value) {
 }
 
 async function openCommandPermissionModal() {
-  const targetPlatforms = await api("/subscriber-target-platforms").catch(() => []);
+  const targetPlatforms = await loadPermissionTargetPlatforms();
   const platformOptions = [{ platformId: "*", pluginName: "全部平台", supportedTypes: ["GROUP", "USER", "CHANNEL", "OTHER"] }]
     .concat(targetPlatforms)
     .concat([{ platformId: "__manual__", pluginName: "手动输入", supportedTypes: ["GROUP", "USER", "CHANNEL", "OTHER"] }]);
@@ -463,11 +604,17 @@ async function openCommandPermissionModal() {
   openModal("添加权限规则", `
     <div class="form-grid">
       <div class="field"><label>目标平台</label><select id="permPlatform">${platformOptions.map(platform => `<option value="${attr(platform.platformId)}">${esc(commandPermissionPlatformOptionText(platform))}</option>`).join("")}</select></div>
-      <div class="field" id="permPlatformManualWrap" hidden><label>平台 ID</label><input id="permPlatformManual"></div>
+      <div class="field" id="permPlatformManualWrap" hidden><label>平台 ID<span class="required-mark">*</span></label><input id="permPlatformManual"></div>
       <div class="field"><label>目标类型</label><select id="permTargetKind"></select></div>
-      <div class="field full" id="permTargetCandidateWrap" hidden><label>可用目标</label><select id="permTargetCandidate"></select></div>
+      <div class="field full" id="permTargetCandidateWrap" hidden>
+        <div class="field-head">
+          <label>可用目标</label>
+          <button type="button" id="permRefreshTargets" class="choice-refresh-button compact">刷新目标</button>
+        </div>
+        <select id="permTargetCandidate"></select>
+      </div>
       <div class="field full" id="permTargetManualWrap" hidden><label>目标 ID</label><input id="permTargetId" value="*"></div>
-      <div class="field"><label>发送者 ID</label><input id="permSenderId" placeholder="填写用户 ID，或 * 表示全部"></div>
+      <div class="field"><label>发送者 ID<span class="required-mark">*</span></label><input id="permSenderId" value="*" placeholder="填写用户 ID，或 * 表示全部"></div>
       <div class="field"><label>角色</label><select id="permRole"><option value="ADMIN">管理员</option><option value="USER">普通用户</option></select></div>
       <div class="field full">
         <details>
@@ -497,9 +644,9 @@ async function openCommandPermissionModal() {
       ? ["*"]
       : ["*"].concat((platform && platform.supportedTypes && platform.supportedTypes.length) ? platform.supportedTypes : ["GROUP", "USER", "CHANNEL", "OTHER"]);
     $("permTargetKind").innerHTML = kinds.map(kind => `<option value="${attr(kind)}">${esc(kind === "*" ? "全部类型" : label(kind))}</option>`).join("");
-    await refreshTargets();
+    await refreshTargets(false);
   };
-  const refreshTargets = async () => {
+  const refreshTargets = async (force = false) => {
     const rawPlatformId = $("permPlatform").value;
     const platformId = permissionPlatformValue();
     const kind = $("permTargetKind").value;
@@ -510,37 +657,63 @@ async function openCommandPermissionModal() {
     setPermissionAdvancedFields(null);
     if (rawPlatformId === "*" || kind === "*") {
       $("permTargetId").value = "*";
-      $("permTargetStatus").textContent = "当前规则匹配全部目标";
+      setPermissionTargetStatus("当前规则匹配全部目标");
       return;
     }
     if (!platformId) {
       $("permTargetManualWrap").hidden = false;
-      $("permTargetStatus").textContent = "请填写平台 ID";
+      setPermissionTargetStatus("请填写平台 ID");
       return;
     }
-    $("permTargetStatus").textContent = "正在获取可用目标...";
+    setPermissionTargetStatus("正在获取可用目标...", true);
+    $("permRefreshTargets").disabled = true;
     try {
-      targetCandidates = await api(`/subscriber-targets?platformId=${encodeURIComponent(platformId)}&type=${encodeURIComponent(kind)}`);
-    } catch (_) {
+      const result = await loadSubscriberTargetCandidates(platformId, kind, force);
+      targetCandidates = result.items || [];
+      if (result.stale) {
+        setPermissionTargetStatus(`接口暂不可用，显示 ${targetCandidates.length} 个缓存目标`);
+      } else if (result.fromCache) {
+        setPermissionTargetStatus(`已从缓存读取 ${targetCandidates.length} 个目标`);
+      } else {
+        setPermissionTargetStatus(`已获取 ${targetCandidates.length} 个目标`);
+      }
+    } catch (error) {
       targetCandidates = [];
+      setPermissionTargetStatus(error.message || "可用目标获取失败");
+    } finally {
+      $("permRefreshTargets").disabled = false;
     }
     if (targetCandidates.length) {
       $("permTargetCandidateWrap").hidden = false;
       $("permTargetCandidate").innerHTML = `<option value="-1">全部目标</option>` + targetCandidates.map((target, index) =>
         `<option value="${index}">${esc(target.name || target.externalId)} · ${esc(target.externalId)}</option>`
       ).join("");
-      $("permTargetStatus").textContent = `已获取 ${targetCandidates.length} 个目标`;
       setPermissionAdvancedFields(null);
       $("permTargetCandidate").onchange = () => setPermissionAdvancedFields(targetCandidates[Number($("permTargetCandidate").value)] || null);
     } else {
       $("permTargetManualWrap").hidden = false;
-      $("permTargetStatus").textContent = "未获取到目标，请手动填写目标 ID";
+      setPermissionTargetStatus("未获取到可用目标，请手动填写目标 ID");
     }
   };
-  $("permPlatform").onchange = refreshKinds;
-  $("permPlatformManual").oninput = refreshTargets;
-  $("permTargetKind").onchange = refreshTargets;
+  $("permPlatform").onchange = () => refreshKinds().catch(handleError);
+  $("permPlatformManual").oninput = () => refreshTargets(false).catch(handleError);
+  $("permTargetKind").onchange = () => refreshTargets(false).catch(handleError);
+  $("permRefreshTargets").onclick = () => refreshTargets(true).catch(handleError);
   await refreshKinds();
+}
+
+async function loadPermissionTargetPlatforms() {
+  if (state.cache.subscriberTargetPlatforms) return state.cache.subscriberTargetPlatforms;
+  state.cache.subscriberTargetPlatforms = await api("/subscriber-target-platforms").catch(() => []);
+  return state.cache.subscriberTargetPlatforms;
+}
+
+function setPermissionTargetStatus(text, loading = false) {
+  const target = $("permTargetStatus");
+  if (!target) return;
+  target.innerHTML = loading
+    ? `<span class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</span>`
+    : esc(text);
 }
 
 function commandPermissionPlatformOptionText(platform) {

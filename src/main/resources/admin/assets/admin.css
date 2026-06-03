@@ -1614,13 +1614,20 @@
     }
     .config-list-panel {
       position: sticky;
-      top: 78px;
+      top: 0px;
       display: grid;
+      grid-template-rows: auto minmax(0, 1fr);
       gap: 10px;
+      max-height: calc(100dvh - 96px);
+      overflow: hidden;
     }
     .config-list {
       display: grid;
       gap: 8px;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding-right: 2px;
     }
     .config-item {
       width: 100%;
@@ -1653,6 +1660,47 @@
     .config-section {
       padding-top: 20px;
       padding-bottom: 20px;
+      animation: plugin-card-in 0.16s ease both;
+      scroll-margin-top: 88px;
+    }
+    .config-section-nav {
+      display: flex;
+      gap: 7px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .config-section-nav-button {
+      min-height: 28px;
+      padding: 4px 9px;
+      border-color: #b9cffc;
+      background: #eef4ff;
+      color: #1d4ed8;
+      font-size: 12px;
+    }
+    .config-section-toggle {
+      border-color: #b9ded8;
+      background: #eef8f6;
+      color: var(--accent);
+    }
+    .config-dirty-badge {
+      min-height: 28px;
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 9px;
+      border: 1px solid #f0c98d;
+      border-radius: 999px;
+      background: #fff8ea;
+      color: var(--amber);
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .config-section .inline-note {
+      padding: 7px 9px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-soft);
+      line-height: 1.45;
     }
     .command-permission-field {
       grid-column: 1 / -1;
@@ -1943,7 +1991,14 @@
       .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .form-grid { grid-template-columns: 1fr; }
       .config-layout { grid-template-columns: 1fr; }
-      .config-list-panel { position: static; }
+      .config-list-panel {
+        position: static;
+        max-height: none;
+        overflow: visible;
+      }
+      .config-list {
+        max-height: 260px;
+      }
       .plugin-filter-bar input,
       .plugin-filter-bar select {
         width: 100%;
