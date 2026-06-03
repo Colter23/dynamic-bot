@@ -61,6 +61,87 @@ class PluginCatalogServiceTest {
     }
 
     @Test
+    fun catalogShouldWrapRemoteDownloadFailure() {
+        val service = PluginCatalogService(
+            configProvider = { PluginCatalogConfig(url = "https://example.com/catalog.json") },
+            pluginProvider = { emptyList() },
+            pluginDirPathProvider = { createTempDirectory("plugin-catalog-missing").toString() },
+            pluginInstaller = { _, id, version, _, _ ->
+                PluginInstallResult(
+                    pluginId = id,
+                    success = true,
+                    changed = true,
+                    pluginState = PluginState.ACTIVE,
+                    newVersion = version,
+                    message = "ok",
+                )
+            },
+            downloader = object : PluginCatalogDownloader {
+                override fun downloadToByteArray(url: String, timeoutSeconds: Double, maxBytes: Long): ByteArray {
+                    throw java.io.FileNotFoundException("404")
+                }
+
+                override fun downloadToFile(
+                    url: String,
+                    destination: File,
+                    timeoutSeconds: Double,
+                    maxBytes: Long,
+                ): PluginCatalogDownloadResult {
+                    throw java.io.FileNotFoundException("404")
+                }
+            },
+        )
+
+        val error = assertFailsWith<IllegalStateException> {
+            service.catalog()
+        }
+
+        assertTrue(error.message!!.contains("插件目录获取失败"))
+    }
+
+    @Test
+    fun catalogShouldFallbackToLocalDefaultCatalogWhenOfficialUrlFails() {
+        val localDir = createTempDirectory("plugin-catalog-local").toFile()
+        localDir.resolve("catalog.json").writeText(
+            catalogJson(item("demo-plugin", "1.0.0", sha256 = "a".repeat(64))),
+            Charsets.UTF_8,
+        )
+        val service = PluginCatalogService(
+            configProvider = { PluginCatalogConfig() },
+            pluginProvider = { emptyList() },
+            pluginDirPathProvider = { localDir.path },
+            pluginInstaller = { _, id, version, _, _ ->
+                PluginInstallResult(
+                    pluginId = id,
+                    success = true,
+                    changed = true,
+                    pluginState = PluginState.ACTIVE,
+                    newVersion = version,
+                    message = "ok",
+                )
+            },
+            downloader = object : PluginCatalogDownloader {
+                override fun downloadToByteArray(url: String, timeoutSeconds: Double, maxBytes: Long): ByteArray {
+                    throw java.io.FileNotFoundException("404")
+                }
+
+                override fun downloadToFile(
+                    url: String,
+                    destination: File,
+                    timeoutSeconds: Double,
+                    maxBytes: Long,
+                ): PluginCatalogDownloadResult {
+                    throw java.io.FileNotFoundException("404")
+                }
+            },
+        )
+
+        val response = service.catalog()
+
+        assertEquals("demo-plugin", response.plugins.single().id)
+    }
+
+    @Test
     fun installShouldDownloadVerifyJarAndCallInstaller() {
         val jarBytes = pluginJarBytes(id = "demo-plugin", version = "1.0.0")
         val catalog = catalogJson(

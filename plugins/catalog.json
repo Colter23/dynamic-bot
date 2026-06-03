@@ -1,0 +1,41 @@
+{
+  "schemaVersion": 1,
+  "plugins": [
+    {
+      "id": "bilibili-publisher",
+      "name": "Bilibili 动态源插件",
+      "version": "0.0.2",
+      "description": "检测 Bilibili 动态、开播和下播事件，支持发布者查询、登录状态和订阅联动。",
+      "apiVersion": "4.0.0",
+      "downloadUrl": "https://github.com/Colter23/dynamic-bot-bilibili/releases/download/v0.0.2/dynamic-bot-bilibili-0.0.1-all.jar",
+      "sha256": "dad1eff26f9f4852d83e7c5535b03bf523d54ace483170fd3034f6bbba2ee471",
+      "sizeBytes": 12187881,
+      "homepageUrl": "https://github.com/Colter23/dynamic-bot-bilibili",
+      "releaseNotesUrl": "https://github.com/Colter23/dynamic-bot-bilibili/releases/tag/v0.0.2",
+      "capabilities": [
+        "PUBLISHER_SOURCE",
+        "PUBLISHER_LOOKUP",
+        "PUBLISHER_FOLLOW",
+        "PUBLISHER_LOGIN",
+        "CONFIGURABLE"
+      ]
+    },
+    {
+      "id": "onebot-gateway",
+      "name": "OneBot 网关插件",
+      "version": "0.0.1",
+      "description": "通过正向或反向 WebSocket 连接 OneBot，实现消息投递和命令接收。",
+      "apiVersion": "4.0.0",
+      "downloadUrl": "https://github.com/Colter23/dynamic-bot-onebot/releases/download/v0.0.1/dynamic-bot-onebot-0.0.1-all.jar",
+      "sha256": "6de01b6ad9f7704b4fda56c7ce1378ddffb04da9a932702d5ec4c859a8ba3900",
+      "sizeBytes": 13798959,
+      "homepageUrl": "https://github.com/Colter23/dynamic-bot-onebot",
+      "releaseNotesUrl": "https://github.com/Colter23/dynamic-bot-onebot/releases/tag/v0.0.1",
+      "capabilities": [
+        "MESSAGE_SINK",
+        "COMMAND_CONTRIBUTOR",
+        "CONFIGURABLE"
+      ]
+    }
+  ]
+}

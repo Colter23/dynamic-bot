@@ -111,11 +111,16 @@ public class PluginCatalogService(
                 ?.takeIf { !force && it.url == url && retryNow < it.expiresAt(config) }
                 ?.let { return@synchronized it }
 
-            val bytes = downloader.downloadToByteArray(
-                url = url,
-                timeoutSeconds = config.downloadTimeoutSeconds,
-                maxBytes = CATALOG_MAX_BYTES,
-            )
+            val bytes = try {
+                downloader.downloadToByteArray(
+                    url = url,
+                    timeoutSeconds = config.downloadTimeoutSeconds,
+                    maxBytes = CATALOG_MAX_BYTES,
+                )
+            } catch (e: Exception) {
+                localDefaultCatalogBytes(config)?.let { it }
+                    ?: throw IllegalStateException("插件目录获取失败：${e.message ?: e::class.simpleName ?: "未知错误"}", e)
+            }
             val text = bytes.toString(Charsets.UTF_8)
             val document = try {
                 json.decodeFromString<PluginCatalogDocument>(text)
@@ -138,12 +143,16 @@ public class PluginCatalogService(
         jarFile.delete()
 
         return try {
-            val result = downloader.downloadToFile(
-                url = item.downloadUrl,
-                destination = jarFile,
-                timeoutSeconds = config.downloadTimeoutSeconds,
-                maxBytes = config.maxDownloadBytes,
-            )
+            val result = try {
+                downloader.downloadToFile(
+                    url = item.downloadUrl,
+                    destination = jarFile,
+                    timeoutSeconds = config.downloadTimeoutSeconds,
+                    maxBytes = config.maxDownloadBytes,
+                )
+            } catch (e: Exception) {
+                throw IllegalStateException("插件下载失败：pluginId=${item.id}，${e.message ?: e::class.simpleName ?: "未知错误"}", e)
+            }
             require(result.sha256.equals(item.sha256, ignoreCase = true)) {
                 "插件下载校验失败：pluginId=${item.id}，期望 sha256=${item.sha256}，实际 sha256=${result.sha256}"
             }
@@ -255,6 +264,12 @@ public class PluginCatalogService(
             require(SHA256_REGEX.matches(item.sha256)) { "插件 ${item.id} 的 sha256 无效" }
             require(item.sizeBytes > 0) { "插件 ${item.id} 的 sizeBytes 必须大于 0" }
         }
+    }
+
+    private fun localDefaultCatalogBytes(config: PluginCatalogConfig): ByteArray? {
+        if (config.url.trim() != PluginCatalogConfig.DEFAULT_URL) return null
+        val file = File(pluginDirPathProvider()).resolve("catalog.json")
+        return file.takeIf { it.isFile }?.readBytes()
     }
 
     private fun CachedCatalog.expiresAt(config: PluginCatalogConfig): Long {
