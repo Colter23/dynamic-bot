@@ -1,81 +1,19 @@
-const $ = id => document.getElementById(id);
-
 let ctx;
 let root;
 let api;
-let apiBlob;
 let state;
-let ui;
-let invalidate;
-let setPage;
-let loadPage;
-let handleError;
-let hydrateMediaImages;
-let releaseMediaObjectUrls;
-let query;
-let esc;
-let attr;
 let fmtTime;
 let fmtBytes;
 let fmtDuration;
-let label;
-let eventLabel;
-let pill;
-let tags;
 let cell;
-let mediaImage;
-let identity;
-let themeSwatch;
-let renderTable;
-let notify;
-let openModal;
-let closeModal;
-let eventTypes;
-let blockKinds;
-let publisherKey;
-let targetKey;
-let policyEvents;
-let mentionEvents;
+let esc;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
   root = ctx.root;
   api = ctx.api;
-  apiBlob = ctx.apiBlob;
   state = ctx.state;
-  ui = ctx.ui;
-  invalidate = ctx.invalidate;
-  setPage = ctx.setPage;
-  loadPage = ctx.loadPage;
-  handleError = ctx.handleError;
-  hydrateMediaImages = ctx.hydrateMediaImages;
-  releaseMediaObjectUrls = ctx.releaseMediaObjectUrls;
-  query = ctx.query;
-  ({
-    esc,
-    attr,
-    fmtTime,
-    fmtBytes,
-    fmtDuration,
-    label,
-    eventLabel,
-    pill,
-    tags,
-    cell,
-    mediaImage,
-    identity,
-    themeSwatch,
-    renderTable,
-    notify,
-    openModal,
-    closeModal,
-    eventTypes,
-    blockKinds,
-    publisherKey,
-    targetKey,
-    policyEvents,
-    mentionEvents,
-  } = ui);
+  ({ esc, fmtTime, fmtBytes, fmtDuration, cell } = ctx.ui);
 }
 
 function pageRoot() {
@@ -87,32 +25,88 @@ export async function mount(nextCtx) {
   await loadSystem(ctx.force);
 }
 
-export async function handleAction() {
+export async function handleAction(nextCtx, _payload) {
+  bindContext(nextCtx);
   return false;
 }
 
 async function loadSystem(force) {
   if (force || !state.cache.system) state.cache.system = await api("/system/status");
   const s = state.cache.system;
+  const memoryPercent = Math.max(0, Math.min(100, Math.round((Number(s.usedMemoryBytes || 0) / Math.max(Number(s.maxMemoryBytes || 1), 1)) * 100)));
+  const memoryMax = fmtBytes(s.maxMemoryBytes);
   pageRoot().innerHTML = `
-    <section class="page">
-      <div class="stats">
-        ${stat("运行时间", fmtDuration(s.uptimeMs), fmtTime(s.startedAtEpochMillis, true))}
-        ${stat("内存", fmtBytes(s.usedMemoryBytes), "已用 / " + fmtBytes(s.maxMemoryBytes))}
-        ${stat("CPU", s.availableProcessors, "可用处理器")}
-        ${stat("后台", s.webAdminPort, s.webAdminHost)}
+    <section class="page system-page">
+      <div class="grid system-grid">
+        <section class="panel half system-overview">
+          <div class="panel-head">
+            <h2>运行概览</h2>
+          </div>
+          <div class="stats system-stats">
+            ${stat("运行时间", fmtDuration(s.uptimeMs), fmtTime(s.startedAtEpochMillis, true))}
+            ${stat("堆内存", fmtBytes(s.usedMemoryBytes), `${memoryPercent}% / ${memoryMax}`)}
+            ${stat("总内存占用", fmtBytes(s.totalMemoryBytes), "可用 " + fmtBytes(s.freeMemoryBytes))}
+            ${stat("后台", s.webAdminPort, s.webAdminHost)}
+          </div>
+          <div class="system-meter">
+            <div class="system-meter-head">
+              <span>堆内存占用</span>
+              <strong>${memoryPercent}%</strong>
+            </div>
+            <div class="system-meter-track" aria-hidden="true">
+              <span style="width:${memoryPercent}%"></span>
+            </div>
+            <div class="system-meter-foot">
+              <span>已用 ${esc(fmtBytes(s.usedMemoryBytes))}</span>
+              <span>上限 ${esc(memoryMax)}</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel half system-path-panel">
+          <div class="panel-head">
+            <h2>环境与路径</h2>
+          </div>
+          ${pathList([
+            {
+              key: "database",
+              name: "数据库路径",
+              value: s.databasePath || "-",
+              hint: s.databasePath ? "当前进程使用的持久化存储" : "未显示数据库路径",
+            },
+            {
+              key: "config",
+              name: "主配置路径",
+              value: s.mainConfigPath,
+              hint: "主项目配置文件",
+            },
+            {
+              key: "java",
+              name: "Java / OS",
+              value: `${s.javaVersion} / ${s.osName}`,
+              hint: "运行环境",
+            },
+            {
+              key: "web",
+              name: "后台地址",
+              value: `${s.webAdminHost}:${s.webAdminPort}`,
+              hint: s.webAdminEnabled ? "后台服务正在监听" : "后台服务未启用",
+            },
+          ])}
+        </section>
       </div>
-      <section class="panel full">
-        <div class="panel-head"><h2>路径</h2></div>
-        ${renderTable([s], [
-          { title: "数据库", render: row => `<span class="sub-line">${esc(row.databasePath || "-")}</span>` },
-          { title: "主配置", render: row => `<span class="sub-line">${esc(row.mainConfigPath)}</span>` },
-          { title: "Java", render: row => cell(row.javaVersion, row.osName) }
-        ])}
-      </section>
     </section>`;
 }
 
 function stat(title, value, sub) {
   return `<div class="stat"><b>${esc(value)}</b><span>${esc(title)} · ${esc(sub || "")}</span></div>`;
+}
+
+function pathList(rows) {
+  return `<div class="system-path-list">${
+    rows.map(row => `<div class="system-path-item">
+      <div>${cell(row.name, row.hint)}</div>
+      <span class="system-path-value">${esc(row.value)}</span>
+    </div>`).join("")
+  }</div>`;
 }

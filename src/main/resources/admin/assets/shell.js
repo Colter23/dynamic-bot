@@ -9,7 +9,7 @@ const $ = id => document.getElementById(id);
       messages: ["消息记录", "投递结果与失败诊断", "/admin/pages/messages.html", "/admin/pages/messages.js"],
       logs: ["日志查看", "进程内实时日志", "/admin/pages/logs.html", "/admin/pages/logs.js"],
       configs: ["配置", "主项目与插件配置", "/admin/pages/configs.html", "/admin/pages/configs.js"],
-      system: ["系统设置", "运行信息与操作", "/admin/pages/system.html", "/admin/pages/system.js"]
+      system: ["系统维护", "运行信息与维护", "/admin/pages/system.html", "/admin/pages/system.js"]
     };
     const state = {
       token: localStorage.getItem(tokenKey) || "",
@@ -345,6 +345,13 @@ const $ = id => document.getElementById(id);
       closeModal();
       showLogin(message || "", !!message);
     }
+    async function stopApplication() {
+      if (!(await canLeaveActivePage())) return false;
+      if (!confirm("确定停止主项目吗？")) return false;
+      const result = await api("/system/stop", { method: "POST" });
+      notify(result.message, false);
+      return true;
+    }
 
     function setPage(page) {
       return setPageAsync(page).catch(handleError);
@@ -553,6 +560,10 @@ const $ = id => document.getElementById(id);
           await setPage(button.dataset.page);
           return;
         }
+        if (action === "stop-application") {
+          await stopApplication();
+          return;
+        }
         if (action === "refresh-current") {
           if (!(await canLeaveActivePage())) return;
           const keysByPage = {
@@ -625,12 +636,7 @@ const $ = id => document.getElementById(id);
     $("modalBackdrop").addEventListener("click", event => {
       if (event.target === $("modalBackdrop")) closeModal();
     });
-    $("stopApplication").onclick = async () => {
-      if (!(await canLeaveActivePage())) return;
-      if (!confirm("确定停止主项目吗？")) return;
-      const result = await api("/system/stop", { method: "POST" });
-      notify(result.message, false);
-    };
+    $("stopApplication").onclick = stopApplication;
 
     if (state.token) {
       api("/dashboard").then(showApp).catch(() => showLogin("已保存的 token 无效", true));
