@@ -128,6 +128,9 @@
       display: grid;
       gap: 4px;
       padding: 12px 10px;
+      min-height: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
     }
     .nav button {
       display: flex;
@@ -150,6 +153,18 @@
       gap: 8px;
       padding: 12px 10px 16px;
       border-top: 1px solid var(--line);
+    }
+    .sidebar-footer button {
+      width: 100%;
+    }
+    .sidebar-footer .sidebar-danger {
+      border-color: #f1b8b2;
+      background: #fff1f0;
+      color: var(--red);
+    }
+    .sidebar-footer .sidebar-danger:hover {
+      background: #fdeceb;
+      filter: none;
     }
     .workspace {
       min-width: 0;
