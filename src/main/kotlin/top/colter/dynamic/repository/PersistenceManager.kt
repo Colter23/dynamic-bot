@@ -20,8 +20,8 @@ import top.colter.dynamic.table.MessageOutboxTable
 import top.colter.dynamic.table.PublisherDrawThemeTable
 import top.colter.dynamic.table.PublisherLiveStatusTable
 import top.colter.dynamic.table.PublisherTable
-import top.colter.dynamic.table.SubscriberTable
 import top.colter.dynamic.table.SourceCursorTable
+import top.colter.dynamic.table.SubscriberTable
 import top.colter.dynamic.table.SubscriptionTable
 
 private val logger = loggerFor<PersistenceManager>()
@@ -59,6 +59,16 @@ public object PersistenceManager {
         }
     }
 
+    private fun JdbcTransaction.executeRequiredSchemaStatements(vararg tables: Table) {
+        val statements = MigrationUtils.statementsRequiredForDatabaseMigration(*tables, withLogs = false)
+        statements.forEach { statement ->
+            exec(statement)
+        }
+        if (statements.isNotEmpty()) {
+            logger.info { "数据库结构已对齐：statements=${statements.size}" }
+        }
+    }
+
     private fun JdbcTransaction.runDatabaseMigrations() {
         val appliedIds = SchemaMigrationTable.selectAll()
             .map { it[SchemaMigrationTable.id] }
@@ -77,16 +87,6 @@ public object PersistenceManager {
                     "数据库迁移已完成：id=${migration.id}，description=${migration.description.ifBlank { "-" }}"
                 }
             }
-    }
-
-    private fun JdbcTransaction.executeRequiredSchemaStatements(vararg tables: Table) {
-        val statements = MigrationUtils.statementsRequiredForDatabaseMigration(*tables, withLogs = false)
-        statements.forEach { statement ->
-            exec(statement)
-        }
-        if (statements.isNotEmpty()) {
-            logger.info { "数据库结构已对齐：statements=${statements.size}" }
-        }
     }
 }
 
@@ -175,18 +175,7 @@ private val DATABASE_MIGRATIONS: List<DatabaseMigration> = listOf(
                 """.trimIndent(),
             )
         }
-    },
-    DatabaseMigration(
-        id = "message-delivery-sink-account-id",
-        description = "为 message_delivery 增加实际发送账号 sink_account_id",
-    ) {
-        if (tableExists("message_delivery") && !columnExists("message_delivery", "sink_account_id")) {
-            exec(
-                "ALTER TABLE ${quoteIdentifier("message_delivery")} " +
-                    "ADD COLUMN ${quoteIdentifier("sink_account_id")} VARCHAR(120) NULL",
-            )
-        }
-    },
+    }
 )
 
 private fun quoteIdentifier(identifier: String): String {

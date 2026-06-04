@@ -30,6 +30,7 @@ import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.core.plugin.MessageTargetCandidate
+import top.colter.dynamic.core.plugin.MessageTargetSource
 import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.plugin.PluginInfo
 import top.colter.dynamic.plugin.PluginManager
@@ -591,16 +592,30 @@ public class AdminService(
 
     public fun subscriberTargetPlatforms(): List<SubscriberTargetPlatformDto> {
         return messageSinkProvider()
-            .map { handle ->
+            .flatMap { handle ->
                 val info = handle.info
                 val sink = handle.instance
-                val platformId = sink.platformId.value
+                sink.supportedTargetPlatforms.map { platformId ->
+                    SinkPlatformEntry(
+                        platformId = platformId.value,
+                        pluginId = info.descriptor.id,
+                        pluginName = info.descriptor.name,
+                        pluginState = info.state.name,
+                        transportId = sink.transportId,
+                        supportedTypes = sink.supportedTargetKinds.map { it.name }.sorted(),
+                    )
+                }
+            }
+            .groupBy { it.platformId }
+            .map { (platformId, entries) ->
                 SubscriberTargetPlatformDto(
                     platformId = platformId,
-                    pluginId = info.descriptor.id,
-                    pluginName = info.descriptor.name,
-                    pluginState = info.state.name,
-                    supportedTypes = sink.supportedTargetKinds.map { it.name }.sorted(),
+                    pluginId = entries.joinToString(",") { it.pluginId },
+                    pluginName = entries.joinToString("、") { it.pluginName },
+                    pluginState = entries.map { it.pluginState }.distinct().joinToString(","),
+                    supportedTypes = entries.flatMap { it.supportedTypes }.distinct().sorted(),
+                    transportIds = entries.map { it.transportId }.distinct().sorted(),
+                    transportCount = entries.map { it.transportId }.distinct().size,
                 )
             }
             .sortedWith(compareBy<SubscriberTargetPlatformDto> { it.platformId }.thenBy { it.pluginId })
@@ -609,13 +624,15 @@ public class AdminService(
     public suspend fun subscriberTargets(platformId: String?, type: String?): List<SubscriberTargetDto> {
         val normalizedPlatform = platformId?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
         val targetType = type?.trim()?.takeIf { it.isNotBlank() }?.let { parseEnum<TargetKind>(it, "type") }
-        val targets = mutableListOf<SubscriberTargetDto>()
+        val targets = mutableListOf<MessageTargetWithPlugin>()
         messageSinkProvider()
             .forEach { handle ->
                 val info = handle.info
                 val sink = handle.instance
-                val sinkPlatform = sink.platformId.value
-                if (normalizedPlatform != null && !sinkPlatform.equals(normalizedPlatform, ignoreCase = true)) {
+                if (normalizedPlatform != null && sink.supportedTargetPlatforms.none {
+                        it.value.equals(normalizedPlatform, ignoreCase = true)
+                    }
+                ) {
                     return@forEach
                 }
                 if (targetType != null && sink.supportedTargetKinds.isNotEmpty() && targetType !in sink.supportedTargetKinds) {
@@ -626,9 +643,12 @@ public class AdminService(
                         (normalizedPlatform == null || target.address.platformId.value.equals(normalizedPlatform, ignoreCase = true)) &&
                             (targetType == null || target.address.kind == targetType)
                     }
-                    .map { target -> target.toDto(info) }
+                    .map { target -> MessageTargetWithPlugin(target, info) }
             }
         return targets
+            .groupBy { it.candidate.address.stableValue() }
+            .values
+            .map { group -> group.toSubscriberTargetDto() }
             .sortedWith(compareBy<SubscriberTargetDto> { it.platformId }.thenBy { it.targetKind }.thenBy { it.name }.thenBy { it.externalId })
     }
 
@@ -1160,8 +1180,7 @@ public class AdminService(
     private suspend fun resolveSubscriberTarget(address: TargetAddress): MessageTargetCandidate? {
         for (handle in messageSinkProvider()) {
             val sink = handle.instance
-            if (!sink.platformId.value.equals(address.platformId.value, ignoreCase = true)) continue
-            if (sink.supportedTargetKinds.isNotEmpty() && address.kind !in sink.supportedTargetKinds) continue
+            if (!sink.supportsTarget(address)) continue
             val candidate = sink.resolveMessageTarget(address) ?: continue
             if (candidate.address == address) return candidate
         }
@@ -1270,17 +1289,35 @@ private fun Subscriber.toDto(
     linkParseConfigSource = if (linkParseTriggerMode == null) "FALLBACK" else "CUSTOM",
 )
 
-private fun MessageTargetCandidate.toDto(info: PluginInfo): SubscriberTargetDto = SubscriberTargetDto(
-    platformId = address.platformId.value,
-    targetKind = address.kind.name,
-    externalId = address.externalId,
-    scopeId = address.scopeId,
-    threadId = address.threadId,
-    accountId = address.accountId,
-    name = name,
-    avatarUri = avatar?.uri,
-    sourcePluginId = info.descriptor.id,
-    sourcePluginName = info.descriptor.name,
+private fun Collection<MessageTargetWithPlugin>.toSubscriberTargetDto(): SubscriberTargetDto {
+    val first = first()
+    val candidate = first.candidate
+    val sources = flatMap { it.candidate.sources }
+        .distinctBy { it.routeId }
+        .sortedWith(compareBy<MessageTargetSource> { it.transportId }.thenBy { it.accountId })
+    return SubscriberTargetDto(
+        platformId = candidate.address.platformId.value,
+        targetKind = candidate.address.kind.name,
+        externalId = candidate.address.externalId,
+        scopeId = candidate.address.scopeId,
+        threadId = candidate.address.threadId,
+        accountId = candidate.address.accountId,
+        name = candidate.name,
+        avatarUri = candidate.avatar?.uri,
+        sourcePluginId = first.info.descriptor.id,
+        sourcePluginName = first.info.descriptor.name,
+        sourceCount = sources.size,
+        sources = sources.map { it.toDto() },
+    )
+}
+
+private fun MessageTargetSource.toDto(): SubscriberTargetSourceDto = SubscriberTargetSourceDto(
+    routeId = routeId,
+    transportId = transportId,
+    transportName = transportName,
+    accountId = accountId,
+    accountName = accountName,
+    state = state.name,
 )
 
 private fun Subscription.toDto(
@@ -1339,6 +1376,7 @@ private fun MessageDelivery.toDto(): MessageDeliveryDto = MessageDeliveryDto(
     status = status.name,
     attempts = attempts,
     sinkMessageId = sinkMessageId,
+    sinkRouteId = sinkRouteId,
     sinkAccountId = sinkAccountId,
     lastError = lastError,
     nextAttemptAtEpochSeconds = nextAttemptAtEpochSeconds,
@@ -1366,6 +1404,20 @@ private fun Map<String, Int>.toStateCounts(total: Long): List<StateCountDto> {
 private data class CachedLoginState(
     val result: PublisherLoginResult,
     val checkedAtEpochMillis: Long,
+)
+
+private data class SinkPlatformEntry(
+    val platformId: String,
+    val pluginId: String,
+    val pluginName: String,
+    val pluginState: String,
+    val transportId: String,
+    val supportedTypes: List<String>,
+)
+
+private data class MessageTargetWithPlugin(
+    val candidate: MessageTargetCandidate,
+    val info: PluginInfo,
 )
 
 private fun UpsertResult<*>.operationLabel(): String {

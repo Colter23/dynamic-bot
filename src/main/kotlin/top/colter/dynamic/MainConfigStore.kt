@@ -11,6 +11,7 @@ import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.plugin.MessageSinkRoutingStrategy
 import top.colter.dynamic.admin.AdminLogBuffer
 import top.colter.dynamic.draw.DrawLayoutRegistry
 import top.colter.dynamic.draw.DrawThemeFactory
@@ -404,6 +405,45 @@ public object MainConfigForms {
                     restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
+                    path = "messageRouting.defaultPolicy.strategy",
+                    label = "默认账号路由策略",
+                    type = ConfigFieldType.SELECT,
+                    section = "消息路由",
+                    description = "未给真实平台单独配置时使用的账号选择策略。",
+                    options = messageRoutingStrategyOptions(),
+                    required = true,
+                ),
+                ConfigFieldSpec(
+                    path = "messageRouting.defaultPolicy.primaryAccountId",
+                    label = "默认主 Bot 账号",
+                    type = ConfigFieldType.TEXT,
+                    section = "消息路由",
+                    description = "留空时使用当前平台第一个接入的可用 Bot；轮询也会从主 Bot 开始。",
+                ),
+                ConfigFieldSpec(
+                    path = "messageRouting.defaultPolicy.failureCooldownSeconds",
+                    label = "默认失败冷却秒数",
+                    type = ConfigFieldType.NUMBER,
+                    section = "消息路由",
+                    description = "某条发送路线失败后，在该时间内优先跳过它。",
+                    min = 1,
+                    numberKind = ConfigNumberKind.INTEGER,
+                ),
+                ConfigFieldSpec(
+                    path = "messageRouting.platformPolicies",
+                    label = "按平台路由策略",
+                    type = ConfigFieldType.JSON,
+                    section = "消息路由",
+                    description = "为 qq、discord 等真实目标平台单独覆盖路由策略；未配置的平台使用默认策略。",
+                    metadata = mapOf(
+                        "example" to """
+                            [
+                              {"platformId":"qq","policy":{"strategy":"PRIMARY_BACKUP","primaryAccountId":"123456","failureCooldownSeconds":60}}
+                            ]
+                        """.trimIndent(),
+                    ),
+                ),
+                ConfigFieldSpec(
                     path = "draw.layout",
                     label = "布局套装",
                     type = ConfigFieldType.SELECT,
@@ -581,6 +621,18 @@ public object MainConfigForms {
         require(config.delivery.lockTtlSeconds > 0.0) { "投递锁超时必须大于 0 秒" }
         require(config.delivery.historyRetentionDays >= 0) { "消息记录保留天数不能为负数" }
         require(config.delivery.cleanupCron.isNotBlank()) { "消息记录清理 Cron 不能为空" }
+        require(config.messageRouting.defaultPolicy.failureCooldownSeconds >= 1) { "默认失败冷却秒数至少为 1" }
+        val routePlatformIds = config.messageRouting.platformPolicies.map { it.platformId.trim().lowercase() }
+        require(routePlatformIds.none { it.isBlank() }) { "按平台路由策略的平台 ID 不能为空" }
+        val duplicatedRoutePlatforms = routePlatformIds.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        require(duplicatedRoutePlatforms.isEmpty()) {
+            "按平台路由策略的平台 ID 不能重复：${duplicatedRoutePlatforms.joinToString(",")}"
+        }
+        config.messageRouting.platformPolicies.forEachIndexed { index, platformPolicy ->
+            require(platformPolicy.policy.failureCooldownSeconds >= 1) {
+                "messageRouting.platformPolicies[$index].policy.failureCooldownSeconds 至少为 1"
+            }
+        }
         require(config.draw.layout.isNotBlank()) { "绘图布局不能为空" }
         require(DrawLayoutRegistry.hasSuite(config.draw.layout)) {
             "绘图布局必须是 ${DrawLayoutRegistry.options().joinToString("|") { it.value }} 之一"
@@ -636,4 +688,10 @@ public object MainConfigForms {
             .map { ConfigFieldOption(it.name, it.name) }
     }
 
+    public fun messageRoutingStrategyOptions(): List<ConfigFieldOption> {
+        return listOf(
+            ConfigFieldOption(MessageSinkRoutingStrategy.ROUND_ROBIN.name, "轮询分担"),
+            ConfigFieldOption(MessageSinkRoutingStrategy.PRIMARY_BACKUP.name, "主备切换"),
+        )
+    }
 }

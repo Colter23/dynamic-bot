@@ -236,6 +236,8 @@ public data class SubscriberTargetPlatformDto(
     val pluginName: String,
     val pluginState: String,
     val supportedTypes: List<String>,
+    val transportIds: List<String> = emptyList(),
+    val transportCount: Int = transportIds.size,
 )
 
 @Serializable
@@ -250,6 +252,18 @@ public data class SubscriberTargetDto(
     val avatarUri: String? = null,
     val sourcePluginId: String,
     val sourcePluginName: String,
+    val sourceCount: Int = 0,
+    val sources: List<SubscriberTargetSourceDto> = emptyList(),
+)
+
+@Serializable
+public data class SubscriberTargetSourceDto(
+    val routeId: String,
+    val transportId: String,
+    val transportName: String,
+    val accountId: String,
+    val accountName: String,
+    val state: String,
 )
 
 @Serializable
@@ -309,6 +323,7 @@ public data class MessageDeliveryDto(
     val status: String,
     val attempts: Int,
     val sinkMessageId: String? = null,
+    val sinkRouteId: String? = null,
     val sinkAccountId: String? = null,
     val lastError: String? = null,
     val nextAttemptAtEpochSeconds: Long? = null,

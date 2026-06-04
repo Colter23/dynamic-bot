@@ -231,7 +231,7 @@ class AdminServerTest {
 
         val response = service.createSubscription(
             CreateSubscriptionRequest(
-                subscriberPlatform = "onebot",
+                subscriberPlatform = "qq",
                 targetKind = "GROUP",
                 subscriberTargetId = "100",
                 publisherPlatform = "bilibili",
@@ -248,7 +248,7 @@ class AdminServerTest {
         assertEquals("GROUP", response.subscription.subscriber?.targetKind)
         assertEquals("100", response.subscription.subscriber?.name)
         assertEquals("bilibili", response.subscription.publisher?.platformId)
-        assertNotNull(SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")))
+        assertNotNull(SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "100")))
     }
 
     @Test
@@ -264,7 +264,7 @@ class AdminServerTest {
 
         val response = service.createSubscription(
             CreateSubscriptionRequest(
-                subscriberPlatform = "onebot",
+                subscriberPlatform = "qq",
                 targetKind = "GROUP",
                 subscriberTargetId = "100",
                 publisherPlatform = "bilibili",
@@ -283,13 +283,13 @@ class AdminServerTest {
         val service = service(
             plugin = FakePublisherFollowPlugin(),
             sink = FakeMessageSinkPlugin(
-                listOf(MessageTargetCandidate(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "测试群", avatar)),
+                listOf(MessageTargetCandidate(TargetAddress.of("qq", TargetKind.GROUP, "100"), "测试群", avatar)),
             ),
         )
 
         val response = service.createSubscription(
             CreateSubscriptionRequest(
-                subscriberPlatform = "onebot",
+                subscriberPlatform = "qq",
                 targetKind = "GROUP",
                 subscriberTargetId = "100",
                 publisherPlatform = "bilibili",
@@ -299,7 +299,7 @@ class AdminServerTest {
 
         assertEquals("测试群", response.subscription.subscriber?.name)
         assertEquals(avatar.uri, response.subscription.subscriber?.avatarUri)
-        assertEquals(avatar, SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100"))?.avatar)
+        assertEquals(avatar, SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "100"))?.avatar)
     }
 
     @Test
@@ -314,7 +314,7 @@ class AdminServerTest {
         assertFailsWith<IllegalArgumentException> {
             service.createSubscription(
                 CreateSubscriptionRequest(
-                    subscriberPlatform = "onebot",
+                    subscriberPlatform = "qq",
                     targetKind = "USER",
                     subscriberTargetId = "100",
                     publisherPlatform = "bilibili",
@@ -329,7 +329,7 @@ class AdminServerTest {
     fun updatePublisherAndCreateFilterRuleShouldUseNewDataModel() {
         initDb("admin-update-filter")
         val publisher = PublisherRepository.upsertInfo(testPublisherInfo(name = "demo-up")).value
-        val subscriber = SubscriberRepository.ensure(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "group")
+        val subscriber = SubscriberRepository.ensure(TargetAddress.of("qq", TargetKind.GROUP, "100"), "group")
         SubscriptionRepository.subscribe(subscriber.id, publisher.id)
         val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!
         val service = service(FakePublisherFollowPlugin())
@@ -355,7 +355,7 @@ class AdminServerTest {
     fun subscriptionsShouldIncludeFilterRulesAndEntityCounts() {
         initDb("admin-subscription-ops")
         val publisher = PublisherRepository.upsertInfo(testPublisherInfo(name = "demo-up")).value
-        val subscriber = SubscriberRepository.ensure(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "group")
+        val subscriber = SubscriberRepository.ensure(TargetAddress.of("qq", TargetKind.GROUP, "100"), "group")
         SubscriptionRepository.subscribe(subscriber.id, publisher.id)
         val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!
         DynamicFilterRuleRepository.addRule(
@@ -377,8 +377,8 @@ class AdminServerTest {
     @Test
     fun subscribersShouldIncludeLinkParseConfigAndFallback() {
         initDb("admin-subscriber-link-parse-list")
-        val custom = SubscriberRepository.ensure(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "custom")
-        val fallback = SubscriberRepository.ensure(TargetAddress.of("onebot", TargetKind.GROUP, "200"), "fallback")
+        val custom = SubscriberRepository.ensure(TargetAddress.of("qq", TargetKind.GROUP, "100"), "custom")
+        val fallback = SubscriberRepository.ensure(TargetAddress.of("qq", TargetKind.GROUP, "200"), "fallback")
         LinkParseTargetConfigRepository.upsert(custom.address, LinkParseTriggerMode.DISABLED, updatedBy = "test")
         val service = service(
             plugin = FakePublisherFollowPlugin(),
@@ -405,11 +405,11 @@ class AdminServerTest {
         val service = service(
             plugin = FakePublisherFollowPlugin(),
             sink = FakeMessageSinkPlugin(
-                listOf(MessageTargetCandidate(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "测试群", avatar)),
+                listOf(MessageTargetCandidate(TargetAddress.of("qq", TargetKind.GROUP, "100"), "测试群", avatar)),
             ),
         )
 
-        val target = service.subscriberTargets(platformId = "onebot", type = "GROUP").single()
+        val target = service.subscriberTargets(platformId = "qq", type = "GROUP").single()
 
         assertEquals("测试群", target.name)
         assertEquals(avatar.uri, target.avatarUri)
@@ -422,13 +422,13 @@ class AdminServerTest {
         val service = service(
             plugin = FakePublisherFollowPlugin(),
             sink = FakeMessageSinkPlugin(
-                listOf(MessageTargetCandidate(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "测试群", avatar)),
+                listOf(MessageTargetCandidate(TargetAddress.of("qq", TargetKind.GROUP, "100"), "测试群", avatar)),
             ),
         )
 
         val created = service.createSubscriber(
             CreateSubscriberRequest(
-                platformId = "onebot",
+                platformId = "qq",
                 targetKind = "GROUP",
                 externalId = "100",
                 linkParseTriggerMode = "ALWAYS",
@@ -439,14 +439,14 @@ class AdminServerTest {
         assertEquals(avatar.uri, created.avatarUri)
         assertEquals("ALWAYS", created.linkParseTriggerMode)
         assertEquals("CUSTOM", created.linkParseConfigSource)
-        assertEquals(LinkParseTriggerMode.ALWAYS, LinkParseTargetConfigRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100"))?.triggerMode)
-        assertEquals(avatar, SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100"))?.avatar)
+        assertEquals(LinkParseTriggerMode.ALWAYS, LinkParseTargetConfigRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "100"))?.triggerMode)
+        assertEquals(avatar, SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "100"))?.avatar)
     }
 
     @Test
     fun updateAndDeleteSubscriberShouldManageLinkParseConfig() {
         initDb("admin-update-subscriber-link-parse")
-        val subscriber = SubscriberRepository.ensure(TargetAddress.of("onebot", TargetKind.GROUP, "100"), "group")
+        val subscriber = SubscriberRepository.ensure(TargetAddress.of("qq", TargetKind.GROUP, "100"), "group")
         val service = service(FakePublisherFollowPlugin())
 
         val updated = service.updateSubscriber(
@@ -505,7 +505,7 @@ class AdminServerTest {
         val message = Message(
             id = "message-admin",
             time = 1L,
-            targets = listOf(TargetAddress.of("onebot", TargetKind.GROUP, "100")),
+            targets = listOf(TargetAddress.of("qq", TargetKind.GROUP, "100")),
             batches = listOf(MessageBatch(listOf(MessageContent.Text("hello")))),
         )
         MessageDeliveryRepository.enqueue(message)
@@ -514,7 +514,7 @@ class AdminServerTest {
 
         val deliveries = service.deliveries(status = "FAILED", limit = 10)
         val filtered = service.deliveries(
-            platformId = "onebot",
+            platformId = "qq",
             targetKind = "GROUP",
             query = "network",
             limit = 10,
@@ -772,7 +772,8 @@ class AdminServerTest {
     private class FakeMessageSinkPlugin(
         private val targets: List<MessageTargetCandidate>,
     ) : MessageSinkPlugin {
-        override val platformId: PlatformId = PlatformId.of("onebot")
+        override val transportId: String = "onebot"
+        override val supportedTargetPlatforms: Set<PlatformId> = setOf(PlatformId.of("qq"))
         override val supportedTargetKinds: Set<TargetKind> = setOf(TargetKind.GROUP, TargetKind.USER)
 
         override suspend fun listMessageTargets(kind: TargetKind?): List<MessageTargetCandidate> {

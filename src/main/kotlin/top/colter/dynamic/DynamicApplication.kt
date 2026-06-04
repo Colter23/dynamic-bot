@@ -151,6 +151,7 @@ public object DynamicApplication : CoroutineScope {
         deliveryDispatcher = DeliveryDispatcher(
             sinkProvider = { pluginManager.getMessageSinkPlugins() },
             configProvider = { configStore.current().delivery },
+            routingConfigProvider = { configStore.current().messageRouting },
         )
         registerDeliveryDispatchTask(config)
         registerDeliveryCleanupTask(config)

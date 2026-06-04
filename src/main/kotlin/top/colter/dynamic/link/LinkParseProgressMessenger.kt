@@ -16,6 +16,7 @@ private val progressLogger = loggerFor<LinkParseProgressMessenger>()
 internal data class LinkParseProgressReceipt(
     val target: TargetAddress,
     val sinkMessageId: String,
+    val sinkRouteId: String? = null,
     val sinkAccountId: String? = null,
 )
 
@@ -34,7 +35,7 @@ internal object NoopLinkParseProgressMessenger : LinkParseProgressMessenger {
 
 internal class DeliveryLinkParseProgressMessenger(
     private val sendCommandResult: suspend (CommandResultSendRequest) -> MessageSendResult,
-    private val recallMessage: suspend (TargetAddress, String, String?) -> MessageRecallResult,
+    private val recallMessage: suspend (TargetAddress, String, String?, String?) -> MessageRecallResult,
 ) : LinkParseProgressMessenger {
     override suspend fun send(event: CommandEvent, config: LinkParseProgressReplyConfig): LinkParseProgressReceipt? {
         if (!config.enabled) return null
@@ -52,11 +53,16 @@ internal class DeliveryLinkParseProgressMessenger(
         return (result as? MessageSendResult.Sent)
             ?.sinkMessageId
             ?.takeIf { it.isNotBlank() }
-            ?.let { LinkParseProgressReceipt(event.context.target, it, result.sinkAccountId) }
+            ?.let { LinkParseProgressReceipt(event.context.target, it, result.sinkRouteId, result.sinkAccountId) }
     }
 
     override suspend fun recall(receipt: LinkParseProgressReceipt) {
-        when (val result = recallMessage(receipt.target, receipt.sinkMessageId, receipt.sinkAccountId)) {
+        when (val result = recallMessage(
+            receipt.target,
+            receipt.sinkMessageId,
+            receipt.sinkRouteId,
+            receipt.sinkAccountId,
+        )) {
             MessageRecallResult.Recalled,
             MessageRecallResult.Unsupported -> Unit
             is MessageRecallResult.Failed -> {

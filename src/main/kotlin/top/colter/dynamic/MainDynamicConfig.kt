@@ -1,6 +1,7 @@
 ﻿package top.colter.dynamic
 
 import top.colter.dynamic.core.command.CommandPermissionRule
+import top.colter.dynamic.core.plugin.MessageSinkRoutingPolicy
 
 public data class MainDynamicConfig(
     val templates: PushTemplates = PushTemplates(),
@@ -8,6 +9,7 @@ public data class MainDynamicConfig(
     val subscription: SubscriptionConfig = SubscriptionConfig(),
     val linkParsing: LinkParsingConfig = LinkParsingConfig(),
     val imageCache: ImageCacheConfig = ImageCacheConfig(),
+    val messageRouting: MessageRoutingConfig = MessageRoutingConfig(),
     val delivery: DeliveryConfig = DeliveryConfig(),
     val draw: DrawSettings = DrawSettings(),
     val pluginCatalog: PluginCatalogConfig = PluginCatalogConfig(),
@@ -101,6 +103,24 @@ public data class DeliveryConfig(
     val lockTtlSeconds: Double = 120.0,
     val historyRetentionDays: Long = 30,
     val cleanupCron: String = "30 4 * * *",
+)
+
+public data class MessageRoutingConfig(
+    val defaultPolicy: MessageSinkRoutingPolicy = MessageSinkRoutingPolicy(),
+    val platformPolicies: List<MessagePlatformRoutingPolicy> = emptyList(),
+) {
+    public fun policyFor(platformId: String): MessageSinkRoutingPolicy {
+        val normalized = platformId.trim().lowercase()
+        return platformPolicies
+            .firstOrNull { it.platformId.trim().lowercase() == normalized }
+            ?.policy
+            ?: defaultPolicy
+    }
+}
+
+public data class MessagePlatformRoutingPolicy(
+    val platformId: String,
+    val policy: MessageSinkRoutingPolicy = MessageSinkRoutingPolicy(),
 )
 
 public data class DrawSettings(

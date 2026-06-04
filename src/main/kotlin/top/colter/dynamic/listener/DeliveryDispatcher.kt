@@ -1,25 +1,26 @@
-﻿package top.colter.dynamic.listener
+package top.colter.dynamic.listener
 
+import kotlin.math.ceil
+import kotlin.math.roundToLong
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import top.colter.dynamic.DeliveryConfig
+import top.colter.dynamic.MessageRoutingConfig
 import top.colter.dynamic.core.data.TargetAddress
-import top.colter.dynamic.event.CommandResultEvent
-import top.colter.dynamic.core.plugin.CommandResultSendRequest
 import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
+import top.colter.dynamic.core.plugin.CommandResultSendRequest
 import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.core.plugin.MessageRecallRequest
 import top.colter.dynamic.core.plugin.MessageRecallResult
 import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
+import top.colter.dynamic.core.tools.loggerFor
+import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.repository.MessageDeliveryRepository
-import top.colter.dynamic.core.tools.loggerFor
-import kotlin.math.ceil
-import kotlin.math.roundToLong
 
 private val logger = loggerFor<DeliveryDispatcher>()
 
@@ -33,6 +34,7 @@ public data class DeliveryDispatchStats(
 public class DeliveryDispatcher(
     private val sinkProvider: () -> List<PluginHandle<MessageSinkPlugin>>,
     private val configProvider: () -> DeliveryConfig,
+    private val routingConfigProvider: () -> MessageRoutingConfig = { MessageRoutingConfig() },
     private val accountRouter: MessageSinkAccountRouter = MessageSinkAccountRouter(),
 ) {
     public suspend fun dispatchDue(): DeliveryDispatchStats = coroutineScope {
@@ -89,29 +91,28 @@ public class DeliveryDispatcher(
     }
 
     public suspend fun sendCommandResult(request: CommandResultSendRequest): MessageSendResult {
-        return when (val resolved = resolveSink(request.target.address)) {
-            is SinkResolveResult.Found -> {
-                runCatching {
-                    val sink = resolved.sink
-                    if (sink is AccountRoutedMessageSinkPlugin) {
-                        accountRouter.sendCommandResult(sink, request)
-                    } else {
-                        sink.sendCommandResult(request)
-                    }
-                }
-                    .getOrElse { error ->
-                        MessageSendResult.failed(error.message ?: "命令回复发送失败", retryable = true)
-                    }
-            }
-            is SinkResolveResult.NotFound -> {
-                logger.warn { "命令回复无可用消息出口：traceId=${request.inReplyTo}，target=${request.target.address.stableValue()}" }
+        val target = request.target.address
+        val routed = resolveRoutedSinks(target)
+        if (routed.routedSinkIds.isNotEmpty()) {
+            return accountRouter.sendCommandResult(
+                candidates = routed.candidates,
+                policy = routingConfigProvider().policyFor(target.platformId.value),
+                request = request,
+            )
+        }
+
+        return when (val direct = resolveDirectSink(target)) {
+            is DirectSinkResolveResult.Found -> runCatching { direct.sink.sendCommandResult(request) }
+                .getOrElse { MessageSendResult.failed(it.message ?: "命令回复发送失败", retryable = true) }
+            DirectSinkResolveResult.NotFound -> {
+                logger.warn { "命令回复无可用消息出口：traceId=${request.inReplyTo}，target=${target.stableValue()}" }
                 MessageSendResult.failed("命令回复无可用消息出口", retryable = false)
             }
-            is SinkResolveResult.Ambiguous -> {
+            is DirectSinkResolveResult.Ambiguous -> {
                 logger.warn {
-                    "命令回复消息出口不唯一：traceId=${request.inReplyTo}，target=${request.target.address.stableValue()}，plugins=${resolved.pluginIds}"
+                    "命令回复消息出口不唯一：traceId=${request.inReplyTo}，target=${target.stableValue()}，plugins=${direct.pluginIds}"
                 }
-                MessageSendResult.failed("命令回复消息出口不唯一：plugins=${resolved.pluginIds.joinToString(",")}", retryable = false)
+                MessageSendResult.failed("命令回复消息出口不唯一：plugins=${direct.pluginIds.joinToString(",")}", retryable = false)
             }
         }
     }
@@ -119,43 +120,49 @@ public class DeliveryDispatcher(
     public suspend fun recallMessage(
         target: TargetAddress,
         sinkMessageId: String,
+        sinkRouteId: String? = null,
         sinkAccountId: String? = null,
     ): MessageRecallResult {
-        return when (val resolved = resolveSink(target)) {
-            is SinkResolveResult.Found -> {
-                runCatching {
-                    val request = MessageRecallRequest(
-                        target = target,
-                        sinkMessageId = sinkMessageId,
-                        sinkAccountId = sinkAccountId,
-                    )
-                    val sink = resolved.sink
-                    if (sink is AccountRoutedMessageSinkPlugin) {
-                        accountRouter.recallMessage(sink, request)
-                    } else {
-                        sink.recallMessage(request)
-                    }
-                }.getOrElse { error ->
-                    MessageRecallResult.failed(error.message ?: "消息撤回失败")
-                }
-            }
-            is SinkResolveResult.NotFound -> {
+        val request = MessageRecallRequest(
+            target = target,
+            sinkMessageId = sinkMessageId,
+            sinkRouteId = sinkRouteId,
+            sinkAccountId = sinkAccountId,
+        )
+        val routed = resolveRoutedSinks(target)
+        if (routed.routedSinkIds.isNotEmpty()) {
+            return accountRouter.recallMessage(
+                candidates = routed.candidates,
+                policy = routingConfigProvider().policyFor(target.platformId.value),
+                request = request,
+            )
+        }
+
+        return when (val direct = resolveDirectSink(target)) {
+            is DirectSinkResolveResult.Found -> runCatching { direct.sink.recallMessage(request) }
+                .getOrElse { MessageRecallResult.failed(it.message ?: "消息撤回失败") }
+            DirectSinkResolveResult.NotFound -> {
                 logger.warn { "消息撤回无可用消息出口：target=${target.stableValue()}，sinkMessageId=$sinkMessageId" }
                 MessageRecallResult.failed("消息撤回无可用消息出口")
             }
-            is SinkResolveResult.Ambiguous -> {
+            is DirectSinkResolveResult.Ambiguous -> {
                 logger.warn {
-                    "消息撤回消息出口不唯一：target=${target.stableValue()}，sinkMessageId=$sinkMessageId，plugins=${resolved.pluginIds}"
+                    "消息撤回消息出口不唯一：target=${target.stableValue()}，sinkMessageId=$sinkMessageId，plugins=${direct.pluginIds}"
                 }
-                MessageRecallResult.failed("消息撤回消息出口不唯一：plugins=${resolved.pluginIds.joinToString(",")}")
+                MessageRecallResult.failed("消息撤回消息出口不唯一：plugins=${direct.pluginIds.joinToString(",")}")
             }
         }
     }
 
     private suspend fun sendDelivery(request: MessageDeliveryRequest, config: DeliveryConfig): DeliveryOutcome {
-        return when (val resolved = resolveSink(request.target)) {
-            is SinkResolveResult.Found -> sendWithSink(request, resolved.sink, config)
-            is SinkResolveResult.NotFound -> {
+        val routed = resolveRoutedSinks(request.target)
+        if (routed.routedSinkIds.isNotEmpty()) {
+            return sendWithRoutes(request, routed.candidates, config)
+        }
+
+        return when (val direct = resolveDirectSink(request.target)) {
+            is DirectSinkResolveResult.Found -> sendWithSink(request, direct.sink, config)
+            DirectSinkResolveResult.NotFound -> {
                 logger.warn {
                     "消息投递失败：未找到消息出口插件，deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}"
                 }
@@ -165,17 +172,33 @@ public class DeliveryDispatcher(
                 )
                 DeliveryOutcome.FAILED
             }
-            is SinkResolveResult.Ambiguous -> {
+            is DirectSinkResolveResult.Ambiguous -> {
                 logger.warn {
-                    "消息投递失败：消息出口插件不唯一，deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，plugins=${resolved.pluginIds}"
+                    "消息投递失败：消息出口插件不唯一，deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，plugins=${direct.pluginIds}"
                 }
                 MessageDeliveryRepository.markFailed(
                     request.delivery.id,
-                    "消息出口插件不唯一：platform=${request.target.platformId.value}，kind=${request.target.kind.name}，plugins=${resolved.pluginIds.joinToString(",")}",
+                    "消息出口插件不唯一：platform=${request.target.platformId.value}，kind=${request.target.kind.name}，plugins=${direct.pluginIds.joinToString(",")}",
                 )
                 DeliveryOutcome.FAILED
             }
         }
+    }
+
+    private suspend fun sendWithRoutes(
+        request: MessageDeliveryRequest,
+        candidates: List<MessageSinkRouteCandidate>,
+        config: DeliveryConfig,
+    ): DeliveryOutcome {
+        logger.debug {
+            "正在发送消息：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，attempt=${request.delivery.attempts}"
+        }
+        val result = accountRouter.sendMessage(
+            candidates = candidates,
+            policy = routingConfigProvider().policyFor(request.target.platformId.value),
+            request = request,
+        )
+        return handleSendResult(request, result, config)
     }
 
     private suspend fun sendWithSink(
@@ -186,25 +209,26 @@ public class DeliveryDispatcher(
         logger.debug {
             "正在发送消息：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，attempt=${request.delivery.attempts}"
         }
-        val result = runCatching {
-            if (sink is AccountRoutedMessageSinkPlugin) {
-                accountRouter.sendMessage(sink, request)
-            } else {
-                sink.sendMessage(request)
-            }
-        }
-            .getOrElse { error ->
-                MessageSendResult.failed(error.message ?: "消息发送失败", retryable = true)
-            }
+        val result = runCatching { sink.sendMessage(request) }
+            .getOrElse { error -> MessageSendResult.failed(error.message ?: "消息发送失败", retryable = true) }
+        return handleSendResult(request, result, config)
+    }
+
+    private fun handleSendResult(
+        request: MessageDeliveryRequest,
+        result: MessageSendResult,
+        config: DeliveryConfig,
+    ): DeliveryOutcome {
         return when (result) {
             is MessageSendResult.Sent -> {
                 MessageDeliveryRepository.markSent(
                     deliveryId = request.delivery.id,
                     sinkMessageId = result.sinkMessageId,
+                    sinkRouteId = result.sinkRouteId,
                     sinkAccountId = result.sinkAccountId,
                 )
                 logger.debug {
-                    "消息发送成功：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，sinkMessageId=${result.sinkMessageId ?: "-"}，sinkAccountId=${result.sinkAccountId ?: "-"}"
+                    "消息发送成功：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，sinkMessageId=${result.sinkMessageId ?: "-"}，sinkRouteId=${result.sinkRouteId ?: "-"}，sinkAccountId=${result.sinkAccountId ?: "-"}"
                 }
                 DeliveryOutcome.SENT
             }
@@ -240,17 +264,38 @@ public class DeliveryDispatcher(
         }
     }
 
-    private fun resolveSink(target: TargetAddress): SinkResolveResult {
+    private suspend fun resolveRoutedSinks(target: TargetAddress): RoutedSinkResolveResult {
+        val routedSinkIds = mutableListOf<String>()
+        val candidates = mutableListOf<MessageSinkRouteCandidate>()
+        sinkProvider().forEach { handle ->
+            val sink = handle.instance
+            if (sink !is AccountRoutedMessageSinkPlugin || !sink.supportsTarget(target)) return@forEach
+            val pluginId = handle.info.descriptor.id
+            routedSinkIds += pluginId
+            val routes = runCatching { sink.listMessageSinkRoutes(target) }
+                .getOrElse { error ->
+                    logger.warn(error) { "消息出口路线读取失败：pluginId=$pluginId，target=${target.stableValue()}" }
+                    emptyList()
+                }
+            routes
+                .filter { it.targetPlatformId == target.platformId }
+                .mapTo(candidates) { route ->
+                    MessageSinkRouteCandidate(pluginId = pluginId, sink = sink, route = route)
+                }
+        }
+        return RoutedSinkResolveResult(routedSinkIds = routedSinkIds.distinct(), candidates = candidates)
+    }
+
+    private fun resolveDirectSink(target: TargetAddress): DirectSinkResolveResult {
         val matches = sinkProvider()
             .filter { handle ->
                 val sink = handle.instance
-                sink.platformId == target.platformId &&
-                    (sink.supportedTargetKinds.isEmpty() || target.kind in sink.supportedTargetKinds)
+                sink !is AccountRoutedMessageSinkPlugin && sink.supportsTarget(target)
             }
         return when (matches.size) {
-            0 -> SinkResolveResult.NotFound
-            1 -> SinkResolveResult.Found(matches.single().instance)
-            else -> SinkResolveResult.Ambiguous(matches.map { it.info.descriptor.id }.sorted())
+            0 -> DirectSinkResolveResult.NotFound
+            1 -> DirectSinkResolveResult.Found(matches.single().instance)
+            else -> DirectSinkResolveResult.Ambiguous(matches.map { it.info.descriptor.id }.sorted())
         }
     }
 
@@ -263,15 +308,20 @@ public class DeliveryDispatcher(
 
     private fun wholeSeconds(seconds: Double): Long = ceil(seconds).toLong().coerceAtLeast(1)
 
+    private data class RoutedSinkResolveResult(
+        val routedSinkIds: List<String>,
+        val candidates: List<MessageSinkRouteCandidate>,
+    )
+
     private enum class DeliveryOutcome {
         SENT,
         RETRIED,
         FAILED,
     }
 
-    private sealed interface SinkResolveResult {
-        data class Found(val sink: MessageSinkPlugin) : SinkResolveResult
-        data object NotFound : SinkResolveResult
-        data class Ambiguous(val pluginIds: List<String>) : SinkResolveResult
+    private sealed interface DirectSinkResolveResult {
+        data class Found(val sink: MessageSinkPlugin) : DirectSinkResolveResult
+        data object NotFound : DirectSinkResolveResult
+        data class Ambiguous(val pluginIds: List<String>) : DirectSinkResolveResult
     }
 }

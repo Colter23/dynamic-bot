@@ -58,6 +58,7 @@ public object MessageDeliveryRepository {
                     it[status] = DeliveryStatus.PENDING
                     it[attempts] = 0
                     it[sinkMessageId] = null
+                    it[sinkRouteId] = null
                     it[sinkAccountId] = null
                     it[lastError] = null
                     it[nextAttemptAt] = now
@@ -155,12 +156,14 @@ public object MessageDeliveryRepository {
     public fun markSent(
         deliveryId: Int,
         sinkMessageId: String? = null,
+        sinkRouteId: String? = null,
         sinkAccountId: String? = null,
     ): Boolean {
         return transaction {
             MessageDeliveryTable.update({ MessageDeliveryTable.id eq deliveryId }) {
                 it[status] = DeliveryStatus.SENT
                 it[MessageDeliveryTable.sinkMessageId] = sinkMessageId
+                it[MessageDeliveryTable.sinkRouteId] = sinkRouteId.normalizedSinkRouteId()
                 it[MessageDeliveryTable.sinkAccountId] = sinkAccountId.normalizedSinkAccountId()
                 it[lastError] = null
                 it[nextAttemptAt] = null
@@ -175,6 +178,7 @@ public object MessageDeliveryRepository {
             MessageDeliveryTable.update({ MessageDeliveryTable.id eq deliveryId }) {
                 it[status] = DeliveryStatus.PENDING
                 it[sinkMessageId] = null
+                it[sinkRouteId] = null
                 it[sinkAccountId] = null
                 it[lastError] = error?.take(500)
                 it[MessageDeliveryTable.nextAttemptAt] = Instant.fromEpochSeconds(nextAttemptAtEpochSeconds)
@@ -189,6 +193,7 @@ public object MessageDeliveryRepository {
             MessageDeliveryTable.update({ MessageDeliveryTable.id eq deliveryId }) {
                 it[status] = DeliveryStatus.FAILED
                 it[sinkMessageId] = null
+                it[sinkRouteId] = null
                 it[sinkAccountId] = null
                 it[lastError] = error?.take(500)
                 it[nextAttemptAt] = null
@@ -202,6 +207,7 @@ public object MessageDeliveryRepository {
         messageId: String,
         target: TargetAddress,
         sinkMessageId: String? = null,
+        sinkRouteId: String? = null,
         sinkAccountId: String? = null,
     ): Boolean {
         return updateLegacyTerminalStatus(
@@ -210,12 +216,13 @@ public object MessageDeliveryRepository {
             DeliveryStatus.SENT,
             null,
             sinkMessageId,
+            sinkRouteId,
             sinkAccountId,
         )
     }
 
     public fun markFailed(messageId: String, target: TargetAddress, error: String?): Boolean {
-        return updateLegacyTerminalStatus(messageId, target, DeliveryStatus.FAILED, error?.take(500), null, null)
+        return updateLegacyTerminalStatus(messageId, target, DeliveryStatus.FAILED, error?.take(500), null, null, null)
     }
 
     public fun countByStatus(status: DeliveryStatus): Long {
@@ -337,6 +344,7 @@ public object MessageDeliveryRepository {
         status: DeliveryStatus,
         error: String?,
         sinkMessageId: String?,
+        sinkRouteId: String?,
         sinkAccountId: String?,
     ): Boolean {
         return transaction {
@@ -352,6 +360,7 @@ public object MessageDeliveryRepository {
                 it[MessageDeliveryTable.status] = status
                 it[attempts] = currentAttempts + 1
                 it[MessageDeliveryTable.sinkMessageId] = sinkMessageId
+                it[MessageDeliveryTable.sinkRouteId] = sinkRouteId.normalizedSinkRouteId()
                 it[MessageDeliveryTable.sinkAccountId] = sinkAccountId.normalizedSinkAccountId()
                 it[lastError] = error
                 it[nextAttemptAt] = null
@@ -430,10 +439,13 @@ private fun MessageDelivery.matchesDeliveryQuery(query: String): Boolean {
         target.stableValue(),
         status.name,
         sinkMessageId,
+        sinkRouteId,
         sinkAccountId,
         lastError,
     ).any { it.contains(query, ignoreCase = true) }
 }
+
+private fun String?.normalizedSinkRouteId(): String? = this?.trim()?.takeIf { it.isNotBlank() }
 
 private fun String?.normalizedSinkAccountId(): String? = this?.trim()?.takeIf { it.isNotBlank() }
 
@@ -463,6 +475,7 @@ public fun ResultRow.toMessageDelivery(): MessageDelivery = MessageDelivery(
     status = this[MessageDeliveryTable.status],
     attempts = this[MessageDeliveryTable.attempts],
     sinkMessageId = this[MessageDeliveryTable.sinkMessageId],
+    sinkRouteId = this[MessageDeliveryTable.sinkRouteId],
     sinkAccountId = this[MessageDeliveryTable.sinkAccountId],
     lastError = this[MessageDeliveryTable.lastError],
     nextAttemptAtEpochSeconds = this[MessageDeliveryTable.nextAttemptAt]?.epochSeconds,

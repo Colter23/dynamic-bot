@@ -9,66 +9,82 @@ import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.core.plugin.MessageRecallRequest
 import top.colter.dynamic.core.plugin.MessageRecallResult
 import top.colter.dynamic.core.plugin.MessageSendResult
-import top.colter.dynamic.core.plugin.MessageSinkAccount
-import top.colter.dynamic.core.plugin.MessageSinkAccountRole
-import top.colter.dynamic.core.plugin.MessageSinkAccountState
+import top.colter.dynamic.core.plugin.MessageSinkRoute
+import top.colter.dynamic.core.plugin.MessageSinkRouteState
 import top.colter.dynamic.core.plugin.MessageSinkRoutingPolicy
 import top.colter.dynamic.core.plugin.MessageSinkRoutingStrategy
 import top.colter.dynamic.core.tools.loggerFor
 
 private val accountRouterLogger = loggerFor<MessageSinkAccountRouter>()
 
+internal data class MessageSinkRouteCandidate(
+    val pluginId: String,
+    val sink: AccountRoutedMessageSinkPlugin,
+    val route: MessageSinkRoute,
+)
+
 public class MessageSinkAccountRouter(
     private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
-    private val cooldownUntil = ConcurrentHashMap<AccountKey, Long>()
+    private val cooldownUntil = ConcurrentHashMap<String, Long>()
     private val cursors = ConcurrentHashMap<String, AtomicInteger>()
 
-    suspend fun sendMessage(
-        sink: AccountRoutedMessageSinkPlugin,
+    internal suspend fun sendMessage(
+        candidates: List<MessageSinkRouteCandidate>,
+        policy: MessageSinkRoutingPolicy,
         request: MessageDeliveryRequest,
     ): MessageSendResult {
-        return sendWithAccount(
-            sink = sink,
+        return sendWithRoute(
+            candidates = candidates,
             target = request.target,
+            policy = policy,
             actionLabel = "消息发送",
-        ) { accountId ->
-            sink.sendMessage(request, accountId)
+        ) { candidate ->
+            candidate.sink.sendMessage(request, candidate.route.routeId)
         }
     }
 
-    suspend fun sendCommandResult(
-        sink: AccountRoutedMessageSinkPlugin,
+    internal suspend fun sendCommandResult(
+        candidates: List<MessageSinkRouteCandidate>,
+        policy: MessageSinkRoutingPolicy,
         request: CommandResultSendRequest,
     ): MessageSendResult {
-        return sendWithAccount(
-            sink = sink,
+        return sendWithRoute(
+            candidates = candidates,
             target = request.target.address,
+            policy = policy,
             actionLabel = "命令回复",
-        ) { accountId ->
-            sink.sendCommandResult(request, accountId)
+        ) { candidate ->
+            candidate.sink.sendCommandResult(request, candidate.route.routeId)
         }
     }
 
-    suspend fun recallMessage(
-        sink: AccountRoutedMessageSinkPlugin,
+    internal suspend fun recallMessage(
+        candidates: List<MessageSinkRouteCandidate>,
+        policy: MessageSinkRoutingPolicy,
         request: MessageRecallRequest,
     ): MessageRecallResult {
-        val requestedAccountId = request.sinkAccountId?.normalizedAccountId()
-        if (requestedAccountId != null) {
-            return runCatching { sink.recallMessage(request, requestedAccountId) }
+        val requestedRouteId = request.sinkRouteId.normalized()
+        if (requestedRouteId != null) {
+            val candidate = candidates.firstOrNull { it.route.routeId == requestedRouteId }
+                ?: return MessageRecallResult.failed("消息撤回路线不存在：$requestedRouteId")
+            return runCatching { candidate.sink.recallMessage(request, candidate.route.routeId) }
                 .getOrElse { MessageRecallResult.failed(it.message ?: "消息撤回失败") }
         }
 
-        val candidates = routeAccounts(sink, request.target)
-            .getOrElse { error -> return MessageRecallResult.failed(error.message ?: "消息撤回账号选择失败") }
-        if (candidates.isEmpty()) {
-            return MessageRecallResult.failed("消息撤回无可用账号")
+        val ordered = routeCandidates(
+            candidates = candidates,
+            target = request.target,
+            policy = policy,
+            preferredAccountId = request.sinkAccountId.normalized() ?: request.target.accountId.normalized(),
+        )
+        if (ordered.isEmpty()) {
+            return MessageRecallResult.failed("消息撤回无可用发送路线")
         }
 
         var lastFailure: MessageRecallResult.Failed? = null
-        for (account in candidates) {
-            val result = runCatching { sink.recallMessage(request, account.accountId) }
+        for (candidate in ordered) {
+            val result = runCatching { candidate.sink.recallMessage(request, candidate.route.routeId) }
                 .getOrElse { MessageRecallResult.failed(it.message ?: "消息撤回失败") }
             when (result) {
                 MessageRecallResult.Recalled,
@@ -79,43 +95,37 @@ public class MessageSinkAccountRouter(
         return lastFailure ?: MessageRecallResult.failed("消息撤回失败")
     }
 
-    private suspend fun sendWithAccount(
-        sink: AccountRoutedMessageSinkPlugin,
+    private suspend fun sendWithRoute(
+        candidates: List<MessageSinkRouteCandidate>,
         target: TargetAddress,
+        policy: MessageSinkRoutingPolicy,
         actionLabel: String,
-        action: suspend (String) -> MessageSendResult,
+        action: suspend (MessageSinkRouteCandidate) -> MessageSendResult,
     ): MessageSendResult {
-        val policy = runCatching { sink.routingPolicy() }
-            .getOrElse { error ->
-                return MessageSendResult.failed("${actionLabel}账号路由策略无效：${error.message}", retryable = true)
-            }
-        val candidates = routeAccounts(sink, target, policy)
-            .getOrElse { error ->
-                return MessageSendResult.failed("${actionLabel}账号选择失败：${error.message}", retryable = true)
-            }
-        if (candidates.isEmpty()) {
-            return MessageSendResult.failed("${actionLabel}无可用账号", retryable = true)
+        val ordered = routeCandidates(candidates, target, policy, target.accountId.normalized())
+        if (ordered.isEmpty()) {
+            return MessageSendResult.failed("${actionLabel}无可用发送路线", retryable = true)
         }
 
         val failures = mutableListOf<String>()
-        for (account in candidates) {
-            val accountId = account.accountId
-            val result = runCatching { action(accountId) }
-                .getOrElse { error ->
-                    MessageSendResult.failed(error.message ?: "${actionLabel}失败", retryable = true)
-                }
+        for (candidate in ordered) {
+            val route = candidate.route
+            val result = runCatching { action(candidate) }
+                .getOrElse { error -> MessageSendResult.failed(error.message ?: "${actionLabel}失败", retryable = true) }
             when (result) {
                 is MessageSendResult.Sent -> {
-                    clearFailure(sink, accountId)
-                    result.sinkAccountId?.let { clearFailure(sink, it) }
-                    return result.copy(sinkAccountId = result.sinkAccountId ?: accountId)
+                    clearFailure(route.routeId)
+                    return result.copy(
+                        sinkRouteId = result.sinkRouteId ?: route.routeId,
+                        sinkAccountId = result.sinkAccountId ?: route.accountId,
+                    )
                 }
                 is MessageSendResult.Failed -> {
-                    markFailure(sink, accountId, policy)
-                    failures += "$accountId=${result.reason}"
+                    markFailure(route.routeId, policy)
+                    failures += "${route.routeId}=${result.reason}"
                     if (result.partialSent) {
                         accountRouterLogger.warn {
-                            "$actionLabel 已部分成功，停止账号切换：target=${target.stableValue()}，accountId=$accountId，原因=${result.reason}"
+                            "$actionLabel 已部分成功，停止路线切换：target=${target.stableValue()}，routeId=${route.routeId}，原因=${result.reason}"
                         }
                         return result.copy(retryable = false, partialSent = true)
                     }
@@ -128,90 +138,91 @@ public class MessageSinkAccountRouter(
 
         return MessageSendResult.failed(
             reason = if (failures.isEmpty()) {
-                "${actionLabel}无可用账号"
+                "${actionLabel}无可用发送路线"
             } else {
-                "${actionLabel}所有账号均失败：${failures.joinToString("；")}"
+                "${actionLabel}所有发送路线均失败：${failures.joinToString("；")}"
             },
             retryable = true,
         )
     }
 
-    private suspend fun routeAccounts(
-        sink: AccountRoutedMessageSinkPlugin,
+    private fun routeCandidates(
+        candidates: List<MessageSinkRouteCandidate>,
         target: TargetAddress,
-        policy: MessageSinkRoutingPolicy = sink.routingPolicy(),
-    ): Result<List<MessageSinkAccount>> = runCatching {
+        policy: MessageSinkRoutingPolicy,
+        preferredAccountId: String?,
+    ): List<MessageSinkRouteCandidate> {
         val now = nowEpochSeconds()
-        val accounts = sink.listMessageSinkAccounts(target)
-            .distinctBy { it.accountId }
-            .filter { it.enabled && it.state == MessageSinkAccountState.READY }
-            .filter { account ->
-                val until = cooldownUntil[AccountKey(sink.routeKey(), account.accountId)] ?: return@filter true
+        val ready = candidates
+            .distinctBy { it.route.routeId }
+            .filter { it.route.enabled && it.route.state == MessageSinkRouteState.READY }
+            .filter { it.route.targetPlatformId == target.platformId }
+            .filter { candidate ->
+                val until = cooldownUntil[candidate.route.routeId] ?: return@filter true
                 if (until <= now) {
-                    cooldownUntil.remove(AccountKey(sink.routeKey(), account.accountId), until)
+                    cooldownUntil.remove(candidate.route.routeId, until)
                     true
                 } else {
                     false
                 }
             }
+        if (ready.isEmpty()) return emptyList()
 
-        val preferredAccountId = target.accountId.normalizedAccountId()
         val ordered = when (policy.strategy) {
-            MessageSinkRoutingStrategy.ROUND_ROBIN -> roundRobinOrder(sink, accounts)
-            MessageSinkRoutingStrategy.PRIMARY_BACKUP -> primaryBackupOrder(accounts)
+            MessageSinkRoutingStrategy.ROUND_ROBIN -> roundRobinOrder(target, ready, policy)
+            MessageSinkRoutingStrategy.PRIMARY_BACKUP -> primaryBackupOrder(ready, policy)
         }
         if (preferredAccountId == null) {
+            return ordered
+        }
+
+        val preferred = ordered.filter { it.route.accountId == preferredAccountId }
+        return if (preferred.isEmpty()) {
             ordered
         } else {
-            val preferred = accounts.firstOrNull { it.accountId == preferredAccountId }
-            if (preferred == null) {
-                ordered
-            } else {
-                listOf(preferred) + ordered.filterNot { it.accountId == preferredAccountId }
-            }
+            preferred + ordered.filterNot { it.route.accountId == preferredAccountId }
         }
     }
 
     private fun roundRobinOrder(
-        sink: AccountRoutedMessageSinkPlugin,
-        accounts: List<MessageSinkAccount>,
-    ): List<MessageSinkAccount> {
-        if (accounts.size <= 1) return accounts
-        val cursor = cursors.computeIfAbsent(sink.routeKey()) { AtomicInteger(0) }
+        target: TargetAddress,
+        candidates: List<MessageSinkRouteCandidate>,
+        policy: MessageSinkRoutingPolicy,
+    ): List<MessageSinkRouteCandidate> {
+        if (candidates.size <= 1) return candidates
+        val base = primaryFirst(candidates, policy)
+        val cursorKey = target.platformId.value
+        val cursor = cursors.computeIfAbsent(cursorKey) { AtomicInteger(0) }
         val start = cursor.getAndUpdate { current ->
             if (current == Int.MAX_VALUE) 0 else current + 1
-        }.floorMod(accounts.size)
-        return accounts.drop(start) + accounts.take(start)
+        }.floorMod(base.size)
+        return base.drop(start) + base.take(start)
     }
 
-    private fun primaryBackupOrder(accounts: List<MessageSinkAccount>): List<MessageSinkAccount> {
-        return accounts.filter { it.role == MessageSinkAccountRole.PRIMARY } +
-            accounts.filter { it.role == MessageSinkAccountRole.BACKUP }
-    }
-
-    private fun markFailure(
-        sink: AccountRoutedMessageSinkPlugin,
-        accountId: String,
+    private fun primaryBackupOrder(
+        candidates: List<MessageSinkRouteCandidate>,
         policy: MessageSinkRoutingPolicy,
-    ) {
+    ): List<MessageSinkRouteCandidate> = primaryFirst(candidates, policy)
+
+    private fun primaryFirst(
+        candidates: List<MessageSinkRouteCandidate>,
+        policy: MessageSinkRoutingPolicy,
+    ): List<MessageSinkRouteCandidate> {
+        val primaryAccountId = policy.primaryAccountId.normalized() ?: candidates.first().route.accountId
+        return candidates.filter { it.route.accountId == primaryAccountId } +
+            candidates.filterNot { it.route.accountId == primaryAccountId }
+    }
+
+    private fun markFailure(routeId: String, policy: MessageSinkRoutingPolicy) {
         val until = nowEpochSeconds() + policy.failureCooldownSeconds.coerceAtLeast(1)
-        cooldownUntil[AccountKey(sink.routeKey(), accountId)] = until
+        cooldownUntil[routeId] = until
     }
 
-    private fun clearFailure(sink: AccountRoutedMessageSinkPlugin, accountId: String) {
-        cooldownUntil.remove(AccountKey(sink.routeKey(), accountId))
-    }
-
-    private fun AccountRoutedMessageSinkPlugin.routeKey(): String {
-        return "${this::class.qualifiedName}:${platformId.value}"
+    private fun clearFailure(routeId: String) {
+        cooldownUntil.remove(routeId)
     }
 
     private fun Int.floorMod(divisor: Int): Int = Math.floorMod(this, divisor)
 
-    private fun String?.normalizedAccountId(): String? = this?.trim()?.takeIf { it.isNotBlank() }
-
-    private data class AccountKey(
-        val sinkKey: String,
-        val accountId: String,
-    )
+    private fun String?.normalized(): String? = this?.trim()?.takeIf { it.isNotBlank() }
 }

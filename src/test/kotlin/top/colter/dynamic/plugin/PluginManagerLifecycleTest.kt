@@ -304,7 +304,7 @@ class PluginManagerLifecycleTest {
             message = Message(
                 id = "message-1",
                 time = 1,
-                targets = listOf(TargetAddress.of("onebot", TargetKind.GROUP, "100")),
+                targets = listOf(TargetAddress.of("qq", TargetKind.GROUP, "100")),
                 batches = listOf(MessageBatch(listOf(MessageContent.Text("hello")))),
             ),
         )
@@ -345,7 +345,8 @@ class PluginManagerLifecycleTest {
     }
 
     private class BlockingSinkPlugin : MessageSinkPlugin {
-        override val platformId: PlatformId = PlatformId.of("onebot")
+        override val transportId: String = "onebot"
+        override val supportedTargetPlatforms: Set<PlatformId> = setOf(PlatformId.of("qq"))
         val started: CompletableDeferred<Unit> = CompletableDeferred()
         val release: CompletableDeferred<Unit> = CompletableDeferred()
         var completed: Boolean = false
@@ -360,7 +361,8 @@ class PluginManagerLifecycleTest {
 }
 
 class LifecycleRecordingPlugin : MessageSinkPlugin {
-    override val platformId: PlatformId = PlatformId.of("onebot")
+    override val transportId: String = "onebot"
+    override val supportedTargetPlatforms: Set<PlatformId> = setOf(PlatformId.of("qq"))
 
     override suspend fun onLoad(context: PluginContext) {
         calls += "load:${context.pluginId}"

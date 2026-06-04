@@ -36,6 +36,7 @@ import top.colter.dynamic.core.plugin.CommandResultSendRequest
 import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
+import top.colter.dynamic.core.plugin.MessageSinkRouteState
 import top.colter.dynamic.core.plugin.Plugin
 import top.colter.dynamic.core.plugin.PluginContext
 import top.colter.dynamic.core.plugin.PluginDescriptor
@@ -53,7 +54,6 @@ import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageDelivery
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
-import top.colter.dynamic.listener.MessageSinkAccountRouter
 import java.io.File
 import java.net.URLClassLoader
 import java.nio.file.AtomicMoveNotSupportedException
@@ -86,7 +86,6 @@ public class PluginManager(
     private val scanner: PluginScanner = PluginScanner(pluginDir, objectMapper)
     private val loader: PluginLoader = PluginLoader()
     private val sinkSemaphore: Semaphore = Semaphore(sinkMaxConcurrency)
-    private val accountRouter = MessageSinkAccountRouter()
 
     private val plugins = ConcurrentHashMap<String, PluginRuntime>()
     private val inFlightDispatchJobs = ConcurrentHashMap<String, MutableSet<Job>>()
@@ -392,7 +391,7 @@ public class PluginManager(
                 if (isShuttingDown) return@launchForPlugin
                 sinkSemaphore.withPermit {
                     event.message.targets
-                        .filter { it.platformId == sink.platformId }
+                        .filter { sink.supportsTarget(it) }
                         .forEachIndexed { index, target ->
                             val request = MessageDeliveryRequest(
                                 delivery = legacyDelivery(event.message, target, index),
@@ -400,7 +399,10 @@ public class PluginManager(
                             )
                             runCatching {
                                 if (sink is AccountRoutedMessageSinkPlugin) {
-                                    accountRouter.sendMessage(sink, request)
+                                    val route = sink.listMessageSinkRoutes(target)
+                                        .firstOrNull { it.enabled && it.state == MessageSinkRouteState.READY }
+                                        ?: error("消息出口无可用发送路线：target=${target.stableValue()}")
+                                    sink.sendMessage(request, route.routeId)
                                 } else {
                                     sink.sendMessage(request)
                                 }
@@ -427,6 +429,7 @@ public class PluginManager(
             launchForPlugin(runtime.descriptor.id) {
                 if (isShuttingDown) return@launchForPlugin
                 sinkSemaphore.withPermit {
+                    if (!sink.supportsTarget(event.target.address)) return@withPermit
                     runCatching {
                         val request = CommandResultSendRequest(
                             target = event.target,
@@ -434,7 +437,10 @@ public class PluginManager(
                             inReplyTo = event.inReplyTo,
                         )
                         if (sink is AccountRoutedMessageSinkPlugin) {
-                            accountRouter.sendCommandResult(sink, request)
+                            val route = sink.listMessageSinkRoutes(event.target.address)
+                                .firstOrNull { it.enabled && it.state == MessageSinkRouteState.READY }
+                                ?: error("命令结果无可用发送路线：target=${event.target.address.stableValue()}")
+                            sink.sendCommandResult(request, route.routeId)
                         } else {
                             sink.sendCommandResult(request)
                         }
