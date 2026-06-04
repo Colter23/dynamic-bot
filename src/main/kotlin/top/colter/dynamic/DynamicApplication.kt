@@ -109,7 +109,15 @@ public object DynamicApplication : CoroutineScope {
         }
 
         eventBus.configureScope(this)
-        val config = configStore.loadOrCreate { generateAdminToken() }
+        var generatedAdminToken: String? = null
+        val config = configStore.loadOrCreate {
+            generateAdminToken().also { generatedAdminToken = it }
+        }
+        generatedAdminToken?.let { token ->
+            logger.info {
+                "Web 后台 Token 已自动生成：$token，请妥善保存；也可在主配置 webAdmin.token 中查看或修改"
+            }
+        }
         registerCoreListeners(config)
 
         val loadResult = pluginManager.loadAllPlugins()
