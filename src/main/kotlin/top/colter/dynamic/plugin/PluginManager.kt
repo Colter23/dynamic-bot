@@ -30,6 +30,7 @@ import top.colter.dynamic.core.event.SourceUpdatePublisher
 import top.colter.dynamic.core.event.SubscriptionChangedEvent
 import top.colter.dynamic.core.link.LinkResolver
 import top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION
+import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
 import top.colter.dynamic.core.plugin.CommandContributor
 import top.colter.dynamic.core.plugin.CommandResultSendRequest
 import top.colter.dynamic.core.plugin.MessageDeliveryRequest
@@ -52,6 +53,7 @@ import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageDelivery
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
+import top.colter.dynamic.listener.MessageSinkAccountRouter
 import java.io.File
 import java.net.URLClassLoader
 import java.nio.file.AtomicMoveNotSupportedException
@@ -84,6 +86,7 @@ public class PluginManager(
     private val scanner: PluginScanner = PluginScanner(pluginDir, objectMapper)
     private val loader: PluginLoader = PluginLoader()
     private val sinkSemaphore: Semaphore = Semaphore(sinkMaxConcurrency)
+    private val accountRouter = MessageSinkAccountRouter()
 
     private val plugins = ConcurrentHashMap<String, PluginRuntime>()
     private val inFlightDispatchJobs = ConcurrentHashMap<String, MutableSet<Job>>()
@@ -395,7 +398,13 @@ public class PluginManager(
                                 delivery = legacyDelivery(event.message, target, index),
                                 message = event.message.copy(targets = listOf(target)),
                             )
-                            runCatching { sink.sendMessage(request) }
+                            runCatching {
+                                if (sink is AccountRoutedMessageSinkPlugin) {
+                                    accountRouter.sendMessage(sink, request)
+                                } else {
+                                    sink.sendMessage(request)
+                                }
+                            }
                                 .onFailure {
                                     logger.error(it) {
                                         "消息分发失败：pluginId=${runtime.descriptor.id}，messageId=$eventId"
@@ -419,13 +428,16 @@ public class PluginManager(
                 if (isShuttingDown) return@launchForPlugin
                 sinkSemaphore.withPermit {
                     runCatching {
-                        sink.sendCommandResult(
-                            CommandResultSendRequest(
-                                target = event.target,
-                                chain = event.chain,
-                                inReplyTo = event.inReplyTo,
-                            ),
+                        val request = CommandResultSendRequest(
+                            target = event.target,
+                            chain = event.chain,
+                            inReplyTo = event.inReplyTo,
                         )
+                        if (sink is AccountRoutedMessageSinkPlugin) {
+                            accountRouter.sendCommandResult(sink, request)
+                        } else {
+                            sink.sendCommandResult(request)
+                        }
                     }
                         .onFailure {
                             logger.error(it) {

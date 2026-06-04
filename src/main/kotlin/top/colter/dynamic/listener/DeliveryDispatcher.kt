@@ -9,6 +9,7 @@ import top.colter.dynamic.DeliveryConfig
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.core.plugin.CommandResultSendRequest
+import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
 import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.core.plugin.MessageRecallRequest
 import top.colter.dynamic.core.plugin.MessageRecallResult
@@ -32,6 +33,7 @@ public data class DeliveryDispatchStats(
 public class DeliveryDispatcher(
     private val sinkProvider: () -> List<PluginHandle<MessageSinkPlugin>>,
     private val configProvider: () -> DeliveryConfig,
+    private val accountRouter: MessageSinkAccountRouter = MessageSinkAccountRouter(),
 ) {
     public suspend fun dispatchDue(): DeliveryDispatchStats = coroutineScope {
         val config = configProvider()
@@ -89,7 +91,14 @@ public class DeliveryDispatcher(
     public suspend fun sendCommandResult(request: CommandResultSendRequest): MessageSendResult {
         return when (val resolved = resolveSink(request.target.address)) {
             is SinkResolveResult.Found -> {
-                runCatching { resolved.sink.sendCommandResult(request) }
+                runCatching {
+                    val sink = resolved.sink
+                    if (sink is AccountRoutedMessageSinkPlugin) {
+                        accountRouter.sendCommandResult(sink, request)
+                    } else {
+                        sink.sendCommandResult(request)
+                    }
+                }
                     .getOrElse { error ->
                         MessageSendResult.failed(error.message ?: "命令回复发送失败", retryable = true)
                     }
@@ -107,11 +116,25 @@ public class DeliveryDispatcher(
         }
     }
 
-    public suspend fun recallMessage(target: TargetAddress, sinkMessageId: String): MessageRecallResult {
+    public suspend fun recallMessage(
+        target: TargetAddress,
+        sinkMessageId: String,
+        sinkAccountId: String? = null,
+    ): MessageRecallResult {
         return when (val resolved = resolveSink(target)) {
             is SinkResolveResult.Found -> {
                 runCatching {
-                    resolved.sink.recallMessage(MessageRecallRequest(target = target, sinkMessageId = sinkMessageId))
+                    val request = MessageRecallRequest(
+                        target = target,
+                        sinkMessageId = sinkMessageId,
+                        sinkAccountId = sinkAccountId,
+                    )
+                    val sink = resolved.sink
+                    if (sink is AccountRoutedMessageSinkPlugin) {
+                        accountRouter.recallMessage(sink, request)
+                    } else {
+                        sink.recallMessage(request)
+                    }
                 }.getOrElse { error ->
                     MessageRecallResult.failed(error.message ?: "消息撤回失败")
                 }
@@ -163,15 +186,25 @@ public class DeliveryDispatcher(
         logger.debug {
             "正在发送消息：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，attempt=${request.delivery.attempts}"
         }
-        val result = runCatching { sink.sendMessage(request) }
+        val result = runCatching {
+            if (sink is AccountRoutedMessageSinkPlugin) {
+                accountRouter.sendMessage(sink, request)
+            } else {
+                sink.sendMessage(request)
+            }
+        }
             .getOrElse { error ->
                 MessageSendResult.failed(error.message ?: "消息发送失败", retryable = true)
             }
         return when (result) {
             is MessageSendResult.Sent -> {
-                MessageDeliveryRepository.markSent(request.delivery.id, result.sinkMessageId)
+                MessageDeliveryRepository.markSent(
+                    deliveryId = request.delivery.id,
+                    sinkMessageId = result.sinkMessageId,
+                    sinkAccountId = result.sinkAccountId,
+                )
                 logger.debug {
-                    "消息发送成功：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，sinkMessageId=${result.sinkMessageId ?: "-"}"
+                    "消息发送成功：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，sinkMessageId=${result.sinkMessageId ?: "-"}，sinkAccountId=${result.sinkAccountId ?: "-"}"
                 }
                 DeliveryOutcome.SENT
             }
@@ -184,7 +217,9 @@ public class DeliveryDispatcher(
         result: MessageSendResult.Failed,
         config: DeliveryConfig,
     ): DeliveryOutcome {
-        val shouldRetry = result.retryable && request.delivery.attempts < config.maxAttempts.coerceAtLeast(1)
+        val shouldRetry = !result.partialSent &&
+            result.retryable &&
+            request.delivery.attempts < config.maxAttempts.coerceAtLeast(1)
         return if (shouldRetry) {
             val nextAttemptAt = nowEpochSeconds() + wholeSeconds(config.retryDelaySeconds)
             MessageDeliveryRepository.markRetry(

@@ -23,6 +23,7 @@ public object MessageDeliveryTable : IntIdTable("message_delivery") {
     public val status: Column<DeliveryStatus> = enumerationByName<DeliveryStatus>("status", 20).default(DeliveryStatus.PENDING)
     public val attempts: Column<Int> = integer(name = "attempts").default(0)
     public val sinkMessageId: Column<String?> = varchar(name = "sink_message_id", length = 255).nullable()
+    public val sinkAccountId: Column<String?> = varchar(name = "sink_account_id", length = 120).nullable()
     public val lastError: Column<String?> = varchar(name = "last_error", length = 500).nullable()
     public val nextAttemptAt: Column<Instant?> = timestamp(name = "next_attempt_at").nullable()
     public val lockedUntil: Column<Instant?> = timestamp(name = "locked_until").nullable()

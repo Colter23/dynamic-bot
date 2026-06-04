@@ -1339,6 +1339,7 @@ private fun MessageDelivery.toDto(): MessageDeliveryDto = MessageDeliveryDto(
     status = status.name,
     attempts = attempts,
     sinkMessageId = sinkMessageId,
+    sinkAccountId = sinkAccountId,
     lastError = lastError,
     nextAttemptAtEpochSeconds = nextAttemptAtEpochSeconds,
     lockedUntilEpochSeconds = lockedUntilEpochSeconds,

@@ -176,6 +176,17 @@ private val DATABASE_MIGRATIONS: List<DatabaseMigration> = listOf(
             )
         }
     },
+    DatabaseMigration(
+        id = "message-delivery-sink-account-id",
+        description = "为 message_delivery 增加实际发送账号 sink_account_id",
+    ) {
+        if (tableExists("message_delivery") && !columnExists("message_delivery", "sink_account_id")) {
+            exec(
+                "ALTER TABLE ${quoteIdentifier("message_delivery")} " +
+                    "ADD COLUMN ${quoteIdentifier("sink_account_id")} VARCHAR(120) NULL",
+            )
+        }
+    },
 )
 
 private fun quoteIdentifier(identifier: String): String {

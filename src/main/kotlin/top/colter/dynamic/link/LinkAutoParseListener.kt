@@ -30,7 +30,7 @@ internal class LinkAutoParseListener(
         if (!linkParsing.autoParseEnabled) return
         if (CommandParser.parse(event.rawText, config.command.prefix) != null) return
 
-        val triggerMode = LinkParseTargetConfigRepository.findByAddress(event.context.target)?.triggerMode
+        val triggerMode = LinkParseTargetConfigRepository.findEffectiveByAddress(event.context.target)?.triggerMode
             ?: linkParsing.fallbackTriggerMode
         if (!triggerMode.allows(event)) {
             logTriggerBlocked(event, triggerMode)
@@ -81,7 +81,7 @@ internal class LinkAutoParseListener(
         CommandResultEvent(
             sourcePlugin = LINK_PARSE_EVENT_SOURCE,
             target = CommandTarget(
-                address = event.context.target,
+                address = event.context.target.withPreferredAccount(event.context.botAccountId),
                 senderId = event.context.senderId,
             ),
             chain = listOf(MessageBatch(listOf(MessageContent.Text(message)))),
@@ -147,5 +147,12 @@ internal class LinkAutoParseListener(
     private fun top.colter.dynamic.core.data.CommandContext.mentionsBot(): Boolean {
         val botId = botAccountId?.trim()?.takeIf { it.isNotBlank() } ?: return false
         return mentionedAccountIds.any { it == botId }
+    }
+
+    private fun top.colter.dynamic.core.data.TargetAddress.withPreferredAccount(
+        accountId: String?,
+    ): top.colter.dynamic.core.data.TargetAddress {
+        val normalized = accountId?.trim()?.takeIf { it.isNotBlank() } ?: return this
+        return copy(accountId = normalized)
     }
 }

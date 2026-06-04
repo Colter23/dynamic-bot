@@ -11,10 +11,16 @@ import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.PlatformId
+import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
 import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.core.plugin.MessageSendResult
+import top.colter.dynamic.core.plugin.MessageSinkAccount
+import top.colter.dynamic.core.plugin.MessageSinkAccountRole
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
+import top.colter.dynamic.core.plugin.MessageSinkRoutingPolicy
+import top.colter.dynamic.core.plugin.MessageSinkRoutingStrategy
 import top.colter.dynamic.plugin.PluginCapability
 import top.colter.dynamic.core.plugin.PluginDescriptor
 import top.colter.dynamic.plugin.PluginHandle
@@ -81,19 +87,129 @@ class DeliveryDispatcherTest {
         assertNotNull(delivery.lastError)
     }
 
-    private fun dispatcher(vararg sinks: RecordingSink): DeliveryDispatcher {
-        return DeliveryDispatcher(
-            sinkProvider = { sinks.map { it.handle() } },
-            configProvider = {
-                DeliveryConfig(
-                    maxAttempts = 2,
-                    retryDelaySeconds = 0.001,
-                    dispatchConcurrency = 2,
-                    lockTtlSeconds = 10.0,
-                )
+    @Test
+    fun `routed sink should round robin accounts and persist actual account`() = runBlocking {
+        initDb("round-robin-accounts")
+        val sink = RoutedRecordingSink(
+            accounts = listOf(MessageSinkAccount("bot-a"), MessageSinkAccount("bot-b")),
+        )
+        val target = testTargetAddress(platformId = "onebot", kind = TargetKind.GROUP, externalId = "10001")
+        MessageDeliveryRepository.enqueue(testMessage("message-rr-1", target))
+        MessageDeliveryRepository.enqueue(testMessage("message-rr-2", target))
+
+        val stats = dispatcher(
+            sink,
+            config = defaultDeliveryConfig().copy(dispatchConcurrency = 1),
+        ).dispatchDue()
+
+        assertEquals(2, stats.sent)
+        assertEquals(listOf("bot-a:message-rr-1", "bot-b:message-rr-2"), sink.sent)
+        assertEquals("bot-a", MessageDeliveryRepository.findByMessageId("message-rr-1").single().sinkAccountId)
+        assertEquals("bot-b", MessageDeliveryRepository.findByMessageId("message-rr-2").single().sinkAccountId)
+    }
+
+    @Test
+    fun `routed sink should treat target account as preferred and fail over`() = runBlocking {
+        initDb("preferred-account-failover")
+        val target = testTargetAddress(
+            platformId = "onebot",
+            kind = TargetKind.GROUP,
+            externalId = "10001",
+            accountId = "bot-a",
+        )
+        val sink = RoutedRecordingSink(
+            accounts = listOf(
+                MessageSinkAccount("bot-a", role = MessageSinkAccountRole.PRIMARY),
+                MessageSinkAccount("bot-b", role = MessageSinkAccountRole.BACKUP),
+            ),
+            policy = MessageSinkRoutingPolicy(MessageSinkRoutingStrategy.PRIMARY_BACKUP, failureCooldownSeconds = 60),
+            result = { accountId, request ->
+                if (accountId == "bot-a") {
+                    MessageSendResult.failed("主账号离线", retryable = true)
+                } else {
+                    MessageSendResult.sent("receipt-${request.message.id}")
+                }
             },
         )
+        val message = testMessage("message-preferred", target)
+        MessageDeliveryRepository.enqueue(message)
+
+        val stats = dispatcher(sink).dispatchDue()
+
+        assertEquals(1, stats.sent)
+        assertEquals(listOf("bot-a:message-preferred", "bot-b:message-preferred"), sink.sent)
+        val delivery = MessageDeliveryRepository.findByMessageId(message.id).single()
+        assertEquals(DeliveryStatus.SENT, delivery.status)
+        assertEquals("bot-b", delivery.sinkAccountId)
     }
+
+    @Test
+    fun `routed sink should cooldown failed primary account`() = runBlocking {
+        initDb("account-cooldown")
+        val sink = RoutedRecordingSink(
+            accounts = listOf(
+                MessageSinkAccount("bot-a", role = MessageSinkAccountRole.PRIMARY),
+                MessageSinkAccount("bot-b", role = MessageSinkAccountRole.BACKUP),
+            ),
+            policy = MessageSinkRoutingPolicy(MessageSinkRoutingStrategy.PRIMARY_BACKUP, failureCooldownSeconds = 60),
+            result = { accountId, request ->
+                if (accountId == "bot-a") {
+                    MessageSendResult.failed("主账号离线", retryable = true)
+                } else {
+                    MessageSendResult.sent("receipt-${request.message.id}")
+                }
+            },
+        )
+        val target = testTargetAddress(platformId = "onebot", kind = TargetKind.GROUP, externalId = "10001")
+        val dispatcher = dispatcher(sink)
+        MessageDeliveryRepository.enqueue(testMessage("message-cooldown-1", target))
+        dispatcher.dispatchDue()
+
+        MessageDeliveryRepository.enqueue(testMessage("message-cooldown-2", target))
+        dispatcher.dispatchDue()
+
+        assertEquals(
+            listOf("bot-a:message-cooldown-1", "bot-b:message-cooldown-1", "bot-b:message-cooldown-2"),
+            sink.sent,
+        )
+    }
+
+    @Test
+    fun `routed sink should not retry or switch account after partial send`() = runBlocking {
+        initDb("partial-send")
+        val sink = RoutedRecordingSink(
+            accounts = listOf(MessageSinkAccount("bot-a"), MessageSinkAccount("bot-b")),
+            result = { _, _ -> MessageSendResult.failed("第二段消息失败", retryable = true, partialSent = true) },
+        )
+        val target = testTargetAddress(platformId = "onebot", kind = TargetKind.GROUP, externalId = "10001")
+        val message = testMessage("message-partial", target)
+        MessageDeliveryRepository.enqueue(message)
+
+        val stats = dispatcher(sink).dispatchDue()
+
+        assertEquals(1, stats.failed)
+        assertEquals(listOf("bot-a:message-partial"), sink.sent)
+        val delivery = MessageDeliveryRepository.findByMessageId(message.id).single()
+        assertEquals(DeliveryStatus.FAILED, delivery.status)
+        assertEquals(1, delivery.attempts)
+    }
+
+    private fun dispatcher(
+        vararg sinks: MessageSinkPlugin,
+        config: DeliveryConfig = defaultDeliveryConfig(),
+    ): DeliveryDispatcher {
+        return DeliveryDispatcher(
+            sinkProvider = { sinks.mapIndexed { index, sink -> sink.handleForTest(index) } },
+            configProvider = { config },
+        )
+    }
+
+    private fun defaultDeliveryConfig(): DeliveryConfig = DeliveryConfig(
+        maxAttempts = 2,
+        retryDelaySeconds = 0.001,
+        dispatchConcurrency = 2,
+        lockTtlSeconds = 10.0,
+    )
 
     private fun testMessage(id: String, target: top.colter.dynamic.core.data.TargetAddress): Message {
         return Message(
@@ -125,19 +241,49 @@ class DeliveryDispatcherTest {
             return result(request)
         }
 
-        fun handle(): PluginHandle<MessageSinkPlugin> = PluginHandle(
-            info = PluginInfo(
-                descriptor = PluginDescriptor(
-                    id = pluginId,
-                    name = pluginId,
-                    version = "test",
-                    mainClass = RecordingSink::class.qualifiedName.orEmpty(),
-                ),
-                capabilities = setOf(PluginCapability.MESSAGE_SINK),
-                state = PluginState.ACTIVE,
-                sourceJarPath = "test.jar",
-            ),
-            instance = this,
-        )
+        fun pluginId(): String = pluginId
     }
+
+    private class RoutedRecordingSink(
+        private val accounts: List<MessageSinkAccount>,
+        private val policy: MessageSinkRoutingPolicy = MessageSinkRoutingPolicy(),
+        private val result: (String, MessageDeliveryRequest) -> MessageSendResult = { accountId, request ->
+            MessageSendResult.sent("receipt-${request.message.id}", sinkAccountId = accountId)
+        },
+    ) : AccountRoutedMessageSinkPlugin {
+        override val platformId: PlatformId = PlatformId.of("onebot")
+        override val supportedTargetKinds: Set<TargetKind> = setOf(TargetKind.GROUP)
+
+        val sent: MutableList<String> = mutableListOf()
+
+        override fun routingPolicy(): MessageSinkRoutingPolicy = policy
+
+        override suspend fun listMessageSinkAccounts(target: TargetAddress?): List<MessageSinkAccount> = accounts
+
+        override suspend fun sendMessage(
+            request: MessageDeliveryRequest,
+            accountId: String,
+        ): MessageSendResult {
+            sent += "$accountId:${request.message.id}"
+            return result(accountId, request)
+        }
+    }
+}
+
+private fun MessageSinkPlugin.handleForTest(index: Int): PluginHandle<MessageSinkPlugin> {
+    val pluginId = "onebot-$index"
+    return PluginHandle(
+        info = PluginInfo(
+            descriptor = PluginDescriptor(
+                id = pluginId,
+                name = pluginId,
+                version = "test",
+                mainClass = this::class.qualifiedName.orEmpty(),
+            ),
+            capabilities = setOf(PluginCapability.MESSAGE_SINK),
+            state = PluginState.ACTIVE,
+            sourceJarPath = "test.jar",
+        ),
+        instance = this,
+    )
 }

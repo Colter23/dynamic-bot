@@ -150,7 +150,7 @@ public class CommandListener(
         CommandResultEvent(
             sourcePlugin = MAIN_OWNER,
             target = CommandTarget(
-                address = event.context.target,
+                address = event.context.target.withPreferredAccount(event.context.botAccountId),
                 senderId = event.context.senderId,
             ),
             chain = result.reply,
@@ -202,7 +202,14 @@ public class CommandListener(
 }
 
 private fun CommandInvocation.currentSubscriber(): Subscriber? {
-    return SubscriberRepository.findByAddress(context.target)
+    return SubscriberRepository.findEffectiveByAddress(context.target)
+}
+
+private fun top.colter.dynamic.core.data.TargetAddress.withPreferredAccount(
+    accountId: String?,
+): top.colter.dynamic.core.data.TargetAddress {
+    val normalized = accountId?.trim()?.takeIf { it.isNotBlank() } ?: return this
+    return copy(accountId = normalized)
 }
 
 private fun success(message: String): CommandExecutionResult {
@@ -479,7 +486,7 @@ private class LoginCommandHandler(
         CommandResultEvent(
             sourcePlugin = "main",
             target = CommandTarget(
-                address = invocation.context.target,
+                address = invocation.context.target.withPreferredAccount(invocation.context.botAccountId),
                 senderId = invocation.context.senderId,
             ),
             chain = commandResult.reply,

@@ -32,7 +32,7 @@ internal class LinkParseConfigCommandHandler(
 
     private fun status(invocation: CommandInvocation): CommandExecutionResult {
         val config = configProvider().linkParsing
-        val targetConfig = LinkParseTargetConfigRepository.findByAddress(invocation.context.target)
+        val targetConfig = LinkParseTargetConfigRepository.findEffectiveByAddress(invocation.context.target)
         val activeMode = targetConfig?.triggerMode ?: config.fallbackTriggerMode
         val source = if (targetConfig == null) "全局回退" else "当前会话配置"
         val progress = config.progressReply

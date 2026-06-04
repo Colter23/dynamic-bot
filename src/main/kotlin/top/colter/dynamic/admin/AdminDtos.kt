@@ -309,6 +309,7 @@ public data class MessageDeliveryDto(
     val status: String,
     val attempts: Int,
     val sinkMessageId: String? = null,
+    val sinkAccountId: String? = null,
     val lastError: String? = null,
     val nextAttemptAtEpochSeconds: Long? = null,
     val lockedUntilEpochSeconds: Long? = null,
