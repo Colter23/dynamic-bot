@@ -15,13 +15,13 @@ import top.colter.dynamic.event.Listener
 import top.colter.dynamic.repository.LinkParseTargetConfigRepository
 import kotlin.math.roundToLong
 
-private val autoParseLogger = loggerFor<DynamicLinkAutoParseListener>()
+private val autoParseLogger = loggerFor<LinkAutoParseListener>()
 
-internal class DynamicLinkAutoParseListener(
+internal class LinkAutoParseListener(
     private val configProvider: () -> MainDynamicConfig,
-    private val forwarder: DynamicLinkForwarder,
+    private val linkParseService: LinkParseService,
     private val eventBus: EventBus = EventBus(),
-    private val dedupe: DynamicLinkDedupe = DynamicLinkDedupe(),
+    private val dedupe: LinkParseDedupe = LinkParseDedupe(),
     private val progressMessenger: LinkParseProgressMessenger = NoopLinkParseProgressMessenger,
 ) : Listener<CommandEvent> {
     override suspend fun onMessage(event: CommandEvent) {
@@ -40,7 +40,7 @@ internal class DynamicLinkAutoParseListener(
         var progressReceipt: LinkParseProgressReceipt? = null
         val autoDedupe = dedupe.takeIf { triggerMode == LinkParseTriggerMode.ALWAYS }
         val result = try {
-            forwarder.forwardFirst(
+            linkParseService.parseAndDispatch(
                 text = event.rawText,
                 context = event.context,
                 maxLinks = linkParsing.maxLinksPerMessage,
@@ -63,10 +63,15 @@ internal class DynamicLinkAutoParseListener(
         }
 
         if (linkParsing.replyOnFailure) {
-            when (result) {
-                is DynamicLinkForwardResult.Failed -> reply(event, "链接解析失败：${result.reason}", CommandStatus.FAILED)
-                DynamicLinkForwardResult.NoSupportedLink -> reply(event, "未找到支持的动态链接", CommandStatus.FAILED)
-                else -> Unit
+            when {
+                result.disabledReason != null -> reply(event, "链接解析失败：${result.disabledReason}", CommandStatus.FAILED)
+                !result.hasSupportedLinks -> reply(event, "未找到支持的链接", CommandStatus.FAILED)
+                result.failures.isNotEmpty() && !result.hasForwarded -> {
+                    reply(event, "链接解析失败：${result.failureSummary.ifBlank { "没有链接成功解析" }}", CommandStatus.FAILED)
+                }
+                result.failures.isNotEmpty() -> {
+                    reply(event, "部分链接解析失败：${result.failureSummary}", CommandStatus.SUCCESS)
+                }
             }
         }
         logForwardResult(event, result)
@@ -113,19 +118,27 @@ internal class DynamicLinkAutoParseListener(
         }
     }
 
-    private fun logForwardResult(event: CommandEvent, result: DynamicLinkForwardResult) {
+    private fun logForwardResult(event: CommandEvent, result: LinkParseBatchResult) {
         val target = event.context.target.stableValue()
-        when (result) {
-            is DynamicLinkForwardResult.Forwarded -> autoParseLogger.info {
-                "链接自动解析已提交：target=$target，platform=${result.parsedLink.platformId.value}，update=${result.parsedLink.updateId}"
+        result.items.forEach { item ->
+            when (item) {
+                is LinkParseItemResult.Forwarded -> autoParseLogger.info {
+                    "链接自动解析已提交：target=$target，platform=${item.parsedLink.platformId.value}，kind=${item.parsedLink.kind}，id=${item.parsedLink.targetId}，deliveryCount=${item.deliveryCount}"
+                }
+                is LinkParseItemResult.Duplicate -> autoParseLogger.debug {
+                    "链接自动解析跳过重复链接：target=$target，platform=${item.parsedLink.platformId.value}，kind=${item.parsedLink.kind}，id=${item.parsedLink.targetId}"
+                }
+                is LinkParseItemResult.Failed -> autoParseLogger.warn {
+                    "链接自动解析失败：target=$target，platform=${item.parsedLink.platformId.value}，kind=${item.parsedLink.kind}，id=${item.parsedLink.targetId}，原因=${item.reason}"
+                }
             }
-            is DynamicLinkForwardResult.Duplicate -> autoParseLogger.debug {
-                "链接自动解析跳过重复动态：target=$target，platform=${result.parsedLink.platformId.value}，update=${result.parsedLink.updateId}"
+        }
+        if (result.disabledReason != null) {
+            autoParseLogger.warn {
+                "链接自动解析失败：target=$target，原因=${result.disabledReason}"
             }
-            is DynamicLinkForwardResult.Failed -> autoParseLogger.warn {
-                "链接自动解析失败：target=$target，原因=${result.reason}"
-            }
-            DynamicLinkForwardResult.NoSupportedLink -> autoParseLogger.debug {
+        } else if (!result.hasSupportedLinks) {
+            autoParseLogger.debug {
                 "链接自动解析未找到支持的链接：target=$target"
             }
         }

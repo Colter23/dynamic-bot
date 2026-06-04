@@ -37,9 +37,10 @@ import top.colter.dynamic.draw.image.ImageFileCleaner
 import top.colter.dynamic.draw.DefaultDynamicDrawService
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.listener.DeliveryDispatcher
-import top.colter.dynamic.link.DynamicLinkAutoParseListener
-import top.colter.dynamic.link.DynamicLinkForwarder
+import top.colter.dynamic.link.LinkAutoParseListener
 import top.colter.dynamic.link.DeliveryLinkParseProgressMessenger
+import top.colter.dynamic.link.DefaultLinkPreviewRenderer
+import top.colter.dynamic.link.LinkParseService
 import top.colter.dynamic.listener.SourceUpdateProcessor
 import top.colter.dynamic.repository.MessageDeliveryRepository
 
@@ -159,15 +160,26 @@ public object DynamicApplication : CoroutineScope {
             },
         )
 
-        val dynamicLinkForwarder = DynamicLinkForwarder(
-            resolversProvider = { pluginManager.getDynamicLinkResolvers() },
+        val linkParseService = LinkParseService(
+            resolversProvider = { pluginManager.getLinkResolvers() },
             sourceUpdatePublisher = sourceUpdatePublisher,
+            publisherLookupResolver = { platformId -> pluginManager.findPublisherLookupPlugin(platformId) },
+            previewRenderer = DefaultLinkPreviewRenderer(
+                configProvider = configStore::current,
+                drawService = DefaultDynamicDrawService(
+                    configProvider = configStore::current,
+                    assetResolver = drawAssetRegistry,
+                ),
+            ),
+            onMessagesQueued = {
+                deliveryDispatcher.dispatchDue()
+            },
         )
 
         listenerTokens += eventBus.subscribe(
             CommandListener(
                 configProvider = configStore::current,
-                dynamicLinkForwarder = dynamicLinkForwarder,
+                linkParseService = linkParseService,
                 publisherLookupResolver = { platformId -> pluginManager.findPublisherLookupPlugin(platformId) },
                 publisherFollowResolver = { platformId -> pluginManager.findPublisherFollowPlugin(platformId) },
                 publisherLoginResolver = { platformId -> pluginManager.findPublisherLoginProvider(platformId) },
@@ -178,9 +190,9 @@ public object DynamicApplication : CoroutineScope {
             ),
         )
         listenerTokens += eventBus.subscribe(
-            DynamicLinkAutoParseListener(
+            LinkAutoParseListener(
                 configProvider = configStore::current,
-                forwarder = dynamicLinkForwarder,
+                linkParseService = linkParseService,
                 eventBus = eventBus,
                 progressMessenger = DeliveryLinkParseProgressMessenger(
                     sendCommandResult = deliveryDispatcher::sendCommandResult,

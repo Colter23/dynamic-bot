@@ -59,9 +59,9 @@ import top.colter.dynamic.repository.PublisherDrawThemeRepository
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SubscriptionRepository
-import top.colter.dynamic.link.DynamicLinkForwarder
+import top.colter.dynamic.link.LinkParseService
 import top.colter.dynamic.link.LinkParseConfigCommandHandler
-import top.colter.dynamic.link.ParseDynamicLinkCommandHandler
+import top.colter.dynamic.link.LinkParseCommandHandler
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.nio.file.Files
@@ -77,7 +77,7 @@ public class CommandListener(
     private val publisherLoginResolver: (String) -> PublisherLoginProvider? = { platform ->
         publisherLookupResolver(platform) as? PublisherLoginProvider
     },
-    private val dynamicLinkForwarder: DynamicLinkForwarder = DynamicLinkForwarder(resolversProvider = { emptyList() }),
+    private val linkParseService: LinkParseService = LinkParseService(resolversProvider = { emptyList() }),
     config: MainDynamicConfig? = null,
     configProvider: (() -> MainDynamicConfig)? = null,
     private val stopRequester: ((String) -> Unit)? = null,
@@ -162,7 +162,14 @@ public class CommandListener(
         commandRegistry.register(HelpCommandHandler(commandPrefixProvider, commandRegistry), MAIN_OWNER)
         commandRegistry.register(StatusCommandHandler(commandRegistry), MAIN_OWNER)
         stopRequester?.let { commandRegistry.register(StopApplicationCommandHandler(it), MAIN_OWNER) }
-        commandRegistry.register(ParseDynamicLinkCommandHandler(dynamicLinkForwarder, commandPrefixProvider), MAIN_OWNER)
+        commandRegistry.register(
+            LinkParseCommandHandler(
+                linkParseService = linkParseService,
+                commandPrefixProvider = commandPrefixProvider,
+                maxLinksProvider = { runtimeConfig.linkParsing.maxLinksPerMessage },
+            ),
+            MAIN_OWNER,
+        )
         commandRegistry.register(LinkParseConfigCommandHandler({ runtimeConfig }, commandPrefixProvider), MAIN_OWNER)
         commandRegistry.register(
             SubscribeCommandHandler(

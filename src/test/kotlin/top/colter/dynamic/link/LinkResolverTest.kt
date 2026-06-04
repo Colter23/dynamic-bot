@@ -4,14 +4,13 @@ import kotlinx.coroutines.runBlocking
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
-import top.colter.dynamic.core.data.DynamicContent
+import kotlin.test.assertNotNull
 import top.colter.dynamic.core.data.DynamicPayload
-import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.core.data.PlatformId
-import top.colter.dynamic.core.link.DynamicLinkResolution
-import top.colter.dynamic.core.link.DynamicLinkResolver
-import top.colter.dynamic.core.link.ParsedDynamicLink
-import top.colter.dynamic.core.plugin.Plugin
+import top.colter.dynamic.core.link.LinkKinds
+import top.colter.dynamic.core.link.LinkResolution
+import top.colter.dynamic.core.link.LinkResolver
+import top.colter.dynamic.core.link.ParsedLink
 import top.colter.dynamic.core.plugin.PluginDescriptor
 import top.colter.dynamic.plugin.PluginManager
 import top.colter.dynamic.plugin.PluginState
@@ -19,25 +18,26 @@ import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testPublisherInfo
 import top.colter.dynamic.testPublisherKey
 
-class DynamicLinkResolverTest {
+class LinkResolverTest {
     @Test
-    fun `parsed dynamic link model should resolve to success`() = runBlocking {
-        val resolver = FakeDynamicLinkResolver()
-        val parsed = resolver.parseDynamicLink("https://example.com/dynamic/1")
+    fun `parsed link model should resolve to dynamic result`() = runBlocking {
+        val resolver = FakeLinkResolver()
+        val parsed = resolver.parseLink("https://example.com/dynamic/1")
 
-        requireNotNull(parsed)
+        assertNotNull(parsed)
         assertEquals(PlatformId.of("example"), parsed.platformId)
-        assertEquals("1", parsed.updateId)
+        assertEquals("1", parsed.targetId)
+        assertEquals(LinkKinds.DYNAMIC, parsed.kind)
 
-        val resolution = resolver.resolveDynamicLink(parsed)
-        assertIs<DynamicLinkResolution.Success>(resolution)
+        val resolution = resolver.resolveLink(parsed)
+        assertIs<LinkResolution.Dynamic>(resolution)
         assertEquals("1", resolution.update.key.externalId)
     }
 
     @Test
     fun `plugin manager should expose active link resolvers`() {
         val manager = PluginManager()
-        val resolver = FakeDynamicLinkResolver()
+        val resolver = FakeLinkResolver()
         manager.registerPluginForTest(
             descriptor = PluginDescriptor(
                 id = "fake-link",
@@ -49,33 +49,33 @@ class DynamicLinkResolverTest {
             state = PluginState.ACTIVE,
         )
 
-        assertEquals(listOf(resolver), manager.getDynamicLinkResolvers())
+        assertEquals(listOf(resolver), manager.getLinkResolvers())
     }
 
-    private class FakeDynamicLinkResolver : DynamicLinkResolver {
+    private class FakeLinkResolver : LinkResolver {
         override val platformId: PlatformId = PlatformId.of("example")
 
-        override suspend fun parseDynamicLink(inputUrl: String): ParsedDynamicLink? {
-            return ParsedDynamicLink(
+        override suspend fun parseLink(inputUrl: String): ParsedLink? {
+            return ParsedLink(
                 platformId = platformId,
-                updateId = inputUrl.substringAfterLast("/"),
+                kind = LinkKinds.DYNAMIC,
+                targetId = inputUrl.substringAfterLast("/"),
                 normalizedUrl = inputUrl,
             )
         }
 
-        override suspend fun resolveDynamicLink(parsedLink: ParsedDynamicLink): DynamicLinkResolution {
-            return DynamicLinkResolution.Success(
+        override suspend fun resolveLink(parsedLink: ParsedLink): LinkResolution {
+            return LinkResolution.Dynamic(
                 parsedLink = parsedLink,
                 update = testDynamicUpdate(
                     publisher = testPublisherInfo(
                         key = testPublisherKey(platformId = platformId.value, externalId = "publisher"),
                         name = "publisher",
                     ),
-                    externalId = parsedLink.updateId,
-                    payload = DynamicPayload(blocks = listOf(TextBlock(DynamicContent.text("resolved")))),
-                ),
+                    externalId = parsedLink.targetId,
+                    payload = DynamicPayload(blocks = listOf()),
+                ).copy(link = parsedLink.normalizedUrl),
             )
         }
-
     }
 }

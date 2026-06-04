@@ -19,6 +19,7 @@ import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.MessageEvent
+import top.colter.dynamic.core.event.PublisherPersistenceMode
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.draw.DefaultDynamicDrawService
@@ -68,7 +69,7 @@ public class SourceUpdateProcessor(
     }
 
     private suspend fun handleDynamic(request: SourceUpdatePublishRequest, update: SourceUpdate): SourceUpdatePublishResult {
-        val (normalizedUpdate, storedPublisher) = normalizePublisher(update)
+        val (normalizedUpdate, storedPublisher) = normalizePublisher(update, request.publisherPersistenceMode)
         val targets = resolveTargets(request.deliveryTarget, storedPublisher)
         if (targets.isEmpty()) {
             logger.info { "来源更新无可投递目标：update=${normalizedUpdate.key.stableValue()}" }
@@ -99,7 +100,7 @@ public class SourceUpdateProcessor(
     }
 
     private suspend fun handleLive(request: SourceUpdatePublishRequest, update: SourceUpdate): SourceUpdatePublishResult {
-        val (normalizedUpdate, storedPublisher) = normalizePublisher(update)
+        val (normalizedUpdate, storedPublisher) = normalizePublisher(update, request.publisherPersistenceMode)
         val targets = resolveTargets(request.deliveryTarget, storedPublisher)
             .filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds)
             .let { applySubscriptionRules(normalizedUpdate, it) }
@@ -120,18 +121,21 @@ public class SourceUpdateProcessor(
         )
     }
 
-    private fun normalizePublisher(update: SourceUpdate): Pair<SourceUpdate, Publisher?> {
+    private fun normalizePublisher(
+        update: SourceUpdate,
+        persistenceMode: PublisherPersistenceMode,
+    ): Pair<SourceUpdate, Publisher?> {
         val incoming = update.publisher
         val stored = PublisherRepository.findByKey(incoming.key) ?: return update to null
         val normalizedPublisher = stored.copy(
             key = incoming.key,
-            name = incoming.name,
-            avatarBadgeKey = incoming.avatarBadgeKey,
-            avatar = incoming.avatar,
-            pendant = incoming.pendant,
+            name = incoming.name.ifBlank { stored.name },
+            avatarBadgeKey = incoming.avatarBadgeKey ?: stored.avatarBadgeKey,
+            avatar = incoming.avatar.takeIf { it.uri.isNotBlank() } ?: stored.avatar,
+            pendant = incoming.pendant ?: stored.pendant,
             banner = incoming.banner ?: stored.banner,
         )
-        if (normalizedPublisher != stored) {
+        if (persistenceMode == PublisherPersistenceMode.UPSERT && normalizedPublisher != stored) {
             PublisherRepository.replace(normalizedPublisher)
         }
         return update.copy(publisher = normalizedPublisher.toInfo()) to normalizedPublisher

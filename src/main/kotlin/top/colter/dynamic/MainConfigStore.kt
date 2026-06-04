@@ -134,7 +134,7 @@ public object MainConfigForms {
                     label = "自动解析链接",
                     type = ConfigFieldType.BOOLEAN,
                     section = "链接解析",
-                    description = "收到聊天消息中的动态链接时，自动解析并按当前消息目标转发动态内容。",
+                    description = "收到聊天消息中的支持链接时，自动解析并按当前消息目标转发解析结果。",
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.fallbackTriggerMode",
@@ -154,7 +154,7 @@ public object MainConfigForms {
                     label = "单条消息最大解析链接数",
                     type = ConfigFieldType.NUMBER,
                     section = "链接解析",
-                    description = "一条聊天消息内最多自动处理多少个动态链接，超出部分会被忽略。",
+                    description = "一条聊天消息内最多自动处理多少个支持链接，超出部分会被忽略。",
                     min = 1,
                     numberKind = ConfigNumberKind.INTEGER,
                 ),
@@ -170,7 +170,7 @@ public object MainConfigForms {
                     label = "自动去重时间窗口（秒）",
                     type = ConfigFieldType.NUMBER,
                     section = "链接解析",
-                    description = "同一个动态链接在该时间窗口内只会自动转发一次，仅“匹配链接即解析”模式有效。",
+                    description = "同一个链接在该时间窗口内只会自动转发一次，仅“匹配链接即解析”模式有效。",
                     min = 0,
                 ),
                 ConfigFieldSpec(

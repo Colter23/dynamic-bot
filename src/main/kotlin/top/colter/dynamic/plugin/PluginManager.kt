@@ -28,7 +28,7 @@ import top.colter.dynamic.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.core.event.SourceUpdatePublisher
 import top.colter.dynamic.core.event.SubscriptionChangedEvent
-import top.colter.dynamic.core.link.DynamicLinkResolver
+import top.colter.dynamic.core.link.LinkResolver
 import top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION
 import top.colter.dynamic.core.plugin.CommandContributor
 import top.colter.dynamic.core.plugin.CommandResultSendRequest
@@ -496,8 +496,8 @@ public class PluginManager(
         return activeExtensionHandles()
     }
 
-    public fun getDynamicLinkResolvers(): List<DynamicLinkResolver> {
-        return activeExtensionHandles<DynamicLinkResolver>().map { it.instance }
+    public fun getLinkResolvers(): List<LinkResolver> {
+        return activeExtensionHandles<LinkResolver>().map { it.instance }
     }
 
     public fun findPublisherLookupPlugin(platformId: String): PublisherLookupPlugin? {
@@ -750,7 +750,7 @@ public class PluginManager(
             if (instance is PublisherLoginProvider) add(PluginCapability.PUBLISHER_LOGIN)
             if (instance is MessageSinkPlugin) add(PluginCapability.MESSAGE_SINK)
             if (instance is CommandContributor) add(PluginCapability.COMMAND_CONTRIBUTOR)
-            if (instance is DynamicLinkResolver) add(PluginCapability.LINK_RESOLVER)
+            if (instance is LinkResolver) add(PluginCapability.LINK_RESOLVER)
             if (instance is ConfigurablePlugin<*>) add(PluginCapability.CONFIGURABLE)
         }
     }
