@@ -5,6 +5,7 @@ import top.colter.dynamic.core.config.ConfigFieldOption
 import top.colter.dynamic.core.config.ConfigFieldSpec
 import top.colter.dynamic.core.config.ConfigFieldType
 import top.colter.dynamic.core.config.ConfigFormSpec
+import top.colter.dynamic.core.config.ConfigMigration
 import top.colter.dynamic.core.config.ConfigNumberKind
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.config.YamlConfigService
@@ -21,7 +22,11 @@ public class MainConfigStore(
     private var currentConfig: MainDynamicConfig? = null
 
     public fun loadOrCreate(adminTokenProvider: () -> String): MainDynamicConfig {
-        val loaded = configService.loadOrCreate(MainDynamicConfig.CONFIG_ID, MainDynamicConfig::class) {
+        val loaded = configService.loadOrCreate(
+            MainDynamicConfig.CONFIG_ID,
+            MainDynamicConfig::class,
+            MainConfigForms.migrations,
+        ) {
             MainDynamicConfig()
         }
         val withToken = if (loaded.webAdmin.enabled && loaded.webAdmin.token.isBlank()) {
@@ -70,6 +75,28 @@ public class MainConfigStore(
 }
 
 public object MainConfigForms {
+    public val migrations: List<ConfigMigration> = listOf(
+        ConfigMigration(
+            id = "main-draw-theme-colors",
+            description = "迁移旧绘图主题色字段到 draw.themeColors",
+        ) {
+            val legacyColors = listOf(
+                get("draw.themeColor") as? String,
+                get("draw.backgroundStartColor") as? String,
+                get("draw.backgroundEndColor") as? String,
+            )
+                .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
+                .distinct()
+
+            if (!contains("draw.themeColors") && legacyColors.isNotEmpty()) {
+                set("draw.themeColors", legacyColors.joinToString(";"))
+            }
+            remove("draw.themeColor")
+            remove("draw.backgroundStartColor")
+            remove("draw.backgroundEndColor")
+        },
+    )
+
     public val formSpec: ConfigFormSpec
         get() = ConfigFormSpec(
             title = "主配置",

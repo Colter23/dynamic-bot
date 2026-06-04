@@ -1,6 +1,7 @@
 ﻿package top.colter.dynamic.listener
 
 import java.util.UUID
+import top.colter.dynamic.MainConfigForms
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.config.YamlConfigService
@@ -46,7 +47,9 @@ public class SourceUpdateProcessor(
     private val onDeliveriesQueued: suspend () -> Unit = {},
 ) {
     private val fixedConfig: MainDynamicConfig by lazy {
-        config ?: configService.loadOrCreate(MainDynamicConfig.CONFIG_ID) { MainDynamicConfig() }
+        config ?: configService.loadOrCreate(MainDynamicConfig.CONFIG_ID, MainConfigForms.migrations) {
+            MainDynamicConfig()
+        }
     }
     private val runtimeConfigProvider: () -> MainDynamicConfig = configProvider ?: { fixedConfig }
     private val runtimeDrawService: DynamicDrawService by lazy {

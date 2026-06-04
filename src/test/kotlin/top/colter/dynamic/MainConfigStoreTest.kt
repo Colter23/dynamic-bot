@@ -1,6 +1,9 @@
 ﻿package top.colter.dynamic
 
 import kotlin.io.path.createTempDirectory
+import kotlin.io.path.createDirectories
+import kotlin.io.path.readText
+import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -33,6 +36,33 @@ class MainConfigStoreTest {
         assertFalse("draw.themeColor" in paths)
         assertFalse("draw.backgroundStartColor" in paths)
         assertFalse("draw.backgroundEndColor" in paths)
+    }
+
+    @Test
+    fun shouldMigrateLegacyDrawThemeFields() {
+        val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-config-migration"))
+        val path = configService.resolvePath(MainDynamicConfig.CONFIG_ID)
+        path.parent.createDirectories()
+        configService.save(
+            MainDynamicConfig.CONFIG_ID,
+            MainDynamicConfig(draw = DrawSettings(themeColors = "#CURRENT")),
+        )
+        val currentYaml = path.readText()
+        path.writeText(
+            currentYaml.replace(
+                Regex("""themeColors:.*"""),
+                "themeColor: \"#111111\"\n  backgroundStartColor: \"#222222\"\n  backgroundEndColor: \"#333333\"",
+            ),
+        )
+
+        val loaded = MainConfigStore(configService).loadOrCreate { "token" }
+        val rewritten = path.readText()
+
+        assertEquals("#111111;#222222;#333333", loaded.draw.themeColors)
+        assertTrue(rewritten.contains("themeColors:"))
+        assertFalse(rewritten.contains("themeColor:"))
+        assertFalse(rewritten.contains("backgroundStartColor"))
+        assertFalse(rewritten.contains("backgroundEndColor"))
     }
 
     @Test

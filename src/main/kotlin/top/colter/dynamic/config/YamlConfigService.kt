@@ -1,7 +1,9 @@
 ﻿package top.colter.dynamic.config
 
 import com.fasterxml.jackson.databind.DeserializationFeature
+import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.databind.node.ObjectNode
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
 import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import java.nio.file.Files
@@ -11,9 +13,11 @@ import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.io.path.inputStream
 import kotlin.io.path.outputStream
+import top.colter.dynamic.core.config.ConfigMigration
 import kotlin.reflect.KClass
 import top.colter.dynamic.core.config.ConfigException
 import top.colter.dynamic.core.config.ConfigService
+import top.colter.dynamic.core.config.MutableConfigDocument
 import top.colter.dynamic.core.config.PluginDataStore
 import top.colter.dynamic.core.tools.loggerFor
 
@@ -24,16 +28,21 @@ public class YamlConfigService(
 ) : ConfigService {
     private val store: YamlDocumentStore = YamlDocumentStore(baseDir, "配置")
 
-    override fun <T : Any> loadOrCreate(pluginId: String, clazz: KClass<T>, defaultProvider: () -> T): T {
-        return store.loadOrCreate(pluginId, clazz, defaultProvider)
+    override fun <T : Any> loadOrCreate(
+        pluginId: String,
+        clazz: KClass<T>,
+        migrations: List<ConfigMigration>,
+        defaultProvider: () -> T,
+    ): T {
+        return store.loadOrCreate(pluginId, clazz, migrations, defaultProvider)
     }
 
     override fun <T : Any> save(pluginId: String, config: T) {
         store.save(pluginId, config)
     }
 
-    override fun <T : Any> reload(pluginId: String, clazz: KClass<T>): T {
-        return store.reload(pluginId, clazz)
+    override fun <T : Any> reload(pluginId: String, clazz: KClass<T>, migrations: List<ConfigMigration>): T {
+        return store.reload(pluginId, clazz, migrations)
     }
 
     override fun exists(pluginId: String): Boolean {
@@ -60,16 +69,21 @@ public class YamlPluginDataStore(
         Files.createDirectories(dataDir)
     }
 
-    override fun <T : Any> loadOrCreate(name: String, clazz: KClass<T>, defaultProvider: () -> T): T {
-        return store.loadOrCreate(name, clazz, defaultProvider)
+    override fun <T : Any> loadOrCreate(
+        name: String,
+        clazz: KClass<T>,
+        migrations: List<ConfigMigration>,
+        defaultProvider: () -> T,
+    ): T {
+        return store.loadOrCreate(name, clazz, migrations, defaultProvider)
     }
 
     override fun <T : Any> save(name: String, value: T) {
         store.save(name, value)
     }
 
-    override fun <T : Any> reload(name: String, clazz: KClass<T>): T {
-        return store.reload(name, clazz)
+    override fun <T : Any> reload(name: String, clazz: KClass<T>, migrations: List<ConfigMigration>): T {
+        return store.reload(name, clazz, migrations)
     }
 
     override fun exists(name: String): Boolean {
@@ -95,7 +109,12 @@ internal class YamlDocumentStore(
 
     private val lockMap: ConcurrentHashMap<String, Any> = ConcurrentHashMap()
 
-    fun <T : Any> loadOrCreate(name: String, clazz: KClass<T>, defaultProvider: () -> T): T {
+    fun <T : Any> loadOrCreate(
+        name: String,
+        clazz: KClass<T>,
+        migrations: List<ConfigMigration> = emptyList(),
+        defaultProvider: () -> T,
+    ): T {
         val path = resolvePath(name)
         val lock = lockMap.computeIfAbsent(name) { Any() }
 
@@ -107,9 +126,7 @@ internal class YamlDocumentStore(
                     logger.info { "$label 文件已创建：name=$name，path=${path.toAbsolutePath()}" }
                     defaultValue
                 } else {
-                    path.inputStream().use { input ->
-                        objectMapper.readValue(input, clazz.java)
-                    }
+                    readExisting(name, path, clazz, migrations)
                 }
             } catch (e: Exception) {
                 throw ConfigException("加载或创建 $label 失败：name=$name", path, e)
@@ -130,16 +147,18 @@ internal class YamlDocumentStore(
         }
     }
 
-    fun <T : Any> reload(name: String, clazz: KClass<T>): T {
+    fun <T : Any> reload(
+        name: String,
+        clazz: KClass<T>,
+        migrations: List<ConfigMigration> = emptyList(),
+    ): T {
         val path = resolvePath(name)
         val lock = lockMap.computeIfAbsent(name) { Any() }
 
         synchronized(lock) {
             try {
                 require(Files.exists(path)) { "$label 文件不存在：name=$name" }
-                path.inputStream().use { input ->
-                    return objectMapper.readValue(input, clazz.java)
-                }
+                return readExisting(name, path, clazz, migrations)
             } catch (e: Exception) {
                 throw ConfigException("重新加载 $label 失败：name=$name", path, e)
             }
@@ -162,6 +181,51 @@ internal class YamlDocumentStore(
         return baseDir.resolve("${validateDocumentId(name)}.yml")
     }
 
+    private fun <T : Any> readExisting(
+        name: String,
+        path: Path,
+        clazz: KClass<T>,
+        migrations: List<ConfigMigration>,
+    ): T {
+        val root = readRootObject(path)
+        val document = JacksonMutableConfigDocument(objectMapper, root)
+        val appliedMigrations = mutableListOf<String>()
+        migrations.forEach { migration ->
+            val before = document.changeCount
+            migration.apply(document)
+            if (document.changeCount > before) {
+                appliedMigrations += migration.id
+            }
+        }
+
+        val value = objectMapper.treeToValue(document.root, clazz.java)
+        val normalized = objectMapper.valueToTree<JsonNode>(value)
+        val defaultsFilled = normalized != document.root
+        if (document.changed || defaultsFilled) {
+            writeAtomically(path, value)
+            val reasons = buildList {
+                if (appliedMigrations.isNotEmpty()) {
+                    add("迁移=${appliedMigrations.joinToString("|")}")
+                }
+                if (defaultsFilled) {
+                    add("默认字段补齐")
+                }
+            }.ifEmpty { listOf("规范化") }
+            logger.info {
+                "$label 文件已更新：name=$name，path=${path.toAbsolutePath()}，原因=${reasons.joinToString("，")}"
+            }
+        }
+        return value
+    }
+
+    private fun readRootObject(path: Path): ObjectNode {
+        val root = path.inputStream().use { input ->
+            objectMapper.readTree(input)
+        }
+        require(root is ObjectNode) { "$label 文件根节点必须是对象" }
+        return root
+    }
+
     private fun <T : Any> writeAtomically(path: Path, value: T) {
         Files.createDirectories(path.parent)
         val tempPath = Files.createTempFile(path.parent, "${path.fileName}.", ".tmp")
@@ -182,6 +246,97 @@ internal class YamlDocumentStore(
         } finally {
             Files.deleteIfExists(tempPath)
         }
+    }
+}
+
+private class JacksonMutableConfigDocument(
+    private val objectMapper: ObjectMapper,
+    val root: ObjectNode,
+) : MutableConfigDocument {
+    var changeCount: Int = 0
+        private set
+
+    val changed: Boolean
+        get() = changeCount > 0
+
+    override fun contains(path: String): Boolean {
+        return findNode(path) != null
+    }
+
+    override fun get(path: String): Any? {
+        val node = findNode(path) ?: return null
+        return objectMapper.convertValue(node, Any::class.java)
+    }
+
+    override fun set(path: String, value: Any?) {
+        setNode(path, objectMapper.valueToTree(value))
+    }
+
+    override fun remove(path: String): Boolean {
+        val segments = pathSegments(path)
+        val parent = findParent(segments) ?: return false
+        val removed = parent.remove(segments.last()) ?: return false
+        changeCount += 1
+        return !removed.isMissingNode
+    }
+
+    override fun move(from: String, to: String, overwrite: Boolean): Boolean {
+        if (from == to) return false
+        val source = findNode(from) ?: return false
+        val before = changeCount
+        if (overwrite || !contains(to)) {
+            setNode(to, source.deepCopy())
+        }
+        remove(from)
+        return changeCount > before
+    }
+
+    private fun setNode(path: String, value: JsonNode) {
+        val existing = findNode(path)
+        if (existing == value) return
+        val segments = pathSegments(path)
+        val parent = ensureParent(segments)
+        parent.set<JsonNode>(segments.last(), value)
+        changeCount += 1
+    }
+
+    private fun findNode(path: String): JsonNode? {
+        var current: JsonNode = root
+        pathSegments(path).forEach { segment ->
+            current = current.get(segment) ?: return null
+        }
+        return current.takeUnless { it.isMissingNode }
+    }
+
+    private fun findParent(segments: List<String>): ObjectNode? {
+        var current: JsonNode = root
+        segments.dropLast(1).forEach { segment ->
+            current = current.get(segment) ?: return null
+            if (current !is ObjectNode) return null
+        }
+        return current as ObjectNode
+    }
+
+    private fun ensureParent(segments: List<String>): ObjectNode {
+        var current = root
+        segments.dropLast(1).forEach { segment ->
+            val child = current.get(segment)
+            current = if (child is ObjectNode) {
+                child
+            } else {
+                objectMapper.createObjectNode().also {
+                    current.set<ObjectNode>(segment, it)
+                    changeCount += 1
+                }
+            }
+        }
+        return current
+    }
+
+    private fun pathSegments(path: String): List<String> {
+        val segments = path.split(".")
+        require(segments.isNotEmpty() && segments.none { it.isBlank() }) { "配置路径不能为空：$path" }
+        return segments
     }
 }
 

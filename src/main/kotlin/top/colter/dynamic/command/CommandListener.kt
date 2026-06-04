@@ -11,6 +11,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.MainConfigForms
 import top.colter.dynamic.core.command.CommandExecutionResult
 import top.colter.dynamic.core.command.CommandHandler
 import top.colter.dynamic.core.command.CommandInvocation
@@ -92,7 +93,9 @@ public class CommandListener(
     }
 
     private val fixedConfig: MainDynamicConfig by lazy {
-        config ?: configService.loadOrCreate(MainDynamicConfig.CONFIG_ID) { MainDynamicConfig() }
+        config ?: configService.loadOrCreate(MainDynamicConfig.CONFIG_ID, MainConfigForms.migrations) {
+            MainDynamicConfig()
+        }
     }
     private val runtimeConfigProvider: () -> MainDynamicConfig = configProvider ?: { fixedConfig }
     private val runtimeConfig: MainDynamicConfig

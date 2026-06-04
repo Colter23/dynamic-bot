@@ -5,6 +5,7 @@ import top.colter.dynamic.core.config.ConfigException
 import top.colter.dynamic.core.config.ConfigFieldSpec
 import top.colter.dynamic.core.config.ConfigFieldType
 import top.colter.dynamic.core.config.ConfigFormSpec
+import top.colter.dynamic.core.config.ConfigMigration
 import top.colter.dynamic.core.config.ConfigurablePlugin
 import kotlin.io.path.createDirectories
 import kotlin.io.path.deleteIfExists
@@ -22,6 +23,12 @@ class ConfigServiceTest {
     data class TestConfig(
         val pollingIntervalMs: Long = 30000,
         val enabled: Boolean = true,
+    )
+
+    data class ExpandedTestConfig(
+        val pollingIntervalMs: Long = 30000,
+        val enabled: Boolean = true,
+        val label: String = "默认标签",
     )
 
     private fun service(): YamlConfigService = YamlConfigService(createTempDirectory("config-service-test"))
@@ -68,6 +75,78 @@ class ConfigServiceTest {
 
         assertEquals(7777, reloaded.pollingIntervalMs)
         assertEquals(false, reloaded.enabled)
+    }
+
+    @Test
+    fun loadOrCreateShouldBackfillMissingDefaultFields() {
+        val configService = service()
+        val pluginId = "test-config-backfill"
+        val path = configService.resolvePath(pluginId)
+        path.parent.createDirectories()
+        path.writeText("pollingIntervalMs: 7777\nenabled: false\n")
+
+        val loaded = configService.loadOrCreate(pluginId, ExpandedTestConfig::class) {
+            ExpandedTestConfig()
+        }
+        val rewritten = path.readText()
+
+        assertEquals(7777, loaded.pollingIntervalMs)
+        assertEquals(false, loaded.enabled)
+        assertEquals("默认标签", loaded.label)
+        assertTrue(rewritten.contains("label:"))
+    }
+
+    @Test
+    fun migrationsShouldMoveAndRemoveFieldsBeforeDeserialization() {
+        val configService = service()
+        val pluginId = "test-config-migration"
+        val path = configService.resolvePath(pluginId)
+        path.parent.createDirectories()
+        path.writeText(
+            """
+            pollingIntervalMs: 8888
+            enabled: false
+            oldLabel: 保留这个值
+            removedLegacyField: true
+            """.trimIndent(),
+        )
+
+        val loaded = configService.loadOrCreate(
+            pluginId,
+            ExpandedTestConfig::class,
+            listOf(
+                ConfigMigration("test-label-migration") {
+                    move("oldLabel", "label")
+                    remove("removedLegacyField")
+                },
+            ),
+        ) {
+            ExpandedTestConfig()
+        }
+        val rewritten = path.readText()
+
+        assertEquals("保留这个值", loaded.label)
+        assertTrue(rewritten.contains("label:"))
+        assertTrue(!rewritten.contains("oldLabel"))
+        assertTrue(!rewritten.contains("removedLegacyField"))
+    }
+
+    @Test
+    fun generatedCompleteYamlShouldNotBeRewrittenOnLoad() {
+        val configService = service()
+        val pluginId = "test-config-stable"
+        val path = configService.resolvePath(pluginId)
+
+        configService.save(pluginId, ExpandedTestConfig(123, false, "stable"))
+        val before = path.readText()
+
+        val loaded = configService.loadOrCreate(pluginId, ExpandedTestConfig::class) {
+            ExpandedTestConfig()
+        }
+        val after = path.readText()
+
+        assertEquals("stable", loaded.label)
+        assertEquals(before, after)
     }
 
     @Test
