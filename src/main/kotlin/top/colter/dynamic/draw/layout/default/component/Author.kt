@@ -31,6 +31,7 @@ internal fun Layout.Author(
         .fillMaxWidth()
         .background(
             image = head,
+            imageAlpha = 0.8f,
             gradient = Gradient(
                 LayoutAlignment.LEFT,
                 LayoutAlignment.RIGHT,
