@@ -435,6 +435,7 @@ public object MainConfigForms {
                     type = ConfigFieldType.JSON,
                     section = "消息路由",
                     description = "为 qq、discord 等真实目标平台单独覆盖路由策略；未配置的平台使用默认策略。",
+                    component = "MESSAGE_ROUTING_POLICY_TABLE",
                     metadata = mapOf(
                         "example" to """
                             [

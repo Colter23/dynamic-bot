@@ -64,11 +64,7 @@ internal object AdminConfigJson {
 
         spec.fields.forEach { field ->
             val incoming = values[field.path]
-            val value = if (field.secret && isBlankSecret(incoming)) {
-                jsonElementAt(currentNode, field.path) ?: JsonNull
-            } else {
-                incoming ?: jsonElementAt(currentNode, field.path) ?: JsonNull
-            }
+            val value = incoming ?: jsonElementAt(currentNode, field.path) ?: JsonNull
             setPath(root, field.path, toJsonNode(value))
         }
 

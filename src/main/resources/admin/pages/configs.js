@@ -120,6 +120,48 @@ export async function handleAction(nextCtx, { action, button, id }) {
     await withButtonLoading(button, "•••", () => toggleConfigSecret(button));
     return true;
   }
+  if (action === "add-onebot-connection") {
+    await withButtonLoading(button, "打开中...", () => openOneBotConnectionModal());
+    return true;
+  }
+  if (action === "edit-onebot-connection") {
+    await withButtonLoading(button, "打开中...", () => openOneBotConnectionModal(Number(button.dataset.index)));
+    return true;
+  }
+  if (action === "delete-onebot-connection") {
+    const connections = oneBotConnections();
+    connections.splice(Number(button.dataset.index), 1);
+    setOneBotConnections(connections);
+    return true;
+  }
+  if (action === "clear-onebot-connections") {
+    if (!(await confirmDanger("清空 OneBot 连接", "确定清空所有正向 WebSocket 连接吗？保存配置后才会正式生效。", { confirmText: "清空" }))) return true;
+    setOneBotConnections([]);
+    return true;
+  }
+  if (action === "toggle-onebot-connection-token") {
+    toggleOneBotConnectionToken(button);
+    return true;
+  }
+  if (action === "add-message-routing-policy") {
+    await withButtonLoading(button, "打开中...", () => openMessageRoutingPlatformPolicyModal());
+    return true;
+  }
+  if (action === "edit-message-routing-policy") {
+    await withButtonLoading(button, "打开中...", () => openMessageRoutingPlatformPolicyModal(Number(button.dataset.index)));
+    return true;
+  }
+  if (action === "delete-message-routing-policy") {
+    const policies = messageRoutingPlatformPolicies();
+    policies.splice(Number(button.dataset.index), 1);
+    setMessageRoutingPlatformPolicies(policies);
+    return true;
+  }
+  if (action === "clear-message-routing-policies") {
+    if (!(await confirmDanger("清空平台路由策略", "确定清空所有按平台路由策略吗？保存配置后才会正式生效。", { confirmText: "清空" }))) return true;
+    setMessageRoutingPlatformPolicies([]);
+    return true;
+  }
   if (action === "add-command-permission") {
     await withButtonLoading(button, "打开中...", openCommandPermissionModal);
     return true;
@@ -237,6 +279,9 @@ function configComparableValue(detail, field) {
   const raw = detail.values[field.path];
   if (field.type === "BOOLEAN") return raw === true;
   if (field.type === "NUMBER") return Number(raw || 0);
+  if (field.component === "MESSAGE_ROUTING_POLICY_TABLE") return normalizeMessageRoutingPlatformPolicies(normalizeConfigJsonValue(raw));
+  if (field.component === "ONEBOT_CONNECTION_TABLE") return normalizeOneBotConnections(normalizeConfigJsonValue(raw));
+  if (field.component === "COMMAND_PERMISSION_TABLE") return normalizeCommandPermissionRules(normalizeConfigJsonValue(raw));
   if (field.type === "JSON") return normalizeConfigJsonValue(raw);
   return displayConfigValue(raw);
 }
@@ -246,8 +291,10 @@ function currentConfigComparableValue(field) {
   if (!node) return null;
   if (field.type === "BOOLEAN") return node.checked;
   if (field.type === "NUMBER") return Number(node.value || 0);
+  if (field.component === "MESSAGE_ROUTING_POLICY_TABLE") return normalizeMessageRoutingPlatformPolicies(normalizeConfigJsonValue(node.value));
+  if (field.component === "ONEBOT_CONNECTION_TABLE") return normalizeOneBotConnections(normalizeConfigJsonValue(node.value));
+  if (field.component === "COMMAND_PERMISSION_TABLE") return normalizeCommandPermissionRules(normalizeConfigJsonValue(node.value));
   if (field.type === "JSON") return normalizeConfigJsonValue(node.value);
-  if (field.type === "SECRET" && node.dataset.secretOriginal !== undefined && node.value === node.dataset.secretOriginal) return "";
   return node.value;
 }
 
@@ -416,9 +463,7 @@ async function restartCurrentConfigPlugin() {
   notify(result.message || "插件已重启", false);
 }
 
-async function toggleConfigSecret(button) {
-  const detail = state.currentConfigDetail;
-  if (!detail) throw new Error("请选择配置文件");
+function toggleConfigSecret(button) {
   const path = button.dataset.path;
   const input = configInputFor({ path });
   if (!input) throw new Error("未找到密钥输入框");
@@ -428,19 +473,14 @@ async function toggleConfigSecret(button) {
     button.title = "查看真实值";
     return;
   }
-  const result = await api(`/configs/${encodeURIComponent(detail.id)}/secrets/${encodeURIComponent(path)}`);
-  const value = result.value === null || result.value === undefined
-    ? ""
-    : (typeof result.value === "object" ? JSON.stringify(result.value) : String(result.value));
-  input.value = value;
-  input.dataset.secretOriginal = value;
   input.type = "text";
   button.dataset.revealed = "true";
   button.title = "隐藏真实值";
-  updateConfigRestartButton(detail);
 }
 
 function configFieldHtml(detail, field) {
+  if (field.component === "MESSAGE_ROUTING_POLICY_TABLE") return messageRoutingPlatformPoliciesFieldHtml(detail, field);
+  if (field.component === "ONEBOT_CONNECTION_TABLE") return oneBotConnectionsFieldHtml(detail, field);
   if (field.component === "COMMAND_PERMISSION_TABLE") return commandPermissionsFieldHtml(detail, field);
   const raw = detail.values[field.path];
   const value = displayConfigValue(raw);
@@ -467,11 +507,12 @@ function configFieldHtml(detail, field) {
 
 function secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml) {
   const hasSecret = !!(detail.secretStates && detail.secretStates[field.path]);
+  const value = displayConfigValue(detail.values[field.path]);
   return `<div class="field" data-config-field-path="${attr(field.path)}">
     ${labelHtml}
     <div class="secret-control">
-      <input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-secret-input="true" type="password" value="" placeholder="${hasSecret ? "********" : ""}" autocomplete="off">
-      <button type="button" class="secret-eye" data-action="toggle-config-secret" data-path="${attr(field.path)}" title="查看真实值"${hasSecret ? "" : " disabled"}>👁</button>
+      <input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-secret-input="true" type="password" value="${attr(value)}" data-secret-original="${attr(value)}" placeholder="${hasSecret ? "********" : ""}" autocomplete="off">
+      <button type="button" class="secret-eye" data-action="toggle-config-secret" data-path="${attr(field.path)}" title="查看真实值">👁</button>
     </div>
     ${descriptionHtml}
   </div>`;
@@ -479,6 +520,311 @@ function secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml) {
 
 function configFieldDescriptionHtml(field) {
   return field.description ? `<span class="inline-note">${esc(field.description)}</span>` : "";
+}
+
+function oneBotConnectionsFieldHtml(detail, field) {
+  const connections = normalizeOneBotConnections(detail.values[field.path]);
+  return `<div class="field onebot-connection-field" data-config-field-path="${attr(field.path)}">
+    <label for="cfg-onebot-connections">${esc(field.label)}</label>
+    ${configFieldDescriptionHtml(field)}
+    <input id="cfg-onebot-connections" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="hidden" value="${attr(JSON.stringify(connections))}">
+    <div class="command-permission-toolbar">
+      <button type="button" data-action="add-onebot-connection">添加连接</button>
+      <button type="button" class="secondary" data-action="clear-onebot-connections">清空</button>
+    </div>
+    <div id="oneBotConnectionTable">${renderOneBotConnectionTable(connections)}</div>
+  </div>`;
+}
+
+function messageRoutingPlatformPoliciesFieldHtml(detail, field) {
+  const policies = normalizeMessageRoutingPlatformPolicies(detail.values[field.path]);
+  return `<div class="field message-routing-policy-field" data-config-field-path="${attr(field.path)}">
+    <label for="cfg-message-routing-platform-policies">${esc(field.label)}</label>
+    ${configFieldDescriptionHtml(field)}
+    <input id="cfg-message-routing-platform-policies" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="hidden" value="${attr(JSON.stringify(policies))}">
+    <div class="command-permission-toolbar">
+      <button type="button" data-action="add-message-routing-policy">添加策略</button>
+      <button type="button" class="secondary" data-action="clear-message-routing-policies">清空</button>
+    </div>
+    <div id="messageRoutingPlatformPolicyTable">${renderMessageRoutingPlatformPolicyTable(policies)}</div>
+  </div>`;
+}
+
+function messageRoutingPlatformPolicies() {
+  const node = $("cfg-message-routing-platform-policies");
+  if (!node || !node.value.trim()) return [];
+  try {
+    return normalizeMessageRoutingPlatformPolicies(JSON.parse(node.value));
+  } catch (_) {
+    return [];
+  }
+}
+
+function setMessageRoutingPlatformPolicies(policies) {
+  const normalized = dedupeMessageRoutingPlatformPolicies(normalizeMessageRoutingPlatformPolicies(policies));
+  const node = $("cfg-message-routing-platform-policies");
+  if (node) node.value = JSON.stringify(normalized);
+  const table = $("messageRoutingPlatformPolicyTable");
+  if (table) table.innerHTML = renderMessageRoutingPlatformPolicyTable(normalized);
+  if (state.currentConfigDetail) {
+    updateConfigRestartButton(state.currentConfigDetail);
+    updateConfigDirtyState(state.currentConfigDetail);
+  }
+}
+
+function normalizeMessageRoutingPlatformPolicies(value) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows.map(normalizeMessageRoutingPlatformPolicy);
+}
+
+function normalizeMessageRoutingPlatformPolicy(policy) {
+  const source = policy || {};
+  const routePolicy = source.policy || {};
+  const strategy = String(routePolicy.strategy || "ROUND_ROBIN").trim().toUpperCase();
+  return {
+    platformId: String(source.platformId || "").trim(),
+    policy: {
+      strategy: strategy === "PRIMARY_BACKUP" ? "PRIMARY_BACKUP" : "ROUND_ROBIN",
+      primaryAccountId: String(routePolicy.primaryAccountId || "").trim(),
+      failureCooldownSeconds: Number(routePolicy.failureCooldownSeconds || 60) || 60,
+    }
+  };
+}
+
+function dedupeMessageRoutingPlatformPolicies(policies) {
+  const seen = new Map();
+  normalizeMessageRoutingPlatformPolicies(policies).forEach(policy => {
+    const key = policy.platformId.toLowerCase();
+    if (!key) return;
+    seen.set(key, policy);
+  });
+  return Array.from(seen.values());
+}
+
+function renderMessageRoutingPlatformPolicyTable(policies) {
+  const rows = normalizeMessageRoutingPlatformPolicies(policies).map((policy, index) => Object.assign({ _index: index }, policy));
+  return renderTable(rows, [
+    { title: "平台", render: row => `<span class="primary-line">${esc(row.platformId || "-")}</span>` },
+    { title: "策略", render: row => pill(row.policy.strategy) },
+    { title: "主账号", render: row => cell(row.policy.primaryAccountId || "留空", row.policy.primaryAccountId ? "优先从该账号发送" : "使用平台第一个可用账号") },
+    { title: "冷却", render: row => `<span class="primary-line">${esc(`${Number(row.policy.failureCooldownSeconds || 0)} 秒`)}</span>` },
+    { title: "操作", render: row => `<div class="row-actions">
+      <button type="button" class="secondary compact" data-action="edit-message-routing-policy" data-index="${row._index}">编辑</button>
+      <button type="button" class="danger compact" data-action="delete-message-routing-policy" data-index="${row._index}">删除</button>
+    </div>` }
+  ]);
+}
+
+async function openMessageRoutingPlatformPolicyModal(index = null) {
+  const editing = Number.isInteger(index) && index >= 0;
+  const policies = messageRoutingPlatformPolicies();
+  const targetPlatforms = await loadPermissionTargetPlatforms();
+  const defaultPolicy = currentMessageRoutingDefaultPolicy();
+  const current = editing
+    ? normalizeMessageRoutingPlatformPolicy(policies[index] || {})
+    : {
+      platformId: targetPlatforms[0]?.platformId || "",
+      policy: defaultPolicy.policy,
+    };
+  const platformOptions = targetPlatforms
+    .map(platform => ({
+      platformId: platform.platformId,
+      pluginName: platform.pluginName,
+    }))
+    .concat([{ platformId: "__manual__", pluginName: "手动输入" }]);
+  const selectedPlatformId = platformOptions.some(platform => platform.platformId === current.platformId)
+    ? current.platformId
+    : "__manual__";
+  openModal(editing ? "编辑平台路由策略" : "添加平台路由策略", `
+    <div class="form-grid message-routing-policy-modal">
+      <div class="field">
+        <label>目标平台</label>
+        <select id="routePlatform">${platformOptions.map(platform => `<option value="${attr(platform.platformId)}">${esc(commandPermissionPlatformOptionText(platform))}</option>`).join("")}</select>
+      </div>
+      <div class="field" id="routePlatformManualWrap" hidden>
+        <label>平台 ID<span class="required-mark">*</span></label>
+        <input id="routePlatformManual" value="${attr(current.platformId)}" placeholder="例如：qq">
+      </div>
+      <div class="field">
+        <label>路由策略</label>
+        <select id="routeStrategy">
+          <option value="ROUND_ROBIN">轮询</option>
+          <option value="PRIMARY_BACKUP">主备</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>主 Bot 账号</label>
+        <input id="routePrimaryAccountId" value="${attr(current.policy.primaryAccountId)}" placeholder="留空则使用平台第一个可用账号">
+      </div>
+      <div class="field">
+        <label>失败冷却（秒）</label>
+        <input id="routeCooldown" type="number" step="1" min="1" inputmode="numeric" value="${attr(current.policy.failureCooldownSeconds || 60)}">
+      </div>
+      <div class="field full">
+        <span class="inline-note">留空主账号时，轮询和主备都会从平台当前第一个可用账号开始。</span>
+      </div>
+    </div>
+  `, async () => {
+    const platformId = routingPlatformValue();
+    if (!platformId) throw new Error("请填写平台 ID");
+    const next = normalizeMessageRoutingPlatformPolicy({
+      platformId,
+      policy: {
+        strategy: $("routeStrategy").value,
+        primaryAccountId: $("routePrimaryAccountId").value,
+        failureCooldownSeconds: $("routeCooldown").value,
+      }
+    });
+    if (editing) {
+      policies[index] = next;
+    } else {
+      policies.push(next);
+    }
+    setMessageRoutingPlatformPolicies(dedupeMessageRoutingPlatformPolicies(policies));
+    closeModal();
+    notify(editing ? "平台路由策略已更新，请保存配置" : "平台路由策略已添加，请保存配置", false);
+  }, { size: "medium" });
+
+  const refreshPlatformField = () => {
+    const rawPlatformId = $("routePlatform").value;
+    $("routePlatformManualWrap").hidden = rawPlatformId !== "__manual__";
+    if (rawPlatformId === "__manual__") {
+      $("routePlatformManual").value = current.platformId;
+    }
+  };
+  $("routePlatform").value = selectedPlatformId;
+  $("routeStrategy").value = current.policy.strategy;
+  $("routePlatform").onchange = refreshPlatformField;
+  refreshPlatformField();
+}
+
+function routingPlatformValue() {
+  return $("routePlatform").value === "__manual__" ? $("routePlatformManual").value.trim() : $("routePlatform").value;
+}
+
+function currentMessageRoutingDefaultPolicy() {
+  const detail = state.currentConfigDetail;
+  const values = (detail && detail.values) || {};
+  return normalizeMessageRoutingPlatformPolicy({
+    platformId: "",
+    policy: {
+      strategy: values["messageRouting.defaultPolicy.strategy"],
+      primaryAccountId: values["messageRouting.defaultPolicy.primaryAccountId"],
+      failureCooldownSeconds: values["messageRouting.defaultPolicy.failureCooldownSeconds"],
+    }
+  });
+}
+
+function oneBotConnections() {
+  const node = $("cfg-onebot-connections");
+  if (!node || !node.value.trim()) return [];
+  try {
+    return normalizeOneBotConnections(JSON.parse(node.value));
+  } catch (_) {
+    return [];
+  }
+}
+
+function setOneBotConnections(connections) {
+  const normalized = normalizeOneBotConnections(connections);
+  const node = $("cfg-onebot-connections");
+  if (node) node.value = JSON.stringify(normalized);
+  const table = $("oneBotConnectionTable");
+  if (table) table.innerHTML = renderOneBotConnectionTable(normalized);
+  if (state.currentConfigDetail) {
+    updateConfigRestartButton(state.currentConfigDetail);
+    updateConfigDirtyState(state.currentConfigDetail);
+  }
+}
+
+function normalizeOneBotConnections(value) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows.map(normalizeOneBotConnection);
+}
+
+function normalizeOneBotConnection(connection) {
+  return {
+    name: String(connection && connection.name || "").trim(),
+    url: String(connection && connection.url || "").trim(),
+    accessToken: String(connection && connection.accessToken || "").trim(),
+    enabled: connection && connection.enabled === false ? false : true
+  };
+}
+
+function renderOneBotConnectionTable(connections) {
+  const rows = normalizeOneBotConnections(connections).map((connection, index) => Object.assign({ _index: index }, connection));
+  return renderTable(rows, [
+    { title: "标记名称", render: connection => cell(connection.name || "未标记", "仅用于后台识别") },
+    { title: "地址", render: connection => `<span class="primary-line">${esc(connection.url || "-")}</span>` },
+    { title: "Token", render: connection => `<span class="sub-line">${connection.accessToken ? "已填写" : "未填写"}</span>` },
+    { title: "状态", render: connection => pill(connection.enabled ? "启用" : "停用") },
+    { title: "操作", render: connection => `<div class="row-actions">
+      <button type="button" class="secondary compact" data-action="edit-onebot-connection" data-index="${connection._index}">编辑</button>
+      <button type="button" class="danger compact" data-action="delete-onebot-connection" data-index="${connection._index}">删除</button>
+    </div>` }
+  ]);
+}
+
+function openOneBotConnectionModal(index = null) {
+  const editing = Number.isInteger(index) && index >= 0;
+  const connections = oneBotConnections();
+  const current = editing
+    ? normalizeOneBotConnection(connections[index] || {})
+    : normalizeOneBotConnection({ url: "ws://127.0.0.1:6700" });
+  openModal(editing ? "编辑 OneBot 连接" : "添加 OneBot 连接", `
+    <div class="form-grid onebot-connection-modal">
+      <div class="field">
+        <label>标记名称</label>
+        <input id="onebotConnectionName" value="${attr(current.name)}" placeholder="例如：主 QQ、备用连接">
+        <span class="inline-note">只用于在后台区分连接，不影响账号识别和发送路由。</span>
+      </div>
+      <div class="field">
+        <label>启用状态</label>
+        <label class="check"><input id="onebotConnectionEnabled" type="checkbox"${current.enabled ? " checked" : ""}>启用这个连接</label>
+      </div>
+      <div class="field full">
+        <label>WebSocket 地址<span class="required-mark">*</span></label>
+        <input id="onebotConnectionUrl" value="${attr(current.url)}" placeholder="ws://127.0.0.1:6700">
+      </div>
+      <div class="field full">
+        <label>Token</label>
+        <div class="secret-control">
+          <input id="onebotConnectionToken" type="password" value="${attr(current.accessToken)}" autocomplete="off" placeholder="留空表示不携带 Token">
+          <button type="button" class="secret-eye" data-action="toggle-onebot-connection-token" data-input-id="onebotConnectionToken" title="查看真实值">👁</button>
+        </div>
+      </div>
+    </div>
+  `, async () => {
+    const next = normalizeOneBotConnection({
+      name: $("onebotConnectionName").value,
+      url: $("onebotConnectionUrl").value,
+      accessToken: $("onebotConnectionToken").value,
+      enabled: $("onebotConnectionEnabled").checked
+    });
+    if (!next.url) throw new Error("请填写 WebSocket 地址");
+    if (editing) {
+      connections[index] = next;
+    } else {
+      connections.push(next);
+    }
+    setOneBotConnections(connections);
+    closeModal();
+    notify(editing ? "OneBot 连接已更新，请保存配置" : "OneBot 连接已添加，请保存配置", false);
+  }, { size: "medium" });
+}
+
+function toggleOneBotConnectionToken(button) {
+  const input = $(button.dataset.inputId);
+  if (!input) return;
+  if (button.dataset.revealed === "true") {
+    input.type = "password";
+    button.dataset.revealed = "false";
+    button.title = "查看真实值";
+  } else {
+    input.type = "text";
+    button.dataset.revealed = "true";
+    button.title = "隐藏真实值";
+  }
 }
 
 function commandPermissionsFieldHtml(detail, field) {
@@ -507,7 +853,7 @@ function commandPermissionRules() {
 }
 
 function setCommandPermissionRules(rules) {
-  const normalized = rules.map(normalizeCommandPermissionRule);
+  const normalized = normalizeCommandPermissionRules(rules);
   const node = $("cfg-command-permissions");
   if (node) node.value = JSON.stringify(normalized);
   const table = $("commandPermissionTable");
@@ -531,8 +877,13 @@ function normalizeCommandPermissionRule(rule) {
   };
 }
 
+function normalizeCommandPermissionRules(value) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows.map(normalizeCommandPermissionRule);
+}
+
 function renderCommandPermissionTable(rules) {
-  const rows = rules.map((rule, index) => Object.assign({ _index: index }, normalizeCommandPermissionRule(rule)));
+  const rows = normalizeCommandPermissionRules(rules).map((rule, index) => Object.assign({ _index: index }, rule));
   return renderTable(rows, [
     { title: "平台", render: rule => `<span class="primary-line">${esc(wildcardText(rule.platformId))}</span>` },
     { title: "目标", render: rule => cell(commandPermissionTargetTitle(rule), commandPermissionScopeText(rule)) },

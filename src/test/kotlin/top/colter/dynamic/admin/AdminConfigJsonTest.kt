@@ -1,6 +1,7 @@
 package top.colter.dynamic.admin
 
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlinx.serialization.json.JsonObject
@@ -11,6 +12,29 @@ import top.colter.dynamic.core.config.ConfigFormSpec
 import top.colter.dynamic.core.config.ConfigNumberKind
 
 class AdminConfigJsonTest {
+    @Test
+    fun valuesForShouldExposeSecretsWhenMaskDisabled() {
+        val spec = secretSpec()
+
+        val masked = AdminConfigJson.valuesFor(SecretConfig(token = "secret"), spec)
+        val exposed = AdminConfigJson.valuesFor(SecretConfig(token = "secret"), spec, maskSecrets = false)
+
+        assertEquals(JsonPrimitive(""), masked["token"])
+        assertEquals(JsonPrimitive("secret"), exposed["token"])
+    }
+
+    @Test
+    fun decodeShouldTreatBlankSecretAsExplicitClear() {
+        val decoded = AdminConfigJson.decode(
+            values = JsonObject(mapOf("token" to JsonPrimitive(""))),
+            current = SecretConfig(token = "old"),
+            spec = secretSpec(),
+            clazz = SecretConfig::class,
+        )
+
+        assertEquals("", decoded.token)
+    }
+
     @Test
     fun integerNumberFieldsShouldRejectDecimalsWithChineseLabel() {
         val spec = ConfigFormSpec(
@@ -58,4 +82,20 @@ class AdminConfigJsonTest {
             spec = spec,
         )
     }
+
+    private fun secretSpec(): ConfigFormSpec = ConfigFormSpec(
+        title = "测试配置",
+        fields = listOf(
+            ConfigFieldSpec(
+                path = "token",
+                label = "Token",
+                type = ConfigFieldType.SECRET,
+                secret = true,
+            ),
+        ),
+    )
+
+    private data class SecretConfig(
+        val token: String = "",
+    )
 }

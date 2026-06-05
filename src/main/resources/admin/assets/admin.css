@@ -810,6 +810,8 @@
       overflow-wrap: anywhere;
     }
     .table-wrap {
+      min-width: 0;
+      max-width: 100%;
       overflow: auto;
       border: 1px solid var(--line);
       border-radius: 8px;
@@ -817,7 +819,6 @@
     }
     table {
       width: 100%;
-      min-width: 820px;
       border-collapse: collapse;
     }
     th, td {
@@ -2009,20 +2010,33 @@
       white-space: nowrap;
     }
     .config-section .inline-note {
+      display: block;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
       padding: 7px 9px;
       border: 1px solid var(--line);
       border-radius: 7px;
       background: var(--panel-soft);
       line-height: 1.45;
     }
+    .message-routing-policy-field,
+    .onebot-connection-field,
     .command-permission-field {
       grid-column: 1 / -1;
+    }
+    .message-routing-policy-field,
+    .onebot-connection-field {
+      gap: 10px;
     }
     .command-permission-toolbar {
       display: flex;
       gap: 8px;
       align-items: center;
       flex-wrap: wrap;
+    }
+    .onebot-connection-modal .secret-control {
+      max-width: 100%;
     }
     .permission-advanced {
       margin-top: 10px;
@@ -2705,5 +2719,4 @@
       .logs-table td:nth-child(3) {
         width: 210px;
       }
-      table { min-width: 720px; }
     }

@@ -989,7 +989,7 @@ public class AdminService(
             pluginState = info.state.name,
             sourcePath = configService.resolvePath(plugin.configId).toString(),
             schema = plugin.configFormSpec,
-            values = AdminConfigJson.valuesFor(current, plugin.configFormSpec),
+            values = AdminConfigJson.valuesFor(current, plugin.configFormSpec, maskSecrets = false),
             secretStates = AdminConfigJson.secretStates(current, plugin.configFormSpec),
         )
     }
@@ -1028,7 +1028,7 @@ public class AdminService(
             description = "主项目配置",
             sourcePath = configService.resolvePath(MainDynamicConfig.CONFIG_ID).toString(),
             schema = MainConfigForms.formSpec,
-            values = AdminConfigJson.valuesFor(current, MainConfigForms.formSpec),
+            values = AdminConfigJson.valuesFor(current, MainConfigForms.formSpec, maskSecrets = false),
             secretStates = AdminConfigJson.secretStates(current, MainConfigForms.formSpec),
         )
     }
@@ -1054,7 +1054,7 @@ public class AdminService(
             restartTargets = result.restartTargets,
             message = result.message,
             pluginId = null,
-            values = AdminConfigJson.valuesFor(saved, MainConfigForms.formSpec),
+            values = AdminConfigJson.valuesFor(saved, MainConfigForms.formSpec, maskSecrets = false),
             secretStates = AdminConfigJson.secretStates(saved, MainConfigForms.formSpec),
         )
     }
@@ -1105,7 +1105,7 @@ public class AdminService(
             restartTargets = result.restartTargets,
             message = result.message,
             pluginId = info.descriptor.id,
-            values = AdminConfigJson.valuesFor(saved, plugin.configFormSpec),
+            values = AdminConfigJson.valuesFor(saved, plugin.configFormSpec, maskSecrets = false),
             secretStates = AdminConfigJson.secretStates(saved, plugin.configFormSpec),
         )
     }
