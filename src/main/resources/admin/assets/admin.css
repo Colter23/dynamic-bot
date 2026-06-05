@@ -702,6 +702,9 @@
       border-radius: 7px;
       background: #fff;
     }
+    .target-source-row.no-priority {
+      grid-template-columns: minmax(0, 1fr) minmax(72px, 0.7fr);
+    }
     .target-source-account,
     .target-source-transport {
       min-width: 0;
@@ -2143,6 +2146,9 @@
     }
     .permission-advanced {
       margin-top: 10px;
+    }
+    .command-permission-modal {
+      grid-template-columns: 1fr;
     }
     .secret-control {
       display: grid;

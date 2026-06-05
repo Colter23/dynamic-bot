@@ -17,6 +17,9 @@ let openModal;
 let closeModal;
 let confirmDanger;
 let loadSubscriberTargetCandidates;
+let hydrateMediaImages;
+let messageTargetChoiceHtml;
+let bindTargetSourceToggles;
 let beginPageRequest;
 let isCurrentPageRequest;
 let invalidatePageRequests;
@@ -40,7 +43,10 @@ function bindContext(nextCtx) {
     closeModal,
     confirmDanger,
     loadSubscriberTargetCandidates,
+    messageTargetChoiceHtml,
+    bindTargetSourceToggles,
   } = ctx.ui);
+  hydrateMediaImages = ctx.hydrateMediaImages;
   beginPageRequest = ctx.beginPageRequest;
   isCurrentPageRequest = ctx.isCurrentPageRequest;
   invalidatePageRequests = ctx.invalidatePageRequests;
@@ -1154,6 +1160,7 @@ function commandPermissionScopeText(rule) {
 }
 
 function commandPermissionRoleText(role) {
+  if (role === "NONE") return "无权限";
   if (role === "ADMIN") return "系统管理员";
   if (role === "MANAGER") return "目标管理员";
   return "普通用户";
@@ -1171,27 +1178,32 @@ async function openCommandPermissionModal() {
   const platformOptions = [{ platformId: "*", pluginName: "全部平台", supportedTypes: ["GROUP", "USER", "CHANNEL", "OTHER"] }]
     .concat(targetPlatforms)
     .concat([{ platformId: "__manual__", pluginName: "手动输入", supportedTypes: ["GROUP", "USER", "CHANNEL", "OTHER"] }]);
-  const commandOptions = [{ pathText: "*", description: "全部命令" }]
-    .concat(commands)
-    .concat([{ pathText: "__manual__", description: "手动输入" }]);
+  const commandOptions = commandPermissionCommandOptions(commands);
   let targetCandidates = [];
   openModal("添加权限规则", `
-    <div class="form-grid">
-      <div class="field"><label>命令路径</label><select id="permCommandPath">${commandOptions.map(command => `<option value="${attr(command.pathText)}">${esc(commandPermissionCommandOptionText(command))}</option>`).join("")}</select></div>
+    <div class="form-grid command-permission-modal">
+      <div class="field"><label>命令路径</label><select id="permCommandPath">${commandOptions.map(command => `<option value="${attr(command.pathText)}" data-kind="${attr(command.optionKind || "")}" data-required-role="${attr(command.requiredRole || "")}" data-default-role="${attr(command.defaultRole || "")}">${esc(commandPermissionCommandOptionText(command))}</option>`).join("")}</select></div>
       <div class="field" id="permCommandManualWrap" hidden><label>命令路径<span class="required-mark">*</span></label><input id="permCommandManual" placeholder="例如：subscribe，或 filter *"></div>
       <div class="field"><label>目标平台</label><select id="permPlatform">${platformOptions.map(platform => `<option value="${attr(platform.platformId)}">${esc(commandPermissionPlatformOptionText(platform))}</option>`).join("")}</select></div>
       <div class="field" id="permPlatformManualWrap" hidden><label>平台 ID<span class="required-mark">*</span></label><input id="permPlatformManual"></div>
       <div class="field"><label>目标类型</label><select id="permTargetKind"></select></div>
       <div class="field full" id="permTargetCandidateWrap" hidden>
         <div class="field-head">
-          <label>可用目标</label>
-          <button type="button" id="permRefreshTargets" class="choice-refresh-button compact">刷新目标</button>
+          <div class="field-title-line">
+            <label>可用目标</label>
+            <span id="permTargetInlineStatus" class="field-inline-status"></span>
+          </div>
+          <div class="row-actions">
+            <button type="button" id="permRefreshTargets" class="secondary compact choice-tool-button choice-refresh-button">刷新</button>
+          </div>
         </div>
-        <select id="permTargetCandidate"></select>
+        <div id="permTargetCandidateList" class="target-choice-list"></div>
       </div>
       <div class="field full" id="permTargetManualWrap" hidden><label>目标 ID</label><input id="permTargetId" value="*"></div>
-      <div class="field"><label>发送者 ID<span class="required-mark">*</span></label><input id="permSenderId" placeholder="填写用户 ID，或 * 表示全部"></div>
-      <div class="field"><label>角色</label><select id="permRole"><option value="MANAGER">目标管理员</option><option value="ADMIN">系统管理员</option></select></div>
+      <div class="field" id="permSenderWrap"><label>发送者 ID<span class="required-mark">*</span></label><input id="permSenderId" placeholder="填写用户 ID，或 * 表示全部"></div>
+      <div class="field full"><span id="permSenderHint" class="inline-note"></span></div>
+      <div class="field" id="permRoleWrap"><label>最高权限</label><select id="permRole"><option value="USER">普通用户</option><option value="MANAGER" selected>目标管理员</option><option value="ADMIN">系统管理员</option></select></div>
+      <div class="field full"><span id="permCommandRoleHint" class="inline-note"></span></div>
       <div class="field full">
         <details>
           <summary>高级匹配</summary>
@@ -1202,14 +1214,13 @@ async function openCommandPermissionModal() {
           </div>
         </details>
       </div>
-      <div class="field full"><span id="permTargetStatus" class="inline-note"></span></div>
     </div>
   `, async () => {
     const next = commandPermissionRules().concat([collectCommandPermissionRule(targetCandidates)]);
     setCommandPermissionRules(next);
     closeModal();
     notify("权限规则已添加，请保存配置", false);
-  }, { size: "wide" });
+  }, { size: "medium" });
 
   const refreshKinds = async () => {
     const rawPlatformId = $("permPlatform").value;
@@ -1229,8 +1240,9 @@ async function openCommandPermissionModal() {
     targetCandidates = [];
     $("permTargetCandidateWrap").hidden = true;
     $("permTargetManualWrap").hidden = true;
-    $("permTargetStatus").textContent = "";
+    $("permTargetInlineStatus").textContent = "";
     setPermissionAdvancedFields(null);
+    refreshPermissionSenderField(targetCandidates);
     if (rawPlatformId === "*" || kind === "*") {
       $("permTargetId").value = "*";
       setPermissionTargetStatus("当前规则匹配全部目标");
@@ -1241,8 +1253,9 @@ async function openCommandPermissionModal() {
       setPermissionTargetStatus("请填写平台 ID");
       return;
     }
-    setPermissionTargetStatus("正在获取可用目标...", true);
+    setPermissionTargetLoading(force ? "正在刷新可用目标..." : "正在获取可用目标...");
     $("permRefreshTargets").disabled = true;
+    let targetLoadFailed = false;
     try {
       const result = await loadSubscriberTargetCandidates(platformId, kind, force);
       targetCandidates = result.items || [];
@@ -1254,21 +1267,47 @@ async function openCommandPermissionModal() {
         setPermissionTargetStatus(`已获取 ${targetCandidates.length} 个目标`);
       }
     } catch (error) {
+      targetLoadFailed = true;
       targetCandidates = [];
+      $("permTargetCandidateWrap").hidden = false;
+      $("permTargetCandidateList").innerHTML = `<div class="empty">目标列表获取失败</div>`;
       setPermissionTargetStatus(error.message || "可用目标获取失败");
     } finally {
       $("permRefreshTargets").disabled = false;
     }
+    if (targetLoadFailed) {
+      refreshPermissionSenderField(targetCandidates);
+      return;
+    }
     if (targetCandidates.length) {
       $("permTargetCandidateWrap").hidden = false;
-      $("permTargetCandidate").innerHTML = `<option value="-1">全部目标</option>` + targetCandidates.map((target, index) =>
-        `<option value="${index}">${esc(target.name || target.externalId)} · ${esc(target.externalId)}</option>`
+      const candidateList = $("permTargetCandidateList");
+      candidateList.innerHTML = permissionAllTargetChoiceHtml() + targetCandidates.map((target, index) =>
+        messageTargetChoiceHtml(target, index, {
+          inputName: "permTargetCandidate",
+          prefix: "permTarget",
+          inputType: "radio",
+          checked: false,
+          showPriority: false
+        })
       ).join("");
+      bindTargetSourceToggles(candidateList);
+      await hydrateMediaImages(candidateList);
       setPermissionAdvancedFields(null);
-      $("permTargetCandidate").onchange = () => setPermissionAdvancedFields(targetCandidates[Number($("permTargetCandidate").value)] || null);
+      candidateList.querySelectorAll(`input[name="permTargetCandidate"]`).forEach(input => {
+        input.onchange = () => {
+          const target = selectedPermissionTargetCandidate(targetCandidates);
+          setPermissionAdvancedFields(target);
+          refreshPermissionSenderField(targetCandidates);
+        };
+      });
+      refreshPermissionSenderField(targetCandidates);
     } else {
+      $("permTargetCandidateWrap").hidden = false;
+      $("permTargetCandidateList").innerHTML = `<div class="empty">暂无可用目标</div>`;
       $("permTargetManualWrap").hidden = false;
       setPermissionTargetStatus("未获取到可用目标，请手动填写目标 ID");
+      refreshPermissionSenderField(targetCandidates);
     }
   };
   $("permPlatform").onchange = () => refreshKinds().catch(handleError);
@@ -1276,6 +1315,7 @@ async function openCommandPermissionModal() {
   $("permTargetKind").onchange = () => refreshTargets(false).catch(handleError);
   $("permRefreshTargets").onclick = () => refreshTargets(true).catch(handleError);
   $("permCommandPath").onchange = refreshCommandField;
+  $("permRole").onchange = refreshPermissionRoleHint;
   refreshCommandField();
   await refreshKinds();
 }
@@ -1292,12 +1332,24 @@ async function loadPermissionTargetPlatforms() {
   return state.cache.subscriberTargetPlatforms;
 }
 
-function setPermissionTargetStatus(text, loading = false) {
-  const target = $("permTargetStatus");
-  if (!target) return;
-  target.innerHTML = loading
-    ? `<span class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</span>`
-    : esc(text);
+function setPermissionTargetStatus(text) {
+  const inline = $("permTargetInlineStatus");
+  if (inline) inline.textContent = text ? `· ${text}` : "";
+}
+
+function setPermissionTargetLoading(text) {
+  $("permTargetCandidateWrap").hidden = false;
+  $("permTargetManualWrap").hidden = true;
+  $("permTargetInlineStatus").textContent = "";
+  $("permTargetCandidateList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
+}
+
+function permissionAllTargetChoiceHtml() {
+  return `<label class="target-choice">
+    <input type="radio" name="permTargetCandidate" value="*" data-index="-1" checked>
+    <span class="target-choice-avatar media-placeholder" aria-hidden="true"></span>
+    <span class="target-choice-text" title="全部目标">全部目标</span>
+  </label>`;
 }
 
 function commandPermissionPlatformOptionText(platform) {
@@ -1307,18 +1359,72 @@ function commandPermissionPlatformOptionText(platform) {
 }
 
 function commandPermissionCommandOptionText(command) {
-  if (command.pathText === "*") return "全部命令";
   if (command.pathText === "__manual__") return "手动输入";
-  return command.description ? `${command.pathText} · ${command.description}` : command.pathText;
+  if (command.optionKind === "GROUP") {
+    return `${command.pathText} · ${command.description || "命令组"} · ${commandPermissionRoleText(command.defaultRole || "MANAGER")}`;
+  }
+  if (command.pathText === "*") return "全部命令";
+  const suffix = command.optionKind === "GROUP" ? command.description || "命令组" : command.description;
+  const role = command.requiredRole ? ` · ${commandPermissionRoleText(command.requiredRole)}` : "";
+  return suffix ? `${command.pathText} · ${suffix}${role}` : `${command.pathText}${role}`;
+}
+
+function commandPermissionCommandOptions(commands) {
+  const groups = [
+    { pathText: "*", description: "普通用户命令组", optionKind: "GROUP", defaultRole: "USER" },
+    { pathText: "*", description: "目标管理命令组", optionKind: "GROUP", defaultRole: "MANAGER" },
+    { pathText: "*", description: "全部命令", optionKind: "GROUP", defaultRole: "ADMIN" },
+    { pathText: "filter *", description: "过滤命令组", optionKind: "GROUP", defaultRole: "MANAGER" },
+    { pathText: "link *", description: "链接解析命令组", optionKind: "GROUP", defaultRole: "MANAGER" }
+  ];
+  const exactCommands = (Array.isArray(commands) ? commands : []).map(command => Object.assign({}, command, {
+    optionKind: "COMMAND"
+  }));
+  return groups.concat(exactCommands).concat([
+    { pathText: "__manual__", description: "手动输入", optionKind: "MANUAL" }
+  ]);
 }
 
 function refreshCommandField() {
   const raw = $("permCommandPath").value;
   $("permCommandManualWrap").hidden = raw !== "__manual__";
+  const selected = selectedPermissionCommandOption();
+  const exactCommand = selected.kind === "COMMAND";
+  $("permRoleWrap").hidden = exactCommand;
+  if (exactCommand) {
+    const requiredRole = selected.requiredRole || "USER";
+    $("permRole").value = requiredRole;
+    $("permCommandRoleHint").textContent = `该命令固定需要${commandPermissionRoleText(requiredRole)}权限。${commandPermissionRoleDescription(requiredRole)}`;
+    return;
+  }
+  const defaultRole = selected.defaultRole || "MANAGER";
+  if (["USER", "MANAGER", "ADMIN"].includes(defaultRole)) $("permRole").value = defaultRole;
+  refreshPermissionRoleHint();
 }
 
 function permissionCommandPathValue() {
   return $("permCommandPath").value === "__manual__" ? $("permCommandManual").value.trim() : $("permCommandPath").value;
+}
+
+function selectedPermissionCommandOption() {
+  const select = $("permCommandPath");
+  const option = select && select.selectedOptions && select.selectedOptions[0];
+  return {
+    kind: option && option.dataset.kind || "",
+    requiredRole: option && option.dataset.requiredRole || "",
+    defaultRole: option && option.dataset.defaultRole || ""
+  };
+}
+
+function refreshPermissionRoleHint() {
+  const role = $("permRole") && $("permRole").value || "MANAGER";
+  $("permCommandRoleHint").textContent = commandPermissionRoleDescription(role);
+}
+
+function commandPermissionRoleDescription(role) {
+  if (role === "ADMIN") return "系统管理员：可执行系统级指令，例如登录来源账号、查看系统状态和停止主程序。";
+  if (role === "MANAGER") return "目标管理员：可管理匹配目标内的订阅、过滤、主题和链接解析配置。";
+  return "普通用户：只能执行查询和安全类指令，例如帮助、列表、手动解析和查看配置。";
 }
 
 function permissionPlatformValue() {
@@ -1332,20 +1438,54 @@ function setPermissionAdvancedFields(target) {
   $("permTargetId").value = target && target.externalId || "*";
 }
 
+function selectedPermissionTargetCandidate(candidates) {
+  if (!$("permTargetCandidateWrap") || $("permTargetCandidateWrap").hidden) return null;
+  const input = document.querySelector(`input[name="permTargetCandidate"]:checked`);
+  const index = input ? Number(input.dataset.index) : -1;
+  return index >= 0 ? candidates[index] || null : null;
+}
+
+function refreshPermissionSenderField(candidates) {
+  const kind = $("permTargetKind") && $("permTargetKind").value || "*";
+  const target = selectedPermissionTargetCandidate(candidates);
+  const senderWrap = $("permSenderWrap");
+  const senderInput = $("permSenderId");
+  const hint = $("permSenderHint");
+  if (!senderWrap || !senderInput || !hint) return;
+  const specificUserTarget = kind === "USER" && !!target;
+  if (specificUserTarget) {
+    senderInput.value = target.externalId || "";
+    senderInput.dataset.autoUserTarget = "true";
+    senderWrap.hidden = true;
+    hint.textContent = "用户目标中发送者就是该用户，已自动使用目标 ID 作为发送者 ID。";
+    return;
+  }
+  senderWrap.hidden = false;
+  if (senderInput.dataset.autoUserTarget === "true") {
+    senderInput.value = "";
+    senderInput.dataset.autoUserTarget = "false";
+  }
+  hint.textContent = kind === "GROUP"
+    ? "群组目标中，发送者 ID 填 * 表示匹配这个群内所有发指令的人。"
+    : "";
+}
+
 function collectCommandPermissionRule(targetCandidates) {
   const commandPath = permissionCommandPathValue() || "*";
   if ($("permCommandPath").value === "__manual__" && commandPath === "*") throw new Error("请填写命令路径");
   const platformId = permissionPlatformValue() || "*";
   if ($("permPlatform").value === "__manual__" && platformId === "*") throw new Error("请填写平台 ID");
   const rawKind = $("permTargetKind").value || "*";
-  const candidateIndex = $("permTargetCandidate") && !$("permTargetCandidateWrap").hidden ? Number($("permTargetCandidate").value) : -1;
-  const candidate = candidateIndex >= 0 ? targetCandidates[candidateIndex] : null;
+  const candidate = selectedPermissionTargetCandidate(targetCandidates);
   const targetId = platformId === "*" || rawKind === "*"
     ? "*"
     : (candidate ? candidate.externalId : $("permTargetId").value.trim() || "*");
   const senderId = $("permSenderId").value.trim();
   if (!senderId) throw new Error("请填写发送者 ID，或使用 * 表示全部发送者");
-  const role = $("permRole").value || "MANAGER";
+  const selectedCommand = selectedPermissionCommandOption();
+  const role = selectedCommand.kind === "COMMAND"
+    ? (selectedCommand.requiredRole || "USER")
+    : ($("permRole").value || "MANAGER");
   if (senderId === "*" && role === "ADMIN") throw new Error("系统管理员规则不能匹配全部发送者");
   return normalizeCommandPermissionRule({
     commandPath,

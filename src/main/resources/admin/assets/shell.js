@@ -263,19 +263,20 @@ const $ = id => document.getElementById(id);
       const labelText = `${count} 个来源`;
       return `<button type="button" class="secondary compact target-source-toggle" data-target-source-toggle="${attr(key)}" data-target-source-label="${attr(labelText)}" aria-expanded="false" title="${attr(sourceAccountTitle(target))}">${esc(labelText)} ▶</button>`;
     }
-    function targetSourcePanelHtml(target, index, prefix) {
+    function targetSourcePanelHtml(target, index, prefix, options = {}) {
       const sources = targetSources(target);
       if (!sources.length) return "";
       const key = `${prefix}:${index}`;
+      const showPriority = options.showPriority !== false;
       return `<div class="target-source-panel" data-target-source-panel="${attr(key)}" hidden>
-        <div class="target-source-help">点击优先设定优先推送渠道，不选择就使用全局路由。</div>
+        <div class="target-source-help">${showPriority ? "点击优先设定优先推送渠道，不选择就使用全局路由。" : "展开查看这个真实目标来自哪些 Bot 账号。"}</div>
         ${sources.map(source => {
           const selected = target && target.accountId && source.accountId === target.accountId;
           return `
-        <div class="target-source-row">
+        <div class="target-source-row${showPriority ? "" : " no-priority"}">
           <span class="target-source-account">${esc(sourceAccountLabel(source))}</span>
           <span class="target-source-transport">${esc(sourceTransportLabel(source))}</span>
-          <button type="button" class="secondary compact target-priority-button${selected ? " active" : ""}" data-target-priority-choice="${attr(key)}" data-account-id="${attr(source.accountId)}" aria-pressed="${selected ? "true" : "false"}">${selected ? "取消优先" : "优先"}</button>
+          ${showPriority ? `<button type="button" class="secondary compact target-priority-button${selected ? " active" : ""}" data-target-priority-choice="${attr(key)}" data-account-id="${attr(source.accountId)}" aria-pressed="${selected ? "true" : "false"}">${selected ? "取消优先" : "优先"}</button>` : ""}
         </div>`;
         }).join("")}</div>`;
     }
@@ -297,7 +298,7 @@ const $ = id => document.getElementById(id);
           <span class="target-choice-text" title="${attr(parts)}">${esc(parts)}</span>
         </label>
         <div class="target-choice-tools">${targetSourceToggleHtml(target, index, prefix)}</div>
-        ${targetSourcePanelHtml(target, index, prefix)}
+        ${targetSourcePanelHtml(target, index, prefix, options)}
       </div>`;
     }
     function bindTargetSourceToggles(root = document) {
