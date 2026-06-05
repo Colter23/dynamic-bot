@@ -34,10 +34,10 @@ public data class PushTemplates(
 
 public data class WebAdminConfig(
     val enabled: Boolean = true,
-    val host: String = "127.0.0.1",
-    val port: Int = 8080,
+    val host: String = "0.0.0.0",
+    val port: Int = 2233,
     val token: String = "",
-    val logBufferCapacity: Int = 2_000,
+    val logBufferCapacity: Int = 1_000,
 )
 
 public data class PluginCatalogConfig(
