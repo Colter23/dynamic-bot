@@ -9,28 +9,31 @@ import top.colter.dynamic.core.command.CommandSpec
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.repository.LinkParseTargetConfigRepository
 
-internal class LinkParseConfigCommandHandler(
+internal object LinkParseConfigCommandHandler {
+    fun handlers(
+        configProvider: () -> MainDynamicConfig,
+        commandPrefixProvider: () -> String,
+    ): List<CommandHandler> = listOf(
+        LinkParseStatusCommandHandler(configProvider, commandPrefixProvider),
+        LinkParseSetCommandHandler(commandPrefixProvider),
+        LinkParseClearCommandHandler(commandPrefixProvider),
+    )
+}
+
+private class LinkParseStatusCommandHandler(
     private val configProvider: () -> MainDynamicConfig,
     private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("link"),
-        description = "查看或设置当前会话的链接解析触发方式",
-        usage = "link <status|set|clear> [off|mention|always]",
+        aliases = listOf(listOf("link", "status")),
+        description = "查看当前会话的链接解析触发方式",
+        usage = "link",
         requiredRole = CommandRole.USER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
-        val action = invocation.args.firstOrNull()?.lowercase() ?: "status"
-        return when (action) {
-            "status" -> status(invocation)
-            "set" -> set(invocation)
-            "clear" -> clear(invocation)
-            else -> failedUsage()
-        }
-    }
-
-    private fun status(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.isNotEmpty()) return failedUsage()
         val config = configProvider().linkParsing
         val targetConfig = LinkParseTargetConfigRepository.findEffectiveByAddress(invocation.context.target)
         val activeMode = targetConfig?.triggerMode ?: config.fallbackTriggerMode
@@ -48,13 +51,25 @@ internal class LinkParseConfigCommandHandler(
         return CommandExecutionResult.success(lines.joinToString("\n"))
     }
 
-    private fun set(invocation: CommandInvocation): CommandExecutionResult {
-        if (!invocation.role.satisfies(CommandRole.ADMIN)) {
-            return CommandExecutionResult.rejected("权限不足")
-        }
-        if (invocation.args.size != 2) return failedUsage()
-        val mode = parseMode(invocation.args[1])
-            ?: return CommandExecutionResult.failed("未知触发方式：${invocation.args[1]}，可用：off、mention、always")
+    private fun failedUsage(): CommandExecutionResult {
+        return CommandExecutionResult.failed("用法：${commandPrefixProvider()} ${spec.usage}")
+    }
+}
+
+private class LinkParseSetCommandHandler(
+    private val commandPrefixProvider: () -> String,
+) : CommandHandler {
+    override val spec: CommandSpec = CommandSpec(
+        path = listOf("link", "set"),
+        description = "设置当前会话的链接解析触发方式",
+        usage = "link set <off|mention|always>",
+        requiredRole = CommandRole.MANAGER,
+    )
+
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.size != 1) return failedUsage()
+        val mode = parseMode(invocation.args.single())
+            ?: return CommandExecutionResult.failed("未知触发方式：${invocation.args.single()}，可用：off、mention、always")
         val result = LinkParseTargetConfigRepository.upsert(
             address = invocation.context.target,
             triggerMode = mode,
@@ -68,11 +83,23 @@ internal class LinkParseConfigCommandHandler(
         return CommandExecutionResult.success("链接解析触发方式$state：${mode.label()}")
     }
 
-    private fun clear(invocation: CommandInvocation): CommandExecutionResult {
-        if (!invocation.role.satisfies(CommandRole.ADMIN)) {
-            return CommandExecutionResult.rejected("权限不足")
-        }
-        if (invocation.args.size != 1) return failedUsage()
+    private fun failedUsage(): CommandExecutionResult {
+        return CommandExecutionResult.failed("用法：${commandPrefixProvider()} ${spec.usage}")
+    }
+}
+
+private class LinkParseClearCommandHandler(
+    private val commandPrefixProvider: () -> String,
+) : CommandHandler {
+    override val spec: CommandSpec = CommandSpec(
+        path = listOf("link", "clear"),
+        description = "清除当前会话的链接解析配置",
+        usage = "link clear",
+        requiredRole = CommandRole.MANAGER,
+    )
+
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.isNotEmpty()) return failedUsage()
         val removed = LinkParseTargetConfigRepository.deleteByAddress(invocation.context.target)
         val message = if (removed) {
             "已清除当前会话链接解析配置，后续使用全局回退触发方式"
@@ -85,23 +112,23 @@ internal class LinkParseConfigCommandHandler(
     private fun failedUsage(): CommandExecutionResult {
         return CommandExecutionResult.failed("用法：${commandPrefixProvider()} ${spec.usage}")
     }
-
-    private fun parseMode(value: String): LinkParseTriggerMode? {
-        return when (value.lowercase()) {
-            "off", "disabled", "disable", "none" -> LinkParseTriggerMode.DISABLED
-            "mention", "at" -> LinkParseTriggerMode.MENTION_ONLY
-            "always", "on" -> LinkParseTriggerMode.ALWAYS
-            else -> null
-        }
-    }
-
-    private fun LinkParseTriggerMode.label(): String {
-        return when (this) {
-            LinkParseTriggerMode.DISABLED -> "不解析"
-            LinkParseTriggerMode.MENTION_ONLY -> "必须 @bot 才解析"
-            LinkParseTriggerMode.ALWAYS -> "匹配到链接就解析"
-        }
-    }
-
-    private fun enabledText(enabled: Boolean): String = if (enabled) "开启" else "关闭"
 }
+
+private fun parseMode(value: String): LinkParseTriggerMode? {
+    return when (value.lowercase()) {
+        "off", "disabled", "disable", "none" -> LinkParseTriggerMode.DISABLED
+        "mention", "at" -> LinkParseTriggerMode.MENTION_ONLY
+        "always", "on" -> LinkParseTriggerMode.ALWAYS
+        else -> null
+    }
+}
+
+private fun LinkParseTriggerMode.label(): String {
+    return when (this) {
+        LinkParseTriggerMode.DISABLED -> "不解析"
+        LinkParseTriggerMode.MENTION_ONLY -> "必须 @bot 才解析"
+        LinkParseTriggerMode.ALWAYS -> "匹配到链接就解析"
+    }
+}
+
+private fun enabledText(enabled: Boolean): String = if (enabled) "开启" else "关闭"

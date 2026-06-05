@@ -8,6 +8,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.command.CommandRegistry
@@ -49,7 +50,7 @@ class CommandListenerTest {
         val plugin = FakePublisherFollowPlugin()
         val listener = CommandListener(
             publisherLookupResolver = { id -> plugin.takeIf { id == "bilibili" } },
-            config = MainDynamicConfig(),
+            config = managerConfig(),
             commandRegistry = CommandRegistry(),
             eventBus = eventBus,
             publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
@@ -74,7 +75,7 @@ class CommandListenerTest {
         val eventBus = EventBus()
         val listener = CommandListener(
             publisherLookupResolver = { null },
-            config = MainDynamicConfig(),
+            config = managerConfig(),
             commandRegistry = CommandRegistry(),
             eventBus = eventBus,
             publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
@@ -94,7 +95,7 @@ class CommandListenerTest {
         val eventBus = EventBus()
         val listener = CommandListener(
             publisherLookupResolver = { null },
-            config = MainDynamicConfig(),
+            config = managerConfig(),
             commandRegistry = CommandRegistry(),
             eventBus = eventBus,
             publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
@@ -117,7 +118,7 @@ class CommandListenerTest {
         val eventBus = EventBus()
         val listener = CommandListener(
             publisherLookupResolver = { null },
-            config = MainDynamicConfig(),
+            config = managerConfig(),
             commandRegistry = CommandRegistry(),
             eventBus = eventBus,
             publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
@@ -166,6 +167,48 @@ class CommandListenerTest {
         assertTrue(LinkParseTargetConfigRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")) == null)
     }
 
+    @Test
+    fun commandShouldBeIgnoredWhenReceivedByNonPrimaryBot() = runBlocking {
+        initDb("command-receive-primary")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = MainDynamicConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            primaryBotAccountResolver = { "42" },
+        )
+
+        val result = dispatchOrNull(
+            eventBus,
+            listener,
+            commandEvent("/db help", botAccountId = "24"),
+        )
+
+        assertEquals(null, result)
+    }
+
+    @Test
+    fun commandShouldBeAcceptedWhenCurrentBotIsMentioned() = runBlocking {
+        initDb("command-receive-mentioned")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = MainDynamicConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            primaryBotAccountResolver = { "42" },
+        )
+
+        val result = dispatchOrNull(
+            eventBus,
+            listener,
+            commandEvent("/db help", botAccountId = "24", mentionedAccountIds = setOf("24")),
+        )
+
+        assertEquals(CommandStatus.SUCCESS, result?.status)
+    }
+
     private suspend fun dispatch(
         eventBus: EventBus,
         listener: CommandListener,
@@ -184,6 +227,24 @@ class CommandListenerTest {
         return withTimeout(3_000) { result.await() }
     }
 
+    private suspend fun dispatchOrNull(
+        eventBus: EventBus,
+        listener: CommandListener,
+        event: CommandEvent,
+    ): CommandResultEvent? {
+        val result = CompletableDeferred<CommandResultEvent>()
+        eventBus.subscribe(
+            object : Listener<CommandResultEvent> {
+                override suspend fun onMessage(event: CommandResultEvent) {
+                    result.complete(event)
+                }
+            },
+        )
+
+        listener.onMessage(event)
+        return withTimeoutOrNull(300) { result.await() }
+    }
+
     private fun initDb(suffix: String) {
         val tempDir = createTempDirectory("dynamic-bot-command-$suffix").toFile()
         PersistenceManager.init(tempDir.resolve("test.db").path)
@@ -198,7 +259,11 @@ class CommandListenerTest {
         SubscriptionRepository.subscribe(subscriber.id, publisher.id)
     }
 
-    private fun commandEvent(rawText: String): CommandEvent {
+    private fun commandEvent(
+        rawText: String,
+        botAccountId: String? = null,
+        mentionedAccountIds: Set<String> = emptySet(),
+    ): CommandEvent {
         return CommandEvent(
             sourcePlugin = "test",
             context = CommandContext.of(
@@ -206,9 +271,19 @@ class CommandListenerTest {
                 kind = TargetKind.GROUP,
                 externalId = "100",
                 senderId = "sender",
+                botAccountId = botAccountId,
+                mentionedAccountIds = mentionedAccountIds,
             ),
             rawText = rawText,
             traceId = "trace",
+        )
+    }
+
+    private fun managerConfig(): MainDynamicConfig {
+        return MainDynamicConfig(
+            command = top.colter.dynamic.CommandConfig(
+                permissions = listOf(CommandPermissionRule(senderId = "sender", role = CommandRole.MANAGER)),
+            ),
         )
     }
 

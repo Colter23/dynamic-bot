@@ -436,6 +436,7 @@ const $ = id => document.getElementById(id);
       const clearTargetCandidates = keys.some(key => ["plugins", "platformLogins", "targetPlatformAccounts", "subscriberTargetPlatforms"].includes(key));
       if (keys.some(key => ["plugins", "platformLogins"].includes(key))) {
         delete state.cache.targetPlatformAccounts;
+        delete state.cache.commands;
       }
       keys.forEach(key => delete state.cache[key]);
       if (clearTargetCandidates) clearSubscriberTargetCandidateCache();

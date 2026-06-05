@@ -1110,14 +1110,15 @@ function setCommandPermissionRules(rules) {
 
 function normalizeCommandPermissionRule(rule) {
   return {
+    commandPath: rule.commandPath || "*",
     platformId: rule.platformId || "*",
     targetKind: rule.targetKind || null,
     targetId: rule.targetId || "*",
     scopeId: rule.scopeId || "*",
     threadId: rule.threadId || "*",
-    accountId: rule.accountId || "*",
+    botAccountId: rule.botAccountId || "*",
     senderId: rule.senderId || "*",
-    role: rule.role || "ADMIN"
+    role: rule.role || "MANAGER"
   };
 }
 
@@ -1129,10 +1130,11 @@ function normalizeCommandPermissionRules(value) {
 function renderCommandPermissionTable(rules) {
   const rows = normalizeCommandPermissionRules(rules).map((rule, index) => Object.assign({ _index: index }, rule));
   return renderTable(rows, [
+    { title: "命令", render: rule => `<span class="primary-line">${esc(wildcardText(rule.commandPath))}</span>` },
     { title: "平台", render: rule => `<span class="primary-line">${esc(wildcardText(rule.platformId))}</span>` },
     { title: "目标", render: rule => cell(commandPermissionTargetTitle(rule), commandPermissionScopeText(rule)) },
     { title: "发送者", render: rule => `<span class="primary-line">${esc(wildcardText(rule.senderId))}</span>` },
-    { title: "角色", render: rule => pill(rule.role) },
+    { title: "角色", render: rule => pill(commandPermissionRoleText(rule.role)) },
     { title: "操作", render: rule => `<button type="button" class="danger" data-action="delete-command-permission" data-index="${rule._index}">删除</button>` }
   ]);
 }
@@ -1146,9 +1148,15 @@ function commandPermissionScopeText(rule) {
   const items = [
     ["作用域", rule.scopeId],
     ["线程", rule.threadId],
-    ["账号", rule.accountId]
+    ["接收 Bot", rule.botAccountId]
   ].filter(([, value]) => value && value !== "*");
   return items.length ? items.map(([name, value]) => `${name}:${value}`).join(" / ") : "全部上下文";
+}
+
+function commandPermissionRoleText(role) {
+  if (role === "ADMIN") return "系统管理员";
+  if (role === "MANAGER") return "目标管理员";
+  return "普通用户";
 }
 
 function wildcardText(value) {
@@ -1156,13 +1164,21 @@ function wildcardText(value) {
 }
 
 async function openCommandPermissionModal() {
-  const targetPlatforms = await loadPermissionTargetPlatforms();
+  const [targetPlatforms, commands] = await Promise.all([
+    loadPermissionTargetPlatforms(),
+    loadPermissionCommands()
+  ]);
   const platformOptions = [{ platformId: "*", pluginName: "全部平台", supportedTypes: ["GROUP", "USER", "CHANNEL", "OTHER"] }]
     .concat(targetPlatforms)
     .concat([{ platformId: "__manual__", pluginName: "手动输入", supportedTypes: ["GROUP", "USER", "CHANNEL", "OTHER"] }]);
+  const commandOptions = [{ pathText: "*", description: "全部命令" }]
+    .concat(commands)
+    .concat([{ pathText: "__manual__", description: "手动输入" }]);
   let targetCandidates = [];
   openModal("添加权限规则", `
     <div class="form-grid">
+      <div class="field"><label>命令路径</label><select id="permCommandPath">${commandOptions.map(command => `<option value="${attr(command.pathText)}">${esc(commandPermissionCommandOptionText(command))}</option>`).join("")}</select></div>
+      <div class="field" id="permCommandManualWrap" hidden><label>命令路径<span class="required-mark">*</span></label><input id="permCommandManual" placeholder="例如：subscribe，或 filter *"></div>
       <div class="field"><label>目标平台</label><select id="permPlatform">${platformOptions.map(platform => `<option value="${attr(platform.platformId)}">${esc(commandPermissionPlatformOptionText(platform))}</option>`).join("")}</select></div>
       <div class="field" id="permPlatformManualWrap" hidden><label>平台 ID<span class="required-mark">*</span></label><input id="permPlatformManual"></div>
       <div class="field"><label>目标类型</label><select id="permTargetKind"></select></div>
@@ -1174,15 +1190,15 @@ async function openCommandPermissionModal() {
         <select id="permTargetCandidate"></select>
       </div>
       <div class="field full" id="permTargetManualWrap" hidden><label>目标 ID</label><input id="permTargetId" value="*"></div>
-      <div class="field"><label>发送者 ID<span class="required-mark">*</span></label><input id="permSenderId" value="*" placeholder="填写用户 ID，或 * 表示全部"></div>
-      <div class="field"><label>角色</label><select id="permRole"><option value="ADMIN">管理员</option><option value="USER">普通用户</option></select></div>
+      <div class="field"><label>发送者 ID<span class="required-mark">*</span></label><input id="permSenderId" placeholder="填写用户 ID，或 * 表示全部"></div>
+      <div class="field"><label>角色</label><select id="permRole"><option value="MANAGER">目标管理员</option><option value="ADMIN">系统管理员</option></select></div>
       <div class="field full">
         <details>
           <summary>高级匹配</summary>
           <div class="form-grid permission-advanced">
             <div class="field"><label>作用域 ID</label><input id="permScopeId" value="*"></div>
             <div class="field"><label>线程 ID</label><input id="permThreadId" value="*"></div>
-            <div class="field"><label>账号 ID</label><input id="permAccountId" value="*"></div>
+            <div class="field"><label>接收 Bot 账号</label><input id="permBotAccountId" value="*" placeholder="例如 QQ 号，或 * 表示全部"></div>
           </div>
         </details>
       </div>
@@ -1259,7 +1275,15 @@ async function openCommandPermissionModal() {
   $("permPlatformManual").oninput = () => refreshTargets(false).catch(handleError);
   $("permTargetKind").onchange = () => refreshTargets(false).catch(handleError);
   $("permRefreshTargets").onclick = () => refreshTargets(true).catch(handleError);
+  $("permCommandPath").onchange = refreshCommandField;
+  refreshCommandField();
   await refreshKinds();
+}
+
+async function loadPermissionCommands() {
+  if (state.cache.commands) return state.cache.commands;
+  state.cache.commands = await api("/commands").catch(() => []);
+  return state.cache.commands;
 }
 
 async function loadPermissionTargetPlatforms() {
@@ -1282,6 +1306,21 @@ function commandPermissionPlatformOptionText(platform) {
   return `${platform.platformId} · ${platform.pluginName || platform.pluginId || ""}`;
 }
 
+function commandPermissionCommandOptionText(command) {
+  if (command.pathText === "*") return "全部命令";
+  if (command.pathText === "__manual__") return "手动输入";
+  return command.description ? `${command.pathText} · ${command.description}` : command.pathText;
+}
+
+function refreshCommandField() {
+  const raw = $("permCommandPath").value;
+  $("permCommandManualWrap").hidden = raw !== "__manual__";
+}
+
+function permissionCommandPathValue() {
+  return $("permCommandPath").value === "__manual__" ? $("permCommandManual").value.trim() : $("permCommandPath").value;
+}
+
 function permissionPlatformValue() {
   return $("permPlatform").value === "__manual__" ? $("permPlatformManual").value.trim() : $("permPlatform").value;
 }
@@ -1289,11 +1328,13 @@ function permissionPlatformValue() {
 function setPermissionAdvancedFields(target) {
   $("permScopeId").value = target && target.scopeId || "*";
   $("permThreadId").value = target && target.threadId || "*";
-  $("permAccountId").value = target && target.accountId || "*";
+  $("permBotAccountId").value = "*";
   $("permTargetId").value = target && target.externalId || "*";
 }
 
 function collectCommandPermissionRule(targetCandidates) {
+  const commandPath = permissionCommandPathValue() || "*";
+  if ($("permCommandPath").value === "__manual__" && commandPath === "*") throw new Error("请填写命令路径");
   const platformId = permissionPlatformValue() || "*";
   if ($("permPlatform").value === "__manual__" && platformId === "*") throw new Error("请填写平台 ID");
   const rawKind = $("permTargetKind").value || "*";
@@ -1304,15 +1345,18 @@ function collectCommandPermissionRule(targetCandidates) {
     : (candidate ? candidate.externalId : $("permTargetId").value.trim() || "*");
   const senderId = $("permSenderId").value.trim();
   if (!senderId) throw new Error("请填写发送者 ID，或使用 * 表示全部发送者");
+  const role = $("permRole").value || "MANAGER";
+  if (senderId === "*" && role === "ADMIN") throw new Error("系统管理员规则不能匹配全部发送者");
   return normalizeCommandPermissionRule({
+    commandPath,
     platformId,
     targetKind: rawKind === "*" ? null : rawKind,
     targetId,
     scopeId: $("permScopeId").value.trim() || "*",
     threadId: $("permThreadId").value.trim() || "*",
-    accountId: $("permAccountId").value.trim() || "*",
+    botAccountId: $("permBotAccountId").value.trim() || "*",
     senderId,
-    role: $("permRole").value || "ADMIN"
+    role
   });
 }
 

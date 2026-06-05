@@ -12,6 +12,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.MainConfigForms
+import top.colter.dynamic.CommandReceiveMode
 import top.colter.dynamic.core.command.CommandExecutionResult
 import top.colter.dynamic.core.command.CommandHandler
 import top.colter.dynamic.core.command.CommandInvocation
@@ -22,6 +23,7 @@ import top.colter.dynamic.core.command.CommandSpec
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.config.loadOrCreate
+import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
@@ -86,6 +88,7 @@ public class CommandListener(
     private val commandRegistry: CommandRegistry = CommandRegistry(),
     private val eventBus: EventBus = EventBus(),
     private val publisherDrawThemeService: PublisherDrawThemeService = PublisherDrawThemeService(),
+    private val primaryBotAccountResolver: suspend (CommandContext) -> String? = { null },
     publisherThemeInitializer: PublisherThemeInitializer? = null,
 ) : Listener<CommandEvent> {
     private companion object {
@@ -115,6 +118,7 @@ public class CommandListener(
     override suspend fun onMessage(event: CommandEvent) {
         val parsed = CommandParser.parse(event.rawText, commandPrefix) ?: return
         val tokens = parsed.tokens
+        if (!shouldAcceptCommand(event)) return
 
         val match = commandRegistry.match(tokens)
         if (match == null) {
@@ -122,7 +126,7 @@ public class CommandListener(
             return
         }
 
-        val role = CommandPermissionResolver(runtimeConfig.command.permissions).resolve(event.context)
+        val role = CommandPermissionResolver(runtimeConfig.command.permissions).resolve(event.context, match.spec.path)
         if (!role.satisfies(match.spec.requiredRole)) {
             reply(event, CommandExecutionResult.rejected("权限不足"))
             return
@@ -173,7 +177,8 @@ public class CommandListener(
             ),
             MAIN_OWNER,
         )
-        commandRegistry.register(LinkParseConfigCommandHandler({ runtimeConfig }, commandPrefixProvider), MAIN_OWNER)
+        LinkParseConfigCommandHandler.handlers({ runtimeConfig }, commandPrefixProvider)
+            .forEach { handler -> commandRegistry.register(handler, MAIN_OWNER) }
         commandRegistry.register(
             SubscribeCommandHandler(
                 publisherLookupResolver,
@@ -198,6 +203,19 @@ public class CommandListener(
         commandRegistry.register(FilterRemoveCommandHandler(commandPrefixProvider), MAIN_OWNER)
         commandRegistry.register(FilterClearCommandHandler(commandPrefixProvider), MAIN_OWNER)
         commandRegistry.register(ThemeCommandHandler(commandPrefixProvider, publisherDrawThemeService), MAIN_OWNER)
+    }
+
+    private suspend fun shouldAcceptCommand(event: CommandEvent): Boolean {
+        val mode = runtimeConfig.command.receiveMode
+        if (mode == CommandReceiveMode.ANY) return true
+        val botAccountId = event.context.botAccountId?.trim()?.takeIf { it.isNotBlank() } ?: return true
+        if (event.context.mentionedAccountIds.any { it == botAccountId }) return true
+        if (mode == CommandReceiveMode.MENTIONED_ONLY) return false
+        val primaryAccountId = primaryBotAccountResolver(event.context)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: return true
+        return botAccountId == primaryAccountId
     }
 }
 
@@ -586,7 +604,7 @@ private class SubscribeCommandHandler(
         path = listOf("subscribe"),
         description = "订阅来源平台发布者",
         usage = "subscribe <platform> <publisherUserId>",
-        requiredRole = CommandRole.USER,
+        requiredRole = CommandRole.MANAGER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -670,7 +688,7 @@ private class UnsubscribeCommandHandler(
         path = listOf("unsubscribe"),
         description = "取消订阅发布者",
         usage = "unsubscribe <platform> <publisherUserId>",
-        requiredRole = CommandRole.USER,
+        requiredRole = CommandRole.MANAGER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -756,7 +774,7 @@ private class ThemeCommandHandler(
         path = listOf("theme"),
         description = "查看或设置当前会话已订阅发布者的绘图主题色",
         usage = "theme <show|set|clear> <platform> <publisherUserId> [#FE65A6;#BFFAFF]",
-        requiredRole = CommandRole.USER,
+        requiredRole = CommandRole.MANAGER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -829,7 +847,7 @@ private class FilterAddElementCommandHandler(
         path = listOf("filter", "add", "element"),
         description = "为订阅添加动态元素屏蔽规则",
         usage = "filter add element <platform> <publisherUserId> <text|image|video|card|poll|repost>",
-        requiredRole = CommandRole.USER,
+        requiredRole = CommandRole.MANAGER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -865,7 +883,7 @@ private class FilterAddContentCommandHandler(
         path = listOf("filter", "add", "content"),
         description = "为订阅添加内容屏蔽规则",
         usage = "filter add content <platform> <publisherUserId> <keyword|regex> <pattern...>",
-        requiredRole = CommandRole.USER,
+        requiredRole = CommandRole.MANAGER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -973,7 +991,7 @@ private class FilterRemoveCommandHandler(
         path = listOf("filter", "remove"),
         description = "删除订阅过滤规则",
         usage = "filter remove <ruleId>",
-        requiredRole = CommandRole.USER,
+        requiredRole = CommandRole.MANAGER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -1007,7 +1025,7 @@ private class FilterClearCommandHandler(
         path = listOf("filter", "clear"),
         description = "清空订阅过滤规则",
         usage = "filter clear <platform> <publisherUserId>",
-        requiredRole = CommandRole.USER,
+        requiredRole = CommandRole.MANAGER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {

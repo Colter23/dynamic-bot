@@ -241,6 +241,10 @@ public fun Application.adminModule(context: AdminServerContext) {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.targetPlatformAccounts() }
             }
+            get("/commands") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi { context.service.commands() }
+            }
             get("/publishers") {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.publishers() }

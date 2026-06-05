@@ -142,11 +142,20 @@ public object MainConfigForms {
                     required = true,
                 ),
                 ConfigFieldSpec(
+                    path = "command.receiveMode",
+                    label = "命令接收策略",
+                    type = ConfigFieldType.SELECT,
+                    section = "命令",
+                    description = "多个 Bot 同时接入同一消息目标时，决定哪些 Bot 可以处理聊天命令。",
+                    options = commandReceiveModeOptions(),
+                    required = true,
+                ),
+                ConfigFieldSpec(
                     path = "command.permissions",
                     label = "权限规则",
                     type = ConfigFieldType.JSON,
                     section = "命令",
-                    description = "未命中规则时为普通用户；命中多条规则时取最高权限。平台、目标、发送者等字段支持 * 通配。",
+                    description = "未命中规则时为普通用户；命中多条规则时取最高权限。命令路径、平台、目标、发送者等字段支持 * 通配。",
                     component = "COMMAND_PERMISSION_TABLE",
                 ),
                 ConfigFieldSpec(
@@ -600,12 +609,16 @@ public object MainConfigForms {
         require(config.templates.liveEnded.isNotBlank()) { "templates.liveEnded 不能为空" }
         require(config.command.prefix.isNotBlank()) { "命令前缀不能为空" }
         config.command.permissions.forEachIndexed { index, rule ->
+            require(rule.commandPath.isNotBlank()) { "command.permissions[$index].commandPath 不能为空" }
             require(rule.platformId.isNotBlank()) { "command.permissions[$index].platformId 不能为空" }
             require(rule.targetId.isNotBlank()) { "command.permissions[$index].targetId 不能为空" }
             require(rule.scopeId.isNotBlank()) { "command.permissions[$index].scopeId 不能为空" }
             require(rule.threadId.isNotBlank()) { "command.permissions[$index].threadId 不能为空" }
-            require(rule.accountId.isNotBlank()) { "command.permissions[$index].accountId 不能为空" }
+            require(rule.botAccountId.isNotBlank()) { "command.permissions[$index].botAccountId 不能为空" }
             require(rule.senderId.isNotBlank()) { "command.permissions[$index].senderId 不能为空" }
+            require(rule.senderId != "*" || rule.role != CommandRole.ADMIN) {
+                "command.permissions[$index] 不能把全部发送者直接设为管理员"
+            }
         }
         require(config.linkParsing.maxLinksPerMessage >= 1) { "单条消息最大解析链接数至少为 1" }
         require(config.linkParsing.autoDedupeTtlSeconds >= 0.0) { "自动去重时间窗口不能为负数" }
@@ -687,7 +700,24 @@ public object MainConfigForms {
     }
 
     public fun commandRoleOptions(): List<ConfigFieldOption> {
-        return CommandRole.entries.map { ConfigFieldOption(it.name, it.name) }
+        return CommandRole.entries.map {
+            ConfigFieldOption(
+                value = it.name,
+                label = when (it) {
+                    CommandRole.USER -> "普通用户"
+                    CommandRole.MANAGER -> "目标管理员"
+                    CommandRole.ADMIN -> "系统管理员"
+                },
+            )
+        }
+    }
+
+    public fun commandReceiveModeOptions(): List<ConfigFieldOption> {
+        return listOf(
+            ConfigFieldOption(CommandReceiveMode.PRIMARY_OR_MENTIONED.name, "主 Bot 或被 @ 的 Bot"),
+            ConfigFieldOption(CommandReceiveMode.MENTIONED_ONLY.name, "必须 @ 当前 Bot"),
+            ConfigFieldOption(CommandReceiveMode.ANY.name, "所有 Bot 都处理"),
+        )
     }
 
     public fun chatTypeOptions(): List<ConfigFieldOption> {

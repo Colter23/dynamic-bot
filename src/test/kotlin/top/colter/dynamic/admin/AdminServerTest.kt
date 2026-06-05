@@ -22,6 +22,12 @@ import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.PluginCatalogConfig
 import top.colter.dynamic.SubscriptionConfig
+import top.colter.dynamic.command.CommandRegistry
+import top.colter.dynamic.core.command.CommandExecutionResult
+import top.colter.dynamic.core.command.CommandHandler
+import top.colter.dynamic.core.command.CommandInvocation
+import top.colter.dynamic.core.command.CommandSpec
+import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicBlockKind
 import top.colter.dynamic.core.data.FilterCondition
@@ -104,6 +110,50 @@ class AdminServerTest {
 
         assertEquals(HttpStatusCode.Unauthorized, unauthorized.status)
         assertEquals(HttpStatusCode.OK, authorized.status)
+    }
+
+    @Test
+    fun adminApiShouldServeRegisteredCommands() = testApplication {
+        val registry = CommandRegistry().apply {
+            register(
+                FakeCommandHandler(
+                    CommandSpec(
+                        path = listOf("link", "set"),
+                        aliases = listOf(listOf("link", "config")),
+                        description = "设置链接解析触发方式",
+                        usage = "link set <off|mention|always>",
+                        requiredRole = CommandRole.MANAGER,
+                    )
+                ),
+                "main",
+            )
+        }
+        val service = AdminService(
+            pluginProvider = { emptyList() },
+            publisherLookupResolver = { null },
+            publisherFollowResolver = { null },
+            configProvider = { MainDynamicConfig() },
+            commandRegistry = registry,
+        )
+        application {
+            adminModule(
+                AdminServerContext(
+                    token = "test-token",
+                    service = service,
+                    loginService = AdminLoginService(loginProviderResolver = { null }),
+                )
+            )
+        }
+
+        val response = client.get("/api/commands") {
+            header(HttpHeaders.Authorization, "Bearer test-token")
+        }
+
+        assertEquals(HttpStatusCode.OK, response.status)
+        val body = response.bodyAsText()
+        assertTrue(body.contains("\"pathText\":\"link set\""))
+        assertTrue(body.contains("\"aliases\":[[\"link\",\"config\"]]"))
+        assertTrue(body.contains("\"requiredRole\":\"MANAGER\""))
     }
 
     @Test
@@ -780,6 +830,14 @@ class AdminServerTest {
 
         override suspend fun listMessageTargets(kind: TargetKind?): List<MessageTargetCandidate> {
             return targets.filter { kind == null || it.address.kind == kind }
+        }
+    }
+
+    private class FakeCommandHandler(
+        override val spec: CommandSpec,
+    ) : CommandHandler {
+        override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+            return CommandExecutionResult.success("ok")
         }
     }
 

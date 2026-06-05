@@ -16,6 +16,7 @@ import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.command.CommandPublisher
 import top.colter.dynamic.core.config.ConfigService
+import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
@@ -27,6 +28,8 @@ import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.core.event.SourceUpdatePublisher
 import top.colter.dynamic.plugin.PluginManager
 import top.colter.dynamic.plugin.PluginState
+import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
+import top.colter.dynamic.core.plugin.MessageSinkRouteState
 import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.core.task.TaskDefinition
 import top.colter.dynamic.core.task.TaskSchedule
@@ -196,6 +199,7 @@ public object DynamicApplication : CoroutineScope {
                 configService = configService,
                 commandRegistry = commandRegistry,
                 eventBus = eventBus,
+                primaryBotAccountResolver = ::resolvePrimaryCommandBotAccount,
             ),
         )
         listenerTokens += eventBus.subscribe(
@@ -236,6 +240,36 @@ public object DynamicApplication : CoroutineScope {
         server.start()
         adminServer = server
         logger.info { "管理后台已启动：http://${config.webAdmin.host}:${config.webAdmin.port}" }
+    }
+
+    private suspend fun resolvePrimaryCommandBotAccount(context: CommandContext): String? {
+        val target = context.target
+        val routes = pluginManager.getMessageSinkPlugins()
+            .flatMap { handle ->
+                val sink = handle.instance as? AccountRoutedMessageSinkPlugin ?: return@flatMap emptyList()
+                if (!sink.supportsTarget(target)) return@flatMap emptyList()
+                runCatching { sink.listMessageSinkRoutes(target) }
+                    .getOrElse { error ->
+                        logger.debug(error) {
+                            "命令主账号解析跳过消息出口：pluginId=${handle.info.descriptor.id}，target=${target.stableValue()}"
+                        }
+                        emptyList()
+                    }
+            }
+            .filter { it.enabled && it.state == MessageSinkRouteState.READY }
+            .filter { it.targetPlatformId == target.platformId }
+            .sortedWith(compareBy({ it.transportId }, { it.accountId }, { it.routeId }))
+        if (routes.isEmpty()) return null
+
+        val configuredPrimary = configStore.current()
+            .messageRouting
+            .policyFor(target.platformId.value)
+            .primaryAccountId
+            .trim()
+            .takeIf { it.isNotBlank() }
+        return configuredPrimary
+            ?.takeIf { accountId -> routes.any { it.accountId == accountId } }
+            ?: routes.first().accountId
     }
 
     private fun generateAdminToken(): String {

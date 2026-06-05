@@ -355,6 +355,19 @@ public class AdminService(
             )
     }
 
+    public fun commands(): List<CommandDto> {
+        return commandRegistry.listCommands().map { spec ->
+            CommandDto(
+                path = spec.path,
+                pathText = spec.path.joinToString(" "),
+                aliases = spec.aliases,
+                description = spec.description,
+                usage = spec.usage,
+                requiredRole = spec.requiredRole.name,
+            )
+        }
+    }
+
     private suspend fun PluginHandle<MessageSinkPlugin>.toTargetPlatformAccountDtos(): List<TargetPlatformAccountDto> {
         val routedSink = instance as? AccountRoutedMessageSinkPlugin ?: return emptyList()
         val pluginInfo = info

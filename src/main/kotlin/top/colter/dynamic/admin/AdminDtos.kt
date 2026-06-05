@@ -169,6 +169,16 @@ public data class TargetPlatformAccountDto(
 )
 
 @Serializable
+public data class CommandDto(
+    val path: List<String>,
+    val pathText: String,
+    val aliases: List<List<String>> = emptyList(),
+    val description: String = "",
+    val usage: String = "",
+    val requiredRole: String,
+)
+
+@Serializable
 public data class PlatformLoginActionDto(
     val key: String,
     val label: String,
