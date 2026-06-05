@@ -31,7 +31,7 @@ internal fun Layout.Author(
         .fillMaxWidth()
         .background(
             image = head,
-            imageAlpha = 0.8f,
+            imageAlpha = 0.85f,
             gradient = Gradient(
                 LayoutAlignment.LEFT,
                 LayoutAlignment.RIGHT,
@@ -65,14 +65,14 @@ internal fun Layout.Author(
         Column(modifier = Modifier().fillWidth().fillMaxHeight().padding(vertical = 20.dp)) {
             Text(
                 text = name,
-                color = Color.WHITE,
+                color = accentColor,
                 fontSize = 36.dp,
                 alignment = LayoutAlignment.LEFT,
                 modifier = Modifier().fillMaxWidth().fillRatioHeight(0.56f)
             )
             Text(
                 text = time,
-                color = Color.WHITE.withAlpha(0.8f),
+                color = Color.WHITE.withAlpha(0.85f),
                 fontSize = 26.dp,
                 alignment = LayoutAlignment.LEFT,
                 modifier = Modifier().fillMaxWidth().fillRatioHeight(1f - 0.56f)

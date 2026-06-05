@@ -64,6 +64,7 @@ internal fun Layout.DefaultDynamicView(
     val blocks = orderDynamicBlocksForLayout(payload.blocks)
     val hasBlocks = blocks.isNotEmpty()
     val hasBodyContent = title != null || hasBlocks
+    val titleFontSize = dynamicTitleFontSize(blocks)
 
     Column(modifier = Modifier().fillMaxWidth()) {
         if (mode == DynamicRenderMode.ROOT) {
@@ -99,7 +100,7 @@ internal fun Layout.DefaultDynamicView(
                     Text(
                         text = it,
                         color = config.theme.textColor,
-                        fontSize = 36.dp,
+                        fontSize = titleFontSize,
                         fontStyle = FontStyle.BOLD,
                         maxLinesCount = 2,
                         modifier = Modifier().margin(bottom = if (hasBlocks) contentSpacing else 0.dp),

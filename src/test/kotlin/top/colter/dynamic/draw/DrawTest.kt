@@ -105,6 +105,50 @@ class DrawTest {
     }
 
     @Test
+    fun `test dynamic content adaptive font sizes`() {
+        data class FontSample(
+            val name: String,
+            val title: String,
+            val text: String,
+        )
+
+        val samples = listOf(
+            FontSample(
+                name = "short",
+                title = "今晚开播",
+                text = "今晚开播！",
+            ),
+            FontSample(
+                name = "medium",
+                title = "动态绘制效果更新",
+                text = "今天整理了一下新版本的动态绘制效果，作者卡片、转发内容和媒体卡片都做了细节调整，欢迎帮忙看看整体观感是否舒服。",
+            ),
+            FontSample(
+                name = "long",
+                title = "动态转发工具开发记录",
+                text = listOf(
+                    "今天主要想记录一下动态转发工具的开发进度：绘图模块已经支持主题色、平台资源、转发动态和多种媒体卡片，",
+                    "接下来还会继续打磨边距、字号、二维码和不同平台的特殊样式。因为最终图片会被发送到 QQ、Discord 等聊天平台，",
+                    "所以整体阅读体验需要在手机小屏上也保持清晰。短内容应该更有冲击力，长内容则需要稳一点，避免一屏里文字显得太挤。",
+                    "这段文字故意写得比较长，用来观察自适应字号在长动态中的表现，包括换行密度、卡片高度、正文和附件之间的距离，",
+                    "以及中文标点、英文 dynamic-bot 和数字 12345 混排时是否仍然自然。后续如果觉得缩放区间不合适，可以继续微调阈值。",
+                ).joinToString(""),
+            ),
+        )
+
+        samples.forEach { sample ->
+            val update = testDynamicUpdate(
+                externalId = "adaptive-font-${sample.name}",
+                payload = DynamicPayload(
+                    title = sample.title,
+                    blocks = listOf(textBlock(sample.text)),
+                ),
+            )
+            renderToOutput("dynamic_content_font_${sample.name}.png", update)
+        }
+    }
+
+    @Test
     fun `test dynamic image grids`() {
         val update = testDynamicUpdate(
             payload = DynamicPayload(
