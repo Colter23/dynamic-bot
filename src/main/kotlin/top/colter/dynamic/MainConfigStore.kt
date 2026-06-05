@@ -109,6 +109,8 @@ public object MainConfigForms {
                     type = ConfigFieldType.TEXTAREA,
                     section = "消息模板",
                     description = "支持 {draw} {name} {uid} {did} {time} {content} {images} {link} {links}；\\n 换行，\\r 分割为多条消息。",
+                    component = "MESSAGE_TEMPLATE_EDITOR",
+                    metadata = mapOf("templateKind" to "DYNAMIC"),
                     required = true,
                 ),
                 ConfigFieldSpec(
@@ -117,6 +119,8 @@ public object MainConfigForms {
                     type = ConfigFieldType.TEXTAREA,
                     section = "消息模板",
                     description = "支持 {draw} {name} {uid} {rid} {time} {title} {area} {cover} {link}；\\n 换行，\\r 分割为多条消息。",
+                    component = "MESSAGE_TEMPLATE_EDITOR",
+                    metadata = mapOf("templateKind" to "LIVE_STARTED"),
                     required = true,
                 ),
                 ConfigFieldSpec(
@@ -125,6 +129,8 @@ public object MainConfigForms {
                     type = ConfigFieldType.TEXTAREA,
                     section = "消息模板",
                     description = "支持 {name} {uid} {rid} {title} {area} {startTime} {endTime} {duration} {link}；\\n 换行。",
+                    component = "MESSAGE_TEMPLATE_EDITOR",
+                    metadata = mapOf("templateKind" to "LIVE_ENDED"),
                     required = true,
                 ),
                 ConfigFieldSpec(

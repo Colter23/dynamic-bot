@@ -2020,6 +2020,98 @@
       background: var(--panel-soft);
       line-height: 1.45;
     }
+    .message-template-field {
+      grid-column: 1 / -1;
+      gap: 10px;
+    }
+    .message-template-shell {
+      min-width: 0;
+      display: grid;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .message-template-head,
+    .message-template-preview-head {
+      min-width: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .message-template-edit-button {
+      border-color: #b9cffc;
+      background: #eef4ff;
+      color: #1d4ed8;
+    }
+    .message-template-preview {
+      min-width: 0;
+      display: grid;
+      gap: 8px;
+    }
+    .message-template-preview-message {
+      min-width: 0;
+      padding: 9px 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-soft);
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+    .message-template-preview-index {
+      display: block;
+      margin-bottom: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .message-template-editor-modal {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.95fr);
+      gap: 12px;
+      min-width: 0;
+    }
+    .message-template-editor-pane,
+    .message-template-preview-pane,
+    .message-template-token-section {
+      min-width: 0;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+    .message-template-editor-input {
+      min-height: 280px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      line-height: 1.5;
+    }
+    .message-template-token-bar {
+      min-width: 0;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+    .message-template-token-button {
+      min-height: 26px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border-color: #b9ded8;
+      background: #eef8f6;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .message-template-token-code {
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-weight: 900;
+    }
+    .message-template-token-title {
+      color: #2f6f68;
+      font-weight: 700;
+    }
     .message-routing-policy-field,
     .onebot-connection-field,
     .command-permission-field {
@@ -2622,6 +2714,7 @@
         min-height: 76px;
       }
       .form-grid { grid-template-columns: 1fr; }
+      .message-template-editor-modal { grid-template-columns: 1fr; }
       .config-layout { grid-template-columns: 1fr; }
       .config-list-panel {
         position: static;

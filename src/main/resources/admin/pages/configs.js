@@ -120,6 +120,10 @@ export async function handleAction(nextCtx, { action, button, id }) {
     await withButtonLoading(button, "•••", () => toggleConfigSecret(button));
     return true;
   }
+  if (action === "edit-message-template") {
+    await withButtonLoading(button, "打开中...", () => openMessageTemplateModal(button.dataset.path));
+    return true;
+  }
   if (action === "add-onebot-connection") {
     await withButtonLoading(button, "打开中...", () => openOneBotConnectionModal());
     return true;
@@ -479,6 +483,7 @@ function toggleConfigSecret(button) {
 }
 
 function configFieldHtml(detail, field) {
+  if (field.component === "MESSAGE_TEMPLATE_EDITOR") return messageTemplateFieldHtml(detail, field);
   if (field.component === "MESSAGE_ROUTING_POLICY_TABLE") return messageRoutingPlatformPoliciesFieldHtml(detail, field);
   if (field.component === "ONEBOT_CONNECTION_TABLE") return oneBotConnectionsFieldHtml(detail, field);
   if (field.component === "COMMAND_PERMISSION_TABLE") return commandPermissionsFieldHtml(detail, field);
@@ -520,6 +525,245 @@ function secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml) {
 
 function configFieldDescriptionHtml(field) {
   return field.description ? `<span class="inline-note">${esc(field.description)}</span>` : "";
+}
+
+function messageTemplateFieldHtml(detail, field) {
+  const value = displayConfigValue(detail.values[field.path]);
+  const kind = messageTemplateKind(field);
+  const inputId = messageTemplateDomId("cfg-template", field.path);
+  const previewId = messageTemplateDomId("messageTemplatePreview", field.path);
+  const statsId = messageTemplateDomId("messageTemplateStats", field.path);
+  const fieldLabel = `${esc(field.label)}${field.required ? `<span class="required-mark">*</span>` : ""}`;
+  return `<div class="field message-template-field" data-config-field-path="${attr(field.path)}">
+    <textarea id="${attr(inputId)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" hidden>${esc(value)}</textarea>
+    <div class="message-template-shell">
+      <div class="message-template-head">
+        <div>
+          <span class="primary-line">${fieldLabel}</span>
+          <span id="${attr(statsId)}" class="sub-line">${esc(messageTemplateStats(value, kind))}</span>
+        </div>
+        <button type="button" class="compact message-template-edit-button" data-action="edit-message-template" data-path="${attr(field.path)}">编辑</button>
+      </div>
+      <div id="${attr(previewId)}" class="message-template-preview">${renderMessageTemplatePreview(value, kind)}</div>
+    </div>
+  </div>`;
+}
+
+function openMessageTemplateModal(path) {
+  const detail = state.currentConfigDetail;
+  if (!detail) throw new Error("请选择配置文件");
+  const field = (detail.schema.fields || []).find(item => item.path === path);
+  if (!field) throw new Error("未找到模板配置项");
+  const input = configInputFor(field);
+  const value = input ? input.value : displayConfigValue(detail.values[field.path]);
+  const kind = messageTemplateKind(field);
+  openModal(`编辑${field.label}`, `
+    <div class="message-template-editor-modal">
+      <div class="message-template-editor-pane">
+        <div class="field full">
+          <label>模板内容</label>
+          <textarea id="messageTemplateEditorInput" class="message-template-editor-input">${esc(value)}</textarea>
+        </div>
+        <div class="message-template-token-section">
+          <span class="sub-line">占位符</span>
+          <div class="message-template-token-bar">${messageTemplateTokenButtonsHtml(kind)}</div>
+        </div>
+      </div>
+      <div class="message-template-preview-pane">
+        <div class="message-template-preview-head">
+          <span class="primary-line">实时预览</span>
+          <span id="messageTemplateEditorStats" class="sub-line">${esc(messageTemplateStats(value, kind))}</span>
+        </div>
+        <div id="messageTemplateEditorPreview" class="message-template-preview">${renderMessageTemplatePreview(value, kind)}</div>
+      </div>
+    </div>
+  `, async () => {
+    const next = $("messageTemplateEditorInput").value;
+    if (field.required && !next.trim()) throw new Error(`${field.label}不能为空`);
+    setMessageTemplateValue(field, next);
+    closeModal();
+    notify(`${field.label}已更新，请保存配置`, false);
+  }, { size: "wide" });
+  wireMessageTemplateEditor(kind);
+}
+
+function wireMessageTemplateEditor(kind) {
+  const input = $("messageTemplateEditorInput");
+  const preview = $("messageTemplateEditorPreview");
+  const stats = $("messageTemplateEditorStats");
+  if (!input || !preview) return;
+  const refresh = () => {
+    preview.innerHTML = renderMessageTemplatePreview(input.value, kind);
+    if (stats) stats.textContent = messageTemplateStats(input.value, kind);
+  };
+  input.addEventListener("input", refresh);
+  document.querySelectorAll("[data-template-token]").forEach(button => {
+    button.onclick = () => {
+      insertTemplateEditorText(button.dataset.templateToken || "");
+      refresh();
+    };
+  });
+  refresh();
+}
+
+function insertTemplateEditorText(text) {
+  const input = $("messageTemplateEditorInput");
+  if (!input) return;
+  const start = input.selectionStart ?? input.value.length;
+  const end = input.selectionEnd ?? input.value.length;
+  input.setRangeText(text, start, end, "end");
+  input.focus();
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+function setMessageTemplateValue(field, value) {
+  const node = configInputFor(field);
+  if (node) node.value = value;
+  const kind = messageTemplateKind(field);
+  const preview = $(messageTemplateDomId("messageTemplatePreview", field.path));
+  if (preview) preview.innerHTML = renderMessageTemplatePreview(value, kind);
+  const stats = $(messageTemplateDomId("messageTemplateStats", field.path));
+  if (stats) stats.textContent = messageTemplateStats(value, kind);
+  if (state.currentConfigDetail) {
+    updateConfigRestartButton(state.currentConfigDetail);
+    updateConfigDirtyState(state.currentConfigDetail);
+  }
+}
+
+function messageTemplateDomId(prefix, path) {
+  return `${prefix}-${String(path || "").replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+}
+
+function messageTemplateKind(field) {
+  const fromMetadata = field.metadata && field.metadata.templateKind;
+  if (fromMetadata) return String(fromMetadata).toUpperCase();
+  if (field.path === "templates.liveStarted") return "LIVE_STARTED";
+  if (field.path === "templates.liveEnded") return "LIVE_ENDED";
+  return "DYNAMIC";
+}
+
+function messageTemplateTokenButtonsHtml(kind) {
+  return messageTemplatePlaceholders(kind).map(item =>
+    `<button type="button" class="message-template-token-button" data-template-token="${attr(item.value)}">
+      <span class="message-template-token-code">${esc(item.label)}</span>
+      <span class="message-template-token-title">${esc(item.title || item.label)}</span>
+    </button>`
+  ).join("");
+}
+
+function messageTemplatePlaceholders(kind) {
+  const common = [
+    { value: "{name}", label: "{name}", title: "发布者名称" },
+    { value: "{uid}", label: "{uid}", title: "发布者 ID" },
+    { value: "{link}", label: "{link}", title: "主链接" },
+    { value: "\\n", label: "\\n", title: "换行" },
+  ];
+  if (kind === "LIVE_STARTED") {
+    return [
+      { value: "{draw}", label: "{draw}", title: "直播绘图" },
+      ...common,
+      { value: "{rid}", label: "{rid}", title: "直播间 ID" },
+      { value: "{time}", label: "{time}", title: "开播时间" },
+      { value: "{title}", label: "{title}", title: "直播标题" },
+      { value: "{area}", label: "{area}", title: "直播分区" },
+      { value: "{cover}", label: "{cover}", title: "封面图" },
+      { value: "\\r", label: "\\r", title: "拆分为下一条消息" },
+    ];
+  }
+  if (kind === "LIVE_ENDED") {
+    return [
+      ...common,
+      { value: "{rid}", label: "{rid}", title: "直播间 ID" },
+      { value: "{title}", label: "{title}", title: "直播标题" },
+      { value: "{area}", label: "{area}", title: "直播分区" },
+      { value: "{startTime}", label: "{startTime}", title: "开始时间" },
+      { value: "{endTime}", label: "{endTime}", title: "结束时间" },
+      { value: "{duration}", label: "{duration}", title: "直播时长" },
+    ];
+  }
+  return [
+    { value: "{draw}", label: "{draw}", title: "动态绘图" },
+    ...common,
+    { value: "{did}", label: "{did}", title: "动态 ID" },
+    { value: "{time}", label: "{time}", title: "发布时间" },
+    { value: "{content}", label: "{content}", title: "动态正文" },
+    { value: "{images}", label: "{images}", title: "动态图片" },
+    { value: "{links}", label: "{links}", title: "附加链接" },
+    { value: "\\r", label: "\\r", title: "拆分为下一条消息" },
+  ];
+}
+
+function messageTemplateStats(template, kind) {
+  const batches = messageTemplatePreviewBatches(template, kind);
+  const normalized = String(template || "").replace(/\\n/g, "\n");
+  const lines = normalized ? normalized.split("\n").length : 0;
+  return `${batches.length} 条消息 / ${lines} 行`;
+}
+
+function renderMessageTemplatePreview(template, kind) {
+  const batches = messageTemplatePreviewBatches(template, kind);
+  if (!batches.length) return `<div class="empty">预览为空</div>`;
+  return batches.map((text, index) => `
+    <div class="message-template-preview-message">
+      <span class="message-template-preview-index">预览消息 ${index + 1}</span>
+      <div>${esc(text).replace(/\n/g, "<br>")}</div>
+    </div>
+  `).join("");
+}
+
+function messageTemplatePreviewBatches(template, kind) {
+  const source = String(template || "");
+  const fragments = kind === "LIVE_ENDED" ? [source] : source.split("\\r");
+  return fragments
+    .map(fragment => renderMessageTemplateFragment(fragment.replace(/\\n/g, "\n"), kind).trim())
+    .filter(Boolean);
+}
+
+function renderMessageTemplateFragment(fragment, kind) {
+  const sample = messageTemplateSampleValues(kind);
+  return String(fragment || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key) => {
+    return sample[key] === undefined ? match : sample[key];
+  });
+}
+
+function messageTemplateSampleValues(kind) {
+  if (kind === "LIVE_STARTED") {
+    return {
+      draw: "【直播绘图】",
+      name: "示例主播",
+      uid: "10001",
+      rid: "230001",
+      time: "2026年06月05日 20:30:00",
+      title: "今晚一起写代码",
+      area: "科技 / 编程",
+      cover: "【直播封面】",
+      link: "https://live.bilibili.com/230001",
+    };
+  }
+  if (kind === "LIVE_ENDED") {
+    return {
+      name: "示例主播",
+      uid: "10001",
+      rid: "230001",
+      title: "今晚一起写代码",
+      area: "科技 / 编程",
+      startTime: "2026年06月05日 20:30:00",
+      endTime: "2026年06月05日 22:04:00",
+      duration: "1h 34m",
+      link: "https://live.bilibili.com/230001",
+    };
+  }
+  return {
+    draw: "【动态绘图】",
+    name: "示例发布者",
+    uid: "10001",
+    did: "987654321",
+    time: "2026年06月05日 20:30:00",
+    content: "今天更新了一组开发进度，顺便整理了几张截图。",
+    images: "【图片 1】\n【图片 2】",
+    link: "https://t.bilibili.com/987654321",
+    links: "https://example.com/post\nhttps://example.com/detail",
+  };
 }
 
 function oneBotConnectionsFieldHtml(detail, field) {
