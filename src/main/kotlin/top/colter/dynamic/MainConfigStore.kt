@@ -151,6 +151,13 @@ public object MainConfigForms {
                     required = true,
                 ),
                 ConfigFieldSpec(
+                    path = "command.requirePermissionRule",
+                    label = "必须配置权限规则",
+                    type = ConfigFieldType.BOOLEAN,
+                    section = "命令",
+                    description = "开启后，未命中权限规则的发送者没有任何指令权限；关闭后未命中规则的发送者按普通用户处理。",
+                ),
+                ConfigFieldSpec(
                     path = "command.permissions",
                     label = "权限规则",
                     type = ConfigFieldType.JSON,
@@ -616,6 +623,9 @@ public object MainConfigForms {
             require(rule.threadId.isNotBlank()) { "command.permissions[$index].threadId 不能为空" }
             require(rule.botAccountId.isNotBlank()) { "command.permissions[$index].botAccountId 不能为空" }
             require(rule.senderId.isNotBlank()) { "command.permissions[$index].senderId 不能为空" }
+            require(rule.role != CommandRole.NONE) {
+                "command.permissions[$index].role 不能为 NONE"
+            }
             require(rule.senderId != "*" || rule.role != CommandRole.ADMIN) {
                 "command.permissions[$index] 不能把全部发送者直接设为管理员"
             }
@@ -700,13 +710,14 @@ public object MainConfigForms {
     }
 
     public fun commandRoleOptions(): List<ConfigFieldOption> {
-        return CommandRole.entries.map {
+        return CommandRole.entries.filter { it != CommandRole.NONE }.map {
             ConfigFieldOption(
                 value = it.name,
                 label = when (it) {
                     CommandRole.USER -> "普通用户"
                     CommandRole.MANAGER -> "目标管理员"
                     CommandRole.ADMIN -> "系统管理员"
+                    CommandRole.NONE -> "无权限"
                 },
             )
         }

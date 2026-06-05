@@ -126,7 +126,13 @@ public class CommandListener(
             return
         }
 
-        val role = CommandPermissionResolver(runtimeConfig.command.permissions).resolve(event.context, match.spec.path)
+        val commandConfig = runtimeConfig.command
+        val defaultRole = if (commandConfig.requirePermissionRule) CommandRole.NONE else CommandRole.USER
+        val role = CommandPermissionResolver(commandConfig.permissions).resolve(
+            context = event.context,
+            commandPath = match.spec.path,
+            defaultRole = defaultRole,
+        )
         if (!role.satisfies(match.spec.requiredRole)) {
             reply(event, CommandExecutionResult.rejected("权限不足"))
             return

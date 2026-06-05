@@ -146,6 +146,7 @@ public enum class DrawOrnament {
 public data class CommandConfig(
     val prefix: String = "/db",
     val receiveMode: CommandReceiveMode = CommandReceiveMode.PRIMARY_OR_MENTIONED,
+    val requirePermissionRule: Boolean = true,
     val permissions: List<CommandPermissionRule> = emptyList(),
 )
 

@@ -194,7 +194,7 @@ class CommandListenerTest {
         val eventBus = EventBus()
         val listener = CommandListener(
             publisherLookupResolver = { null },
-            config = MainDynamicConfig(),
+            config = publicUserConfig(),
             commandRegistry = CommandRegistry(),
             eventBus = eventBus,
             primaryBotAccountResolver = { "42" },
@@ -207,6 +207,22 @@ class CommandListenerTest {
         )
 
         assertEquals(CommandStatus.SUCCESS, result?.status)
+    }
+
+    @Test
+    fun commandShouldRejectWhenPermissionRuleIsRequiredAndNoRuleMatches() = runBlocking {
+        initDb("command-require-permission")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = MainDynamicConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db help"))
+
+        assertEquals(CommandStatus.REJECTED, result.status)
     }
 
     private suspend fun dispatch(
@@ -284,6 +300,12 @@ class CommandListenerTest {
             command = top.colter.dynamic.CommandConfig(
                 permissions = listOf(CommandPermissionRule(senderId = "sender", role = CommandRole.MANAGER)),
             ),
+        )
+    }
+
+    private fun publicUserConfig(): MainDynamicConfig {
+        return MainDynamicConfig(
+            command = top.colter.dynamic.CommandConfig(requirePermissionRule = false),
         )
     }
 
