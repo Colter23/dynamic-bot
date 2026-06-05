@@ -784,6 +784,11 @@
       background: #fff1f0;
       color: #b42318;
     }
+    button.soft-edit-button {
+      border-color: #b9cffc;
+      background: #eef4ff;
+      color: #1d4ed8;
+    }
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
@@ -2128,11 +2133,13 @@
     }
     .message-routing-policy-field,
     .onebot-connection-field,
-    .command-permission-field {
+    .command-permission-field,
+    .notification-target-field {
       grid-column: 1 / -1;
     }
     .message-routing-policy-field,
-    .onebot-connection-field {
+    .onebot-connection-field,
+    .notification-target-field {
       gap: 10px;
     }
     .command-permission-toolbar {
@@ -2149,6 +2156,30 @@
     }
     .command-permission-modal {
       grid-template-columns: 1fr;
+    }
+    .notification-target-cell {
+      display: grid;
+      gap: 5px;
+      justify-items: start;
+      min-width: 0;
+    }
+    .notification-target-line {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+      min-width: 0;
+    }
+    .notification-target-manual-panel {
+      display: grid;
+      gap: 10px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+    }
+    .notification-target-manual-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .secret-control {
       display: grid;
@@ -2356,11 +2387,14 @@
       gap: 14px;
     }
     .system-grid {
-      align-items: start;
+      align-items: stretch;
     }
     .system-overview,
     .system-path-panel {
       min-width: 0;
+      height: 100%;
+      display: grid;
+      align-content: start;
     }
     .system-stats {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2433,6 +2467,91 @@
     .system-path-item .primary-line,
     .system-path-item .sub-line {
       max-width: none;
+    }
+    .system-forward-panel {
+      min-width: 0;
+    }
+    .system-maintenance-panel {
+      min-width: 0;
+    }
+    .system-operation-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .system-operation-button {
+      min-width: 0;
+      min-height: 76px;
+      display: grid;
+      align-content: center;
+      justify-items: start;
+      gap: 4px;
+      padding: 12px;
+      border-color: #b9cffc;
+      background: #eef4ff;
+      color: #1d4ed8;
+      text-align: left;
+    }
+    .system-operation-title {
+      color: #1e3a8a;
+      font-size: 14px;
+      font-weight: 900;
+    }
+    .system-operation-desc {
+      color: #315fbd;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: normal;
+      overflow-wrap: anywhere;
+    }
+    .system-forward-form {
+      min-width: 0;
+      display: grid;
+      gap: 12px;
+    }
+    .system-forward-target-list {
+      max-height: 320px;
+    }
+    .system-forward-manual details {
+      min-width: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+    }
+    .system-forward-manual summary {
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      padding: 7px 10px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+    .system-forward-manual-body {
+      display: grid;
+      gap: 8px;
+      padding: 0 10px 10px;
+    }
+    .system-forward-manual textarea {
+      min-height: 76px;
+    }
+    .system-forward-message {
+      min-height: 126px;
+    }
+    .system-forward-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .system-forward-result {
+      min-width: 0;
+    }
+    .batch-result.success {
+      border-color: #b7d9d4;
+      background: #eef8f6;
+      color: var(--accent);
     }
     .logs-page {
       min-width: 0;

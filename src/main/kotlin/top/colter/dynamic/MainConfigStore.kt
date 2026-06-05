@@ -376,7 +376,7 @@ public object MainConfigForms {
                     label = "启用系统通知",
                     type = ConfigFieldType.BOOLEAN,
                     section = "系统通知",
-                    description = "开启后，影响 Bot 正常运行的重要异常会发送给系统管理员目标。",
+                    description = "开启后，影响 Bot 正常运行的重要异常会发送给通知目标。",
                 ),
                 ConfigFieldSpec(
                     path = "notifications.minSeverity",
@@ -409,10 +409,11 @@ public object MainConfigForms {
                 ),
                 ConfigFieldSpec(
                     path = "notifications.adminTargets",
-                    label = "系统管理员通知目标",
+                    label = "通知目标",
                     type = ConfigFieldType.JSON,
                     section = "系统通知",
-                    description = "配置接收系统通知的真实消息目标；platformId 是 qq、discord 等真实平台，accountId 只表示优先发送账号。",
+                    description = "配置接收系统通知的管理员目标。可添加多个目标，重要异常会按通知级别发送到这些目标。",
+                    component = "NOTIFICATION_TARGET_TABLE",
                     metadata = mapOf(
                         "example" to """
                             [
@@ -716,7 +717,7 @@ public object MainConfigForms {
             }
         val duplicatedNotificationTargets = notificationTargetKeys.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
         require(duplicatedNotificationTargets.isEmpty()) {
-            "系统管理员通知目标不能重复"
+            "通知目标不能重复"
         }
         require(config.delivery.maxAttempts >= 1) { "最大投递尝试次数至少为 1" }
         require(config.delivery.retryDelaySeconds > 0.0) { "投递重试间隔必须大于 0 秒" }

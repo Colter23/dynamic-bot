@@ -11,6 +11,7 @@ let attr;
 let label;
 let pill;
 let cell;
+let platformTag;
 let renderTable;
 let notify;
 let openModal;
@@ -20,6 +21,7 @@ let loadSubscriberTargetCandidates;
 let hydrateMediaImages;
 let messageTargetChoiceHtml;
 let bindTargetSourceToggles;
+let selectedTargetPriorityAccount;
 let beginPageRequest;
 let isCurrentPageRequest;
 let invalidatePageRequests;
@@ -37,6 +39,7 @@ function bindContext(nextCtx) {
     label,
     pill,
     cell,
+    platformTag,
     renderTable,
     notify,
     openModal,
@@ -45,6 +48,7 @@ function bindContext(nextCtx) {
     loadSubscriberTargetCandidates,
     messageTargetChoiceHtml,
     bindTargetSourceToggles,
+    selectedTargetPriorityAccount,
   } = ctx.ui);
   hydrateMediaImages = ctx.hydrateMediaImages;
   beginPageRequest = ctx.beginPageRequest;
@@ -172,6 +176,25 @@ export async function handleAction(nextCtx, { action, button, id }) {
     setMessageRoutingPlatformPolicies([]);
     return true;
   }
+  if (action === "add-notification-target") {
+    await withButtonLoading(button, "打开中...", () => openNotificationTargetModal());
+    return true;
+  }
+  if (action === "edit-notification-target") {
+    await withButtonLoading(button, "打开中...", () => openNotificationTargetModal(Number(button.dataset.index)));
+    return true;
+  }
+  if (action === "delete-notification-target") {
+    const targets = notificationTargets();
+    targets.splice(Number(button.dataset.index), 1);
+    setNotificationTargets(targets);
+    return true;
+  }
+  if (action === "clear-notification-targets") {
+    if (!(await confirmDanger("清空通知目标", "确定清空所有通知目标吗？保存配置后才会正式生效。", { confirmText: "清空" }))) return true;
+    setNotificationTargets([]);
+    return true;
+  }
   if (action === "add-command-permission") {
     await withButtonLoading(button, "打开中...", openCommandPermissionModal);
     return true;
@@ -292,6 +315,7 @@ function configComparableValue(detail, field) {
   if (field.component === "MESSAGE_ROUTING_POLICY_TABLE") return normalizeMessageRoutingPlatformPolicies(normalizeConfigJsonValue(raw));
   if (field.component === "ONEBOT_CONNECTION_TABLE") return normalizeOneBotConnections(normalizeConfigJsonValue(raw));
   if (field.component === "COMMAND_PERMISSION_TABLE") return normalizeCommandPermissionRules(normalizeConfigJsonValue(raw));
+  if (field.component === "NOTIFICATION_TARGET_TABLE") return normalizeNotificationTargets(normalizeConfigJsonValue(raw));
   if (field.type === "JSON") return normalizeConfigJsonValue(raw);
   return displayConfigValue(raw);
 }
@@ -304,6 +328,7 @@ function currentConfigComparableValue(field) {
   if (field.component === "MESSAGE_ROUTING_POLICY_TABLE") return normalizeMessageRoutingPlatformPolicies(normalizeConfigJsonValue(node.value));
   if (field.component === "ONEBOT_CONNECTION_TABLE") return normalizeOneBotConnections(normalizeConfigJsonValue(node.value));
   if (field.component === "COMMAND_PERMISSION_TABLE") return normalizeCommandPermissionRules(normalizeConfigJsonValue(node.value));
+  if (field.component === "NOTIFICATION_TARGET_TABLE") return normalizeNotificationTargets(normalizeConfigJsonValue(node.value));
   if (field.type === "JSON") return normalizeConfigJsonValue(node.value);
   return node.value;
 }
@@ -493,6 +518,7 @@ function configFieldHtml(detail, field) {
   if (field.component === "MESSAGE_ROUTING_POLICY_TABLE") return messageRoutingPlatformPoliciesFieldHtml(detail, field);
   if (field.component === "ONEBOT_CONNECTION_TABLE") return oneBotConnectionsFieldHtml(detail, field);
   if (field.component === "COMMAND_PERMISSION_TABLE") return commandPermissionsFieldHtml(detail, field);
+  if (field.component === "NOTIFICATION_TARGET_TABLE") return notificationTargetsFieldHtml(detail, field);
   const raw = detail.values[field.path];
   const value = displayConfigValue(raw);
   const fieldLabel = `${esc(field.label)}${field.required ? `<span class="required-mark">*</span>` : ""}${field.restartRequired ? ` <span class="restart-mark" title="保存后需重启">⚠️</span>` : ""}`;
@@ -1075,6 +1101,350 @@ function toggleOneBotConnectionToken(button) {
     button.dataset.revealed = "true";
     button.title = "隐藏真实值";
   }
+}
+
+function notificationTargetsFieldHtml(detail, field) {
+  const targets = normalizeNotificationTargets(detail.values[field.path]);
+  return `<div class="field notification-target-field" data-config-field-path="${attr(field.path)}">
+    <label for="cfg-notification-targets">${esc(field.label)}</label>
+    ${configFieldDescriptionHtml(field)}
+    <input id="cfg-notification-targets" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="hidden" value="${attr(JSON.stringify(targets))}">
+    <div class="command-permission-toolbar">
+      <button type="button" data-action="add-notification-target">添加目标</button>
+      <button type="button" class="secondary" data-action="clear-notification-targets">清空</button>
+    </div>
+    <div id="notificationTargetTable">${renderNotificationTargetTable(targets)}</div>
+  </div>`;
+}
+
+function notificationTargets() {
+  const node = $("cfg-notification-targets");
+  if (!node || !node.value.trim()) return [];
+  try {
+    return normalizeNotificationTargets(JSON.parse(node.value));
+  } catch (_) {
+    return [];
+  }
+}
+
+function setNotificationTargets(targets) {
+  const normalized = dedupeNotificationTargets(normalizeNotificationTargets(targets));
+  const node = $("cfg-notification-targets");
+  if (node) node.value = JSON.stringify(normalized);
+  const table = $("notificationTargetTable");
+  if (table) table.innerHTML = renderNotificationTargetTable(normalized);
+  if (state.currentConfigDetail) {
+    updateConfigRestartButton(state.currentConfigDetail);
+    updateConfigDirtyState(state.currentConfigDetail);
+  }
+}
+
+function normalizeNotificationTargets(value) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows.map(normalizeNotificationTarget).filter(Boolean);
+}
+
+function normalizeNotificationTarget(target) {
+  const source = target || {};
+  const targetKind = String(source.targetKind || "USER").trim().toUpperCase();
+  const normalized = {
+    platformId: String(source.platformId || "").trim(),
+    targetKind: ["GROUP", "USER", "CHANNEL", "OTHER"].includes(targetKind) ? targetKind : "USER",
+    externalId: String(source.externalId || "").trim(),
+    name: String(source.name || "").trim(),
+    enabled: source.enabled === false ? false : true,
+  };
+  const scopeId = blankToNull(source.scopeId);
+  const threadId = blankToNull(source.threadId);
+  const accountId = blankToNull(source.accountId);
+  if (scopeId) normalized.scopeId = scopeId;
+  if (threadId) normalized.threadId = threadId;
+  if (accountId) normalized.accountId = accountId;
+  return normalized.platformId && normalized.externalId ? normalized : null;
+}
+
+function dedupeNotificationTargets(targets) {
+  const seen = new Map();
+  normalizeNotificationTargets(targets).forEach(target => {
+    const key = [target.platformId.toLowerCase(), target.targetKind, target.externalId, target.scopeId || "", target.threadId || ""].join("\u001F");
+    seen.set(key, target);
+  });
+  return Array.from(seen.values());
+}
+
+function renderNotificationTargetTable(targets) {
+  const rows = normalizeNotificationTargets(targets).map((target, index) => Object.assign({ _index: index }, target));
+  return renderTable(rows, [
+    { title: "名称", render: row => cell(row.name || row.externalId, row.externalId) },
+    { title: "目标", render: row => `<div class="notification-target-cell">
+      <span class="notification-target-line">${platformTag(row.platformId, row.platformId)}<span class="pill info">${esc(label(row.targetKind))}</span></span>
+      <span class="sub-line">${esc(notificationTargetScopeText(row))}</span>
+    </div>` },
+    { title: "状态", render: row => `<span class="pill ${row.enabled ? "ok" : "warn"}">${row.enabled ? "启用" : "停用"}</span>` },
+    { title: "优先账号", render: row => `<span class="primary-line">${esc(row.accountId || "全局路由")}</span>` },
+    { title: "操作", render: row => `<div class="row-actions">
+      <button type="button" class="secondary compact soft-edit-button" data-action="edit-notification-target" data-index="${row._index}">编辑</button>
+      <button type="button" class="danger compact" data-action="delete-notification-target" data-index="${row._index}">删除</button>
+    </div>` }
+  ]);
+}
+
+function notificationTargetScopeText(target) {
+  const items = [
+    ["作用域", target.scopeId],
+    ["线程", target.threadId],
+  ].filter(([, value]) => value);
+  return items.length ? items.map(([name, value]) => `${name}:${value}`).join(" / ") : "默认上下文";
+}
+
+async function openNotificationTargetModal(index = null) {
+  const editing = Number.isInteger(index) && index >= 0;
+  const targets = notificationTargets();
+  const targetPlatforms = await loadPermissionTargetPlatforms();
+  const fallbackTarget = defaultNotificationTarget(targetPlatforms);
+  const current = editing
+    ? Object.assign(fallbackTarget, normalizeNotificationTarget(targets[index] || {}) || {})
+    : fallbackTarget;
+  const platformOptions = targetPlatforms
+    .map(platform => ({
+      platformId: platform.platformId,
+      pluginName: platform.pluginName,
+      supportedTypes: platform.supportedTypes,
+      transportCount: platform.transportCount,
+    }))
+    .concat([{ platformId: "__manual__", pluginName: "手动输入", supportedTypes: ["GROUP", "USER", "CHANNEL", "OTHER"] }]);
+  const selectedPlatformId = platformOptions.some(platform => platform.platformId === current.platformId)
+    ? current.platformId
+    : "__manual__";
+  let targetCandidates = [];
+  let manualTargetMode = selectedPlatformId === "__manual__";
+  openModal(editing ? "编辑通知目标" : "添加通知目标", `
+    <div class="form-grid notification-target-modal">
+      <div class="field">
+        <label>目标平台</label>
+        <select id="notifyPlatform">${platformOptions.map(platform => `<option value="${attr(platform.platformId)}">${esc(commandPermissionPlatformOptionText(platform))}</option>`).join("")}</select>
+      </div>
+      <div class="field" id="notifyPlatformManualWrap" hidden>
+        <label>平台 ID<span class="required-mark">*</span></label>
+        <input id="notifyPlatformManual" value="${attr(current.platformId)}" placeholder="例如 qq、discord">
+      </div>
+      <div class="field">
+        <label>目标类型</label>
+        <select id="notifyTargetKind"></select>
+      </div>
+      <div class="field">
+        <label>状态</label>
+        <label class="check"><input id="notifyTargetEnabled" type="checkbox"${current.enabled ? " checked" : ""}>启用通知目标</label>
+      </div>
+      <div class="field full" id="notifyTargetCandidateWrap">
+        <div class="field-head">
+          <div class="field-title-line">
+            <label>可用目标</label>
+            <span id="notifyTargetStatus" class="field-inline-status"></span>
+          </div>
+          <div class="row-actions">
+            <button type="button" id="notifyRefreshTargets" class="secondary compact choice-tool-button choice-refresh-button">刷新</button>
+            <button type="button" id="notifyManualTargetToggle" class="secondary compact choice-tool-button">手动输入</button>
+          </div>
+        </div>
+        <div id="notifyTargetCandidateList" class="target-choice-list"></div>
+      </div>
+      <div class="field full" id="notifyManualTargetWrap" hidden>
+        <div class="notification-target-manual-panel">
+          <span id="notifyManualHint" class="inline-note">找不到目标时可以手动填写目标信息；不指定优先账号时会使用全局路由。</span>
+          <div class="form-grid notification-target-manual-grid">
+            <div class="field">
+              <label>目标 ID<span class="required-mark">*</span></label>
+              <input id="notifyTargetId" value="${attr(current.externalId)}">
+            </div>
+            <div class="field">
+              <label>显示名称</label>
+              <input id="notifyTargetName" value="${attr(current.name)}" placeholder="留空时使用目标名称或 ID">
+            </div>
+            <div class="field"><label>作用域 ID</label><input id="notifyScopeId" value="${attr(current.scopeId || "")}"></div>
+            <div class="field"><label>线程 ID</label><input id="notifyThreadId" value="${attr(current.threadId || "")}"></div>
+            <div class="field full"><label>优先账号</label><input id="notifyAccountId" value="${attr(current.accountId || "")}" placeholder="不填则使用全局路由"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  `, async () => {
+    const next = collectNotificationTarget(targetCandidates);
+    if (editing) {
+      targets[index] = next;
+    } else {
+      targets.push(next);
+    }
+    setNotificationTargets(targets);
+    closeModal();
+    notify(editing ? "通知目标已更新，请保存配置" : "通知目标已添加，请保存配置", false);
+  }, { size: "medium" });
+
+  const setManualTargetMode = (enabled, reason = "") => {
+    manualTargetMode = !!enabled;
+    const wrap = $("notifyManualTargetWrap");
+    if (wrap) wrap.hidden = !manualTargetMode;
+    const hint = $("notifyManualHint");
+    if (hint && reason) hint.textContent = reason;
+    const toggle = $("notifyManualTargetToggle");
+    if (toggle) {
+      const manualPlatform = $("notifyPlatform") && $("notifyPlatform").value === "__manual__";
+      toggle.hidden = manualPlatform || (!targetCandidates.length && manualTargetMode);
+      toggle.disabled = !targetCandidates.length && !manualTargetMode;
+      toggle.textContent = manualTargetMode ? "使用可用目标" : "手动输入";
+    }
+  };
+
+  const refreshKinds = async () => {
+    const rawPlatformId = $("notifyPlatform").value;
+    $("notifyPlatformManualWrap").hidden = rawPlatformId !== "__manual__";
+    const platform = platformOptions.find(item => item.platformId === rawPlatformId);
+    const kinds = (platform && platform.supportedTypes && platform.supportedTypes.length)
+      ? platform.supportedTypes
+      : ["GROUP", "USER", "CHANNEL", "OTHER"];
+    $("notifyTargetKind").innerHTML = kinds.map(kind => `<option value="${attr(kind)}">${esc(label(kind))}</option>`).join("");
+    if (kinds.includes(current.targetKind)) $("notifyTargetKind").value = current.targetKind;
+    if (rawPlatformId !== "__manual__") setManualTargetMode(false);
+    await refreshTargets(false);
+  };
+  const refreshTargets = async (force = false) => {
+    const rawPlatformId = $("notifyPlatform").value;
+    const platformId = notificationPlatformValue();
+    const kind = $("notifyTargetKind").value;
+    targetCandidates = [];
+    setNotificationTargetStatus("");
+    if (!platformId || rawPlatformId === "__manual__") {
+      $("notifyTargetCandidateWrap").hidden = true;
+      setManualTargetMode(true, platformId ? "手动输入目标平台时，请填写目标 ID；不指定优先账号时会使用全局路由。" : "请先填写目标平台。");
+      return;
+    }
+    $("notifyTargetCandidateWrap").hidden = false;
+    setNotificationTargetLoading(force ? "正在刷新可用目标..." : "正在获取可用目标...");
+    $("notifyRefreshTargets").disabled = true;
+    try {
+      const result = await loadSubscriberTargetCandidates(platformId, kind, force);
+      targetCandidates = result.items || [];
+      if (targetCandidates.length) {
+        const candidateList = $("notifyTargetCandidateList");
+        candidateList.innerHTML = targetCandidates.map((target, targetIndex) => {
+          const viewTarget = target.externalId === current.externalId
+            ? Object.assign({}, target, { accountId: current.accountId || target.accountId })
+            : target;
+          return messageTargetChoiceHtml(viewTarget, targetIndex, {
+            inputName: "notifyTargetCandidate",
+            prefix: "notifyTarget",
+            inputType: "radio",
+            checked: target.externalId === current.externalId,
+          });
+        }).join("");
+        bindTargetSourceToggles(candidateList);
+        await hydrateMediaImages(candidateList);
+        candidateList.querySelectorAll(`input[name="notifyTargetCandidate"]`).forEach(input => {
+          input.onchange = () => applyNotificationCandidate(selectedNotificationTargetCandidate(targetCandidates));
+        });
+        const selected = selectedNotificationTargetCandidate(targetCandidates);
+        if (selected) applyNotificationCandidate(selected, { keepName: !!current.name });
+        setNotificationTargetStatus(`${targetCandidates.length} 个可用目标`);
+        setManualTargetMode(editing && !!current.externalId && !selected, "当前目标没有出现在可用目标列表中，请手动确认目标 ID；不指定优先账号时会使用全局路由。");
+      } else {
+        $("notifyTargetCandidateList").innerHTML = `<div class="empty">暂无可用目标</div>`;
+        setNotificationTargetStatus("可手动填写目标 ID");
+        setManualTargetMode(true, "没有获取到可用目标，请手动填写目标 ID；不指定优先账号时会使用全局路由。");
+      }
+    } catch (error) {
+      $("notifyTargetCandidateList").innerHTML = `<div class="empty">目标列表获取失败</div>`;
+      setNotificationTargetStatus(error.message || "可用目标获取失败");
+      setManualTargetMode(true, "目标列表获取失败，请手动填写目标 ID；不指定优先账号时会使用全局路由。");
+    } finally {
+      $("notifyRefreshTargets").disabled = false;
+    }
+  };
+
+  $("notifyPlatform").value = selectedPlatformId;
+  $("notifyPlatform").onchange = () => refreshKinds().catch(handleError);
+  $("notifyPlatformManual").oninput = () => refreshTargets(false).catch(handleError);
+  $("notifyTargetKind").onchange = () => refreshTargets(false).catch(handleError);
+  $("notifyRefreshTargets").onclick = () => refreshTargets(true).catch(handleError);
+  $("notifyManualTargetToggle").onclick = () => {
+    if (!manualTargetMode) {
+      const selected = selectedNotificationTargetCandidate(targetCandidates);
+      if (selected) applyNotificationCandidate(selected);
+    }
+    setManualTargetMode(!manualTargetMode);
+  };
+  await refreshKinds();
+}
+
+function defaultNotificationTarget(targetPlatforms) {
+  const firstPlatform = Array.isArray(targetPlatforms) ? targetPlatforms[0] : null;
+  return {
+    platformId: firstPlatform?.platformId || "",
+    targetKind: firstPlatform?.supportedTypes?.[0] || "USER",
+    externalId: "",
+    name: "",
+    enabled: true,
+  };
+}
+
+function setNotificationTargetLoading(text) {
+  $("notifyTargetStatus").textContent = "";
+  $("notifyTargetCandidateList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
+}
+
+function setNotificationTargetStatus(text) {
+  const node = $("notifyTargetStatus");
+  if (node) node.textContent = text ? `· ${text}` : "";
+}
+
+function notificationPlatformValue() {
+  return $("notifyPlatform").value === "__manual__" ? $("notifyPlatformManual").value.trim() : $("notifyPlatform").value;
+}
+
+function selectedNotificationTargetCandidate(candidates) {
+  const input = document.querySelector(`input[name="notifyTargetCandidate"]:checked`);
+  const index = input ? Number(input.dataset.index) : -1;
+  return index >= 0 ? candidates[index] || null : null;
+}
+
+function notificationManualTargetMode() {
+  const wrap = $("notifyManualTargetWrap");
+  return !!wrap && !wrap.hidden;
+}
+
+function applyNotificationCandidate(target, options = {}) {
+  if (!target) return;
+  $("notifyTargetId").value = target.externalId || "";
+  $("notifyScopeId").value = target.scopeId || "";
+  $("notifyThreadId").value = target.threadId || "";
+  if (!options.keepName) $("notifyTargetName").value = target.name || "";
+}
+
+function collectNotificationTarget(candidates) {
+  const platformId = notificationPlatformValue();
+  if (!platformId) throw new Error("请填写目标平台");
+  const candidate = notificationManualTargetMode() ? null : selectedNotificationTargetCandidate(candidates);
+  if (!candidate && !notificationManualTargetMode()) {
+    throw new Error("请选择可用目标，或点击手动输入填写目标 ID");
+  }
+  const candidateIndex = candidate ? candidates.indexOf(candidate) : -1;
+  const accountFromSource = candidateIndex >= 0 ? selectedTargetPriorityAccount("notifyTarget", candidateIndex) : "";
+  const target = normalizeNotificationTarget({
+    platformId,
+    targetKind: $("notifyTargetKind").value,
+    externalId: candidate ? candidate.externalId : $("notifyTargetId").value,
+    scopeId: $("notifyScopeId").value,
+    threadId: $("notifyThreadId").value,
+    accountId: accountFromSource || $("notifyAccountId").value,
+    name: $("notifyTargetName").value || (candidate && candidate.name) || "",
+    enabled: $("notifyTargetEnabled").checked,
+  });
+  if (!target) throw new Error("请填写通知目标 ID");
+  return target;
+}
+
+function blankToNull(value) {
+  const text = String(value || "").trim();
+  return text ? text : null;
 }
 
 function commandPermissionsFieldHtml(detail, field) {
