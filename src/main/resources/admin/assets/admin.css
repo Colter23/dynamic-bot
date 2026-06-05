@@ -1634,10 +1634,21 @@
       width: min(1040px, 100%);
       margin: 0 auto;
     }
+    .account-connection-page {
+      width: 100%;
+      margin: 0;
+    }
+    .account-connection-section {
+      display: grid;
+      gap: 12px;
+    }
+    .account-connection-section .panel-head {
+      margin-bottom: 0;
+    }
     .platform-login-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(286px, 340px));
-      justify-content: center;
+      justify-content: start;
       gap: 12px;
       align-items: start;
     }

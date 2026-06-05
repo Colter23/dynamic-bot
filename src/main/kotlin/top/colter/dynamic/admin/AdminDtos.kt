@@ -151,6 +151,24 @@ public data class PlatformLoginDto(
 )
 
 @Serializable
+public data class TargetPlatformAccountDto(
+    val platformId: String,
+    val transportId: String,
+    val transportName: String,
+    val pluginId: String,
+    val pluginName: String,
+    val pluginVersion: String,
+    val pluginState: String,
+    val routeId: String,
+    val accountId: String,
+    val accountName: String,
+    val avatarUri: String? = null,
+    val enabled: Boolean,
+    val state: String,
+    val checkedAtEpochMillis: Long,
+)
+
+@Serializable
 public data class PlatformLoginActionDto(
     val key: String,
     val label: String,

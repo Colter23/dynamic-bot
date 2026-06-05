@@ -26,6 +26,7 @@ import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
@@ -339,6 +340,55 @@ public class AdminService(
             }
             .awaitAll()
             .sortedBy { it.platformId }
+    }
+
+    public suspend fun targetPlatformAccounts(): List<TargetPlatformAccountDto> = coroutineScope {
+        messageSinkProvider()
+            .map { handle -> async { handle.toTargetPlatformAccountDtos() } }
+            .awaitAll()
+            .flatten()
+            .sortedWith(
+                compareBy<TargetPlatformAccountDto> { it.platformId }
+                    .thenBy { it.accountId }
+                    .thenBy { it.transportId }
+                    .thenBy { it.routeId },
+            )
+    }
+
+    private suspend fun PluginHandle<MessageSinkPlugin>.toTargetPlatformAccountDtos(): List<TargetPlatformAccountDto> {
+        val routedSink = instance as? AccountRoutedMessageSinkPlugin ?: return emptyList()
+        val pluginInfo = info
+        val checkedAt = System.currentTimeMillis()
+        val routes = if (pluginInfo.state == PluginState.ACTIVE) {
+            runCatching {
+                withTimeoutOrNull(LOGIN_STATE_TIMEOUT_MS) {
+                    routedSink.listMessageSinkRoutes()
+                }.orEmpty()
+            }.getOrElse {
+                logger.warn(it) { "目标平台账号状态读取失败：pluginId=${pluginInfo.descriptor.id}" }
+                emptyList()
+            }
+        } else {
+            emptyList()
+        }
+        return routes.map { route ->
+            TargetPlatformAccountDto(
+                platformId = route.targetPlatformId.value,
+                transportId = route.transportId,
+                transportName = route.transportName,
+                pluginId = pluginInfo.descriptor.id,
+                pluginName = pluginInfo.descriptor.name,
+                pluginVersion = pluginInfo.descriptor.version,
+                pluginState = pluginInfo.state.name,
+                routeId = route.routeId,
+                accountId = route.accountId,
+                accountName = route.accountName,
+                avatarUri = route.accountAvatar?.uri,
+                enabled = route.enabled,
+                state = route.state.name,
+                checkedAtEpochMillis = checkedAt,
+            )
+        }
     }
 
     private suspend fun PluginHandle<PublisherLoginProvider>.toPlatformLoginDto(force: Boolean): PlatformLoginDto {

@@ -92,16 +92,48 @@ export async function handleAction(nextCtx, { action, button }) {
 
 async function loadPlatformLogins(force) {
   const request = beginPageRequest("login");
-  if (force || !state.cache.platformLogins) state.cache.platformLogins = await api(force ? "/platform-logins?force=true" : "/platform-logins");
+  const sourceAccountsPromise = force || !state.cache.platformLogins
+    ? api(force ? "/platform-logins?force=true" : "/platform-logins")
+    : Promise.resolve(state.cache.platformLogins);
+  const targetAccountsPromise = force || !state.cache.targetPlatformAccounts
+    ? api("/target-platform-accounts")
+    : Promise.resolve(state.cache.targetPlatformAccounts);
+  const [sourceAccounts, targetAccounts] = await Promise.all([sourceAccountsPromise, targetAccountsPromise]);
   if (!isCurrentPageRequest(request)) return;
-  const rows = state.cache.platformLogins;
+  state.cache.platformLogins = sourceAccounts;
+  state.cache.targetPlatformAccounts = targetAccounts;
   pageRoot().innerHTML = `
-    <section class="page platform-login-page">
-      <div class="platform-login-grid">
-        ${rows.length ? rows.map(renderPlatformCard).join("") : `<div class="empty">暂无可登录平台</div>`}
-      </div>
+    <section class="page account-connection-page">
+      ${renderAccountConnectionSection(
+        "消息源账号",
+        "用于读取 Bilibili、X 等动态源的登录账号。",
+        renderAccountGrid(sourceAccounts, renderPlatformCard, "暂无可登录的消息源账号"),
+      )}
+      ${renderAccountConnectionSection(
+        "目标平台账号",
+        "用于向 QQ、Discord 等真实目标平台发送消息的 Bot 连接。",
+        renderAccountGrid(targetAccounts, renderTargetPlatformAccountCard, "暂无目标平台账号连接"),
+      )}
     </section>`;
   await hydrateMediaImages(pageRoot());
+}
+
+function renderAccountConnectionSection(title, description, body) {
+  return `<section class="panel account-connection-section">
+    <div class="panel-head">
+      <div>
+        <h2>${esc(title)}</h2>
+        <p>${esc(description)}</p>
+      </div>
+    </div>
+    ${body}
+  </section>`;
+}
+
+function renderAccountGrid(rows, renderer, emptyText) {
+  return rows && rows.length
+    ? `<div class="platform-login-grid">${rows.map(renderer).join("")}</div>`
+    : `<div class="empty">${esc(emptyText)}</div>`;
 }
 
 function renderPlatformCard(item) {
@@ -127,6 +159,33 @@ function renderPlatformCard(item) {
       </div>
     </div>
     <div class="platform-login-actions">${renderLoginActions(item)}</div>
+  </article>`;
+}
+
+function renderTargetPlatformAccountCard(item) {
+  const accountName = item.accountName || "未显示账号";
+  const accountId = item.accountId || "";
+  const checkedText = item.checkedAtEpochMillis ? `检查：${fmtTime(item.checkedAtEpochMillis, true)}` : "";
+  const transportText = item.transportName || item.transportId || "未知通道";
+  const pluginText = item.pluginName || item.pluginId || "未知插件";
+  const accountMeta = [accountId, transportText, pluginText, checkedText].filter(Boolean).join(" · ") || "暂无连接信息";
+  const status = item.enabled === false ? "DISABLED" : item.state;
+  return `<article class="platform-login-card target-platform-account-card">
+    <div class="platform-login-head">
+      <div class="platform-login-title">
+        ${platformTag(item.platformId, item.platformId)}
+        <span>${esc(transportText)}${item.pluginVersion ? ` · ${esc(item.pluginVersion)}` : ""}</span>
+      </div>
+      ${pill(status)}
+    </div>
+    <div class="platform-login-account">
+      ${mediaImage(item.avatarUri, "platform-login-avatar avatar", item.platformId, "AVATAR")}
+      <div>
+        <span>Bot 账号</span>
+        <strong>${esc(accountName)}</strong>
+        <small>${esc(accountMeta)}</small>
+      </div>
+    </div>
   </article>`;
 }
 

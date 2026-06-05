@@ -3,7 +3,7 @@ const $ = id => document.getElementById(id);
     const pages = {
       dashboard: ["仪表盘", "运行状态", "/admin/pages/dashboard.html", "/admin/pages/dashboard.js"],
       plugins: ["插件管理", "生命周期与能力", "/admin/pages/plugins.html", "/admin/pages/plugins.js"],
-      login: ["平台登录", "动态源账号状态", "/admin/pages/login.html", "/admin/pages/login.js"],
+      login: ["账号连接", "动态源与消息出口状态", "/admin/pages/login.html", "/admin/pages/login.js"],
       subscriptions: ["订阅管理", "订阅策略与过滤规则", "/admin/pages/subscriptions.html", "/admin/pages/subscriptions.js"],
       entities: ["发布者与目标", "来源与消息出口", "/admin/pages/entities.html", "/admin/pages/entities.js"],
       messages: ["消息记录", "投递结果与失败诊断", "/admin/pages/messages.html", "/admin/pages/messages.js"],
@@ -433,7 +433,10 @@ const $ = id => document.getElementById(id);
         state.cache = {};
         return;
       }
-      const clearTargetCandidates = keys.some(key => ["plugins", "platformLogins", "subscriberTargetPlatforms"].includes(key));
+      const clearTargetCandidates = keys.some(key => ["plugins", "platformLogins", "targetPlatformAccounts", "subscriberTargetPlatforms"].includes(key));
+      if (keys.some(key => ["plugins", "platformLogins"].includes(key))) {
+        delete state.cache.targetPlatformAccounts;
+      }
       keys.forEach(key => delete state.cache[key]);
       if (clearTargetCandidates) clearSubscriberTargetCandidateCache();
     }
@@ -736,7 +739,7 @@ const $ = id => document.getElementById(id);
           const keysByPage = {
             dashboard: ["dashboard"],
             plugins: ["plugins"],
-            login: ["platformLogins"],
+            login: ["platformLogins", "targetPlatformAccounts"],
             subscriptions: ["subscriptions"],
             entities: ["publishers", "subscribers"],
             messages: ["deliveries"],

@@ -101,10 +101,10 @@ async function loadDashboard(force) {
         <section class="panel half dashboard-panel">
           <div class="panel-head dashboard-panel-head">
             <div>
-              <h2>平台登录</h2>
-              <p>${loginSuccess}/${logins.length} 已登录</p>
+              <h2>账号连接</h2>
+              <p>${loginSuccess}/${logins.length} 源账号已登录</p>
             </div>
-            <button class="secondary compact" data-action="goto" data-page="login">平台登录</button>
+            <button class="secondary compact" data-action="goto" data-page="login">账号连接</button>
           </div>
           ${renderLoginHealth(logins)}
         </section>
@@ -160,7 +160,7 @@ function renderPluginHealth(plugins) {
 }
 
 function renderLoginHealth(items) {
-  if (!items.length) return `<div class="empty dashboard-empty">暂无平台登录</div>`;
+  if (!items.length) return `<div class="empty dashboard-empty">暂无源账号登录</div>`;
   return `<div class="dashboard-list">${
     items.map(item => `<div class="dashboard-list-item">
       <div>

@@ -237,6 +237,10 @@ public fun Application.adminModule(context: AdminServerContext) {
                     ?: false
                 call.respondApi { context.service.platformLogins(force = force) }
             }
+            get("/target-platform-accounts") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi { context.service.targetPlatformAccounts() }
+            }
             get("/publishers") {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.publishers() }
