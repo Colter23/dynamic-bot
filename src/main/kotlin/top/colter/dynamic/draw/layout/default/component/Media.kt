@@ -33,6 +33,7 @@ internal fun Layout.Media(
     accentColor: Int = Color.makeRGB(251, 114, 153),
     cardColor: Int = Color.WHITE.withAlpha(0.6f),
     borderColor: Int = Color.WHITE,
+    titleColor: Int = Color.BLACK,
     secondaryTextColor: Int = Color.BLACK.withAlpha(0.7f),
     modifier: Modifier = Modifier()
 ) = Column(
@@ -126,6 +127,7 @@ internal fun Layout.Media(
     Text(
         text = title,
         fontSize = 34.dp,
+        color = titleColor,
         maxLinesCount = 2,
         modifier = Modifier().margin(top = 15.dp, right = 15.dp, bottom = 10.dp, left = 15.dp)
     )

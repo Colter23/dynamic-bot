@@ -20,6 +20,7 @@ internal fun Layout.MediaSmall(
     accentColor: Int = Color.makeRGB(251, 114, 153),
     cardColor: Int = Color.WHITE.withAlpha(0.6f),
     borderColor: Int = Color.WHITE,
+    titleColor: Int = Color.BLACK,
     secondaryTextColor: Int = Color.BLACK.withAlpha(0.7f),
     modifier: Modifier = Modifier()
 ) = Row (
@@ -101,6 +102,7 @@ internal fun Layout.MediaSmall(
         Text(
             text = title,
             fontSize = 23.dp,
+            color = titleColor,
             maxLinesCount = 2,
             alignment = LayoutAlignment.LEFT,
             modifier = Modifier().fillRatioHeight(0.4f)

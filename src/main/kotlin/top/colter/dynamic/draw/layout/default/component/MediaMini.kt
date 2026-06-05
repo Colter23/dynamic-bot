@@ -20,6 +20,7 @@ internal fun Layout.MediaMini(
     accentColor: Int = Color.makeRGB(251, 114, 153),
     cardColor: Int = Color.WHITE.withAlpha(0.6f),
     borderColor: Int = Color.WHITE,
+    titleColor: Int = Color.BLACK,
     secondaryTextColor: Int = Color.BLACK.withAlpha(0.7f),
     modifier: Modifier = Modifier()
 ) = Row (
@@ -47,6 +48,7 @@ internal fun Layout.MediaMini(
             Text(
                 text = title,
                 fontSize = 22.dp,
+                color = titleColor,
                 maxLinesCount = 1,
                 alignment = LayoutAlignment.LEFT,
                 modifier = Modifier().fillMaxWidth()

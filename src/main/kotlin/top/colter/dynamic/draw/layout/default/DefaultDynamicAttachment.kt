@@ -132,6 +132,7 @@ private fun Layout.drawDynamicMediaCard(
                     accentColor = config.theme.primaryColor,
                     cardColor = config.theme.cardColor,
                     borderColor = config.theme.borderColor,
+                    titleColor = config.theme.textColor,
                     secondaryTextColor = config.theme.secondaryTextColor,
                     modifier = modifier,
                 )
@@ -147,6 +148,7 @@ private fun Layout.drawDynamicMediaCard(
                     accentColor = config.theme.primaryColor,
                     cardColor = config.theme.cardColor,
                     borderColor = config.theme.borderColor,
+                    titleColor = config.theme.textColor,
                     secondaryTextColor = config.theme.secondaryTextColor,
                     modifier = modifier,
                 )
@@ -162,6 +164,7 @@ private fun Layout.drawDynamicMediaCard(
             accentColor = config.theme.primaryColor,
             cardColor = config.theme.cardColor,
             borderColor = config.theme.borderColor,
+            titleColor = config.theme.textColor,
             secondaryTextColor = config.theme.secondaryTextColor,
             modifier = modifier,
         )
@@ -174,6 +177,7 @@ private fun Layout.drawDynamicMediaCard(
             accentColor = config.theme.primaryColor,
             cardColor = config.theme.cardColor,
             borderColor = config.theme.borderColor,
+            titleColor = config.theme.textColor,
             secondaryTextColor = config.theme.secondaryTextColor,
             modifier = modifier,
         )
@@ -196,6 +200,7 @@ private fun Layout.drawDynamicPoll(
         accentColor = config.theme.primaryColor,
         cardColor = config.theme.cardColor,
         borderColor = config.theme.borderColor,
+        titleColor = config.theme.textColor,
         secondaryTextColor = config.theme.secondaryTextColor,
         modifier = modifier,
     )
