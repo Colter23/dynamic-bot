@@ -26,9 +26,9 @@ public data class PushTemplates(
     val liveEnded: String = DEFAULT_LIVE_ENDED_TEMPLATE,
 ) {
     public companion object {
-        public const val DEFAULT_DYNAMIC_TEMPLATE: String = "{draw}\n{name} 发布了新动态\n{content}\n{link}"
-        public const val DEFAULT_LIVE_STARTED_TEMPLATE: String = "{draw}\n{name} 开播了\n{title}\n{link}"
-        public const val DEFAULT_LIVE_ENDED_TEMPLATE: String = "{name} 下播了\n{title}\n直播时长：{duration}\n{link}"
+        public const val DEFAULT_DYNAMIC_TEMPLATE: String = "{draw}\n{name}@动态\n{link}"
+        public const val DEFAULT_LIVE_STARTED_TEMPLATE: String = "{draw}\n{name}@直播\n{title}\n{link}"
+        public const val DEFAULT_LIVE_ENDED_TEMPLATE: String = "{name} 直播结束啦!\n直播时长：{duration}"
     }
 }
 

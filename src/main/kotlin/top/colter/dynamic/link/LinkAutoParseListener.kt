@@ -3,6 +3,7 @@
 import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.command.CommandParser
+import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
 import top.colter.dynamic.core.data.MessageBatch
@@ -23,12 +24,17 @@ internal class LinkAutoParseListener(
     private val eventBus: EventBus = EventBus(),
     private val dedupe: LinkParseDedupe = LinkParseDedupe(),
     private val progressMessenger: LinkParseProgressMessenger = NoopLinkParseProgressMessenger,
+    private val primaryBotAccountResolver: suspend (CommandContext) -> String? = { null },
 ) : Listener<CommandEvent> {
     override suspend fun onMessage(event: CommandEvent) {
         val config = configProvider()
         val linkParsing = config.linkParsing
         if (!linkParsing.autoParseEnabled) return
         if (CommandParser.parse(event.rawText, config.command.prefix) != null) return
+        if (!shouldAcceptAutoParse(event)) {
+            logBotBlocked(event)
+            return
+        }
 
         val triggerMode = LinkParseTargetConfigRepository.findEffectiveByAddress(event.context.target)?.triggerMode
             ?: linkParsing.fallbackTriggerMode
@@ -101,6 +107,24 @@ internal class LinkAutoParseListener(
             LinkParseTriggerMode.DISABLED -> false
             LinkParseTriggerMode.ALWAYS -> true
             LinkParseTriggerMode.MENTION_ONLY -> event.context.mentionsBot()
+        }
+    }
+
+    private suspend fun shouldAcceptAutoParse(event: CommandEvent): Boolean {
+        val botAccountId = event.context.botAccountId?.trim()?.takeIf { it.isNotBlank() } ?: return true
+        if (event.context.mentionedAccountIds.any { it == botAccountId }) return true
+        val primaryAccountId = primaryBotAccountResolver(event.context)
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?: return true
+        return botAccountId == primaryAccountId
+    }
+
+    private fun logBotBlocked(event: CommandEvent) {
+        if (!event.rawText.contains("http://") && !event.rawText.contains("https://")) return
+        val context = event.context
+        autoParseLogger.debug {
+            "链接自动解析未触发：当前 Bot 不是主 Bot 且未被 @ target=${context.target.stableValue()} botAccountId=${context.botAccountId ?: "未知"} mentionedAccountIds=${context.mentionedAccountIds.joinToString(",").ifBlank { "无" }}"
         }
     }
 

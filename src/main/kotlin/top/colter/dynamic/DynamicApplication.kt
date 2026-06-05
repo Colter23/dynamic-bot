@@ -211,6 +211,7 @@ public object DynamicApplication : CoroutineScope {
                     sendCommandResult = deliveryDispatcher::sendCommandResult,
                     recallMessage = deliveryDispatcher::recallMessage,
                 ),
+                primaryBotAccountResolver = ::resolvePrimaryCommandBotAccount,
             ),
         )
 

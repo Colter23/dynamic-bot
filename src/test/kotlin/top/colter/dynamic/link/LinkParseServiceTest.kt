@@ -49,6 +49,7 @@ class LinkParseServiceTest {
         val listener = CommandListener(
             publisherLookupResolver = { null },
             config = MainDynamicConfig(
+                command = top.colter.dynamic.CommandConfig(requirePermissionRule = false),
                 linkParsing = LinkParsingConfig(maxLinksPerMessage = 5),
             ),
             linkParseService = LinkParseService(
@@ -152,6 +153,69 @@ class LinkParseServiceTest {
         assertEquals(1, resolver.resolveCalls)
         assertEquals(listOf("链接解析中，请稍候..."), messenger.sentTexts)
         assertEquals(listOf("progress-1"), messenger.recalledIds)
+    }
+
+    @Test
+    fun `auto parser should only run on primary bot by default`() = runBlocking {
+        initDb("auto-primary-bot")
+        val resolver = FakeLinkResolver()
+        val sourceUpdates = RecordingSourceUpdatePublisher()
+        val listener = LinkAutoParseListener(
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        fallbackTriggerMode = LinkParseTriggerMode.ALWAYS,
+                    ),
+                )
+            },
+            linkParseService = LinkParseService(
+                resolversProvider = { listOf(resolver) },
+                sourceUpdatePublisher = sourceUpdates,
+            ),
+            primaryBotAccountResolver = { "42" },
+        )
+
+        listener.onMessage(commandEvent("https://t.bilibili.com/1", botAccountId = "24"))
+        assertEquals(0, resolver.resolveCalls)
+
+        listener.onMessage(commandEvent("https://t.bilibili.com/1", botAccountId = "42"))
+        val request = withTimeout(3_000) { sourceUpdates.receive() }
+
+        assertEquals("1", request.update.key.externalId)
+        assertEquals(1, resolver.resolveCalls)
+    }
+
+    @Test
+    fun `auto parser should run on mentioned non-primary bot`() = runBlocking {
+        initDb("auto-mentioned-non-primary-bot")
+        val resolver = FakeLinkResolver()
+        val sourceUpdates = RecordingSourceUpdatePublisher()
+        val listener = LinkAutoParseListener(
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        fallbackTriggerMode = LinkParseTriggerMode.ALWAYS,
+                    ),
+                )
+            },
+            linkParseService = LinkParseService(
+                resolversProvider = { listOf(resolver) },
+                sourceUpdatePublisher = sourceUpdates,
+            ),
+            primaryBotAccountResolver = { "42" },
+        )
+
+        listener.onMessage(
+            commandEvent(
+                "@24 https://t.bilibili.com/2",
+                botAccountId = "24",
+                mentionedAccountIds = setOf("24"),
+            )
+        )
+        val request = withTimeout(3_000) { sourceUpdates.receive() }
+
+        assertEquals("2", request.update.key.externalId)
+        assertEquals(1, resolver.resolveCalls)
     }
 
     private suspend fun dispatchCommand(
