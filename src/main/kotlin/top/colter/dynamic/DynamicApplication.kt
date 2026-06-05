@@ -45,6 +45,9 @@ import top.colter.dynamic.link.DeliveryLinkParseProgressMessenger
 import top.colter.dynamic.link.DefaultLinkPreviewRenderer
 import top.colter.dynamic.link.LinkParseService
 import top.colter.dynamic.listener.SourceUpdateProcessor
+import top.colter.dynamic.message.OutboundMessageService
+import top.colter.dynamic.notification.MessageSinkRouteMonitor
+import top.colter.dynamic.notification.SystemNotificationService
 import top.colter.dynamic.repository.MessageDeliveryRepository
 
 private val logger = loggerFor<DynamicApplication>()
@@ -59,6 +62,8 @@ public object DynamicApplication : CoroutineScope {
     private val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry()
     private lateinit var sourceUpdateProcessor: SourceUpdateProcessor
     private lateinit var deliveryDispatcher: DeliveryDispatcher
+    private lateinit var outboundMessageService: OutboundMessageService
+    private lateinit var messageSinkRouteMonitor: MessageSinkRouteMonitor
     private val commandPublisher: CommandPublisher = CommandPublisher { request ->
         eventBus.broadcast(
             CommandEvent(
@@ -156,8 +161,18 @@ public object DynamicApplication : CoroutineScope {
             configProvider = { configStore.current().delivery },
             routingConfigProvider = { configStore.current().messageRouting },
         )
+        outboundMessageService = OutboundMessageService(
+            onMessagesQueued = {
+                deliveryDispatcher.dispatchDue()
+            },
+        )
+        messageSinkRouteMonitor = MessageSinkRouteMonitor(
+            sinkProvider = { pluginManager.getMessageSinkPlugins() },
+            eventBus = eventBus,
+        )
         registerDeliveryDispatchTask(config)
         registerDeliveryCleanupTask(config)
+        registerMessageSinkRouteMonitorTask(config)
         sourceUpdateProcessor = SourceUpdateProcessor(
             configProvider = configStore::current,
             configService = configService,
@@ -200,6 +215,7 @@ public object DynamicApplication : CoroutineScope {
                 commandRegistry = commandRegistry,
                 eventBus = eventBus,
                 primaryBotAccountResolver = ::resolvePrimaryCommandBotAccount,
+                outboundMessageService = outboundMessageService,
             ),
         )
         listenerTokens += eventBus.subscribe(
@@ -212,6 +228,13 @@ public object DynamicApplication : CoroutineScope {
                     recallMessage = deliveryDispatcher::recallMessage,
                 ),
                 primaryBotAccountResolver = ::resolvePrimaryCommandBotAccount,
+            ),
+        )
+
+        listenerTokens += eventBus.subscribe(
+            SystemNotificationService(
+                configProvider = configStore::current,
+                outboundMessageService = outboundMessageService,
             ),
         )
 
@@ -235,6 +258,7 @@ public object DynamicApplication : CoroutineScope {
             commandRegistry = commandRegistry,
             eventBus = eventBus,
             drawAssetRegistry = drawAssetRegistry,
+            outboundMessageService = outboundMessageService,
             stopRequester = { reason -> requestStop(reason) },
             startedAtEpochMillis = startedAtEpochMillis,
         )
@@ -348,6 +372,21 @@ public object DynamicApplication : CoroutineScope {
                     } else {
                         logger.debug { "消息记录无需清理" }
                     }
+                },
+            ),
+        )
+    }
+
+    private fun registerMessageSinkRouteMonitorTask(config: MainDynamicConfig) {
+        taskScheduler.start(
+            TaskDefinition(
+                id = "main-message-sink-route-monitor",
+                schedule = TaskSchedule.FixedDelay(
+                    delay = config.notifications.routeMonitorIntervalSeconds.seconds,
+                    runImmediately = false,
+                ),
+                action = {
+                    messageSinkRouteMonitor.scan()
                 },
             ),
         )

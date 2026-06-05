@@ -13,6 +13,7 @@ import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.MessageDelivery
+import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.Publisher
@@ -26,6 +27,8 @@ import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.message.OutboundMessageService
+import top.colter.dynamic.message.RENDER_VARIANT_MANUAL_FORWARD
 import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
@@ -88,6 +91,7 @@ public class AdminService(
     private val configService: ConfigService = YamlConfigService(),
     private val commandRegistry: CommandRegistry = CommandRegistry(),
     private val eventBus: EventBus = EventBus(),
+    private val outboundMessageService: OutboundMessageService = OutboundMessageService(),
     private val pluginReloader: (String) -> PluginReloadResult = {
         throw IllegalStateException("插件重载功能未配置")
     },
@@ -114,6 +118,7 @@ public class AdminService(
         configService: ConfigService = YamlConfigService(),
         commandRegistry: CommandRegistry = CommandRegistry(),
         eventBus: EventBus = EventBus(),
+        outboundMessageService: OutboundMessageService = OutboundMessageService(),
         startedAtEpochMillis: Long = System.currentTimeMillis(),
     ) : this(
         pluginProvider = { pluginManager.getAllPlugins() },
@@ -128,6 +133,7 @@ public class AdminService(
         configService = configService,
         commandRegistry = commandRegistry,
         eventBus = eventBus,
+        outboundMessageService = outboundMessageService,
         pluginReloader = pluginManager::reloadPlugin,
         pluginStarter = pluginManager::startPlugin,
         pluginStopper = pluginManager::stopPlugin,
@@ -231,6 +237,50 @@ public class AdminService(
                 limit = limit ?: 50,
             )
             .map { it.toDto() }
+    }
+
+    public suspend fun forwardMessage(request: CreateMessageForwardRequest): MessageForwardResponse {
+        val targets = request.targets.map { target ->
+            TargetAddress.of(
+                platformId = target.platformId,
+                kind = parseEnum<TargetKind>(target.targetKind, "targetKind"),
+                externalId = target.externalId,
+                scopeId = target.scopeId,
+                threadId = target.threadId,
+                accountId = target.accountId,
+            )
+        }
+        val text = request.text?.trim()?.takeIf { it.isNotBlank() }
+        val batches = request.batches?.takeIf { it.isNotEmpty() }
+        require((text != null) xor (batches != null)) { "text 和 batches 必须且只能提供一个" }
+
+        val result = if (text != null) {
+            outboundMessageService.enqueueText(
+                source = "web-admin",
+                targets = targets,
+                text = text,
+                renderVariant = RENDER_VARIANT_MANUAL_FORWARD,
+            )
+        } else {
+            outboundMessageService.enqueueBatches(
+                source = "web-admin",
+                targets = targets,
+                batches = batches.orEmpty(),
+                renderVariant = RENDER_VARIANT_MANUAL_FORWARD,
+            )
+        }
+        val newDeliveryIds = result.newDeliveries.mapTo(mutableSetOf()) { it.id }
+        return MessageForwardResponse(
+            messageId = result.message.id,
+            targetCount = result.targetCount,
+            newDeliveryCount = result.newDeliveryCount,
+            existingDeliveryCount = result.existingDeliveryCount,
+            deliveries = (result.newDeliveries + result.existingDeliveries)
+                .sortedWith(compareBy<MessageDelivery> { it.target.platformId.value }
+                    .thenBy { it.target.kind.name }
+                    .thenBy { it.target.externalId })
+                .map { delivery -> delivery.toForwardDto(newDelivery = delivery.id in newDeliveryIds) },
+        )
     }
 
     public fun plugins(): List<PluginDto> {
@@ -1446,6 +1496,17 @@ private fun MessageDelivery.toDto(): MessageDeliveryDto = MessageDeliveryDto(
     lockedUntilEpochSeconds = lockedUntilEpochSeconds,
     createdAtEpochSeconds = createdAtEpochSeconds,
     updatedAtEpochSeconds = updatedAtEpochSeconds,
+)
+
+private fun MessageDelivery.toForwardDto(newDelivery: Boolean): MessageForwardDeliveryDto = MessageForwardDeliveryDto(
+    deliveryId = id,
+    targetKey = target.stableValue(),
+    platformId = target.platformId.value,
+    targetKind = target.kind.name,
+    targetId = target.externalId,
+    accountId = target.accountId,
+    status = status.name,
+    newDelivery = newDelivery,
 )
 
 private fun AdminLogRecord.toDto(): AdminLogEntryDto = AdminLogEntryDto(

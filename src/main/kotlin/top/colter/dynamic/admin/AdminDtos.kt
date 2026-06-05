@@ -5,6 +5,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import top.colter.dynamic.core.config.ConfigFormSpec
 import top.colter.dynamic.core.data.FilterCondition
+import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.SubscriptionPolicy
 
 @Serializable
@@ -358,6 +359,44 @@ public data class MessageDeliveryDto(
     val lockedUntilEpochSeconds: Long? = null,
     val createdAtEpochSeconds: Long,
     val updatedAtEpochSeconds: Long,
+)
+
+@Serializable
+public data class ForwardTargetRequest(
+    val platformId: String,
+    val targetKind: String,
+    val externalId: String,
+    val scopeId: String? = null,
+    val threadId: String? = null,
+    val accountId: String? = null,
+)
+
+@Serializable
+public data class CreateMessageForwardRequest(
+    val targets: List<ForwardTargetRequest>,
+    val text: String? = null,
+    val batches: List<MessageBatch>? = null,
+)
+
+@Serializable
+public data class MessageForwardResponse(
+    val messageId: String,
+    val targetCount: Int,
+    val newDeliveryCount: Int,
+    val existingDeliveryCount: Int,
+    val deliveries: List<MessageForwardDeliveryDto>,
+)
+
+@Serializable
+public data class MessageForwardDeliveryDto(
+    val deliveryId: Int,
+    val targetKey: String,
+    val platformId: String,
+    val targetKind: String,
+    val targetId: String,
+    val accountId: String? = null,
+    val status: String,
+    val newDelivery: Boolean,
 )
 
 @Serializable

@@ -10,7 +10,9 @@ import top.colter.dynamic.core.config.ConfigNumberKind
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.data.CommandRole
+import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.event.SystemNotificationSeverity
 import top.colter.dynamic.core.plugin.MessageSinkRoutingStrategy
 import top.colter.dynamic.admin.AdminLogBuffer
 import top.colter.dynamic.draw.DrawLayoutRegistry
@@ -370,6 +372,57 @@ public object MainConfigForms {
                     restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
+                    path = "notifications.enabled",
+                    label = "启用系统通知",
+                    type = ConfigFieldType.BOOLEAN,
+                    section = "系统通知",
+                    description = "开启后，影响 Bot 正常运行的重要异常会发送给系统管理员目标。",
+                ),
+                ConfigFieldSpec(
+                    path = "notifications.minSeverity",
+                    label = "最低通知级别",
+                    type = ConfigFieldType.SELECT,
+                    section = "系统通知",
+                    description = "低于该级别的通知会被忽略；恢复类通知通常为 INFO。",
+                    options = notificationSeverityOptions(),
+                    required = true,
+                ),
+                ConfigFieldSpec(
+                    path = "notifications.dedupeSeconds",
+                    label = "通知去重时间（秒）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "系统通知",
+                    description = "同一类通知在该时间内只发送一次；设为 0 表示不去重。",
+                    min = 0,
+                    numberKind = ConfigNumberKind.INTEGER,
+                ),
+                ConfigFieldSpec(
+                    path = "notifications.routeMonitorIntervalSeconds",
+                    label = "Bot 状态检查间隔（秒）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "系统通知",
+                    description = "主项目定期检查消息出口账号路线状态，用于发现 Bot 掉线和恢复。",
+                    min = 1,
+                    numberKind = ConfigNumberKind.INTEGER,
+                    restartRequired = true,
+                    restartTarget = "主程序",
+                ),
+                ConfigFieldSpec(
+                    path = "notifications.adminTargets",
+                    label = "系统管理员通知目标",
+                    type = ConfigFieldType.JSON,
+                    section = "系统通知",
+                    description = "配置接收系统通知的真实消息目标；platformId 是 qq、discord 等真实平台，accountId 只表示优先发送账号。",
+                    metadata = mapOf(
+                        "example" to """
+                            [
+                              {"platformId":"qq","targetKind":"USER","externalId":"123456","name":"管理员"},
+                              {"platformId":"qq","targetKind":"GROUP","externalId":"654321","accountId":"10001","name":"运维群"}
+                            ]
+                        """.trimIndent(),
+                    ),
+                ),
+                ConfigFieldSpec(
                     path = "delivery.maxAttempts",
                     label = "最大投递尝试次数",
                     type = ConfigFieldType.NUMBER,
@@ -645,6 +698,26 @@ public object MainConfigForms {
         require(config.imageCache.cleanupCron.isNotBlank()) { "清理任务 Cron 不能为空" }
         require(config.imageCache.sourceCleanup.maxIdleDays >= 0) { "原图最大闲置天数不能为负数" }
         require(config.imageCache.renderedCleanup.maxIdleDays >= 0) { "渲染图片最大闲置天数不能为负数" }
+        require(config.notifications.dedupeSeconds >= 0) { "通知去重时间不能为负数" }
+        require(config.notifications.routeMonitorIntervalSeconds >= 1) { "Bot 状态检查间隔至少为 1 秒" }
+        val notificationTargetKeys = config.notifications.adminTargets
+            .filter { it.enabled }
+            .mapIndexed { index, target ->
+                require(target.platformId.isNotBlank()) { "notifications.adminTargets[$index].platformId 不能为空" }
+                require(target.externalId.isNotBlank()) { "notifications.adminTargets[$index].externalId 不能为空" }
+                TargetAddress.of(
+                    platformId = target.platformId,
+                    kind = target.targetKind,
+                    externalId = target.externalId,
+                    scopeId = target.scopeId,
+                    threadId = target.threadId,
+                    accountId = target.accountId,
+                ).stableValue()
+            }
+        val duplicatedNotificationTargets = notificationTargetKeys.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        require(duplicatedNotificationTargets.isEmpty()) {
+            "系统管理员通知目标不能重复"
+        }
         require(config.delivery.maxAttempts >= 1) { "最大投递尝试次数至少为 1" }
         require(config.delivery.retryDelaySeconds > 0.0) { "投递重试间隔必须大于 0 秒" }
         require(config.delivery.dispatchConcurrency >= 1) { "投递并发数至少为 1" }
@@ -703,6 +776,9 @@ public object MainConfigForms {
         ) {
             targets += "主程序"
         }
+        if (previous.notifications.routeMonitorIntervalSeconds != next.notifications.routeMonitorIntervalSeconds) {
+            targets += "主程序"
+        }
         if (previous.draw.font != next.draw.font) {
             targets += "主程序"
         }
@@ -740,6 +816,15 @@ public object MainConfigForms {
         return listOf(
             ConfigFieldOption(MessageSinkRoutingStrategy.ROUND_ROBIN.name, "轮询分担"),
             ConfigFieldOption(MessageSinkRoutingStrategy.PRIMARY_BACKUP.name, "主备切换"),
+        )
+    }
+
+    public fun notificationSeverityOptions(): List<ConfigFieldOption> {
+        return listOf(
+            ConfigFieldOption(SystemNotificationSeverity.INFO.name, "INFO 信息"),
+            ConfigFieldOption(SystemNotificationSeverity.WARN.name, "WARN 警告"),
+            ConfigFieldOption(SystemNotificationSeverity.ERROR.name, "ERROR 错误"),
+            ConfigFieldOption(SystemNotificationSeverity.CRITICAL.name, "CRITICAL 严重"),
         )
     }
 }

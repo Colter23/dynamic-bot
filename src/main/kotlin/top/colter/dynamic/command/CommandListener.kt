@@ -40,6 +40,8 @@ import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.PublisherKind
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.Subscription
+import top.colter.dynamic.core.data.TargetAddress
+import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
@@ -65,6 +67,8 @@ import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.link.LinkParseService
 import top.colter.dynamic.link.LinkParseConfigCommandHandler
 import top.colter.dynamic.link.LinkParseCommandHandler
+import top.colter.dynamic.message.OutboundMessageService
+import top.colter.dynamic.message.RENDER_VARIANT_MANUAL_FORWARD
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.nio.file.Files
@@ -89,6 +93,7 @@ public class CommandListener(
     private val eventBus: EventBus = EventBus(),
     private val publisherDrawThemeService: PublisherDrawThemeService = PublisherDrawThemeService(),
     private val primaryBotAccountResolver: suspend (CommandContext) -> String? = { null },
+    private val outboundMessageService: OutboundMessageService = OutboundMessageService(),
     publisherThemeInitializer: PublisherThemeInitializer? = null,
 ) : Listener<CommandEvent> {
     private companion object {
@@ -197,6 +202,7 @@ public class CommandListener(
             MAIN_OWNER,
         )
         commandRegistry.register(LoginCommandHandler(publisherLoginResolver, commandPrefixProvider, eventBus), MAIN_OWNER)
+        commandRegistry.register(ForwardCommandHandler(commandPrefixProvider, outboundMessageService), MAIN_OWNER)
         commandRegistry.register(
             UnsubscribeCommandHandler(publisherFollowResolver, { runtimeConfig }, commandPrefixProvider, eventBus),
             MAIN_OWNER,
@@ -591,6 +597,57 @@ private class StopApplicationCommandHandler(
             afterReply = {
                 stopRequester("command:${invocation.context.target.stableValue()}")
             },
+        )
+    }
+}
+
+private class ForwardCommandHandler(
+    private val commandPrefixProvider: () -> String,
+    private val outboundMessageService: OutboundMessageService,
+) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
+    override val spec: CommandSpec = CommandSpec(
+        path = listOf("forward"),
+        description = "批量转发文本消息到指定目标",
+        usage = "forward <platform> <kind> <targetIds> <message...>",
+        requiredRole = CommandRole.ADMIN,
+    )
+
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.size < 4) {
+            return failed("用法：$commandPrefix ${spec.usage}")
+        }
+        val platform = invocation.args[0].trim().lowercase()
+        if (platform.isBlank()) return failed("消息目标平台不能为空")
+
+        val kind = TargetKind.entries.firstOrNull { it.name.equals(invocation.args[1], ignoreCase = true) }
+            ?: return failed("目标类型无效：${invocation.args[1]}")
+        val targetIds = invocation.args[2]
+            .split(',', '，')
+            .mapNotNull { it.trim().takeIf(String::isNotBlank) }
+            .distinct()
+        if (targetIds.isEmpty()) return failed("消息目标 ID 不能为空")
+
+        val text = invocation.args.drop(3).joinToString(" ").trim()
+        if (text.isBlank()) return failed("转发内容不能为空")
+
+        val targets = targetIds.map { targetId ->
+            TargetAddress.of(
+                platformId = platform,
+                kind = kind,
+                externalId = targetId,
+            )
+        }
+        val result = outboundMessageService.enqueueText(
+            source = "command:${invocation.context.target.stableValue()}",
+            targets = targets,
+            text = text,
+            renderVariant = RENDER_VARIANT_MANUAL_FORWARD,
+        )
+        return success(
+            "已创建转发任务：目标=${result.targetCount}，新增投递=${result.newDeliveryCount}，已存在=${result.existingDeliveryCount}",
         )
     }
 }

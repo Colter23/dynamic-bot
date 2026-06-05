@@ -25,9 +25,14 @@ import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.event.ListenerToken
 import top.colter.dynamic.event.MessageEvent
+import top.colter.dynamic.event.SystemNotificationEvent
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.core.event.SourceUpdatePublisher
 import top.colter.dynamic.core.event.SubscriptionChangedEvent
+import top.colter.dynamic.core.event.SystemNotificationPublishRequest
+import top.colter.dynamic.core.event.SystemNotificationPublishResult
+import top.colter.dynamic.core.event.SystemNotificationPublisher
+import top.colter.dynamic.core.event.SystemNotificationSeverity
 import top.colter.dynamic.core.link.LinkResolver
 import top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION
 import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
@@ -120,6 +125,7 @@ public class PluginManager(
                     }.onFailure { e ->
                         result.failedPlugins[descriptor.id] = e.message ?: e::class.simpleName ?: "未知错误"
                         logger.error(e) { "插件加载失败：pluginId=${descriptor.id}" }
+                        publishPluginFailure(descriptor.id, "load", e, "插件加载失败")
                     }
                 }
 
@@ -165,6 +171,7 @@ public class PluginManager(
                 runtime.state = PluginState.FAILED
                 runtime.error = e
                 logger.error(e) { "插件启动失败：pluginId=$pluginId" }
+                publishPluginFailure(pluginId, "start", e, "插件启动失败")
             }
         }
     }
@@ -226,6 +233,7 @@ public class PluginManager(
             if (scanResult == null) {
                 val message = "插件文件不存在或描述无效：$pluginId"
                 logger.warn { "插件重载失败：pluginId=$pluginId，原因=文件不存在或描述无效" }
+                publishPluginFailure(pluginId, "reload", message, "插件重载失败")
                 return PluginReloadResult(
                     pluginId = pluginId,
                     success = false,
@@ -250,6 +258,7 @@ public class PluginManager(
                     )
                 } else {
                     val message = info?.error?.message ?: "插件重载后状态异常：${info?.state ?: "未知状态"}"
+                    publishPluginFailure(pluginId, "reload", message, "插件重载失败")
                     PluginReloadResult(
                         pluginId = pluginId,
                         success = false,
@@ -261,6 +270,7 @@ public class PluginManager(
                 }
             }.getOrElse {
                 logger.error(it) { "插件重载失败：pluginId=$pluginId" }
+                publishPluginFailure(pluginId, "reload", it, "插件重载失败")
                 PluginReloadResult(
                     pluginId = pluginId,
                     success = false,
@@ -363,6 +373,7 @@ public class PluginManager(
                 )
             } catch (e: Throwable) {
                 logger.error(e) { "插件安装更新失败，准备回滚：pluginId=$pluginId" }
+                publishPluginFailure(pluginId, "install_or_update", e, "插件安装或更新失败")
                 rollbackInstallOrUpdate(
                     pluginId = pluginId,
                     targetFile = targetFile,
@@ -599,6 +610,7 @@ public class PluginManager(
             sourceUpdatePublisher = sourceUpdatePublisher,
             sourceStateStore = sourceStateStore,
             subscriptionQueryService = subscriptionQueryService,
+            notificationPublisher = notificationPublisherFor(descriptor.id),
         )
 
         runCatching {
@@ -639,6 +651,55 @@ public class PluginManager(
         require(conflicts.isEmpty()) {
             "插件 ID 重复：$pluginId，冲突文件=${conflicts.joinToString { it.jarFile.name }}"
         }
+    }
+
+    private fun notificationPublisherFor(pluginId: String): SystemNotificationPublisher = SystemNotificationPublisher { request ->
+        eventBus.broadcast(
+            SystemNotificationEvent(
+                sourcePlugin = pluginId,
+                notification = request,
+            ),
+        )
+        SystemNotificationPublishResult.accepted()
+    }
+
+    private fun publishPluginFailure(
+        pluginId: String,
+        operation: String,
+        error: Throwable,
+        title: String,
+    ) {
+        publishPluginFailure(
+            pluginId = pluginId,
+            operation = operation,
+            errorText = error.message ?: error::class.qualifiedName ?: "未知错误",
+            title = title,
+        )
+    }
+
+    private fun publishPluginFailure(
+        pluginId: String,
+        operation: String,
+        errorText: String,
+        title: String,
+    ) {
+        eventBus.broadcast(
+            SystemNotificationEvent(
+                sourcePlugin = pluginId,
+                notification = SystemNotificationPublishRequest(
+                    type = "plugin.lifecycle_failed",
+                    severity = SystemNotificationSeverity.ERROR,
+                    title = title,
+                    content = "插件执行 $operation 操作失败：$errorText",
+                    dedupeKey = "plugin.lifecycle_failed:$pluginId:$operation",
+                    details = mapOf(
+                        "pluginId" to pluginId,
+                        "operation" to operation,
+                        "error" to errorText,
+                    ),
+                ),
+            ),
+        )
     }
 
     private fun ensureTargetFileReusable(pluginId: String, targetFile: File) {
@@ -726,6 +787,7 @@ public class PluginManager(
                 runtime.state = PluginState.FAILED
                 runtime.error = e
                 logger.error(e) { "插件停止失败：pluginId=$pluginId" }
+                publishPluginFailure(pluginId, "stop", e, "插件停止失败")
             }
         } else {
             drainDispatchJobs(pluginId)

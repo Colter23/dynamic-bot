@@ -1,6 +1,8 @@
 ﻿package top.colter.dynamic
 
 import top.colter.dynamic.core.command.CommandPermissionRule
+import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.event.SystemNotificationSeverity
 import top.colter.dynamic.core.plugin.MessageSinkRoutingPolicy
 
 public data class MainDynamicConfig(
@@ -9,6 +11,7 @@ public data class MainDynamicConfig(
     val subscription: SubscriptionConfig = SubscriptionConfig(),
     val linkParsing: LinkParsingConfig = LinkParsingConfig(),
     val imageCache: ImageCacheConfig = ImageCacheConfig(),
+    val notifications: NotificationConfig = NotificationConfig(),
     val messageRouting: MessageRoutingConfig = MessageRoutingConfig(),
     val delivery: DeliveryConfig = DeliveryConfig(),
     val draw: DrawSettings = DrawSettings(),
@@ -94,6 +97,25 @@ public data class ImageCacheConfig(
 public data class ImageCleanupConfig(
     val enabled: Boolean = true,
     val maxIdleDays: Long = 30,
+)
+
+public data class NotificationConfig(
+    val enabled: Boolean = true,
+    val minSeverity: SystemNotificationSeverity = SystemNotificationSeverity.WARN,
+    val dedupeSeconds: Int = 300,
+    val routeMonitorIntervalSeconds: Int = 30,
+    val adminTargets: List<NotificationTargetConfig> = emptyList(),
+)
+
+public data class NotificationTargetConfig(
+    val platformId: String = "",
+    val targetKind: TargetKind = TargetKind.USER,
+    val externalId: String = "",
+    val scopeId: String? = null,
+    val threadId: String? = null,
+    val accountId: String? = null,
+    val name: String = "",
+    val enabled: Boolean = true,
 )
 
 public data class DeliveryConfig(

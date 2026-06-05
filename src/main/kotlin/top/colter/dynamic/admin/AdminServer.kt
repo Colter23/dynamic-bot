@@ -42,6 +42,7 @@ import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.draw.resource.PlatformDrawAssetResource
 import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.message.OutboundMessageService
 import top.colter.dynamic.plugin.PluginManager
 
 private val logger = loggerFor<AdminServer>()
@@ -55,6 +56,7 @@ public class AdminServer(
     private val commandRegistry: CommandRegistry = CommandRegistry(),
     private val eventBus: EventBus = EventBus(),
     private val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
+    private val outboundMessageService: OutboundMessageService = OutboundMessageService(),
     private val stopRequester: ((String) -> Unit)? = null,
     private val startedAtEpochMillis: Long = System.currentTimeMillis(),
 ) {
@@ -76,6 +78,7 @@ public class AdminServer(
                 configService = configService,
                 commandRegistry = commandRegistry,
                 eventBus = eventBus,
+                outboundMessageService = outboundMessageService,
                 startedAtEpochMillis = startedAtEpochMillis,
             ),
             loginService = adminLoginService,
@@ -204,6 +207,10 @@ public fun Application.adminModule(context: AdminServerContext) {
                         limit = call.optionalQueryInt("limit"),
                     )
                 }
+            }
+            post("/message-forwards") {
+                if (!call.ensureAuthorized(context)) return@post
+                call.respondApi { context.service.forwardMessage(call.receive()) }
             }
             get("/media/image") {
                 if (!call.ensureAuthorized(context)) return@get

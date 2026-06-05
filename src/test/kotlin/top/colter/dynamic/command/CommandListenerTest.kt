@@ -35,6 +35,7 @@ import top.colter.dynamic.core.plugin.PublisherFollowPlugin
 import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.LinkParseTargetConfigRepository
+import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.repository.PublisherDrawThemeRepository
 import top.colter.dynamic.repository.PublisherRepository
@@ -225,6 +226,24 @@ class CommandListenerTest {
         assertEquals(CommandStatus.REJECTED, result.status)
     }
 
+    @Test
+    fun forwardShouldEnqueueManualMessageForExplicitTargets() = runBlocking {
+        initDb("command-forward")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = adminConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db forward qq GROUP 10001,10002 维护通知"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        assertTrue(renderMessage(result).contains("新增投递=2"))
+        assertEquals(2, MessageDeliveryRepository.findRecent(limit = 10).size)
+    }
+
     private suspend fun dispatch(
         eventBus: EventBus,
         listener: CommandListener,
@@ -306,6 +325,14 @@ class CommandListenerTest {
     private fun publicUserConfig(): MainDynamicConfig {
         return MainDynamicConfig(
             command = top.colter.dynamic.CommandConfig(requirePermissionRule = false),
+        )
+    }
+
+    private fun adminConfig(): MainDynamicConfig {
+        return MainDynamicConfig(
+            command = top.colter.dynamic.CommandConfig(
+                permissions = listOf(CommandPermissionRule(senderId = "sender", role = CommandRole.ADMIN)),
+            ),
         )
     }
 
