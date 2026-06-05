@@ -1,0 +1,122 @@
+package top.colter.dynamic.media
+
+import io.ktor.http.ContentType
+import java.net.URI
+import java.net.URLDecoder
+import java.nio.charset.StandardCharsets
+import kotlin.io.path.createDirectories
+import kotlin.io.path.createTempDirectory
+import kotlin.io.path.writeBytes
+import kotlin.test.Test
+import kotlin.test.assertContentEquals
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+import top.colter.dynamic.ImageCacheConfig
+import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.OutboundMediaConfig
+import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
+
+class OutboundMediaServiceTest {
+    @Test
+    fun `rewrite local rendered image to signed public url and resolve it`() {
+        val renderedRoot = createTempDirectory("outbound-rendered")
+        val sourceRoot = createTempDirectory("outbound-source")
+        val imageBytes = byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte(), 1, 2, 3)
+        val image = renderedRoot.resolve("bilibili").resolve("demo.png")
+        image.parent.createDirectories()
+        image.writeBytes(imageBytes)
+
+        val service = OutboundMediaService(
+            configProvider = {
+                MainDynamicConfig(
+                    imageCache = ImageCacheConfig(
+                        sourceRoot = sourceRoot.toString(),
+                        renderedRoot = renderedRoot.toString(),
+                        maxImageBytes = 1024,
+                    ),
+                    outboundMedia = OutboundMediaConfig(
+                        publicBaseUrl = "http://example.com:2233/",
+                        urlTtlSeconds = 60,
+                        signingSecret = "secret",
+                    ),
+                )
+            },
+            nowEpochSeconds = { 1_000 },
+        )
+
+        val rewritten = service.rewriteMedia(MediaRef(uri = image.toString(), kind = MediaKind.IMAGE))
+
+        assertTrue(rewritten.uri.startsWith("http://example.com:2233/media/outbound/"))
+        assertFalse(rewritten.uri.contains(image.toString()))
+        val parts = signedUrlParts(rewritten.uri)
+        val result = service.resolve(parts.id, parts.expires, parts.signature)
+        assertEquals(ContentType.Image.PNG, result.contentType)
+        assertEquals(60, result.cacheMaxAgeSeconds)
+        assertContentEquals(imageBytes, result.bytes)
+    }
+
+    @Test
+    fun `keep local image when public base url is blank`() {
+        val service = OutboundMediaService(
+            configProvider = {
+                MainDynamicConfig(outboundMedia = OutboundMediaConfig(signingSecret = "secret"))
+            },
+            nowEpochSeconds = { 1_000 },
+        )
+        val media = MediaRef(uri = "data/images/draw/demo.png", kind = MediaKind.IMAGE)
+
+        assertEquals(media, service.rewriteMedia(media))
+    }
+
+    @Test
+    fun `reject expired signed url`() {
+        val renderedRoot = createTempDirectory("outbound-expired")
+        val image = renderedRoot.resolve("demo.png")
+        image.writeBytes(byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte()))
+        var now = 1_000L
+        val service = OutboundMediaService(
+            configProvider = {
+                MainDynamicConfig(
+                    imageCache = ImageCacheConfig(renderedRoot = renderedRoot.toString()),
+                    outboundMedia = OutboundMediaConfig(
+                        publicBaseUrl = "http://example.com",
+                        urlTtlSeconds = 10,
+                        signingSecret = "secret",
+                    ),
+                )
+            },
+            nowEpochSeconds = { now },
+        )
+        val parts = signedUrlParts(service.rewriteMedia(MediaRef(image.toString(), MediaKind.IMAGE)).uri)
+
+        now = 1_011
+
+        assertFailsWith<IllegalArgumentException> {
+            service.resolve(parts.id, parts.expires, parts.signature)
+        }
+    }
+
+    private fun signedUrlParts(url: String): SignedUrlParts {
+        val uri = URI(url)
+        val id = uri.path.substringAfterLast('/')
+        val params = uri.rawQuery.split('&')
+            .map { it.substringBefore('=') to it.substringAfter('=', "") }
+            .associate { (key, value) ->
+                key to URLDecoder.decode(value, StandardCharsets.UTF_8)
+            }
+        return SignedUrlParts(
+            id = URLDecoder.decode(id, StandardCharsets.UTF_8),
+            expires = params.getValue("expires").toLong(),
+            signature = params.getValue("sig"),
+        )
+    }
+
+    private data class SignedUrlParts(
+        val id: String,
+        val expires: Long,
+        val signature: String,
+    )
+}

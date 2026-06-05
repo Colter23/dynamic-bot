@@ -25,6 +25,16 @@ public class MainConfigStore(
     private var currentConfig: MainDynamicConfig? = null
 
     public fun loadOrCreate(adminTokenProvider: () -> String): MainDynamicConfig {
+        return loadOrCreate(
+            adminTokenProvider = adminTokenProvider,
+            secretProvider = adminTokenProvider,
+        )
+    }
+
+    public fun loadOrCreate(
+        adminTokenProvider: () -> String,
+        secretProvider: () -> String,
+    ): MainDynamicConfig {
         val loaded = configService.loadOrCreate(
             MainDynamicConfig.CONFIG_ID,
             MainDynamicConfig::class,
@@ -37,16 +47,21 @@ public class MainConfigStore(
         } else {
             loaded
         }
-        if (withToken != loaded) {
-            configService.save(MainDynamicConfig.CONFIG_ID, withToken)
+        val withSecrets = if (withToken.outboundMedia.signingSecret.isBlank()) {
+            withToken.copy(outboundMedia = withToken.outboundMedia.copy(signingSecret = secretProvider()))
+        } else {
+            withToken
         }
-        AdminLogBuffer.configureCapacity(withToken.webAdmin.logBufferCapacity)
-        currentConfig = withToken
-        return withToken
+        if (withSecrets != loaded) {
+            configService.save(MainDynamicConfig.CONFIG_ID, withSecrets)
+        }
+        AdminLogBuffer.configureCapacity(withSecrets.webAdmin.logBufferCapacity)
+        currentConfig = withSecrets
+        return withSecrets
     }
 
     public fun current(): MainDynamicConfig {
-        return currentConfig ?: loadOrCreate { "" }
+        return currentConfig ?: loadOrCreate(adminTokenProvider = { "" }, secretProvider = { "" })
     }
 
     public fun save(next: MainDynamicConfig): ConfigApplyResult {
@@ -370,6 +385,37 @@ public object MainConfigForms {
                     numberKind = ConfigNumberKind.INTEGER,
                     restartRequired = true,
                     restartTarget = "主程序",
+                ),
+                ConfigFieldSpec(
+                    path = "outboundMedia.enabled",
+                    label = "启用出站媒体 URL",
+                    type = ConfigFieldType.BOOLEAN,
+                    section = "出站媒体",
+                    description = "开启后，本地生成的图片可以转换成带签名的临时链接，供远程消息出口拉取。",
+                ),
+                ConfigFieldSpec(
+                    path = "outboundMedia.publicBaseUrl",
+                    label = "外部访问地址",
+                    type = ConfigFieldType.TEXT,
+                    section = "出站媒体",
+                    description = "远程 OneBot 能访问到的主项目地址，例如 http://公网IP:2233；留空时继续使用插件兜底发送方式。",
+                ),
+                ConfigFieldSpec(
+                    path = "outboundMedia.urlTtlSeconds",
+                    label = "链接有效期（秒）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "出站媒体",
+                    description = "生成的媒体链接在该时间内有效；投递重试会重新生成链接。",
+                    min = 1,
+                    numberKind = ConfigNumberKind.INTEGER,
+                ),
+                ConfigFieldSpec(
+                    path = "outboundMedia.signingSecret",
+                    label = "媒体链接签名密钥",
+                    type = ConfigFieldType.SECRET,
+                    section = "出站媒体",
+                    description = "留空时首次启动自动生成；修改后已经生成的媒体链接会立即失效。",
+                    secret = true,
                 ),
                 ConfigFieldSpec(
                     path = "notifications.enabled",
@@ -699,6 +745,16 @@ public object MainConfigForms {
         require(config.imageCache.cleanupCron.isNotBlank()) { "清理任务 Cron 不能为空" }
         require(config.imageCache.sourceCleanup.maxIdleDays >= 0) { "原图最大闲置天数不能为负数" }
         require(config.imageCache.renderedCleanup.maxIdleDays >= 0) { "渲染图片最大闲置天数不能为负数" }
+        require(config.outboundMedia.urlTtlSeconds >= 1) { "出站媒体链接有效期至少为 1 秒" }
+        val outboundMediaBaseUrl = config.outboundMedia.publicBaseUrl.trim()
+        if (outboundMediaBaseUrl.isNotBlank()) {
+            require(outboundMediaBaseUrl.startsWith("http://", ignoreCase = true) ||
+                outboundMediaBaseUrl.startsWith("https://", ignoreCase = true)) {
+                "出站媒体外部访问地址必须以 http:// 或 https:// 开头"
+            }
+            require(config.webAdmin.enabled) { "配置出站媒体外部访问地址时需要启用 Web 后台服务" }
+            require(config.outboundMedia.signingSecret.isNotBlank()) { "出站媒体签名密钥不能为空" }
+        }
         require(config.notifications.dedupeSeconds >= 0) { "通知去重时间不能为负数" }
         require(config.notifications.routeMonitorIntervalSeconds >= 1) { "Bot 状态检查间隔至少为 1 秒" }
         val notificationTargetKeys = config.notifications.adminTargets

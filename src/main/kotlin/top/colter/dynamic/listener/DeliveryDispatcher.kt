@@ -19,6 +19,7 @@ import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.event.CommandResultEvent
+import top.colter.dynamic.media.OutboundMediaService
 import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.repository.MessageDeliveryRepository
 
@@ -36,6 +37,7 @@ public class DeliveryDispatcher(
     private val configProvider: () -> DeliveryConfig,
     private val routingConfigProvider: () -> MessageRoutingConfig = { MessageRoutingConfig() },
     private val accountRouter: MessageSinkAccountRouter = MessageSinkAccountRouter(),
+    private val outboundMediaService: OutboundMediaService? = null,
 ) {
     public suspend fun dispatchDue(): DeliveryDispatchStats = coroutineScope {
         val config = configProvider()
@@ -91,18 +93,19 @@ public class DeliveryDispatcher(
     }
 
     public suspend fun sendCommandResult(request: CommandResultSendRequest): MessageSendResult {
-        val target = request.target.address
+        val rewrittenRequest = rewriteCommandResultRequest(request)
+        val target = rewrittenRequest.target.address
         val routed = resolveRoutedSinks(target)
         if (routed.routedSinkIds.isNotEmpty()) {
             return accountRouter.sendCommandResult(
                 candidates = routed.candidates,
                 policy = routingConfigProvider().policyFor(target.platformId.value),
-                request = request,
+                request = rewrittenRequest,
             )
         }
 
         return when (val direct = resolveDirectSink(target)) {
-            is DirectSinkResolveResult.Found -> runCatching { direct.sink.sendCommandResult(request) }
+            is DirectSinkResolveResult.Found -> runCatching { direct.sink.sendCommandResult(rewrittenRequest) }
                 .getOrElse { MessageSendResult.failed(it.message ?: "命令回复发送失败", retryable = true) }
             DirectSinkResolveResult.NotFound -> {
                 logger.warn { "命令回复无可用消息出口：traceId=${request.inReplyTo}，target=${target.stableValue()}" }
@@ -155,34 +158,47 @@ public class DeliveryDispatcher(
     }
 
     private suspend fun sendDelivery(request: MessageDeliveryRequest, config: DeliveryConfig): DeliveryOutcome {
-        val routed = resolveRoutedSinks(request.target)
+        val rewrittenRequest = rewriteDeliveryRequest(request)
+        val routed = resolveRoutedSinks(rewrittenRequest.target)
         if (routed.routedSinkIds.isNotEmpty()) {
-            return sendWithRoutes(request, routed.candidates, config)
+            return sendWithRoutes(rewrittenRequest, routed.candidates, config)
         }
 
-        return when (val direct = resolveDirectSink(request.target)) {
-            is DirectSinkResolveResult.Found -> sendWithSink(request, direct.sink, config)
+        return when (val direct = resolveDirectSink(rewrittenRequest.target)) {
+            is DirectSinkResolveResult.Found -> sendWithSink(rewrittenRequest, direct.sink, config)
             DirectSinkResolveResult.NotFound -> {
                 logger.warn {
-                    "消息投递失败：未找到消息出口插件，deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}"
+                    "消息投递失败：未找到消息出口插件，deliveryId=${rewrittenRequest.delivery.id}，messageId=${rewrittenRequest.delivery.messageId}，target=${rewrittenRequest.target.stableValue()}"
                 }
                 MessageDeliveryRepository.markFailed(
-                    request.delivery.id,
-                    "未找到消息出口插件：platform=${request.target.platformId.value}，kind=${request.target.kind.name}",
+                    rewrittenRequest.delivery.id,
+                    "未找到消息出口插件：platform=${rewrittenRequest.target.platformId.value}，kind=${rewrittenRequest.target.kind.name}",
                 )
                 DeliveryOutcome.FAILED
             }
             is DirectSinkResolveResult.Ambiguous -> {
                 logger.warn {
-                    "消息投递失败：消息出口插件不唯一，deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，plugins=${direct.pluginIds}"
+                    "消息投递失败：消息出口插件不唯一，deliveryId=${rewrittenRequest.delivery.id}，messageId=${rewrittenRequest.delivery.messageId}，target=${rewrittenRequest.target.stableValue()}，plugins=${direct.pluginIds}"
                 }
                 MessageDeliveryRepository.markFailed(
-                    request.delivery.id,
-                    "消息出口插件不唯一：platform=${request.target.platformId.value}，kind=${request.target.kind.name}，plugins=${direct.pluginIds.joinToString(",")}",
+                    rewrittenRequest.delivery.id,
+                    "消息出口插件不唯一：platform=${rewrittenRequest.target.platformId.value}，kind=${rewrittenRequest.target.kind.name}，plugins=${direct.pluginIds.joinToString(",")}",
                 )
                 DeliveryOutcome.FAILED
             }
         }
+    }
+
+    private fun rewriteDeliveryRequest(request: MessageDeliveryRequest): MessageDeliveryRequest {
+        val service = outboundMediaService ?: return request
+        val message = service.rewriteMessage(request.message)
+        return if (message == request.message) request else request.copy(message = message)
+    }
+
+    private fun rewriteCommandResultRequest(request: CommandResultSendRequest): CommandResultSendRequest {
+        val service = outboundMediaService ?: return request
+        val chain = service.rewriteBatches(request.chain)
+        return if (chain == request.chain) request else request.copy(chain = chain)
     }
 
     private suspend fun sendWithRoutes(

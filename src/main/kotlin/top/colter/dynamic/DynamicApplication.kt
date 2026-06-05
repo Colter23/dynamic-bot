@@ -45,6 +45,7 @@ import top.colter.dynamic.link.DeliveryLinkParseProgressMessenger
 import top.colter.dynamic.link.DefaultLinkPreviewRenderer
 import top.colter.dynamic.link.LinkParseService
 import top.colter.dynamic.listener.SourceUpdateProcessor
+import top.colter.dynamic.media.OutboundMediaService
 import top.colter.dynamic.message.OutboundMessageService
 import top.colter.dynamic.notification.MessageSinkRouteMonitor
 import top.colter.dynamic.notification.SystemNotificationService
@@ -63,6 +64,7 @@ public object DynamicApplication : CoroutineScope {
     private lateinit var sourceUpdateProcessor: SourceUpdateProcessor
     private lateinit var deliveryDispatcher: DeliveryDispatcher
     private lateinit var outboundMessageService: OutboundMessageService
+    private lateinit var outboundMediaService: OutboundMediaService
     private lateinit var messageSinkRouteMonitor: MessageSinkRouteMonitor
     private val commandPublisher: CommandPublisher = CommandPublisher { request ->
         eventBus.broadcast(
@@ -118,9 +120,10 @@ public object DynamicApplication : CoroutineScope {
 
         eventBus.configureScope(this)
         var generatedAdminToken: String? = null
-        val config = configStore.loadOrCreate {
-            generateAdminToken().also { generatedAdminToken = it }
-        }
+        val config = configStore.loadOrCreate(
+            adminTokenProvider = { generateAdminToken().also { generatedAdminToken = it } },
+            secretProvider = { generateAdminToken() },
+        )
         generatedAdminToken?.let { token ->
             logger.info {
                 "Web 后台 Token 已自动生成：$token，请妥善保存；也可在主配置 webAdmin.token 中查看或修改"
@@ -155,11 +158,13 @@ public object DynamicApplication : CoroutineScope {
             maxMemoryEntries = config.imageCache.memoryMaxEntries,
             maxReadBytes = config.imageCache.maxImageBytes,
         )
+        outboundMediaService = OutboundMediaService(configProvider = configStore::current)
         registerImageCleanupTask(config)
         deliveryDispatcher = DeliveryDispatcher(
             sinkProvider = { pluginManager.getMessageSinkPlugins() },
             configProvider = { configStore.current().delivery },
             routingConfigProvider = { configStore.current().messageRouting },
+            outboundMediaService = outboundMediaService,
         )
         outboundMessageService = OutboundMessageService(
             onMessagesQueued = {
@@ -259,6 +264,7 @@ public object DynamicApplication : CoroutineScope {
             eventBus = eventBus,
             drawAssetRegistry = drawAssetRegistry,
             outboundMessageService = outboundMessageService,
+            outboundMediaService = outboundMediaService,
             stopRequester = { reason -> requestStop(reason) },
             startedAtEpochMillis = startedAtEpochMillis,
         )

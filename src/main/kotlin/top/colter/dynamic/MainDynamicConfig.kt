@@ -11,6 +11,7 @@ public data class MainDynamicConfig(
     val subscription: SubscriptionConfig = SubscriptionConfig(),
     val linkParsing: LinkParsingConfig = LinkParsingConfig(),
     val imageCache: ImageCacheConfig = ImageCacheConfig(),
+    val outboundMedia: OutboundMediaConfig = OutboundMediaConfig(),
     val notifications: NotificationConfig = NotificationConfig(),
     val messageRouting: MessageRoutingConfig = MessageRoutingConfig(),
     val delivery: DeliveryConfig = DeliveryConfig(),
@@ -97,6 +98,13 @@ public data class ImageCacheConfig(
 public data class ImageCleanupConfig(
     val enabled: Boolean = true,
     val maxIdleDays: Long = 30,
+)
+
+public data class OutboundMediaConfig(
+    val enabled: Boolean = true,
+    val publicBaseUrl: String = "",
+    val urlTtlSeconds: Int = 1_800,
+    val signingSecret: String = "",
 )
 
 public data class NotificationConfig(

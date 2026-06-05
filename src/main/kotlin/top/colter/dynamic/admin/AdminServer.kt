@@ -42,6 +42,8 @@ import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.draw.resource.PlatformDrawAssetResource
 import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.media.OutboundMediaResult
+import top.colter.dynamic.media.OutboundMediaService
 import top.colter.dynamic.message.OutboundMessageService
 import top.colter.dynamic.plugin.PluginManager
 
@@ -57,6 +59,7 @@ public class AdminServer(
     private val eventBus: EventBus = EventBus(),
     private val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
     private val outboundMessageService: OutboundMessageService = OutboundMessageService(),
+    private val outboundMediaService: OutboundMediaService = OutboundMediaService(configProvider),
     private val stopRequester: ((String) -> Unit)? = null,
     private val startedAtEpochMillis: Long = System.currentTimeMillis(),
 ) {
@@ -83,6 +86,7 @@ public class AdminServer(
             ),
             loginService = adminLoginService,
             mediaService = AdminMediaService(configProvider = configProvider),
+            outboundMediaService = outboundMediaService,
             drawAssetRegistry = drawAssetRegistry,
             stopRequester = stopRequester,
         )
@@ -106,6 +110,7 @@ public data class AdminServerContext(
     val service: AdminService,
     val loginService: AdminLoginService,
     val mediaService: AdminMediaService = AdminMediaService(),
+    val outboundMediaService: OutboundMediaService = OutboundMediaService(configProvider = { MainDynamicConfig() }),
     val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
     val stopRequester: ((String) -> Unit)? = null,
 )
@@ -135,6 +140,17 @@ public fun Application.adminModule(context: AdminServerContext) {
         }
         get("/admin/{...}") {
             call.respondText(AdminStatic.indexHtml, ContentType.Text.Html)
+        }
+        get("/media/outbound/{id}") {
+            call.respondOutboundMedia {
+                context.outboundMediaService.resolve(
+                    id = call.pathString("id"),
+                    expires = call.request.queryParameters["expires"]?.toLongOrNull()
+                        ?: throw IllegalArgumentException("缺少或无效的过期时间"),
+                    signature = call.request.queryParameters["sig"]
+                        ?: throw IllegalArgumentException("缺少媒体链接签名"),
+                )
+            }
         }
 
         route("/api") {
@@ -465,6 +481,23 @@ private suspend fun ApplicationCall.respondMedia(block: suspend () -> AdminMedia
         respond(HttpStatusCode.BadGateway, ErrorResponse(e.message ?: "图片加载失败"))
     } catch (e: Exception) {
         respond(HttpStatusCode.BadGateway, ErrorResponse(e.message ?: "图片加载失败"))
+    }
+}
+
+private suspend fun ApplicationCall.respondOutboundMedia(block: suspend () -> OutboundMediaResult) {
+    try {
+        val result = block()
+        response.headers.append(HttpHeaders.CacheControl, "public, max-age=${result.cacheMaxAgeSeconds}")
+        respondBytes(
+            bytes = result.bytes,
+            contentType = result.contentType,
+        )
+    } catch (e: IllegalArgumentException) {
+        respond(HttpStatusCode.BadRequest, ErrorResponse(e.message ?: "媒体链接无效"))
+    } catch (e: NoSuchElementException) {
+        respond(HttpStatusCode.NotFound, ErrorResponse(e.message ?: "媒体资源不存在"))
+    } catch (e: Exception) {
+        respond(HttpStatusCode.BadGateway, ErrorResponse(e.message ?: "媒体资源读取失败"))
     }
 }
 
