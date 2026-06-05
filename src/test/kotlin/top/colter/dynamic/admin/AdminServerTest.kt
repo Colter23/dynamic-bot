@@ -431,11 +431,13 @@ class AdminServerTest {
                 platformId = "qq",
                 targetKind = "GROUP",
                 externalId = "100",
+                accountId = "bot-1",
                 linkParseTriggerMode = "ALWAYS",
             ),
         )
 
         assertEquals("测试群", created.name)
+        assertEquals("bot-1", created.accountId)
         assertEquals(avatar.uri, created.avatarUri)
         assertEquals("ALWAYS", created.linkParseTriggerMode)
         assertEquals("CUSTOM", created.linkParseConfigSource)

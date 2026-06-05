@@ -1182,7 +1182,7 @@ public class AdminService(
             val sink = handle.instance
             if (!sink.supportsTarget(address)) continue
             val candidate = sink.resolveMessageTarget(address) ?: continue
-            if (candidate.address == address) return candidate
+            if (candidate.address.stableValue() == address.stableValue()) return candidate
         }
         return null
     }

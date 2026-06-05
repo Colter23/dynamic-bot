@@ -86,7 +86,9 @@ const $ = id => document.getElementById(id);
         DYNAMIC: "动态", LIVE_STARTED: "开播", LIVE_ENDED: "下播",
         BLOCK: "阻止", ALLOW: "允许", MENTION_ALL: "@全体", NONE: "无",
         IMAGE: "图片", VIDEO: "视频", CARD: "卡片", POLL: "投票", ORIGIN: "转发",
-        OPEN: "直播中", CLOSE: "未开播", ROUND: "轮播"
+        OPEN: "直播中", CLOSE: "未开播", ROUND: "轮播",
+        READY: "可用", UNAVAILABLE: "不可用",
+        ROUND_ROBIN: "轮询", PRIMARY_BACKUP: "主备"
       };
       return map[value] || value || "-";
     }
@@ -229,8 +231,116 @@ const $ = id => document.getElementById(id);
         `<option value="${mode}"${mode === selected ? " selected" : ""}>${esc(linkParseModeLabel(mode))}</option>`
       ).join("");
     }
-    function subscriberTargetAddressKey(platformId, kind, externalId, scopeId, threadId, accountId) {
-      return [platformId, kind, externalId, scopeId || "", threadId || "", accountId || ""].join("\u001F");
+    function subscriberTargetAddressKey(platformId, kind, externalId, scopeId, threadId) {
+      return [platformId, kind, externalId, scopeId || "", threadId || ""].join("\u001F");
+    }
+    function targetSources(target) {
+      return Array.isArray(target && target.sources) ? target.sources : [];
+    }
+    function targetSourceCount(target) {
+      return Number(target && target.sourceCount || targetSources(target).length || 0);
+    }
+    function sourceAccountLabel(source) {
+      const name = source && source.accountName || "";
+      const id = source && source.accountId || "";
+      if (!name) return id || "-";
+      if (!id || id === name) return name;
+      return `${name} (${id})`;
+    }
+    function sourceTransportLabel(source) {
+      return source && source.transportName || "-";
+    }
+    function sourceAccountTitle(target) {
+      const names = targetSources(target)
+        .map(source => source && (source.accountName || source.accountId))
+        .filter(Boolean);
+      return names.length ? `来源账号：${names.join("、")}` : "暂无来源账号";
+    }
+    function targetSourceToggleHtml(target, index, prefix) {
+      const count = targetSourceCount(target);
+      if (count <= 0) return `<span class="pill warn">无来源</span>`;
+      const key = `${prefix}:${index}`;
+      const labelText = `${count} 个来源`;
+      return `<button type="button" class="secondary compact target-source-toggle" data-target-source-toggle="${attr(key)}" data-target-source-label="${attr(labelText)}" aria-expanded="false" title="${attr(sourceAccountTitle(target))}">${esc(labelText)} ▶</button>`;
+    }
+    function targetSourcePanelHtml(target, index, prefix) {
+      const sources = targetSources(target);
+      if (!sources.length) return "";
+      const key = `${prefix}:${index}`;
+      return `<div class="target-source-panel" data-target-source-panel="${attr(key)}" hidden>
+        <div class="target-source-help">点击优先设定优先推送渠道，不选择就使用全局路由。</div>
+        ${sources.map(source => {
+          const selected = target && target.accountId && source.accountId === target.accountId;
+          return `
+        <div class="target-source-row">
+          <span class="target-source-account">${esc(sourceAccountLabel(source))}</span>
+          <span class="target-source-transport">${esc(sourceTransportLabel(source))}</span>
+          <button type="button" class="secondary compact target-priority-button${selected ? " active" : ""}" data-target-priority-choice="${attr(key)}" data-account-id="${attr(source.accountId)}" aria-pressed="${selected ? "true" : "false"}">${selected ? "取消优先" : "优先"}</button>
+        </div>`;
+        }).join("")}</div>`;
+    }
+    function messageTargetChoiceHtml(target, index, options = {}) {
+      const inputName = options.inputName || "targetCandidate";
+      const prefix = options.prefix || inputName;
+      const inputType = options.inputType || "checkbox";
+      const checked = !!options.checked;
+      const title = target && (target.name || target.externalId) || "-";
+      const parts = [
+        title,
+        label(target && target.targetKind),
+        target && target.externalId,
+      ].filter(Boolean).join(" · ");
+      return `<div class="target-choice target-choice-rich">
+        <label class="target-choice-main">
+          <input type="${attr(inputType)}" name="${attr(inputName)}" value="${attr(target && target.externalId || "")}" data-index="${attr(index)}"${checked ? " checked" : ""}>
+          ${mediaImage(target && target.avatarUri, "target-choice-avatar", target && target.platformId, "AVATAR")}
+          <span class="target-choice-text" title="${attr(parts)}">${esc(parts)}</span>
+        </label>
+        <div class="target-choice-tools">${targetSourceToggleHtml(target, index, prefix)}</div>
+        ${targetSourcePanelHtml(target, index, prefix)}
+      </div>`;
+    }
+    function bindTargetSourceToggles(root = document) {
+      root.querySelectorAll("[data-target-source-toggle]").forEach(button => {
+        button.onclick = event => {
+          event.preventDefault();
+          event.stopPropagation();
+          const key = button.dataset.targetSourceToggle;
+          const panel = Array.from(root.querySelectorAll("[data-target-source-panel]"))
+            .find(item => item.dataset.targetSourcePanel === key);
+          if (!panel) return;
+          const open = panel.hidden;
+          panel.hidden = !open;
+          button.setAttribute("aria-expanded", open ? "true" : "false");
+          button.textContent = `${button.dataset.targetSourceLabel || "来源"} ${open ? "▼" : "▶"}`;
+        };
+      });
+      root.querySelectorAll("[data-target-priority-choice]").forEach(button => {
+        button.onclick = event => {
+          event.preventDefault();
+          event.stopPropagation();
+          const key = button.dataset.targetPriorityChoice;
+          const selected = button.classList.contains("active");
+          Array.from(root.querySelectorAll("[data-target-priority-choice]"))
+            .filter(item => item.dataset.targetPriorityChoice === key)
+            .forEach(item => {
+              item.classList.remove("active");
+              item.setAttribute("aria-pressed", "false");
+              item.textContent = "优先";
+            });
+          if (!selected) {
+            button.classList.add("active");
+            button.setAttribute("aria-pressed", "true");
+            button.textContent = "取消优先";
+          }
+        };
+      });
+    }
+    function selectedTargetPriorityAccount(prefix, index, root = document) {
+      const key = `${prefix}:${index}`;
+      const button = Array.from(root.querySelectorAll("[data-target-priority-choice]"))
+        .find(item => item.dataset.targetPriorityChoice === key && item.classList.contains("active"));
+      return button ? (button.dataset.accountId || "").trim() : "";
     }
     function subscriberTargetCandidateCacheKey(platform, kind) {
       return `${platform || ""}\u001F${kind || ""}`;
@@ -476,6 +586,9 @@ const $ = id => document.getElementById(id);
       loadSubscriberTargetCandidates,
       clearSubscriberTargetCandidateCache,
       subscriberTargetAddressKey,
+      messageTargetChoiceHtml,
+      bindTargetSourceToggles,
+      selectedTargetPriorityAccount,
       eventTypes,
       blockKinds,
       publisherKey,

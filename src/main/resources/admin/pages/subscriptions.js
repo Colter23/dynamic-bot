@@ -41,6 +41,9 @@ let linkParseModeLabel;
 let linkParseModeOptions;
 let loadSubscriberTargetCandidates;
 let subscriberTargetAddressKey;
+let messageTargetChoiceHtml;
+let bindTargetSourceToggles;
+let selectedTargetPriorityAccount;
 let eventTypes;
 let blockKinds;
 let publisherKey;
@@ -104,6 +107,9 @@ function bindContext(nextCtx) {
     linkParseModeOptions,
     loadSubscriberTargetCandidates,
     subscriberTargetAddressKey,
+    messageTargetChoiceHtml,
+    bindTargetSourceToggles,
+    selectedTargetPriorityAccount,
     eventTypes,
     blockKinds,
     publisherKey,
@@ -350,7 +356,7 @@ async function openCreateSubscription() {
   if (!state.cache.publishers) state.cache.publishers = await api("/publishers");
   if (!state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
   const targetPlatforms = await api("/subscriber-target-platforms").catch(() => []);
-  const fallbackTargets = targetPlatforms.length ? targetPlatforms : [{ platformId: "onebot", pluginName: "手动", supportedTypes: ["GROUP", "USER"] }];
+  const fallbackTargets = targetPlatforms.length ? targetPlatforms : [{ platformId: "qq", pluginName: "手动", supportedTypes: ["GROUP", "USER"] }];
   const publisherPlatforms = await api("/publisher-platforms").catch(() => []);
   const existingTargets = state.cache.subscribers || [];
   const existingPublishers = state.cache.publishers || [];
@@ -547,6 +553,7 @@ async function openCreateSubscription() {
       const candidateList = $("subNewTargetCandidateList");
       if (!candidateList) return;
       candidateList.innerHTML = targetCandidates.map((target, index) => subscriptionTargetChoiceHtml(target, index, false)).join("");
+      bindTargetSourceToggles(candidateList);
       await hydrateMediaImages(candidateList);
       if (!isModalActive()) return;
       setCreateSubscriptionTargetStatus(`${targetCandidates.length} 个可添加目标，已添加目标不显示，来自${source}`);
@@ -686,6 +693,7 @@ function existingTargetChoiceHtml(target, index, checked) {
     target.platformId,
     label(target.targetKind),
     target.externalId,
+    target.accountId ? `优先账号 ${target.accountId}` : "",
   ].filter(Boolean).join(" · ");
   return `<label class="target-choice">
     <input type="radio" name="subExistingTarget" value="${attr(target.id)}" data-index="${attr(index)}"${checked ? " checked" : ""}>
@@ -710,17 +718,12 @@ function existingPublisherChoiceHtml(publisher, index, checked) {
 }
 
 function subscriptionTargetChoiceHtml(target, index, checked) {
-  const title = target.name || target.externalId;
-  const parts = [
-    title,
-    label(target.targetKind),
-    target.externalId,
-  ].filter(Boolean).join(" · ");
-  return `<label class="target-choice">
-    <input type="checkbox" name="subNewTargetCandidate" value="${attr(target.externalId)}" data-index="${attr(index)}"${checked ? " checked" : ""}>
-    ${mediaImage(target.avatarUri, "target-choice-avatar", target.platformId, "AVATAR")}
-    <span class="target-choice-text" title="${attr(parts)}">${esc(parts)}</span>
-  </label>`;
+  return messageTargetChoiceHtml(target, index, {
+    inputName: "subNewTargetCandidate",
+    prefix: "subNewTarget",
+    inputType: "checkbox",
+    checked,
+  });
 }
 
 function setCreateSubscriptionTargetChecked(checked) {
@@ -751,7 +754,13 @@ function collectCreateSubscriptionTargets(candidates) {
     return manual ? [{ platformId, targetKind, externalId: manual, label: manual, linkParseTriggerMode }] : [];
   }
   return Array.from(document.querySelectorAll(`input[name="subNewTargetCandidate"]:checked`))
-    .map(input => candidates[Number(input.dataset.index)])
+    .map(input => {
+      const index = Number(input.dataset.index);
+      const target = candidates[index];
+      if (!target) return null;
+      const accountId = selectedTargetPriorityAccount("subNewTarget", index);
+      return Object.assign({}, target, accountId ? { accountId } : { accountId: undefined });
+    })
     .filter(Boolean)
     .map(target => ({
       platformId,
@@ -820,10 +829,10 @@ function collectCreateSubscriptionPublisher(candidates) {
 
 function filterExistingSubscriptionTargets(candidates) {
   const existed = new Set((state.cache.subscribers || []).map(target =>
-    subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId, target.accountId)
+    subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId)
   ));
   return (candidates || []).filter(target =>
-    !existed.has(subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId, target.accountId))
+    !existed.has(subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId))
   );
 }
 

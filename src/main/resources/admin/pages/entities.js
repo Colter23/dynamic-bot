@@ -39,6 +39,9 @@ let linkParseModeLabel;
 let linkParseModeOptions;
 let loadSubscriberTargetCandidates;
 let subscriberTargetAddressKey;
+let messageTargetChoiceHtml;
+let bindTargetSourceToggles;
+let selectedTargetPriorityAccount;
 let eventTypes;
 let blockKinds;
 let publisherKey;
@@ -98,6 +101,9 @@ function bindContext(nextCtx) {
     linkParseModeOptions,
     loadSubscriberTargetCandidates,
     subscriberTargetAddressKey,
+    messageTargetChoiceHtml,
+    bindTargetSourceToggles,
+    selectedTargetPriorityAccount,
     eventTypes,
     blockKinds,
     publisherKey,
@@ -424,7 +430,7 @@ async function openCreateSubscriber() {
   const isModalActive = () => !modalClosed && createSubscriberModalSeq === modalSeq && !!$("newTargetCandidateList");
   if (!state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
   const targetPlatforms = await api("/subscriber-target-platforms").catch(() => []);
-  const fallbackTargets = targetPlatforms.length ? targetPlatforms : [{ platformId: "onebot", pluginName: "手动", supportedTypes: ["GROUP", "USER"] }];
+  const fallbackTargets = targetPlatforms.length ? targetPlatforms : [{ platformId: "qq", pluginName: "手动", supportedTypes: ["GROUP", "USER"] }];
   let targetCandidates = [];
 
   openModal("添加消息目标", `
@@ -530,6 +536,7 @@ async function openCreateSubscriber() {
       const candidateList = $("newTargetCandidateList");
       if (!candidateList) return;
       candidateList.innerHTML = targetCandidates.map((target, index) => subscriberTargetChoiceHtml(target, index, false)).join("");
+      bindTargetSourceToggles(candidateList);
       await hydrateMediaImages(candidateList);
       if (!isModalActive()) return;
       setTargetInlineStatus(`${targetCandidates.length} 个可添加目标，已添加目标不显示，来自${source}`);
@@ -564,17 +571,12 @@ function setTargetInlineStatus(text) {
 }
 
 function subscriberTargetChoiceHtml(target, index, checked) {
-  const title = target.name || target.externalId;
-  const parts = [
-    title,
-    label(target.targetKind),
-    target.externalId,
-  ].filter(Boolean).join(" · ");
-  return `<label class="target-choice">
-    <input type="checkbox" name="newTargetCandidate" value="${attr(target.externalId)}" data-index="${attr(index)}"${checked ? " checked" : ""}>
-    ${mediaImage(target.avatarUri, "target-choice-avatar", target.platformId, "AVATAR")}
-    <span class="target-choice-text" title="${attr(parts)}">${esc(parts)}</span>
-  </label>`;
+  return messageTargetChoiceHtml(target, index, {
+    inputName: "newTargetCandidate",
+    prefix: "newTarget",
+    inputType: "checkbox",
+    checked,
+  });
 }
 
 function setCreateSubscriberTargetChecked(checked) {
@@ -587,16 +589,22 @@ function collectCreateSubscriberTargets(candidates) {
     return manual ? [{ externalId: manual, name: manual }] : [];
   }
   return Array.from(document.querySelectorAll(`input[name="newTargetCandidate"]:checked`))
-    .map(input => candidates[Number(input.dataset.index)])
+    .map(input => {
+      const index = Number(input.dataset.index);
+      const target = candidates[index];
+      if (!target) return null;
+      const accountId = selectedTargetPriorityAccount("newTarget", index);
+      return Object.assign({}, target, accountId ? { accountId } : { accountId: undefined });
+    })
     .filter(Boolean);
 }
 
 function filterExistingSubscriberTargets(candidates) {
   const existed = new Set((state.cache.subscribers || []).map(target =>
-    subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId, target.accountId)
+    subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId)
   ));
   return (candidates || []).filter(target =>
-    !existed.has(subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId, target.accountId))
+    !existed.has(subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId))
   );
 }
 

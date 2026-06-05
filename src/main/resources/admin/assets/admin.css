@@ -649,6 +649,82 @@
       white-space: nowrap;
       font-weight: 700;
     }
+    .target-choice-rich {
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: start;
+      cursor: default;
+    }
+    .target-choice-main {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 18px 30px minmax(0, 1fr);
+      align-items: center;
+      gap: 9px;
+      cursor: pointer;
+    }
+    .target-choice-tools {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+    button.target-source-toggle {
+      border-color: #d4c8ee;
+      background: #f6f2ff;
+      color: #6941a8;
+    }
+    .target-source-panel {
+      grid-column: 1 / -1;
+      display: grid;
+      gap: 6px;
+      margin-left: 57px;
+      padding: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      animation: plugin-card-in 0.14s ease both;
+    }
+    .target-source-help {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.4;
+      overflow-wrap: anywhere;
+    }
+    .target-source-row {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(72px, 0.7fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 7px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: #fff;
+    }
+    .target-source-account,
+    .target-source-transport {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .target-source-transport {
+      color: var(--muted);
+      font-weight: 700;
+    }
+    button.target-priority-button {
+      border-color: #b9ded8;
+      background: #eef8f6;
+      color: var(--accent);
+    }
+    button.target-priority-button.active {
+      border-color: #f0c98d;
+      background: #fff8ea;
+      color: var(--amber);
+    }
     .target-loading {
       display: inline-flex;
       align-items: center;
