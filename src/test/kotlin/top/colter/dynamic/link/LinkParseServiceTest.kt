@@ -1,6 +1,8 @@
 package top.colter.dynamic.link
 
 import kotlin.io.path.createTempDirectory
+import kotlin.io.path.createDirectories
+import kotlin.io.path.writeBytes
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -11,6 +13,7 @@ import kotlinx.coroutines.withTimeout
 import top.colter.dynamic.LinkParseProgressReplyConfig
 import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.LinkParsingConfig
+import top.colter.dynamic.LinkVideoDownloadConfig
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.command.CommandRegistry
@@ -18,6 +21,7 @@ import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
+import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.TargetKind
@@ -26,14 +30,19 @@ import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.core.event.SourceUpdatePublisher
 import top.colter.dynamic.core.link.LinkKinds
+import top.colter.dynamic.core.link.LinkPreview
 import top.colter.dynamic.core.link.LinkResolution
 import top.colter.dynamic.core.link.LinkResolver
+import top.colter.dynamic.core.link.LinkVideoDownloadRequest
+import top.colter.dynamic.core.link.LinkVideoDownloadResult
+import top.colter.dynamic.core.link.LinkVideoDownloader
 import top.colter.dynamic.core.link.ParsedLink
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
+import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testPublisherInfo
@@ -218,6 +227,109 @@ class LinkParseServiceTest {
         assertEquals(1, resolver.resolveCalls)
     }
 
+    @Test
+    fun `video preview should append downloaded video batch when enabled`() = runBlocking {
+        initDb("video-download")
+        val cacheRoot = createTempDirectory("dynamic-bot-link-video-cache")
+        val videoFile = cacheRoot.resolve("video.mp4")
+        videoFile.writeBytes(byteArrayOf(0, 0, 0, 1))
+        val resolver = FakeVideoLinkResolver()
+        val downloader = FakeVideoDownloader(
+            result = LinkVideoDownloadResult(
+                video = MediaRef(videoFile.toString(), MediaKind.VIDEO, mimeType = "video/mp4"),
+                fileSizeBytes = 4,
+                title = "demo video",
+                durationSeconds = 120,
+            ),
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(resolver) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        videoDownload = LinkVideoDownloadConfig(
+                            enabled = true,
+                            maxDurationSeconds = 300,
+                            maxFileMegabytes = 1.0,
+                            cacheRoot = cacheRoot.toString(),
+                        ),
+                    ),
+                )
+            },
+            videoDownloadersProvider = { listOf(downloader) },
+            previewRenderer = LinkPreviewRenderer {
+                MediaRef("https://example.com/preview.png", MediaKind.IMAGE)
+            },
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://www.bilibili.com/video/BV1xx411c7mD",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(1, result.forwarded.size)
+        assertEquals("BV1xx411c7mD", downloader.requests.single().parsedLink.targetId)
+        val delivery = MessageDeliveryRepository.findRecent(limit = 1).single()
+        val message = MessageDeliveryRepository.findMessage(delivery.messageId)!!
+        assertEquals(2, message.batches.size)
+        assertTrue(message.batches.first().content.single() is MessageContent.Image)
+        val video = message.batches[1].content.single() as MessageContent.Video
+        assertEquals(videoFile.toString(), video.video.uri)
+        assertEquals(MediaKind.VIDEO, video.video.kind)
+    }
+
+    @Test
+    fun `video download should resolve blank ffmpeg path from project root`() = runBlocking {
+        initDb("video-download-ffmpeg")
+        val cacheRoot = createTempDirectory("dynamic-bot-link-video-cache")
+        val projectRoot = createTempDirectory("dynamic-bot-project-root")
+        val ffmpegName = if (System.getProperty("os.name").contains("windows", ignoreCase = true)) {
+            "ffmpeg.exe"
+        } else {
+            "ffmpeg"
+        }
+        val ffmpeg = projectRoot.resolve("ffmpeg").resolve("bin").resolve(ffmpegName)
+        ffmpeg.parent.createDirectories()
+        ffmpeg.writeBytes(byteArrayOf(1))
+        val videoFile = cacheRoot.resolve("video.mp4")
+        videoFile.writeBytes(byteArrayOf(0, 0, 0, 1))
+        val downloader = FakeVideoDownloader(
+            result = LinkVideoDownloadResult(
+                video = MediaRef(videoFile.toString(), MediaKind.VIDEO, mimeType = "video/mp4"),
+                fileSizeBytes = 4,
+            ),
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeVideoLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        videoDownload = LinkVideoDownloadConfig(
+                            enabled = true,
+                            maxFileMegabytes = 1.0,
+                            cacheRoot = cacheRoot.toString(),
+                            ffmpegPath = "",
+                        ),
+                    ),
+                )
+            },
+            videoDownloadersProvider = { listOf(downloader) },
+            previewRenderer = LinkPreviewRenderer {
+                MediaRef("https://example.com/preview.png", MediaKind.IMAGE)
+            },
+            projectRootProvider = { projectRoot.toFile() },
+        )
+
+        service.parseAndDispatch(
+            text = "https://www.bilibili.com/video/BV1xx411c7mD",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(ffmpeg.toFile().absolutePath, downloader.requests.single().ffmpegPath)
+    }
+
     private suspend fun dispatchCommand(
         eventBus: EventBus,
         listener: CommandListener,
@@ -338,6 +450,47 @@ class LinkParseServiceTest {
                     externalId = parsedLink.targetId,
                 ).copy(link = parsedLink.normalizedUrl),
             )
+        }
+    }
+
+    private class FakeVideoLinkResolver : LinkResolver {
+        override val platformId: PlatformId = PlatformId.of("bilibili")
+
+        override suspend fun parseLink(inputUrl: String): ParsedLink? {
+            val id = inputUrl.substringAfterLast("/").substringBefore("?").takeIf { it.isNotBlank() } ?: return null
+            return ParsedLink(
+                platformId = platformId,
+                kind = LinkKinds.VIDEO,
+                targetId = id,
+                normalizedUrl = "https://www.bilibili.com/video/$id",
+                sourceUrl = inputUrl,
+            )
+        }
+
+        override suspend fun resolveLink(parsedLink: ParsedLink): LinkResolution {
+            return LinkResolution.Preview(
+                parsedLink = parsedLink,
+                preview = LinkPreview(
+                    platformId = platformId,
+                    kind = LinkKinds.VIDEO,
+                    id = parsedLink.targetId,
+                    url = parsedLink.normalizedUrl,
+                    title = "demo video",
+                    durationSeconds = 120,
+                ),
+            )
+        }
+    }
+
+    private class FakeVideoDownloader(
+        private val result: LinkVideoDownloadResult,
+    ) : LinkVideoDownloader {
+        override val platformId: PlatformId = PlatformId.of("bilibili")
+        val requests: MutableList<LinkVideoDownloadRequest> = mutableListOf()
+
+        override suspend fun downloadVideoLink(request: LinkVideoDownloadRequest): LinkVideoDownloadResult {
+            requests += request
+            return result
         }
     }
 }

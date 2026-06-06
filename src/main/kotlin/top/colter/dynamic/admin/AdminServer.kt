@@ -17,6 +17,7 @@ import io.ktor.server.request.path
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondFile
 import io.ktor.server.response.respondText
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
@@ -488,8 +489,14 @@ private suspend fun ApplicationCall.respondOutboundMedia(block: suspend () -> Ou
     try {
         val result = block()
         response.headers.append(HttpHeaders.CacheControl, "public, max-age=${result.cacheMaxAgeSeconds}")
+        val file = result.file
+        if (file != null) {
+            response.headers.append(HttpHeaders.ContentType, result.contentType.toString())
+            respondFile(file)
+            return
+        }
         respondBytes(
-            bytes = result.bytes,
+            bytes = result.bytes ?: ByteArray(0),
             contentType = result.contentType,
         )
     } catch (e: IllegalArgumentException) {

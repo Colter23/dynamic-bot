@@ -12,8 +12,12 @@ import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import top.colter.dynamic.ImageCacheConfig
+import top.colter.dynamic.LinkParsingConfig
+import top.colter.dynamic.LinkVideoDownloadConfig
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.OutboundMediaConfig
 import top.colter.dynamic.core.data.MediaKind
@@ -35,7 +39,7 @@ class OutboundMediaServiceTest {
                     imageCache = ImageCacheConfig(
                         sourceRoot = sourceRoot.toString(),
                         renderedRoot = renderedRoot.toString(),
-                        maxImageBytes = 1024,
+                        maxImageMegabytes = 1.0,
                     ),
                     outboundMedia = OutboundMediaConfig(
                         publicBaseUrl = "http://example.com:2233/",
@@ -55,7 +59,51 @@ class OutboundMediaServiceTest {
         val result = service.resolve(parts.id, parts.expires, parts.signature)
         assertEquals(ContentType.Image.PNG, result.contentType)
         assertEquals(60, result.cacheMaxAgeSeconds)
-        assertContentEquals(imageBytes, result.bytes)
+        assertContentEquals(imageBytes, assertNotNull(result.bytes))
+        assertNull(result.file)
+    }
+
+    @Test
+    fun `rewrite local link video to signed public url and resolve it as file`() {
+        val renderedRoot = createTempDirectory("outbound-rendered-video")
+        val sourceRoot = createTempDirectory("outbound-source-video")
+        val videoRoot = createTempDirectory("outbound-video")
+        val video = videoRoot.resolve("bilibili").resolve("demo.mp4")
+        video.parent.createDirectories()
+        video.writeBytes(byteArrayOf(0, 0, 0, 1))
+
+        val service = OutboundMediaService(
+            configProvider = {
+                MainDynamicConfig(
+                    imageCache = ImageCacheConfig(
+                        sourceRoot = sourceRoot.toString(),
+                        renderedRoot = renderedRoot.toString(),
+                        maxImageMegabytes = 1.0,
+                    ),
+                    linkParsing = LinkParsingConfig(
+                        videoDownload = LinkVideoDownloadConfig(
+                            cacheRoot = videoRoot.toString(),
+                            maxFileMegabytes = 1.0,
+                        ),
+                    ),
+                    outboundMedia = OutboundMediaConfig(
+                        publicBaseUrl = "http://example.com:2233",
+                        urlTtlSeconds = 60,
+                        signingSecret = "secret",
+                    ),
+                )
+            },
+            nowEpochSeconds = { 1_000 },
+        )
+
+        val rewritten = service.rewriteMedia(MediaRef(uri = video.toString(), kind = MediaKind.VIDEO))
+
+        assertTrue(rewritten.uri.startsWith("http://example.com:2233/media/outbound/"))
+        val parts = signedUrlParts(rewritten.uri)
+        val result = service.resolve(parts.id, parts.expires, parts.signature)
+        assertEquals(ContentType("video", "mp4"), result.contentType)
+        assertEquals(video.toFile(), result.file)
+        assertNull(result.bytes)
     }
 
     @Test

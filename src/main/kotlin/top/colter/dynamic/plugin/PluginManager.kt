@@ -34,6 +34,7 @@ import top.colter.dynamic.core.event.SystemNotificationPublishResult
 import top.colter.dynamic.core.event.SystemNotificationPublisher
 import top.colter.dynamic.core.event.SystemNotificationSeverity
 import top.colter.dynamic.core.link.LinkResolver
+import top.colter.dynamic.core.link.LinkVideoDownloader
 import top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION
 import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
 import top.colter.dynamic.core.plugin.CommandContributor
@@ -529,6 +530,10 @@ public class PluginManager(
         return activeExtensionHandles<LinkResolver>().map { it.instance }
     }
 
+    public fun getLinkVideoDownloaders(): List<LinkVideoDownloader> {
+        return activeExtensionHandles<LinkVideoDownloader>().map { it.instance }
+    }
+
     public fun findPublisherLookupPlugin(platformId: String): PublisherLookupPlugin? {
         val normalized = top.colter.dynamic.core.data.PlatformId.of(platformId)
         return activeExtensionHandles<PublisherLookupPlugin>()
@@ -831,6 +836,7 @@ public class PluginManager(
             if (instance is MessageSinkPlugin) add(PluginCapability.MESSAGE_SINK)
             if (instance is CommandContributor) add(PluginCapability.COMMAND_CONTRIBUTOR)
             if (instance is LinkResolver) add(PluginCapability.LINK_RESOLVER)
+            if (instance is LinkVideoDownloader) add(PluginCapability.LINK_VIDEO_DOWNLOADER)
             if (instance is ConfigurablePlugin<*>) add(PluginCapability.CONFIGURABLE)
         }
     }

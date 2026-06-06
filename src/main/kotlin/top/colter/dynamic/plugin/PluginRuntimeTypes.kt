@@ -10,6 +10,7 @@ public enum class PluginCapability {
     MESSAGE_SINK,
     COMMAND_CONTRIBUTOR,
     LINK_RESOLVER,
+    LINK_VIDEO_DOWNLOADER,
     CONFIGURABLE,
 }
 

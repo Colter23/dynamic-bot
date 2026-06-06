@@ -1,6 +1,7 @@
 package top.colter.dynamic.media
 
 import io.ktor.http.ContentType
+import java.io.File
 import java.net.URI
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -8,6 +9,7 @@ import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.attribute.FileTime
 import java.security.MessageDigest
 import java.util.Base64
 import javax.crypto.Mac
@@ -76,20 +78,35 @@ public class OutboundMediaService(
         require(Files.isRegularFile(realPath, LinkOption.NOFOLLOW_LINKS)) { "媒体文件不存在" }
 
         val size = Files.size(realPath)
-        require(size <= config.imageCache.maxImageBytes) {
-            "媒体文件超过大小限制：size=$size，maxBytes=${config.imageCache.maxImageBytes}"
+        require(size <= root.maxBytes) {
+            "媒体文件超过大小限制：size=$size，maxBytes=${root.maxBytes}"
         }
-        val bytes = Files.readAllBytes(realPath)
-        require(bytes.size.toLong() <= config.imageCache.maxImageBytes) {
-            "媒体文件超过大小限制：maxBytes=${config.imageCache.maxImageBytes}"
+        touchAccessTime(realPath)
+        val cacheMaxAgeSeconds = (expires - nowEpochSeconds()).coerceAtLeast(0)
+        return when (root.type) {
+            OutboundMediaRootType.IMAGE -> {
+                val bytes = Files.readAllBytes(realPath)
+                require(bytes.size.toLong() <= root.maxBytes) {
+                    "媒体文件超过大小限制：maxBytes=${root.maxBytes}"
+                }
+                val contentType = imageContentType(realPath, bytes)
+                    ?: throw IllegalArgumentException("不支持的媒体类型：${realPath.fileName}")
+                OutboundMediaResult(
+                    bytes = bytes,
+                    contentType = contentType,
+                    cacheMaxAgeSeconds = cacheMaxAgeSeconds,
+                )
+            }
+            OutboundMediaRootType.VIDEO -> {
+                val contentType = videoContentType(realPath)
+                    ?: throw IllegalArgumentException("不支持的视频类型：${realPath.fileName}")
+                OutboundMediaResult(
+                    file = realPath.toFile(),
+                    contentType = contentType,
+                    cacheMaxAgeSeconds = cacheMaxAgeSeconds,
+                )
+            }
         }
-        val contentType = imageContentType(realPath, bytes)
-            ?: throw IllegalArgumentException("不支持的媒体类型：${realPath.fileName}")
-        return OutboundMediaResult(
-            bytes = bytes,
-            contentType = contentType,
-            cacheMaxAgeSeconds = (expires - nowEpochSeconds()).coerceAtLeast(0),
-        )
     }
 
     private fun rewriteContent(content: MessageContent): MessageContent {
@@ -97,6 +114,10 @@ public class OutboundMediaService(
             is MessageContent.Image -> {
                 val rewritten = rewriteMedia(content.image)
                 if (rewritten == content.image) content else content.copy(image = rewritten)
+            }
+            is MessageContent.Video -> {
+                val rewritten = rewriteMedia(content.video)
+                if (rewritten == content.video) content else content.copy(video = rewritten)
             }
             is MessageContent.Forward -> {
                 val rewrittenNodes = content.nodes.map { node ->
@@ -114,11 +135,45 @@ public class OutboundMediaService(
     }
 
     private fun allowedRoots(config: MainDynamicConfig): List<OutboundMediaRoot> {
-        return listOf(
-            OutboundMediaRoot("source", Paths.get(config.imageCache.sourceRoot).toAbsolutePath().normalize()),
-            OutboundMediaRoot("rendered", Paths.get(config.imageCache.renderedRoot).toAbsolutePath().normalize()),
-            OutboundMediaRoot("login-qr", Paths.get("data", "login-qr").toAbsolutePath().normalize()),
-        )
+        return buildList {
+            add(
+                OutboundMediaRoot(
+                    key = "source",
+                    path = Paths.get(config.imageCache.sourceRoot).toAbsolutePath().normalize(),
+                    maxBytes = config.imageCache.maxImageBytes,
+                    type = OutboundMediaRootType.IMAGE,
+                )
+            )
+            add(
+                OutboundMediaRoot(
+                    key = "rendered",
+                    path = Paths.get(config.imageCache.renderedRoot).toAbsolutePath().normalize(),
+                    maxBytes = config.imageCache.maxImageBytes,
+                    type = OutboundMediaRootType.IMAGE,
+                )
+            )
+            add(
+                OutboundMediaRoot(
+                    key = "login-qr",
+                    path = Paths.get("data", "login-qr").toAbsolutePath().normalize(),
+                    maxBytes = config.imageCache.maxImageBytes,
+                    type = OutboundMediaRootType.IMAGE,
+                )
+            )
+            config.linkParsing.videoDownload.cacheRoot
+                .trim()
+                .takeIf { it.isNotBlank() }
+                ?.let { root ->
+                    add(
+                        OutboundMediaRoot(
+                            key = "link-video",
+                            path = Paths.get(root).toAbsolutePath().normalize(),
+                            maxBytes = config.linkParsing.videoDownload.maxFileBytes,
+                            type = OutboundMediaRootType.VIDEO,
+                        )
+                    )
+                }
+        }
     }
 
     private fun mediaId(rootKey: String, relativePath: String): String {
@@ -173,6 +228,22 @@ public class OutboundMediaService(
         }
     }
 
+    private fun videoContentType(path: Path): ContentType? {
+        return when (path.fileName.toString().substringAfterLast('.', "").lowercase()) {
+            "mp4" -> ContentType("video", "mp4")
+            "m4v" -> ContentType("video", "x-m4v")
+            "webm" -> ContentType("video", "webm")
+            "mov" -> ContentType("video", "quicktime")
+            else -> null
+        }
+    }
+
+    private fun touchAccessTime(path: Path) {
+        runCatching {
+            Files.setLastModifiedTime(path, FileTime.fromMillis(System.currentTimeMillis()))
+        }
+    }
+
     private fun ByteArray.hasAscii(offset: Int, value: String): Boolean {
         if (size < offset + value.length) return false
         return value.indices.all { index -> this[offset + index] == value[index].code.toByte() }
@@ -212,7 +283,8 @@ public class OutboundMediaService(
 }
 
 public data class OutboundMediaResult(
-    val bytes: ByteArray,
+    val bytes: ByteArray? = null,
+    val file: File? = null,
     val contentType: ContentType,
     val cacheMaxAgeSeconds: Long,
 )
@@ -220,7 +292,14 @@ public data class OutboundMediaResult(
 private data class OutboundMediaRoot(
     val key: String,
     val path: Path,
+    val maxBytes: Long,
+    val type: OutboundMediaRootType,
 )
+
+private enum class OutboundMediaRootType {
+    IMAGE,
+    VIDEO,
+}
 
 private data class DecodedMediaId(
     val rootKey: String,

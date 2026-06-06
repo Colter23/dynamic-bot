@@ -1,7 +1,15 @@
 package top.colter.dynamic.link
 
+import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlin.math.roundToLong
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withTimeoutOrNull
+import top.colter.dynamic.LinkVideoDownloadConfig
+import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.Message
@@ -14,9 +22,12 @@ import top.colter.dynamic.core.event.PublisherPersistenceMode
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.core.event.SourceUpdatePublisher
+import top.colter.dynamic.core.link.LinkKinds
 import top.colter.dynamic.core.link.LinkPreview
 import top.colter.dynamic.core.link.LinkResolution
 import top.colter.dynamic.core.link.LinkResolver
+import top.colter.dynamic.core.link.LinkVideoDownloadRequest
+import top.colter.dynamic.core.link.LinkVideoDownloader
 import top.colter.dynamic.core.link.ParsedLink
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.tools.loggerFor
@@ -31,13 +42,18 @@ private val linkParseLogger = loggerFor<LinkParseService>()
 
 public class LinkParseService(
     private val resolversProvider: () -> List<LinkResolver>,
+    private val configProvider: () -> MainDynamicConfig = { MainDynamicConfig() },
     private val sourceUpdatePublisher: SourceUpdatePublisher = SourceUpdatePublisher {
         SourceUpdatePublishResult.failed("来源更新发布器未配置")
     },
+    private val videoDownloadersProvider: () -> List<LinkVideoDownloader> = { emptyList() },
     private val publisherLookupResolver: (String) -> PublisherLookupPlugin? = { null },
     private val previewRenderer: LinkPreviewRenderer = DefaultLinkPreviewRenderer(),
     private val onMessagesQueued: suspend () -> Unit = {},
+    private val projectRootProvider: () -> File = { File(System.getProperty("user.dir")) },
 ) {
+    private val videoDownloadSemaphores: MutableMap<Int, Semaphore> = ConcurrentHashMap()
+
     internal suspend fun parseAndDispatch(
         text: String,
         context: CommandContext,
@@ -169,7 +185,7 @@ public class LinkParseService(
         parsedLink: ParsedLink,
         context: CommandContext,
     ): LinkParseItemResult {
-        val batches = runCatching {
+        val previewBatches = runCatching {
             val image = previewRenderer.render(preview)
             listOf(
                 MessageBatch(
@@ -188,7 +204,87 @@ public class LinkParseService(
             }
             listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText()))))
         }
+        val videoBatch = downloadVideoBatchOrNull(preview, parsedLink)
+        val batches = if (videoBatch == null) previewBatches else previewBatches + videoBatch
         return forwardMessage(batches, parsedLink, context)
+    }
+
+    private suspend fun downloadVideoBatchOrNull(
+        preview: LinkPreview,
+        parsedLink: ParsedLink,
+    ): MessageBatch? {
+        val config = configProvider().linkParsing.videoDownload
+        if (!config.enabled) return null
+        if (parsedLink.kind != LinkKinds.VIDEO || preview.kind != LinkKinds.VIDEO) return null
+
+        val duration = preview.durationSeconds
+        if (duration == null) {
+            linkParseLogger.info {
+                "链接视频下载跳过：时长未知，platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}"
+            }
+            return null
+        }
+        if (config.maxDurationSeconds > 0 && duration > config.maxDurationSeconds) {
+            linkParseLogger.info {
+                "链接视频下载跳过：时长超限，platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，duration=$duration，max=${config.maxDurationSeconds}"
+            }
+            return null
+        }
+
+        val downloader = videoDownloadersProvider()
+            .firstOrNull { it.platformId == parsedLink.platformId }
+            ?: run {
+                linkParseLogger.info {
+                    "链接视频下载跳过：没有可用下载器，platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}"
+                }
+                return null
+            }
+
+        return try {
+            semaphoreFor(config).withPermit {
+                val result = withTimeoutOrNull(secondsToMillis(config.timeoutSeconds, minimumMillis = 1)) {
+                    downloader.downloadVideoLink(
+                        LinkVideoDownloadRequest(
+                            parsedLink = parsedLink,
+                            directory = videoCacheDirectory(config, parsedLink.platformId.value),
+                            maxBytes = config.maxFileBytes,
+                            quality = config.quality,
+                            ffmpegPath = resolveFfmpegPath(config),
+                        ),
+                    )
+                } ?: run {
+                    linkParseLogger.warn {
+                        "链接视频下载超时，已回退预览：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，timeoutSeconds=${config.timeoutSeconds}"
+                    }
+                    return null
+                }
+                if (result.fileSizeBytes > config.maxFileBytes) {
+                    linkParseLogger.warn {
+                        "链接视频下载结果超出大小限制，已回退预览：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，size=${result.fileSizeBytes}，max=${config.maxFileBytes}"
+                    }
+                    return null
+                }
+                linkParseLogger.info {
+                    "链接视频下载完成：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，size=${result.fileSizeBytes}"
+                }
+                MessageBatch(
+                    listOf(
+                        MessageContent.Video(
+                            fallbackText = "",
+                            video = result.video.copy(kind = MediaKind.VIDEO),
+                            altText = result.title.takeIf { it.isNotBlank() } ?: preview.title.takeIf { it.isNotBlank() },
+                        ),
+                    ),
+                )
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Throwable) {
+            linkParseLogger.warn(e) {
+                "链接视频下载失败，已回退预览：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，原因=${e.message ?: "未知错误"}"
+            }
+            null
+        }
     }
 
     private suspend fun forwardMessage(
@@ -245,6 +341,67 @@ public class LinkParseService(
             System.currentTimeMillis().toString(),
             UUID.randomUUID().toString(),
         ).joinToString(":")
+    }
+
+    private fun semaphoreFor(config: LinkVideoDownloadConfig): Semaphore {
+        val permits = config.maxConcurrentDownloads.coerceAtLeast(1)
+        return videoDownloadSemaphores.getOrPut(permits) { Semaphore(permits) }
+    }
+
+    private fun videoCacheDirectory(config: LinkVideoDownloadConfig, platformId: String): File {
+        return File(config.cacheRoot).resolve(platformId)
+    }
+
+    private fun resolveFfmpegPath(config: LinkVideoDownloadConfig): String {
+        return config.ffmpegPath.trim().takeIf { it.isNotBlank() }
+            ?: findProjectFfmpeg()?.absolutePath.orEmpty()
+    }
+
+    private fun findProjectFfmpeg(): File? {
+        return projectRootProvider().absoluteFile
+            .ancestorRoots(maxDepth = 4)
+            .firstNotNullOfOrNull(::findFfmpegInRoot)
+    }
+
+    private fun findFfmpegInRoot(root: File): File? {
+        val names = if (isWindows()) {
+            listOf("ffmpeg.exe", "ffmpeg")
+        } else {
+            listOf("ffmpeg", "ffmpeg.exe")
+        }
+        val fixedCandidates = buildList {
+            names.forEach { name -> add(root.resolve(name)) }
+            listOf("bin", "tools", "ffmpeg", "ffmpeg/bin").forEach { directory ->
+                names.forEach { name -> add(root.resolve(directory).resolve(name)) }
+            }
+        }
+        fixedCandidates.firstOrNull { it.isFile }?.let { return it }
+
+        return root.listFiles()
+            .orEmpty()
+            .asSequence()
+            .filter { it.isDirectory && it.name.startsWith("ffmpeg", ignoreCase = true) }
+            .sortedBy { it.name.lowercase() }
+            .flatMap { directory ->
+                names.asSequence()
+                    .flatMap { name -> sequenceOf(directory.resolve("bin").resolve(name), directory.resolve(name)) }
+            }
+            .firstOrNull { it.isFile }
+    }
+
+    private fun File.ancestorRoots(maxDepth: Int): Sequence<File> {
+        return generateSequence(absoluteFile.toPath().normalize().toFile()) { current ->
+            current.parentFile?.takeIf { it != current }
+        }.take(maxDepth + 1)
+    }
+
+    private fun isWindows(): Boolean {
+        return System.getProperty("os.name").contains("windows", ignoreCase = true)
+    }
+
+    private fun secondsToMillis(seconds: Double, minimumMillis: Long): Long {
+        if (seconds <= 0.0 && minimumMillis <= 0) return 0
+        return (seconds * 1_000.0).roundToLong().coerceAtLeast(minimumMillis)
     }
 
     private fun PublisherInfo.needsLookup(): Boolean {

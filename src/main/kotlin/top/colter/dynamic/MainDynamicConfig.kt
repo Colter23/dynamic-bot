@@ -1,8 +1,11 @@
 ﻿package top.colter.dynamic
 
+import com.fasterxml.jackson.annotation.JsonIgnore
+import kotlin.math.roundToLong
 import top.colter.dynamic.core.command.CommandPermissionRule
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.event.SystemNotificationSeverity
+import top.colter.dynamic.core.link.LinkVideoQuality
 import top.colter.dynamic.core.plugin.MessageSinkRoutingPolicy
 
 public data class MainDynamicConfig(
@@ -48,8 +51,12 @@ public data class PluginCatalogConfig(
     val url: String = DEFAULT_URL,
     val cacheSeconds: Long = 600,
     val downloadTimeoutSeconds: Double = 60.0,
-    val maxDownloadBytes: Long = 200L * 1024L * 1024L,
+    val maxDownloadMegabytes: Double = 200.0,
 ) {
+    @get:JsonIgnore
+    public val maxDownloadBytes: Long
+        get() = megabytesToBytes(maxDownloadMegabytes)
+
     public companion object {
         public const val DEFAULT_URL: String =
             "https://raw.githubusercontent.com/Colter23/dynamic-bot/main/plugins/catalog.json"
@@ -68,6 +75,7 @@ public data class LinkParsingConfig(
     val replyOnFailure: Boolean = false,
     val autoDedupeTtlSeconds: Double = 60.0,
     val progressReply: LinkParseProgressReplyConfig = LinkParseProgressReplyConfig(),
+    val videoDownload: LinkVideoDownloadConfig = LinkVideoDownloadConfig(),
 )
 
 public enum class LinkParseTriggerMode {
@@ -82,18 +90,42 @@ public data class LinkParseProgressReplyConfig(
     val recallOnComplete: Boolean = true,
 )
 
+public data class LinkVideoDownloadConfig(
+    val enabled: Boolean = false,
+    val maxDurationSeconds: Long = 300,
+    val maxFileMegabytes: Double = 200.0,
+    val quality: LinkVideoQuality = LinkVideoQuality.P720,
+    val ffmpegPath: String = "",
+    val cacheRoot: String = "data/videos/link-parse",
+    val timeoutSeconds: Double = 600.0,
+    val maxConcurrentDownloads: Int = 1,
+    val cleanupMaxIdleDays: Long = 7,
+) {
+    @get:JsonIgnore
+    public val maxFileBytes: Long
+        get() = megabytesToBytes(maxFileMegabytes)
+}
+
 public data class ImageCacheConfig(
     val sourceRoot: String = "data/images/source",
     val renderedRoot: String = "data/images/draw",
     val downloadTimeoutSeconds: Double = 10.0,
-    val maxImageBytes: Long = 20L * 1024L * 1024L,
+    val maxImageMegabytes: Double = 20.0,
     val maxConcurrentDownloads: Int = 8,
-    val memoryMaxBytes: Long = 128L * 1024L * 1024L,
+    val memoryMaxMegabytes: Double = 128.0,
     val memoryMaxEntries: Int = 512,
     val cleanupCron: String = "0 4 * * *",
     val sourceCleanup: ImageCleanupConfig = ImageCleanupConfig(),
     val renderedCleanup: ImageCleanupConfig = ImageCleanupConfig(),
-)
+) {
+    @get:JsonIgnore
+    public val maxImageBytes: Long
+        get() = megabytesToBytes(maxImageMegabytes)
+
+    @get:JsonIgnore
+    public val memoryMaxBytes: Long
+        get() = megabytesToBytes(memoryMaxMegabytes)
+}
 
 public data class ImageCleanupConfig(
     val enabled: Boolean = true,
@@ -184,4 +216,13 @@ public enum class CommandReceiveMode {
     ANY,
     PRIMARY_OR_MENTIONED,
     MENTIONED_ONLY,
+}
+
+private const val BYTES_PER_MEGABYTE: Long = 1024L * 1024L
+
+private fun megabytesToBytes(megabytes: Double): Long {
+    if (megabytes <= 0.0) return 0L
+    return (megabytes * BYTES_PER_MEGABYTE.toDouble())
+        .roundToLong()
+        .coerceAtLeast(1L)
 }

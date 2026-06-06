@@ -72,7 +72,7 @@ class MainConfigStoreTest {
         assertTrue("pluginCatalog.url" in paths)
         assertTrue("pluginCatalog.cacheSeconds" in paths)
         assertTrue("pluginCatalog.downloadTimeoutSeconds" in paths)
-        assertTrue("pluginCatalog.maxDownloadBytes" in paths)
+        assertTrue("pluginCatalog.maxDownloadMegabytes" in paths)
 
         val error = assertFailsWith<IllegalArgumentException> {
             MainConfigForms.validate(
@@ -89,7 +89,7 @@ class MainConfigStoreTest {
     fun imageCacheAndDeliveryRetentionConfigShouldBeExposedAndValidated() {
         val paths = MainConfigForms.formSpec.fields.map { it.path }
 
-        assertTrue("imageCache.memoryMaxBytes" in paths)
+        assertTrue("imageCache.memoryMaxMegabytes" in paths)
         assertTrue("imageCache.memoryMaxEntries" in paths)
         assertTrue("delivery.historyRetentionDays" in paths)
         assertTrue("delivery.cleanupCron" in paths)
@@ -97,7 +97,7 @@ class MainConfigStoreTest {
         val error = assertFailsWith<IllegalArgumentException> {
             MainConfigForms.validate(
                 MainDynamicConfig(
-                    imageCache = ImageCacheConfig(memoryMaxBytes = -1),
+                    imageCache = ImageCacheConfig(memoryMaxMegabytes = -1.0),
                 ),
             )
         }

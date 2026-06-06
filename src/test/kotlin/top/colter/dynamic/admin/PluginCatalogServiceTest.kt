@@ -246,7 +246,7 @@ class PluginCatalogServiceTest {
                     url = "https://example.com/catalog.json",
                     cacheSeconds = 600,
                     downloadTimeoutSeconds = 1.0,
-                    maxDownloadBytes = 1024 * 1024,
+                    maxDownloadMegabytes = 1.0,
                 )
             },
             pluginProvider = { installed },

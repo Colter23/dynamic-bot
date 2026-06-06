@@ -4,6 +4,7 @@ import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.config.ConfigFieldOption
 import top.colter.dynamic.core.config.ConfigFieldSpec
 import top.colter.dynamic.core.config.ConfigFieldType
+import top.colter.dynamic.core.config.ConfigFieldVisibility
 import top.colter.dynamic.core.config.ConfigFormSpec
 import top.colter.dynamic.core.config.ConfigMigration
 import top.colter.dynamic.core.config.ConfigNumberKind
@@ -13,6 +14,7 @@ import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.event.SystemNotificationSeverity
+import top.colter.dynamic.core.link.LinkVideoQuality
 import top.colter.dynamic.core.plugin.MessageSinkRoutingStrategy
 import top.colter.dynamic.admin.AdminLogBuffer
 import top.colter.dynamic.draw.DrawLayoutRegistry
@@ -264,6 +266,88 @@ public object MainConfigForms {
                     description = "解析结果发送完成或失败后，尽量撤回解析中的提示消息；不支持撤回的平台会忽略。",
                 ),
                 ConfigFieldSpec(
+                    path = "linkParsing.videoDownload.enabled",
+                    label = "下载视频链接",
+                    type = ConfigFieldType.BOOLEAN,
+                    section = "链接解析",
+                    description = "开启后，解析视频链接时会尝试下载视频；下载失败或不满足条件时仍发送普通链接预览。",
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.videoDownload.maxDurationSeconds",
+                    label = "最大视频时长（秒）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "链接解析",
+                    description = "仅下载不超过该时长的视频；0 表示不限制时长。",
+                    min = 0,
+                    numberKind = ConfigNumberKind.INTEGER,
+                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.videoDownload.maxFileMegabytes",
+                    label = "最大视频大小（MB）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "链接解析",
+                    description = "下载视频允许的最大文件大小，支持小数，例如 0.5 表示 0.5 MB；超出后会放弃视频并回退为普通链接预览。",
+                    min = 0,
+                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.videoDownload.quality",
+                    label = "视频画质",
+                    type = ConfigFieldType.SELECT,
+                    section = "链接解析",
+                    description = "下载时使用的画质策略，默认最高不超过 720P。",
+                    options = linkVideoQualityOptions(),
+                    required = true,
+                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.videoDownload.ffmpegPath",
+                    label = "ffmpeg 路径",
+                    type = ConfigFieldType.TEXT,
+                    section = "链接解析",
+                    description = "Bilibili DASH 视频通常需要 ffmpeg 合并音视频；留空时会自动从项目根目录查找 ffmpeg，仍找不到则回退为普通预览。",
+                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.videoDownload.cacheRoot",
+                    label = "视频缓存目录",
+                    type = ConfigFieldType.TEXT,
+                    section = "链接解析",
+                    description = "链接解析下载的视频缓存目录。",
+                    required = true,
+                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.videoDownload.timeoutSeconds",
+                    label = "视频下载超时（秒）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "链接解析",
+                    description = "单个视频下载允许耗时；超时后回退为普通链接预览。",
+                    min = 1,
+                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.videoDownload.maxConcurrentDownloads",
+                    label = "视频下载并发数",
+                    type = ConfigFieldType.NUMBER,
+                    section = "链接解析",
+                    description = "同时下载视频的最大数量。",
+                    min = 1,
+                    numberKind = ConfigNumberKind.INTEGER,
+                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.videoDownload.cleanupMaxIdleDays",
+                    label = "视频缓存最大闲置天数",
+                    type = ConfigFieldType.NUMBER,
+                    section = "链接解析",
+                    description = "视频缓存超过该天数未访问后会随媒体清理任务删除；0 表示只要命中清理任务即可删除。",
+                    min = 0,
+                    numberKind = ConfigNumberKind.INTEGER,
+                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
+                ),
+                ConfigFieldSpec(
                     path = "imageCache.sourceRoot",
                     label = "原图缓存目录",
                     type = ConfigFieldType.TEXT,
@@ -294,13 +378,12 @@ public object MainConfigForms {
                     restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
-                    path = "imageCache.maxImageBytes",
-                    label = "单张图片大小上限（字节）",
+                    path = "imageCache.maxImageMegabytes",
+                    label = "单张图片大小上限（MB）",
                     type = ConfigFieldType.NUMBER,
                     section = "图片缓存",
-                    description = "后台预览和图片缓存允许读取或下载的单张图片最大体积，用于避免异常大图占满内存。",
-                    min = 1,
-                    numberKind = ConfigNumberKind.INTEGER,
+                    description = "后台预览和图片缓存允许读取或下载的单张图片最大体积，支持小数，例如 0.5 表示 0.5 MB。",
+                    min = 0,
                     restartRequired = true,
                     restartTarget = "主程序",
                 ),
@@ -316,13 +399,12 @@ public object MainConfigForms {
                     restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
-                    path = "imageCache.memoryMaxBytes",
-                    label = "图片内存缓存上限（字节）",
+                    path = "imageCache.memoryMaxMegabytes",
+                    label = "图片内存缓存上限（MB）",
                     type = ConfigFieldType.NUMBER,
                     section = "图片缓存",
-                    description = "原图字节在进程内热缓存的最大总量；超出后按最近最少使用淘汰，磁盘缓存不受影响。",
+                    description = "原图在进程内热缓存的最大总量，支持小数；超出后按最近最少使用淘汰，磁盘缓存不受影响。",
                     min = 0,
-                    numberKind = ConfigNumberKind.INTEGER,
                     restartRequired = true,
                     restartTarget = "主程序",
                 ),
@@ -331,7 +413,7 @@ public object MainConfigForms {
                     label = "图片内存缓存最大条数",
                     type = ConfigFieldType.NUMBER,
                     section = "图片缓存",
-                    description = "原图字节在进程内最多保留多少个 URI；设为 0 表示不保留图片字节热缓存。",
+                    description = "原图在进程内最多保留多少个 URI；设为 0 表示不保留图片热缓存。",
                     min = 0,
                     numberKind = ConfigNumberKind.INTEGER,
                     restartRequired = true,
@@ -651,13 +733,12 @@ public object MainConfigForms {
                     description = "下载插件 Jar 和插件列表时允许等待的时间；支持小数，例如 0.5 表示 0.5 秒。",
                 ),
                 ConfigFieldSpec(
-                    path = "pluginCatalog.maxDownloadBytes",
-                    label = "插件最大下载大小（字节）",
+                    path = "pluginCatalog.maxDownloadMegabytes",
+                    label = "插件最大下载大小（MB）",
                     type = ConfigFieldType.NUMBER,
                     section = "插件目录",
-                    description = "单个插件 Jar 允许下载的最大字节数，默认 200MB。",
-                    min = 1,
-                    numberKind = ConfigNumberKind.INTEGER,
+                    description = "单个插件 Jar 允许下载的最大体积，支持小数，例如 0.5 表示 0.5 MB。",
+                    min = 0,
                 ),
                 ConfigFieldSpec(
                     path = "webAdmin.enabled",
@@ -739,12 +820,22 @@ public object MainConfigForms {
         if (config.linkParsing.progressReply.enabled) {
             require(config.linkParsing.progressReply.text.isNotBlank()) { "解析中提示文字不能为空" }
         }
+        val videoDownload = config.linkParsing.videoDownload
+        require(videoDownload.maxDurationSeconds >= 0) { "视频最大时长不能为负数" }
+        require(videoDownload.maxFileMegabytes.isFiniteNumber()) { "视频最大大小必须是有效数字" }
+        require(videoDownload.maxFileMegabytes > 0.0) { "视频最大大小必须大于 0 MB" }
+        require(videoDownload.cacheRoot.isNotBlank()) { "视频缓存目录不能为空" }
+        require(videoDownload.timeoutSeconds > 0.0) { "视频下载超时必须大于 0 秒" }
+        require(videoDownload.maxConcurrentDownloads >= 1) { "视频下载并发数至少为 1" }
+        require(videoDownload.cleanupMaxIdleDays >= 0) { "视频缓存最大闲置天数不能为负数" }
         require(config.imageCache.sourceRoot.isNotBlank()) { "原图缓存目录不能为空" }
         require(config.imageCache.renderedRoot.isNotBlank()) { "渲染图片目录不能为空" }
         require(config.imageCache.downloadTimeoutSeconds > 0.0) { "图片下载超时必须大于 0 秒" }
-        require(config.imageCache.maxImageBytes > 0) { "单张图片大小上限必须大于 0" }
+        require(config.imageCache.maxImageMegabytes.isFiniteNumber()) { "单张图片大小上限必须是有效数字" }
+        require(config.imageCache.maxImageMegabytes > 0.0) { "单张图片大小上限必须大于 0 MB" }
         require(config.imageCache.maxConcurrentDownloads >= 1) { "最大并发下载数至少为 1" }
-        require(config.imageCache.memoryMaxBytes >= 0) { "图片内存缓存上限不能为负数" }
+        require(config.imageCache.memoryMaxMegabytes.isFiniteNumber()) { "图片内存缓存上限必须是有效数字" }
+        require(config.imageCache.memoryMaxMegabytes >= 0.0) { "图片内存缓存上限不能为负数" }
         require(config.imageCache.memoryMaxEntries >= 0) { "图片内存缓存最大条数不能为负数" }
         require(config.imageCache.cleanupCron.isNotBlank()) { "清理任务 Cron 不能为空" }
         require(config.imageCache.sourceCleanup.maxIdleDays >= 0) { "原图最大闲置天数不能为负数" }
@@ -809,7 +900,8 @@ public object MainConfigForms {
         }
         require(config.pluginCatalog.cacheSeconds >= 0) { "插件列表缓存时间不能为负数" }
         require(config.pluginCatalog.downloadTimeoutSeconds > 0.0) { "插件下载超时必须大于 0 秒" }
-        require(config.pluginCatalog.maxDownloadBytes > 0) { "插件最大下载大小必须大于 0" }
+        require(config.pluginCatalog.maxDownloadMegabytes.isFiniteNumber()) { "插件最大下载大小必须是有效数字" }
+        require(config.pluginCatalog.maxDownloadMegabytes > 0.0) { "插件最大下载大小必须大于 0 MB" }
         require(config.webAdmin.port in 1..65_535) { "Web 后台端口必须在 1 到 65535 之间" }
         require(config.webAdmin.host.isNotBlank()) { "Web 后台监听地址不能为空" }
         require(config.webAdmin.logBufferCapacity in 100..AdminLogBuffer.MAX_CAPACITY) {
@@ -829,6 +921,11 @@ public object MainConfigForms {
             targets += "Web 后台"
         }
         if (previous.imageCache != next.imageCache) {
+            targets += "主程序"
+        }
+        if (previous.linkParsing.videoDownload.cacheRoot != next.linkParsing.videoDownload.cacheRoot ||
+            previous.linkParsing.videoDownload.cleanupMaxIdleDays != next.linkParsing.videoDownload.cleanupMaxIdleDays
+        ) {
             targets += "主程序"
         }
         if (previous.delivery.retryDelaySeconds != next.delivery.retryDelaySeconds ||
@@ -887,5 +984,21 @@ public object MainConfigForms {
             ConfigFieldOption(SystemNotificationSeverity.ERROR.name, "ERROR 错误"),
             ConfigFieldOption(SystemNotificationSeverity.CRITICAL.name, "CRITICAL 严重"),
         )
+    }
+
+    public fun linkVideoQualityOptions(): List<ConfigFieldOption> {
+        return listOf(
+            ConfigFieldOption(LinkVideoQuality.AUTO_LOWEST.name, "自动最低"),
+            ConfigFieldOption(LinkVideoQuality.P240.name, "最高 240P"),
+            ConfigFieldOption(LinkVideoQuality.P360.name, "最高 360P"),
+            ConfigFieldOption(LinkVideoQuality.P480.name, "最高 480P"),
+            ConfigFieldOption(LinkVideoQuality.P720.name, "最高 720P"),
+            ConfigFieldOption(LinkVideoQuality.P1080.name, "最高 1080P"),
+            ConfigFieldOption(LinkVideoQuality.AUTO_HIGHEST.name, "自动最高"),
+        )
+    }
+
+    private fun Double.isFiniteNumber(): Boolean {
+        return !isNaN() && !isInfinite()
     }
 }

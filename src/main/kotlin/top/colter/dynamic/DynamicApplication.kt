@@ -194,7 +194,9 @@ public object DynamicApplication : CoroutineScope {
 
         val linkParseService = LinkParseService(
             resolversProvider = { pluginManager.getLinkResolvers() },
+            configProvider = configStore::current,
             sourceUpdatePublisher = sourceUpdatePublisher,
+            videoDownloadersProvider = { pluginManager.getLinkVideoDownloaders() },
             publisherLookupResolver = { platformId -> pluginManager.findPublisherLookupPlugin(platformId) },
             previewRenderer = DefaultLinkPreviewRenderer(
                 configProvider = configStore::current,
@@ -310,14 +312,14 @@ public object DynamicApplication : CoroutineScope {
     }
 
     private fun registerImageCleanupTask(config: MainDynamicConfig) {
-        val imageCacheConfig = config.imageCache
-        if (!imageCacheConfig.sourceCleanup.enabled && !imageCacheConfig.renderedCleanup.enabled) return
-
         taskScheduler.start(
             TaskDefinition(
                 id = "main-image-cleanup",
-                schedule = TaskSchedule.Cron(imageCacheConfig.cleanupCron),
+                schedule = TaskSchedule.Cron(config.imageCache.cleanupCron),
                 action = {
+                    val current = configStore.current()
+                    val imageCacheConfig = current.imageCache
+                    val videoDownloadConfig = current.linkParsing.videoDownload
                     val cleaner = ImageFileCleaner()
                     if (imageCacheConfig.sourceCleanup.enabled) {
                         val result = cleaner.clean(
@@ -339,6 +341,17 @@ public object DynamicApplication : CoroutineScope {
                             logger.info { "渲染图缓存已清理：文件=${result.deletedFiles}，字节=${result.deletedBytes}" }
                         } else {
                             logger.debug { "渲染图缓存无需清理" }
+                        }
+                    }
+                    if (videoDownloadConfig.cacheRoot.isNotBlank()) {
+                        val result = cleaner.clean(
+                            Paths.get(videoDownloadConfig.cacheRoot),
+                            videoDownloadConfig.cleanupMaxIdleDays,
+                        )
+                        if (result.deletedFiles > 0) {
+                            logger.info { "视频缓存已清理：文件=${result.deletedFiles}，字节=${result.deletedBytes}" }
+                        } else {
+                            logger.debug { "视频缓存无需清理" }
                         }
                     }
                     DynamicImageCache.clearMemory()

@@ -758,6 +758,7 @@ function capabilityText(value) {
     MESSAGE_SINK: "消息发送",
     COMMAND_CONTRIBUTOR: "命令",
     LINK_RESOLVER: "链接解析",
+    LINK_VIDEO_DOWNLOADER: "视频下载",
     CONFIGURABLE: "配置",
   };
   return map[value] || value || "-";

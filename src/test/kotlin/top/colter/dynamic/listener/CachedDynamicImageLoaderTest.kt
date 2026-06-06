@@ -78,7 +78,7 @@ class CachedDynamicImageLoaderTest {
     fun loadShouldPassConfiguredMaxImageBytesToDownloader(): Unit = runBlocking {
         val root = createTempDirectory("dynamic-loader-max-bytes")
         var observedMaxBytes = 0L
-        val loader = loader(root.toString(), maxImageBytes = 123) { _, _, maxBytes ->
+        val loader = loader(root.toString(), maxImageMegabytes = 123.0 / 1024.0 / 1024.0) { _, _, maxBytes ->
             observedMaxBytes = maxBytes
             pngBytes(Color.CYAN)
         }
@@ -104,14 +104,14 @@ class CachedDynamicImageLoaderTest {
     private fun loader(
         sourceRoot: String,
         maxConcurrentDownloads: Int = 8,
-        maxImageBytes: Long = 20L * 1024L * 1024L,
+        maxImageMegabytes: Double = 20.0,
         downloader: ImageDownloader,
     ): CachedDynamicImageLoader {
         return CachedDynamicImageLoader(
             config = ImageCacheConfig(
                 sourceRoot = sourceRoot,
                 maxConcurrentDownloads = maxConcurrentDownloads,
-                maxImageBytes = maxImageBytes,
+                maxImageMegabytes = maxImageMegabytes,
             ),
             downloader = downloader,
         )
