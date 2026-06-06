@@ -3,12 +3,13 @@
 import java.util.LinkedHashSet
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.serializer
+import org.jetbrains.exposed.v1.core.Op
 import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
-import org.jetbrains.exposed.v1.jdbc.insert
+import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
@@ -33,11 +34,7 @@ public object SourceCursorRepository {
         return transaction {
             SourceCursorTable
                 .selectAll()
-                .where {
-                    (SourceCursorTable.publisherId eq EntityID(publisherId, PublisherTable)) and
-                        (SourceCursorTable.sourceKey eq sourceKey) and
-                        (SourceCursorTable.eventType eq eventType.value)
-                }
+                .where { sourceCursorFilter(publisherId, sourceKey, eventType) }
                 .firstOrNull()
                 ?.toSourceCursor()
         }
@@ -78,41 +75,41 @@ public object SourceCursorRepository {
     ): SourceCursor {
         require(PublisherRepository.findById(publisherId) != null) { "发布者不存在：publisherId=$publisherId" }
 
-        val previous = find(publisherId, sourceKey, eventType)
-        val recentUpdateKeys = updateRecentUpdateKeys(previous, updateKey)
-        val updated = SourceCursor(
-            publisherId = publisherId,
-            sourceKey = sourceKey,
-            eventType = eventType,
-            lastSeenUpdateKey = updateKey,
-            lastSeenAtEpochSeconds = timestamp,
-            recentUpdateKeys = recentUpdateKeys,
-        )
-
-        transaction {
-            if (previous == null) {
-                SourceCursorTable.insert {
-                    it[SourceCursorTable.publisherId] = EntityID(updated.publisherId, PublisherTable)
-                    it[SourceCursorTable.sourceKey] = updated.sourceKey
-                    it[SourceCursorTable.eventType] = updated.eventType.value
-                    it[SourceCursorTable.lastSeenUpdateKey] = updated.lastSeenUpdateKey
-                    it[SourceCursorTable.lastSeenAt] = updated.lastSeenAtEpochSeconds
-                    it[SourceCursorTable.recentUpdateKeys] = encodeRecentUpdateKeys(updated.recentUpdateKeys)
-                }
-            } else {
-                SourceCursorTable.update({
-                    (SourceCursorTable.publisherId eq EntityID(publisherId, PublisherTable)) and
-                        (SourceCursorTable.sourceKey eq sourceKey) and
-                        (SourceCursorTable.eventType eq eventType.value)
-                }) {
-                    it[SourceCursorTable.lastSeenUpdateKey] = updated.lastSeenUpdateKey
-                    it[SourceCursorTable.lastSeenAt] = updated.lastSeenAtEpochSeconds
-                    it[SourceCursorTable.recentUpdateKeys] = encodeRecentUpdateKeys(updated.recentUpdateKeys)
-                }
+        return transaction {
+            val filter = sourceCursorFilter(publisherId, sourceKey, eventType)
+            val initial = SourceCursor(
+                publisherId = publisherId,
+                sourceKey = sourceKey,
+                eventType = eventType,
+                lastSeenUpdateKey = updateKey,
+                lastSeenAtEpochSeconds = timestamp,
+                recentUpdateKeys = listOf(updateKey),
+            )
+            val inserted = SourceCursorTable.insertIgnore {
+                it[SourceCursorTable.publisherId] = EntityID(initial.publisherId, PublisherTable)
+                it[SourceCursorTable.sourceKey] = initial.sourceKey
+                it[SourceCursorTable.eventType] = initial.eventType.value
+                it[SourceCursorTable.lastSeenUpdateKey] = initial.lastSeenUpdateKey
+                it[SourceCursorTable.lastSeenAt] = initial.lastSeenAtEpochSeconds
+                it[SourceCursorTable.recentUpdateKeys] = encodeRecentUpdateKeys(initial.recentUpdateKeys)
+            }.insertedCount > 0
+            if (inserted) {
+                return@transaction initial
             }
-        }
 
-        return updated
+            val previous = SourceCursorTable
+                .selectAll()
+                .where { filter }
+                .firstOrNull()
+                ?.toSourceCursor()
+            val updated = initial.copy(recentUpdateKeys = updateRecentUpdateKeys(previous, updateKey))
+            SourceCursorTable.update({ filter }) {
+                it[SourceCursorTable.lastSeenUpdateKey] = updated.lastSeenUpdateKey
+                it[SourceCursorTable.lastSeenAt] = updated.lastSeenAtEpochSeconds
+                it[SourceCursorTable.recentUpdateKeys] = encodeRecentUpdateKeys(updated.recentUpdateKeys)
+            }
+            updated
+        }
     }
 
     public fun deleteByPublisherId(publisherId: Int): Boolean {
@@ -139,6 +136,16 @@ public object SourceCursorRepository {
         }
         return dedupe.toList()
     }
+}
+
+private fun sourceCursorFilter(
+    publisherId: Int,
+    sourceKey: String,
+    eventType: SourceEventType,
+): Op<Boolean> {
+    return (SourceCursorTable.publisherId eq EntityID(publisherId, PublisherTable)) and
+        (SourceCursorTable.sourceKey eq sourceKey) and
+        (SourceCursorTable.eventType eq eventType.value)
 }
 
 private fun encodeRecentUpdateKeys(keys: List<String>): String {

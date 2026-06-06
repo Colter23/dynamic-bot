@@ -526,6 +526,7 @@ public data class CreateSubscriptionResponse(
     val subscriberUpdated: Boolean,
     val subscriptionCreated: Boolean,
     val autoFollowed: Boolean,
+    val warnings: List<String> = emptyList(),
 )
 
 @Serializable

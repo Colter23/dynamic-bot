@@ -28,10 +28,6 @@ public object LinkParseTargetConfigRepository {
 
     public fun findEffectiveByAddress(address: TargetAddress): LinkParseTargetConfig? {
         return findByAddress(address)
-            ?: address
-                .takeIf { it.accountId != null }
-                ?.copy(accountId = null)
-                ?.let { findByAddress(it) }
     }
 
     public fun findAll(): List<LinkParseTargetConfig> {

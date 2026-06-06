@@ -86,6 +86,7 @@ public class PluginManager(
     private val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
     private val sinkMaxConcurrency: Int = 4,
     private val shutdownDrainTimeoutMs: Long = 5000,
+    private val pluginHookTimeoutMs: Long = DEFAULT_PLUGIN_HOOK_TIMEOUT_MS,
 ) {
     private val pluginDir: File = File(pluginDirPath)
     private val objectMapper: ObjectMapper = ObjectMapper(YAMLFactory()).registerKotlinModule()
@@ -156,7 +157,7 @@ public class PluginManager(
             }
 
             runCatching {
-                runBlocking { runtime.instance.onStart() }
+                runPluginHook(pluginId, "start") { runtime.instance.onStart() }
                 registerCommands(runtime)
                 runtime.state = PluginState.ACTIVE
                 runtime.error = null
@@ -164,7 +165,7 @@ public class PluginManager(
             }.onFailure { e ->
                 commandRegistry.unregisterByOwner(pluginId)
                 drainDispatchJobs(pluginId)
-                runCatching { runBlocking { runtime.instance.onStop() } }
+                runCatching { runPluginHook(pluginId, "stop") { runtime.instance.onStop() } }
                     .onFailure { stopError ->
                         logger.warn(stopError) { "插件启动回滚停止失败：pluginId=$pluginId" }
                     }
@@ -196,7 +197,7 @@ public class PluginManager(
             val runtime = plugins[pluginId] ?: return false
             stopPlugin(runtime)
 
-            runCatching { runBlocking { runtime.instance.onUnload() } }
+            runCatching { runPluginHook(pluginId, "unload") { runtime.instance.onUnload() } }
                 .onFailure {
                     runtime.state = PluginState.FAILED
                     runtime.error = it
@@ -619,7 +620,7 @@ public class PluginManager(
         )
 
         runCatching {
-            runBlocking { loaded.instance.onLoad(context) }
+            runPluginHook(descriptor.id, "load") { loaded.instance.onLoad(context) }
         }.onFailure {
             drawAssetRegistry.unregisterPluginAssets(descriptor.id)
             pluginScope.cancel("插件加载失败：${descriptor.id}")
@@ -783,7 +784,7 @@ public class PluginManager(
             runtime.state = PluginState.LOADED
             drainDispatchJobs(pluginId)
             val stopped = runCatching {
-                runBlocking { runtime.instance.onStop() }
+                runPluginHook(pluginId, "stop") { runtime.instance.onStop() }
                 runtime.error = null
                 logger.info { "插件已停止：pluginId=$pluginId" }
             }
@@ -805,6 +806,16 @@ public class PluginManager(
             .onFailure {
                 logger.warn(it) { "插件任务调度器关闭失败：pluginId=${runtime.descriptor.id}" }
             }
+    }
+
+    private fun runPluginHook(pluginId: String, operation: String, block: suspend () -> Unit) {
+        runBlocking {
+            withTimeoutOrNull(pluginHookTimeoutMs) {
+                block()
+            } ?: throw IllegalStateException(
+                "插件 $operation 钩子执行超时：pluginId=$pluginId，timeoutMs=$pluginHookTimeoutMs",
+            )
+        }
     }
 
     private fun ensureSubscriptionListenerRegistered() {
@@ -983,6 +994,7 @@ public class PluginManager(
 
     private companion object {
         private val PLUGIN_ID_REGEX: Regex = Regex("^[a-zA-Z0-9._-]+$")
+        private const val DEFAULT_PLUGIN_HOOK_TIMEOUT_MS: Long = 10_000
     }
 }
 

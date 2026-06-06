@@ -1,4 +1,4 @@
-﻿package top.colter.dynamic.admin
+package top.colter.dynamic.admin
 
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -53,6 +53,7 @@ import top.colter.dynamic.core.plugin.PlatformDrawAssetDescriptor
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKind
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
+import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.plugin.PluginCapability
@@ -324,6 +325,30 @@ class AdminServerTest {
 
         assertFalse(response.autoFollowed)
         assertFalse(plugin.followed)
+    }
+
+    @Test
+    fun createSubscriptionShouldWarnButSucceedWithoutFollowPlugin() = runBlocking {
+        initDb("admin-create-subscription-no-follow-plugin")
+        val service = service(
+            plugin = FakePublisherLookupPlugin(),
+            followPlugin = null,
+        )
+
+        val response = service.createSubscription(
+            CreateSubscriptionRequest(
+                subscriberPlatform = "qq",
+                targetKind = "GROUP",
+                subscriberTargetId = "100",
+                publisherPlatform = "bilibili",
+                publisherExternalId = "123",
+            ),
+        )
+
+        assertTrue(response.subscriptionCreated)
+        assertFalse(response.autoFollowed)
+        assertEquals(listOf("未找到发布者关注插件，已跳过自动关注：bilibili"), response.warnings)
+        assertNotNull(SubscriptionRepository.findById(response.subscription.id))
     }
 
     @Test
@@ -753,9 +778,10 @@ class AdminServerTest {
     }
 
     private fun service(
-        plugin: PublisherFollowPlugin,
+        plugin: PublisherLookupPlugin,
         sink: MessageSinkPlugin? = null,
         config: MainDynamicConfig = MainDynamicConfig(),
+        followPlugin: PublisherFollowPlugin? = plugin as? PublisherFollowPlugin,
     ): AdminService {
         return AdminService(
             pluginProvider = { emptyList() },
@@ -775,7 +801,7 @@ class AdminServerTest {
                 }.orEmpty()
             },
             publisherLookupResolver = { platformId -> plugin.takeIf { platformId == plugin.platformId.value } },
-            publisherFollowResolver = { platformId -> plugin.takeIf { platformId == plugin.platformId.value } },
+            publisherFollowResolver = { platformId -> followPlugin?.takeIf { platformId == it.platformId.value } },
             configProvider = { config },
             publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
         )
@@ -817,7 +843,19 @@ class AdminServerTest {
 
         override suspend fun followPublisher(userId: String): FollowActionResult {
             followed = true
-            return FollowActionResult(FollowActionStatus.FOLLOWED)
+            return FollowActionResult(FollowActionStatus.DONE)
+        }
+    }
+
+    private class FakePublisherLookupPlugin : PublisherLookupPlugin {
+        override val platformId: PlatformId = PlatformId.of("bilibili")
+
+        override suspend fun fetchPublisherInfo(userId: String): PublisherInfo {
+            return PublisherInfo(
+                key = PublisherKey.of(platformId = platformId.value, externalId = userId),
+                name = "demo-up",
+                avatar = MediaRef("https://example.com/face.png", MediaKind.AVATAR),
+            )
         }
     }
 

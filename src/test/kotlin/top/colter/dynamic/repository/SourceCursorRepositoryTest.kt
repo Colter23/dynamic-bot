@@ -5,6 +5,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.initTestDatabase
 import top.colter.dynamic.testPublisher
@@ -47,6 +51,29 @@ class SourceCursorRepositoryTest {
             100L,
             SourceCursorRepository.find(1, "dynamic", SourceEventType.DYNAMIC_CREATED)?.lastSeenAtEpochSeconds,
         )
+    }
+
+    @Test
+    fun shouldHandleConcurrentMarkSeenForSameCursor() = runBlocking {
+        initTestDatabase("source-cursor-concurrent-test")
+        seedPublisher(1)
+        val keys = (1..8).map { "d-$it" }
+
+        keys.mapIndexed { index, key ->
+            async(Dispatchers.Default) {
+                SourceCursorRepository.markSeen(
+                    publisherId = 1,
+                    sourceKey = "dynamic",
+                    eventType = SourceEventType.DYNAMIC_CREATED,
+                    updateKey = key,
+                    timestamp = index.toLong(),
+                )
+            }
+        }.awaitAll()
+
+        val state = assertNotNull(SourceCursorRepository.find(1, "dynamic", SourceEventType.DYNAMIC_CREATED))
+        assertTrue(state.lastSeenUpdateKey in keys)
+        assertTrue(state.recentUpdateKeys.isNotEmpty())
     }
 
     private fun seedPublisher(id: Int) {

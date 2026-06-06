@@ -1,4 +1,4 @@
-﻿package top.colter.dynamic.command
+package top.colter.dynamic.command
 
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
@@ -32,6 +32,7 @@ import top.colter.dynamic.core.plugin.FollowActionResult
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
+import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.LinkParseTargetConfigRepository
@@ -67,6 +68,29 @@ class CommandListenerTest {
         )
         assertEquals(1, SubscriptionRepository.findPublisherIdsBySubscriberId(subscriber.id).size)
         assertEquals("123", publisher.externalId)
+    }
+
+    @Test
+    fun subscribeShouldWarnButSucceedWithoutFollowPlugin() = runBlocking {
+        initDb("command-subscribe-no-follow-plugin")
+        val eventBus = EventBus()
+        val plugin = FakePublisherLookupPlugin()
+        val listener = CommandListener(
+            publisherLookupResolver = { id -> plugin.takeIf { id == "bilibili" } },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db subscribe bilibili 123"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        assertTrue(renderMessage(result).contains("自动关注提示=未找到发布者关注插件：bilibili"))
+        val subscriber = assertNotNull(
+            SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")),
+        )
+        assertEquals(1, SubscriptionRepository.findPublisherIdsBySubscriberId(subscriber.id).size)
     }
 
     @Test
@@ -358,7 +382,18 @@ class CommandListenerTest {
         override suspend fun queryFollowState(userId: String): FollowState = FollowState.FOLLOWING
 
         override suspend fun followPublisher(userId: String): FollowActionResult {
-            return FollowActionResult(FollowActionStatus.FOLLOWED)
+            return FollowActionResult(FollowActionStatus.DONE)
+        }
+    }
+
+    private class FakePublisherLookupPlugin : PublisherLookupPlugin {
+        override val platformId: PlatformId = PlatformId.of("bilibili")
+
+        override suspend fun fetchPublisherInfo(userId: String): PublisherInfo {
+            return testPublisherInfo(
+                key = PublisherKey.of(platformId = platformId.value, externalId = userId),
+                name = "demo-up",
+            )
         }
     }
 }

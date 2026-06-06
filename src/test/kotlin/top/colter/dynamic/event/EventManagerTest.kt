@@ -95,6 +95,7 @@ class EventBusTest {
         delay(100)
 
         assertEquals(1, count.get())
+        assertEquals(1, eventBus.droppedEventCount())
 
         release.complete(Unit)
         scope.cancel()

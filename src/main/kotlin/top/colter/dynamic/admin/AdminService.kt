@@ -1,4 +1,4 @@
-﻿package top.colter.dynamic.admin
+package top.colter.dynamic.admin
 
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.MainConfigForms
@@ -895,13 +895,12 @@ public class AdminService(
         }
         val publisherPlatform = publisherUpsert.value.key.platformId.value
         val publisherExternalId = publisherUpsert.value.key.externalId
-        val autoFollowed = if (configProvider().subscription.autoFollowPublisherOnSubscribe) {
-            val followPlugin = publisherFollowResolver(publisherPlatform)
-                ?: throw NoSuchElementException("未找到发布者关注插件：$publisherPlatform")
-            ensureFollowed(followPlugin, publisherPlatform, publisherExternalId)
+        val autoFollowOutcome = if (configProvider().subscription.autoFollowPublisherOnSubscribe) {
+            tryEnsureFollowed(publisherPlatform, publisherExternalId)
         } else {
-            false
+            AutoFollowOutcome(followed = false)
         }
+        val autoFollowed = autoFollowOutcome.followed
 
         val subscriberUpsert = if (request.subscriberId != null) {
             val subscriber = SubscriberRepository.findById(request.subscriberId)
@@ -980,6 +979,7 @@ public class AdminService(
             subscriberUpdated = subscriberUpsert.updated,
             subscriptionCreated = subscriptionResult.changed,
             autoFollowed = autoFollowed,
+            warnings = listOfNotNull(autoFollowOutcome.warning),
         )
     }
 
@@ -1243,25 +1243,44 @@ public class AdminService(
         return result.changed
     }
 
+    private suspend fun tryEnsureFollowed(
+        platform: String,
+        externalId: String,
+    ): AutoFollowOutcome {
+        val plugin = publisherFollowResolver(platform)
+            ?: return AutoFollowOutcome(
+                followed = false,
+                warning = "未找到发布者关注插件，已跳过自动关注：$platform",
+            )
+        return ensureFollowed(plugin, platform, externalId)
+    }
+
     private suspend fun ensureFollowed(
         plugin: PublisherFollowPlugin,
         platform: String,
         externalId: String,
-    ): Boolean {
+    ): AutoFollowOutcome {
         return when (plugin.queryFollowState(externalId)) {
-            FollowState.FOLLOWING -> false
+            FollowState.FOLLOWING -> AutoFollowOutcome(followed = false)
             FollowState.NOT_FOLLOWING -> {
                 val result = plugin.followPublisher(externalId)
                 when (result.status) {
-                    FollowActionStatus.FOLLOWED -> true
-                    FollowActionStatus.ALREADY_FOLLOWING -> false
-                    FollowActionStatus.FAILED -> throw IllegalStateException(
-                        result.message ?: "关注发布者失败：$platform",
+                    FollowActionStatus.DONE -> AutoFollowOutcome(followed = true)
+                    FollowActionStatus.NOOP -> AutoFollowOutcome(followed = false)
+                    FollowActionStatus.FAILED -> AutoFollowOutcome(
+                        followed = false,
+                        warning = result.message ?: "关注发布者失败，已跳过自动关注：$platform",
                     )
-                    FollowActionStatus.UNSUPPORTED -> throw IllegalStateException("平台不支持关注操作：$platform")
+                    FollowActionStatus.UNSUPPORTED -> AutoFollowOutcome(
+                        followed = false,
+                        warning = "平台不支持关注操作，已跳过自动关注：$platform",
+                    )
                 }
             }
-            FollowState.UNSUPPORTED -> throw IllegalStateException("平台不支持关注状态检查：$platform")
+            FollowState.UNSUPPORTED -> AutoFollowOutcome(
+                followed = false,
+                warning = "平台不支持关注状态检查，已跳过自动关注：$platform",
+            )
         }
     }
 
@@ -1528,6 +1547,11 @@ private fun Map<String, Int>.toStateCounts(total: Long): List<StateCountDto> {
 private data class CachedLoginState(
     val result: PublisherLoginResult,
     val checkedAtEpochMillis: Long,
+)
+
+private data class AutoFollowOutcome(
+    val followed: Boolean,
+    val warning: String? = null,
 )
 
 private data class SinkPlatformEntry(

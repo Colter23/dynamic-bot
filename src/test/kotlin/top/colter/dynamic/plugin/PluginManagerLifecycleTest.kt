@@ -225,6 +225,24 @@ class PluginManagerLifecycleTest {
     }
 
     @Test
+    fun startShouldFailWhenPluginHookTimesOut() {
+        val manager = PluginManager(
+            pluginDirPath = createTempDirectory("plugin-manager-hook-timeout").toString(),
+            pluginHookTimeoutMs = 50,
+        )
+        val plugin = HangingStartPlugin()
+        manager.registerPluginForTest(descriptor("hanging", plugin), plugin)
+
+        manager.startPlugin("hanging")
+
+        val info = manager.getAllPlugins().single()
+        assertEquals(PluginState.FAILED, info.state)
+        assertTrue(info.error?.message?.contains("超时") == true)
+
+        manager.shutdown()
+    }
+
+    @Test
     fun stopShouldDrainInFlightSinkCallbacks() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val manager = PluginManager(
@@ -317,6 +335,12 @@ class PluginManagerLifecycleTest {
 
     private class TestSourcePlugin : PublisherSourcePlugin {
         override val platformId: PlatformId = PlatformId.of("bilibili")
+    }
+
+    private class HangingStartPlugin : Plugin {
+        override suspend fun onStart() {
+            CompletableDeferred<Unit>().await()
+        }
     }
 
     private class RollbackCommandPlugin : CommandContributor {

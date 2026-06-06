@@ -88,10 +88,6 @@ public object SubscriberRepository {
 
     public fun findEffectiveByAddress(address: TargetAddress): Subscriber? {
         return findByAddress(address)
-            ?: address
-                .takeIf { it.accountId != null }
-                ?.copy(accountId = null)
-                ?.let { findByAddress(it) }
     }
 
     public fun upsert(

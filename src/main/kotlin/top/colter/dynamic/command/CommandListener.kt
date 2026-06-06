@@ -1,4 +1,4 @@
-﻿package top.colter.dynamic.command
+package top.colter.dynamic.command
 
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
@@ -296,6 +296,11 @@ private data class ResolvedFilterTarget(
     val publisher: Publisher,
     val subscriber: Subscriber,
     val subscription: Subscription,
+)
+
+private data class CommandAutoFollowOutcome(
+    val followed: Boolean,
+    val warning: String? = null,
 )
 
 private sealed interface FilterTargetResolveResult {
@@ -681,7 +686,7 @@ private class SubscribeCommandHandler(
             ?: return CommandExecutionResult.failed("未找到发布者查询插件：$platform")
         val autoFollowEnabled = configProvider().subscription.autoFollowPublisherOnSubscribe
         val followPlugin = if (autoFollowEnabled) {
-            followResolver(platform) ?: return CommandExecutionResult.failed("未找到发布者关注插件：$platform")
+            followResolver(platform)
         } else {
             null
         }
@@ -689,29 +694,10 @@ private class SubscribeCommandHandler(
         val publisherInfo = lookupPlugin.fetchPublisherInfo(publisherUserId)
             ?: return CommandExecutionResult.failed("未找到发布者：$platform:$publisherUserId")
 
-        val autoFollowed = if (autoFollowEnabled) {
-            val followState = followPlugin!!.queryFollowState(publisherUserId)
-            when (followState) {
-                FollowState.FOLLOWING -> false
-                FollowState.NOT_FOLLOWING -> {
-                    val followResult = followPlugin.followPublisher(publisherUserId)
-                    when (followResult.status) {
-                        FollowActionStatus.FOLLOWED -> true
-                        FollowActionStatus.ALREADY_FOLLOWING -> false
-                        FollowActionStatus.FAILED -> {
-                            return CommandExecutionResult.failed(followResult.message ?: "关注发布者失败：$platform")
-                        }
-                        FollowActionStatus.UNSUPPORTED -> {
-                            return CommandExecutionResult.failed("$platform 不支持自动关注")
-                        }
-                    }
-                }
-                FollowState.UNSUPPORTED -> {
-                    return CommandExecutionResult.failed("$platform 不支持关注状态检查")
-                }
-            }
+        val autoFollowOutcome = if (autoFollowEnabled) {
+            tryAutoFollow(followPlugin, platform, publisherUserId)
         } else {
-            false
+            CommandAutoFollowOutcome(followed = false)
         }
 
         val publisherUpsert = PublisherRepository.upsertInfo(publisherInfo)
@@ -731,10 +717,46 @@ private class SubscribeCommandHandler(
 
         val publisherState = if (publisherUpsert.created) "新建" else "已存在"
         val subscriptionState = if (mutation.changed) "新建" else "已存在"
-        val followStateText = if (!autoFollowEnabled) "已关闭" else if (autoFollowed) "是" else "否"
+        val followStateText = if (!autoFollowEnabled) "已关闭" else if (autoFollowOutcome.followed) "是" else "否"
+        val warningText = autoFollowOutcome.warning?.let { "，自动关注提示=$it" }.orEmpty()
         return CommandExecutionResult.success(
-            "已订阅：${publisherUpsert.value.name}（自动关注=$followStateText，发布者=$publisherState，订阅=$subscriptionState）",
+            "已订阅：${publisherUpsert.value.name}（自动关注=$followStateText，发布者=$publisherState，订阅=$subscriptionState$warningText）",
         )
+    }
+
+    private suspend fun tryAutoFollow(
+        followPlugin: PublisherFollowPlugin?,
+        platform: String,
+        publisherUserId: String,
+    ): CommandAutoFollowOutcome {
+        if (followPlugin == null) {
+            return CommandAutoFollowOutcome(
+                followed = false,
+                warning = "未找到发布者关注插件：$platform",
+            )
+        }
+        return when (followPlugin.queryFollowState(publisherUserId)) {
+            FollowState.FOLLOWING -> CommandAutoFollowOutcome(followed = false)
+            FollowState.NOT_FOLLOWING -> {
+                val followResult = followPlugin.followPublisher(publisherUserId)
+                when (followResult.status) {
+                    FollowActionStatus.DONE -> CommandAutoFollowOutcome(followed = true)
+                    FollowActionStatus.NOOP -> CommandAutoFollowOutcome(followed = false)
+                    FollowActionStatus.FAILED -> CommandAutoFollowOutcome(
+                        followed = false,
+                        warning = followResult.message ?: "关注发布者失败：$platform",
+                    )
+                    FollowActionStatus.UNSUPPORTED -> CommandAutoFollowOutcome(
+                        followed = false,
+                        warning = "$platform 不支持自动关注",
+                    )
+                }
+            }
+            FollowState.UNSUPPORTED -> CommandAutoFollowOutcome(
+                followed = false,
+                warning = "$platform 不支持关注状态检查",
+            )
+        }
     }
 }
 

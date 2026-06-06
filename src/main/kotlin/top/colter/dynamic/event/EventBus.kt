@@ -31,6 +31,8 @@ public class EventBus(
     @PublishedApi
     internal val inFlightEvents: AtomicInteger = AtomicInteger(0)
     @PublishedApi
+    internal val droppedEvents: AtomicInteger = AtomicInteger(0)
+    @PublishedApi
     internal val maxInFlightEventsLimit: Int = maxInFlightEvents.coerceAtLeast(1)
     private val scopeLock: Any = Any()
     private var parentContext: CoroutineContext = parentContext
@@ -70,17 +72,23 @@ public class EventBus(
             eventScope.cancel("事件总线已关闭")
             eventMap.clear()
             inFlightEvents.set(0)
+            droppedEvents.set(0)
             parentContext = Dispatchers.Default
             eventScope = createScope(parentContext)
         }
     }
 
+    /**
+     * EventBus is a best-effort notification channel for lightweight UI/runtime events.
+     * Critical delivery paths must persist state through repositories or outbox tables before broadcasting.
+     */
     public inline fun <reified E : Any> broadcast(event: E) {
         val eventName = eventKey<E>()
         eventMap[eventName]?.forEach { entry ->
             val nextInFlight = inFlightEvents.incrementAndGet()
             if (nextInFlight > maxInFlightEventsLimit) {
                 inFlightEvents.decrementAndGet()
+                droppedEvents.incrementAndGet()
                 eventBusLogger.warn {
                     "事件分发队列已满，已丢弃事件：event=$eventName，listener=${entry.token.id}，inFlight=$nextInFlight"
                 }
@@ -104,6 +112,8 @@ public class EventBus(
     public inline fun <reified E : Any> listenerCount(): Int {
         return eventMap[eventKey<E>()]?.size ?: 0
     }
+
+    public fun droppedEventCount(): Int = droppedEvents.get()
 
     @PublishedApi
     internal inline fun <reified E : Any> eventKey(): String {
