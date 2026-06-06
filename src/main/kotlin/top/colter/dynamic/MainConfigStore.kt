@@ -17,6 +17,7 @@ import top.colter.dynamic.core.plugin.MessageSinkRoutingStrategy
 import top.colter.dynamic.admin.AdminLogBuffer
 import top.colter.dynamic.draw.DrawLayoutRegistry
 import top.colter.dynamic.draw.DrawThemeFactory
+import top.colter.dynamic.listener.PushTemplateRenderer
 
 public class MainConfigStore(
     private val configService: ConfigService = YamlConfigService(),
@@ -125,7 +126,7 @@ public object MainConfigForms {
                     label = "动态模板",
                     type = ConfigFieldType.TEXTAREA,
                     section = "消息模板",
-                    description = "支持 {draw} {name} {uid} {did} {time} {content} {images} {link} {links}；\\n 换行，\\r 分割为多条消息。",
+                    description = "支持 {draw} {name} {uid} {did} {time} {content} {images} {link} {links}；\\n 换行，\\r 分割为多条消息；{>>}...{<<} 包裹内容会作为合并转发发送。",
                     component = "MESSAGE_TEMPLATE_EDITOR",
                     metadata = mapOf("templateKind" to "DYNAMIC"),
                     required = true,
@@ -135,7 +136,7 @@ public object MainConfigForms {
                     label = "开播模板",
                     type = ConfigFieldType.TEXTAREA,
                     section = "消息模板",
-                    description = "支持 {draw} {name} {uid} {rid} {time} {title} {area} {cover} {link}；\\n 换行，\\r 分割为多条消息。",
+                    description = "支持 {draw} {name} {uid} {rid} {time} {title} {area} {cover} {link}；\\n 换行，\\r 分割为多条消息；{>>}...{<<} 包裹内容会作为合并转发发送。",
                     component = "MESSAGE_TEMPLATE_EDITOR",
                     metadata = mapOf("templateKind" to "LIVE_STARTED"),
                     required = true,
@@ -145,7 +146,7 @@ public object MainConfigForms {
                     label = "下播模板",
                     type = ConfigFieldType.TEXTAREA,
                     section = "消息模板",
-                    description = "支持 {name} {uid} {rid} {title} {area} {startTime} {endTime} {duration} {link}；\\n 换行。",
+                    description = "支持 {name} {uid} {rid} {title} {area} {startTime} {endTime} {duration} {link}；\\n 换行；{>>}...{<<} 包裹内容会作为合并转发发送。",
                     component = "MESSAGE_TEMPLATE_EDITOR",
                     metadata = mapOf("templateKind" to "LIVE_ENDED"),
                     required = true,
@@ -714,6 +715,9 @@ public object MainConfigForms {
         require(config.templates.dynamic.isNotBlank()) { "templates.dynamic 不能为空" }
         require(config.templates.liveStarted.isNotBlank()) { "templates.liveStarted 不能为空" }
         require(config.templates.liveEnded.isNotBlank()) { "templates.liveEnded 不能为空" }
+        PushTemplateRenderer.validateForwardBlockSyntax(config.templates.dynamic)
+        PushTemplateRenderer.validateForwardBlockSyntax(config.templates.liveStarted)
+        PushTemplateRenderer.validateForwardBlockSyntax(config.templates.liveEnded)
         require(config.command.prefix.isNotBlank()) { "命令前缀不能为空" }
         config.command.permissions.forEachIndexed { index, rule ->
             require(rule.commandPath.isNotBlank()) { "command.permissions[$index].commandPath 不能为空" }

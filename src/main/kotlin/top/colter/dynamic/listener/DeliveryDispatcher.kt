@@ -16,6 +16,7 @@ import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.core.plugin.MessageRecallRequest
 import top.colter.dynamic.core.plugin.MessageRecallResult
 import top.colter.dynamic.core.plugin.MessageSendResult
+import top.colter.dynamic.core.plugin.MessageSinkFeature
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.event.CommandResultEvent
@@ -97,15 +98,18 @@ public class DeliveryDispatcher(
         val target = rewrittenRequest.target.address
         val routed = resolveRoutedSinks(target)
         if (routed.routedSinkIds.isNotEmpty()) {
+            val (sendRequest, candidates) = prepareRoutedCommandResultRequest(rewrittenRequest, routed.candidates)
             return accountRouter.sendCommandResult(
-                candidates = routed.candidates,
+                candidates = candidates,
                 policy = routingConfigProvider().policyFor(target.platformId.value),
-                request = rewrittenRequest,
+                request = sendRequest,
             )
         }
 
         return when (val direct = resolveDirectSink(target)) {
-            is DirectSinkResolveResult.Found -> runCatching { direct.sink.sendCommandResult(rewrittenRequest) }
+            is DirectSinkResolveResult.Found -> runCatching {
+                direct.sink.sendCommandResult(prepareDirectCommandResultRequest(rewrittenRequest, direct.sink))
+            }
                 .getOrElse { MessageSendResult.failed(it.message ?: "命令回复发送失败", retryable = true) }
             DirectSinkResolveResult.NotFound -> {
                 logger.warn { "命令回复无可用消息出口：traceId=${request.inReplyTo}，target=${target.stableValue()}" }
@@ -161,11 +165,16 @@ public class DeliveryDispatcher(
         val rewrittenRequest = rewriteDeliveryRequest(request)
         val routed = resolveRoutedSinks(rewrittenRequest.target)
         if (routed.routedSinkIds.isNotEmpty()) {
-            return sendWithRoutes(rewrittenRequest, routed.candidates, config)
+            val (sendRequest, candidates) = prepareRoutedDeliveryRequest(rewrittenRequest, routed.candidates)
+            return sendWithRoutes(sendRequest, candidates, config)
         }
 
         return when (val direct = resolveDirectSink(rewrittenRequest.target)) {
-            is DirectSinkResolveResult.Found -> sendWithSink(rewrittenRequest, direct.sink, config)
+            is DirectSinkResolveResult.Found -> sendWithSink(
+                prepareDirectDeliveryRequest(rewrittenRequest, direct.sink),
+                direct.sink,
+                config,
+            )
             DirectSinkResolveResult.NotFound -> {
                 logger.warn {
                     "消息投递失败：未找到消息出口插件，deliveryId=${rewrittenRequest.delivery.id}，messageId=${rewrittenRequest.delivery.messageId}，target=${rewrittenRequest.target.stableValue()}"
@@ -199,6 +208,54 @@ public class DeliveryDispatcher(
         val service = outboundMediaService ?: return request
         val chain = service.rewriteBatches(request.chain)
         return if (chain == request.chain) request else request.copy(chain = chain)
+    }
+
+    private fun prepareRoutedDeliveryRequest(
+        request: MessageDeliveryRequest,
+        candidates: List<MessageSinkRouteCandidate>,
+    ): Pair<MessageDeliveryRequest, List<MessageSinkRouteCandidate>> {
+        if (!request.message.batches.containsMergedForward()) return request to candidates
+        val supported = candidates.filter { candidate ->
+            MessageSinkFeature.MERGED_FORWARD in candidate.sink.supportedMessageFeatures
+        }
+        return if (supported.isNotEmpty()) {
+            request to supported
+        } else {
+            request.withMergedForwardFallback() to candidates
+        }
+    }
+
+    private fun prepareRoutedCommandResultRequest(
+        request: CommandResultSendRequest,
+        candidates: List<MessageSinkRouteCandidate>,
+    ): Pair<CommandResultSendRequest, List<MessageSinkRouteCandidate>> {
+        if (!request.chain.containsMergedForward()) return request to candidates
+        val supported = candidates.filter { candidate ->
+            MessageSinkFeature.MERGED_FORWARD in candidate.sink.supportedMessageFeatures
+        }
+        return if (supported.isNotEmpty()) {
+            request to supported
+        } else {
+            request.withMergedForwardFallback() to candidates
+        }
+    }
+
+    private fun prepareDirectDeliveryRequest(
+        request: MessageDeliveryRequest,
+        sink: MessageSinkPlugin,
+    ): MessageDeliveryRequest {
+        if (!request.message.batches.containsMergedForward()) return request
+        if (MessageSinkFeature.MERGED_FORWARD in sink.supportedMessageFeatures) return request
+        return request.withMergedForwardFallback()
+    }
+
+    private fun prepareDirectCommandResultRequest(
+        request: CommandResultSendRequest,
+        sink: MessageSinkPlugin,
+    ): CommandResultSendRequest {
+        if (!request.chain.containsMergedForward()) return request
+        if (MessageSinkFeature.MERGED_FORWARD in sink.supportedMessageFeatures) return request
+        return request.withMergedForwardFallback()
     }
 
     private suspend fun sendWithRoutes(

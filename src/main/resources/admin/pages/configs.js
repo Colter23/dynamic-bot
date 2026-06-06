@@ -688,7 +688,6 @@ function messageTemplatePlaceholders(kind) {
     { value: "{name}", label: "{name}", title: "发布者名称" },
     { value: "{uid}", label: "{uid}", title: "发布者 ID" },
     { value: "{link}", label: "{link}", title: "主链接" },
-    { value: "\\n", label: "\\n", title: "换行" },
   ];
   if (kind === "LIVE_STARTED") {
     return [
@@ -700,6 +699,8 @@ function messageTemplatePlaceholders(kind) {
       { value: "{area}", label: "{area}", title: "直播分区" },
       { value: "{cover}", label: "{cover}", title: "封面图" },
       { value: "\\r", label: "\\r", title: "拆分为下一条消息" },
+      messageTemplateForwardToken(kind),
+      { value: "\\n", label: "\\n", title: "换行" },
     ];
   }
   if (kind === "LIVE_ENDED") {
@@ -711,6 +712,8 @@ function messageTemplatePlaceholders(kind) {
       { value: "{startTime}", label: "{startTime}", title: "开始时间" },
       { value: "{endTime}", label: "{endTime}", title: "结束时间" },
       { value: "{duration}", label: "{duration}", title: "直播时长" },
+      messageTemplateForwardToken(kind),
+      { value: "\\n", label: "\\n", title: "换行" },
     ];
   }
   return [
@@ -722,7 +725,31 @@ function messageTemplatePlaceholders(kind) {
     { value: "{images}", label: "{images}", title: "动态图片" },
     { value: "{links}", label: "{links}", title: "附加链接" },
     { value: "\\r", label: "\\r", title: "拆分为下一条消息" },
+    messageTemplateForwardToken(kind),
+    { value: "\\n", label: "\\n", title: "换行" },
   ];
+}
+
+function messageTemplateForwardToken(kind) {
+  if (kind === "LIVE_STARTED") {
+    return {
+      value: "{>>}\\n直播标题：{title}\\n分区：{area}\\r封面：\\n{cover}\\r直播间：{link}\\n{<<}",
+      label: "{>>}...{<<}",
+      title: "合并转发块",
+    };
+  }
+  if (kind === "LIVE_ENDED") {
+    return {
+      value: "{>>}\\n直播标题：{title}\\n直播时长：{duration}\\r直播间：{link}\\n{<<}",
+      label: "{>>}...{<<}",
+      title: "合并转发块",
+    };
+  }
+  return {
+    value: "{>>}\\n完整文字：\\n{content}\\r全部原图：\\n{images}\\r原始链接：{link}\\n{<<}",
+    label: "{>>}...{<<}",
+    title: "合并转发块",
+  };
 }
 
 function messageTemplateStats(template, kind) {
@@ -735,20 +762,41 @@ function messageTemplateStats(template, kind) {
 function renderMessageTemplatePreview(template, kind) {
   const batches = messageTemplatePreviewBatches(template, kind);
   if (!batches.length) return `<div class="empty">预览为空</div>`;
-  return batches.map((text, index) => `
-    <div class="message-template-preview-message">
-      <span class="message-template-preview-index">预览消息 ${index + 1}</span>
-      <div>${esc(text).replace(/\n/g, "<br>")}</div>
-    </div>
-  `).join("");
+  return batches.map((item, index) => renderMessageTemplatePreviewItem(item, index)).join("");
 }
 
 function messageTemplatePreviewBatches(template, kind) {
   const source = String(template || "");
-  const fragments = kind === "LIVE_ENDED" ? [source] : source.split("\\r");
-  return fragments
-    .map(fragment => renderMessageTemplateFragment(fragment.replace(/\\n/g, "\n"), kind).trim())
-    .filter(Boolean);
+  const segments = parseMessageTemplatePreviewSegments(source);
+  if (!segments) {
+    return messageTemplatePlainPreviewBatches(source, kind);
+  }
+
+  const batches = [];
+  let current = "";
+  const flush = () => {
+    const text = current.trim();
+    if (text) batches.push({ type: "text", text });
+    current = "";
+  };
+
+  segments.forEach(segment => {
+    if (segment.type === "forward") {
+      flush();
+      const nodes = segment.value.split("\\r")
+        .map(fragment => renderMessageTemplateFragment(fragment.replace(/\\n/g, "\n"), kind).trim())
+        .filter(Boolean);
+      if (nodes.length) batches.push({ type: "forward", nodes });
+      return;
+    }
+    const fragments = kind === "LIVE_ENDED" ? [segment.value] : segment.value.split("\\r");
+    fragments.forEach((fragment, index) => {
+      if (index > 0) flush();
+      current += renderMessageTemplateFragment(fragment.replace(/\\n/g, "\n"), kind);
+    });
+  });
+  flush();
+  return batches;
 }
 
 function renderMessageTemplateFragment(fragment, kind) {
@@ -756,6 +804,57 @@ function renderMessageTemplateFragment(fragment, kind) {
   return String(fragment || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key) => {
     return sample[key] === undefined ? match : sample[key];
   });
+}
+
+function messageTemplatePlainPreviewBatches(source, kind) {
+  const fragments = kind === "LIVE_ENDED" ? [source] : source.split("\\r");
+  return fragments
+    .map(fragment => renderMessageTemplateFragment(fragment.replace(/\\n/g, "\n"), kind).trim())
+    .filter(Boolean)
+    .map(text => ({ type: "text", text }));
+}
+
+function parseMessageTemplatePreviewSegments(source) {
+  const segments = [];
+  let index = 0;
+  while (index < source.length) {
+    const start = source.indexOf("{>>}", index);
+    const end = source.indexOf("{<<}", index);
+    if (end !== -1 && (start === -1 || end < start)) return null;
+    if (start === -1) {
+      segments.push({ type: "text", value: source.slice(index) });
+      break;
+    }
+    if (start > index) segments.push({ type: "text", value: source.slice(index, start) });
+    const contentStart = start + 4;
+    const close = source.indexOf("{<<}", contentStart);
+    if (close === -1) return null;
+    const nested = source.indexOf("{>>}", contentStart);
+    if (nested !== -1 && nested < close) return null;
+    segments.push({ type: "forward", value: source.slice(contentStart, close) });
+    index = close + 4;
+  }
+  return segments;
+}
+
+function renderMessageTemplatePreviewItem(item, index) {
+  const labelText = item.type === "forward" ? `合并转发 ${index + 1}` : `预览消息 ${index + 1}`;
+  if (item.type !== "forward") {
+    return `<div class="message-template-preview-message">
+      <span class="message-template-preview-index">${esc(labelText)}</span>
+      <div>${esc(item.text).replace(/\n/g, "<br>")}</div>
+    </div>`;
+  }
+  return `<div class="message-template-preview-message message-template-preview-forward">
+    <span class="message-template-preview-index">${esc(labelText)}</span>
+    <div class="message-template-forward-summary">合并转发节点：${item.nodes.length} 条</div>
+    <div class="message-template-forward-nodes">
+      ${item.nodes.map((node, nodeIndex) => `<div class="message-template-forward-node">
+        <span class="message-template-forward-node-title">节点 ${nodeIndex + 1}</span>
+        <div>${esc(node).replace(/\n/g, "<br>")}</div>
+      </div>`).join("")}
+    </div>
+  </div>`;
 }
 
 function messageTemplateSampleValues(kind) {

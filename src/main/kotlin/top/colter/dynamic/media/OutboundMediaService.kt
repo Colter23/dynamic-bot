@@ -98,6 +98,13 @@ public class OutboundMediaService(
                 val rewritten = rewriteMedia(content.image)
                 if (rewritten == content.image) content else content.copy(image = rewritten)
             }
+            is MessageContent.Forward -> {
+                val rewrittenNodes = content.nodes.map { node ->
+                    val rewrittenBatches = rewriteBatches(node.batches)
+                    if (rewrittenBatches == node.batches) node else node.copy(batches = rewrittenBatches)
+                }
+                if (rewrittenNodes == content.nodes) content else content.copy(nodes = rewrittenNodes)
+            }
             else -> content
         }
     }

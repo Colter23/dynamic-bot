@@ -2086,6 +2086,36 @@
       font-size: 12px;
       font-weight: 800;
     }
+    .message-template-preview-forward {
+      border-style: dashed;
+      background: #f7fbff;
+    }
+    .message-template-forward-summary {
+      margin-bottom: 8px;
+      color: #1d4ed8;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .message-template-forward-nodes {
+      display: grid;
+      gap: 6px;
+      min-width: 0;
+    }
+    .message-template-forward-node {
+      min-width: 0;
+      padding: 7px 8px;
+      border: 1px solid #d9e6ff;
+      border-radius: 7px;
+      background: #fff;
+      overflow-wrap: anywhere;
+    }
+    .message-template-forward-node-title {
+      display: block;
+      margin-bottom: 4px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
     .message-template-editor-modal {
       display: grid;
       grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.95fr);

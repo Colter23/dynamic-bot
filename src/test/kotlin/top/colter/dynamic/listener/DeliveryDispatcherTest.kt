@@ -8,6 +8,7 @@ import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.DeliveryConfig
 import top.colter.dynamic.MessageRoutingConfig
 import top.colter.dynamic.core.data.DeliveryStatus
+import top.colter.dynamic.core.data.ForwardNode
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
@@ -17,6 +18,7 @@ import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
 import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.core.plugin.MessageSendResult
+import top.colter.dynamic.core.plugin.MessageSinkFeature
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.core.plugin.MessageSinkRoute
 import top.colter.dynamic.core.plugin.MessageSinkRoutingPolicy
@@ -98,6 +100,7 @@ class DeliveryDispatcherTest {
         val stats = dispatcher(
             sink,
             config = defaultDeliveryConfig().copy(dispatchConcurrency = 1),
+            routing = roundRobinRouting(),
         ).dispatchDue()
 
         assertEquals(2, stats.sent)
@@ -191,6 +194,44 @@ class DeliveryDispatcherTest {
         assertEquals(1, delivery.attempts)
     }
 
+    @Test
+    fun `direct sink without merged forward support should receive fallback batches`() = runBlocking {
+        initDb("direct-forward-fallback")
+        val sink = RecordingSink()
+        val target = testTargetAddress(platformId = "qq", kind = TargetKind.GROUP, externalId = "10001")
+        val message = mergedForwardMessage("message-forward-fallback", target)
+        MessageDeliveryRepository.enqueue(message)
+
+        val stats = dispatcher(sink).dispatchDue()
+
+        assertEquals(1, stats.sent)
+        val sent = sink.sentMessages.single()
+        assertEquals(3, sent.batches.size)
+        assertEquals("before", sent.batches[0].content.single().fallbackText)
+        assertEquals("Demo UP:\n", sent.batches[1].content[0].fallbackText)
+        assertEquals("node text", sent.batches[1].content[1].fallbackText)
+        assertEquals("after", sent.batches[2].content.single().fallbackText)
+        assertEquals(false, sent.batches.any { batch -> batch.content.any { it is MessageContent.Forward } })
+    }
+
+    @Test
+    fun `routed sink with merged forward support should keep forward content`() = runBlocking {
+        initDb("routed-forward-supported")
+        val sink = RoutedRecordingSink(
+            accountIds = listOf("bot-a"),
+            features = setOf(MessageSinkFeature.MERGED_FORWARD),
+        )
+        val target = testTargetAddress(platformId = "qq", kind = TargetKind.GROUP, externalId = "10001")
+        val message = mergedForwardMessage("message-forward-supported", target)
+        MessageDeliveryRepository.enqueue(message)
+
+        val stats = dispatcher(sink).dispatchDue()
+
+        assertEquals(1, stats.sent)
+        val sent = sink.sentMessages.single()
+        assertEquals(true, sent.batches.single().content.any { it is MessageContent.Forward })
+    }
+
     private fun dispatcher(
         vararg sinks: MessageSinkPlugin,
         config: DeliveryConfig = defaultDeliveryConfig(),
@@ -218,12 +259,49 @@ class DeliveryDispatcherTest {
         ),
     )
 
+    private fun roundRobinRouting(): MessageRoutingConfig = MessageRoutingConfig(
+        defaultPolicy = MessageSinkRoutingPolicy(
+            strategy = MessageSinkRoutingStrategy.ROUND_ROBIN,
+            primaryAccountId = "bot-a",
+            failureCooldownSeconds = 60,
+        ),
+    )
+
     private fun testMessage(id: String, target: TargetAddress): Message {
         return Message(
             id = id,
             time = 1L,
             targets = listOf(target),
             batches = listOf(MessageBatch(listOf(MessageContent.Text("hello")))),
+        )
+    }
+
+    private fun mergedForwardMessage(id: String, target: TargetAddress): Message {
+        return Message(
+            id = id,
+            time = 1L,
+            targets = listOf(target),
+            batches = listOf(
+                MessageBatch(
+                    listOf(
+                        MessageContent.Text("before"),
+                        MessageContent.Forward(
+                            fallbackText = "[合并转发] Demo UP",
+                            title = "Demo UP 的原始内容",
+                            sourceName = "Demo UP",
+                            nodes = listOf(
+                                ForwardNode(
+                                    senderId = "123",
+                                    senderName = "Demo UP",
+                                    time = 1L,
+                                    batches = listOf(MessageBatch(listOf(MessageContent.Text("node text")))),
+                                ),
+                            ),
+                        ),
+                        MessageContent.Text("after"),
+                    ),
+                ),
+            ),
         )
     }
 
@@ -242,24 +320,29 @@ class DeliveryDispatcherTest {
         override val supportedTargetKinds: Set<TargetKind> = setOf(TargetKind.GROUP)
 
         val sentMessageIds: MutableList<String> = mutableListOf()
+        val sentMessages: MutableList<Message> = mutableListOf()
 
         override suspend fun sendMessage(request: MessageDeliveryRequest): MessageSendResult {
             sentMessageIds += request.message.id
+            sentMessages += request.message
             return result(request)
         }
     }
 
     private class RoutedRecordingSink(
         private val accountIds: List<String>,
+        private val features: Set<MessageSinkFeature> = emptySet(),
         private val result: (String, MessageDeliveryRequest) -> MessageSendResult = { accountId, request ->
             MessageSendResult.sent("receipt-${request.message.id}", sinkAccountId = accountId)
         },
     ) : AccountRoutedMessageSinkPlugin {
         override val transportId: String = "onebot"
+        override val supportedMessageFeatures: Set<MessageSinkFeature> = features
         override val supportedTargetPlatforms: Set<PlatformId> = setOf(PlatformId.of("qq"))
         override val supportedTargetKinds: Set<TargetKind> = setOf(TargetKind.GROUP)
 
         val sent: MutableList<String> = mutableListOf()
+        val sentMessages: MutableList<Message> = mutableListOf()
 
         override suspend fun listMessageSinkRoutes(target: TargetAddress?): List<MessageSinkRoute> {
             return accountIds.map { accountId ->
@@ -279,6 +362,7 @@ class DeliveryDispatcherTest {
         ): MessageSendResult {
             val accountId = routeId.substringAfterLast(":")
             sent += "$accountId:${request.message.id}"
+            sentMessages += request.message
             return result(accountId, request)
         }
     }

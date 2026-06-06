@@ -4,6 +4,7 @@ import top.colter.dynamic.core.data.DynamicContentNodeLink
 import top.colter.dynamic.core.data.DynamicContentNodeMention
 import top.colter.dynamic.core.data.DynamicContentNodeTag
 import top.colter.dynamic.core.data.DynamicPayload
+import top.colter.dynamic.core.data.ForwardNode
 import top.colter.dynamic.core.data.ImageGridBlock
 import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.MediaRef
@@ -29,6 +30,7 @@ public class PushTemplateRenderer {
         val splitConversation = update.eventType != SourceEventType.LIVE_ENDED
         return renderTemplate(
             template = template,
+            update = update,
             splitConversation = splitConversation,
             appendPlaceholder = { contents, placeholder, key ->
                 when (val payload = update.payload) {
@@ -41,13 +43,92 @@ public class PushTemplateRenderer {
 
     private fun renderTemplate(
         template: String,
+        update: SourceUpdate,
         splitConversation: Boolean,
         appendPlaceholder: (MutableList<MessageContent>, String, String) -> Unit,
     ): List<MessageBatch> {
-        val fragments = if (splitConversation) template.split(CHAIN_SEPARATOR) else listOf(template)
-        return fragments
-            .map { renderBatch(it.replace(LINE_BREAK, "\n"), appendPlaceholder) }
-            .mapNotNull { it.normalizedOrNull() }
+        val batches = mutableListOf<MessageBatch>()
+        val current = mutableListOf<MessageContent>()
+
+        fun flush() {
+            MessageBatch(current.toList()).normalizedOrNull()?.let { batches += it }
+            current.clear()
+        }
+
+        parseTemplateSegments(template).forEach { segment ->
+            when (segment) {
+                is TemplateSegment.Text -> appendTextSegment(
+                    contents = current,
+                    template = segment.value,
+                    splitConversation = splitConversation,
+                    flush = ::flush,
+                    appendPlaceholder = appendPlaceholder,
+                )
+                is TemplateSegment.Forward -> renderForwardContent(segment.value, update, appendPlaceholder)
+                    ?.let { current += it }
+            }
+        }
+        flush()
+        return batches
+    }
+
+    private fun appendTextSegment(
+        contents: MutableList<MessageContent>,
+        template: String,
+        splitConversation: Boolean,
+        flush: () -> Unit,
+        appendPlaceholder: (MutableList<MessageContent>, String, String) -> Unit,
+    ) {
+        if (!splitConversation) {
+            appendRenderedFragment(contents, template, appendPlaceholder)
+            return
+        }
+
+        template.split(CHAIN_SEPARATOR).forEachIndexed { index, fragment ->
+            if (index > 0) flush()
+            appendRenderedFragment(contents, fragment, appendPlaceholder)
+        }
+    }
+
+    private fun appendRenderedFragment(
+        contents: MutableList<MessageContent>,
+        template: String,
+        appendPlaceholder: (MutableList<MessageContent>, String, String) -> Unit,
+    ) {
+        val rendered = renderBatch(template.replace(LINE_BREAK, "\n"), appendPlaceholder)
+        contents += rendered.content
+    }
+
+    private fun renderForwardContent(
+        template: String,
+        update: SourceUpdate,
+        appendPlaceholder: (MutableList<MessageContent>, String, String) -> Unit,
+    ): MessageContent.Forward? {
+        val nodes = template.split(CHAIN_SEPARATOR)
+            .mapNotNull { nodeTemplate ->
+                renderBatch(nodeTemplate.replace(LINE_BREAK, "\n"), appendPlaceholder)
+                    .normalizedOrNull()
+                    ?.let { batch ->
+                        ForwardNode(
+                            senderId = update.publisher.externalId,
+                            senderName = update.publisher.name,
+                            senderAvatar = update.publisher.avatar,
+                            time = update.occurredAtEpochSeconds,
+                            batches = listOf(batch),
+                        )
+                    }
+            }
+        if (nodes.isEmpty()) return null
+
+        val title = "${update.publisher.name} 的原始内容"
+        return MessageContent.Forward(
+            fallbackText = "[合并转发] $title",
+            title = title,
+            summary = "共 ${nodes.size} 条内容",
+            sourceName = update.publisher.name,
+            sourceAvatar = update.publisher.avatar,
+            nodes = nodes,
+        )
     }
 
     private fun renderBatch(
@@ -231,8 +312,56 @@ public class PushTemplateRenderer {
         return result
     }
 
-    private companion object {
+    private sealed interface TemplateSegment {
+        data class Text(val value: String) : TemplateSegment
+        data class Forward(val value: String) : TemplateSegment
+    }
+
+    public companion object {
+        public fun validateForwardBlockSyntax(template: String) {
+            parseTemplateSegments(template)
+        }
+
+        private fun parseTemplateSegments(template: String): List<TemplateSegment> {
+            val segments = mutableListOf<TemplateSegment>()
+            var index = 0
+
+            while (index < template.length) {
+                val nextStart = template.indexOf(FORWARD_START, startIndex = index)
+                val nextEnd = template.indexOf(FORWARD_END, startIndex = index)
+                require(nextEnd == -1 || (nextStart != -1 && nextStart < nextEnd)) {
+                    "合并转发模板结束标记 $FORWARD_END 缺少开始标记 $FORWARD_START"
+                }
+
+                if (nextStart == -1) {
+                    segments += TemplateSegment.Text(template.substring(index))
+                    break
+                }
+
+                if (nextStart > index) {
+                    segments += TemplateSegment.Text(template.substring(index, nextStart))
+                }
+
+                val contentStart = nextStart + FORWARD_START.length
+                val close = template.indexOf(FORWARD_END, startIndex = contentStart)
+                require(close != -1) {
+                    "合并转发模板开始标记 $FORWARD_START 缺少结束标记 $FORWARD_END"
+                }
+                val nestedStart = template.indexOf(FORWARD_START, startIndex = contentStart)
+                require(nestedStart == -1 || nestedStart > close) {
+                    "合并转发模板不支持嵌套 $FORWARD_START"
+                }
+
+                segments += TemplateSegment.Forward(template.substring(contentStart, close))
+                index = close + FORWARD_END.length
+            }
+
+            return segments
+        }
+
         private const val DRAW_PLACEHOLDER: String = "{draw}"
+        private const val FORWARD_START: String = "{>>}"
+        private const val FORWARD_END: String = "{<<}"
         private const val LINE_BREAK: String = "\\n"
         private const val CHAIN_SEPARATOR: String = "\\r"
         private const val SECONDS_PER_MINUTE: Long = 60

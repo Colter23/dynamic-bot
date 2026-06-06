@@ -2,7 +2,9 @@
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertTrue
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicContentNodeLink
@@ -110,6 +112,55 @@ class PushTemplateRendererTest {
         assertEquals(2, chains.size)
         assertEquals("hello\nDemo UP", chains[0].content.single().fallbackText)
         assertEquals("https://t.bilibili.com/dynamic-1", chains[1].content.single().fallbackText)
+    }
+
+    @Test
+    fun shouldRenderMergedForwardBlockWithNodes() {
+        val chains = renderer.render(
+            "head {name}{>>}完整文字：\\n{content}\\r全部原图：\\n{images}{<<}tail",
+            demoDynamic(),
+            drawImage = null,
+        )
+
+        val contents = chains.single().content
+        assertEquals("head Demo UP", contents[0].fallbackText)
+        val forward = assertIs<MessageContent.Forward>(contents[1])
+        assertEquals("Demo UP 的原始内容", forward.title)
+        assertEquals("Demo UP", forward.sourceName)
+        assertEquals("123", forward.nodes[0].senderId)
+        assertEquals(1_710_000_000, forward.nodes[0].time)
+        assertEquals("完整文字：\nDemo contentlink", forward.nodes[0].batches.single().content.single().fallbackText)
+        assertEquals("全部原图：\n", forward.nodes[1].batches.single().content[0].fallbackText)
+        assertEquals("https://example.com/pic-a.png", (forward.nodes[1].batches.single().content[1] as MessageContent.Image).image.uri)
+        assertEquals("tail", contents[2].fallbackText)
+    }
+
+    @Test
+    fun shouldSplitConversationOutsideMergedForwardBlockOnly() {
+        val chains = renderer.render(
+            "first\\r{>>}node-a\\rnode-b{<<}\\rlast",
+            demoDynamic(),
+            drawImage = null,
+        )
+
+        assertEquals(3, chains.size)
+        assertEquals("first", chains[0].content.single().fallbackText)
+        val forward = assertIs<MessageContent.Forward>(chains[1].content.single())
+        assertEquals(listOf("node-a", "node-b"), forward.nodes.map { it.batches.single().content.single().fallbackText })
+        assertEquals("last", chains[2].content.single().fallbackText)
+    }
+
+    @Test
+    fun shouldRejectInvalidMergedForwardBlocks() {
+        assertFailsWith<IllegalArgumentException> {
+            PushTemplateRenderer.validateForwardBlockSyntax("{>>}missing end")
+        }
+        assertFailsWith<IllegalArgumentException> {
+            PushTemplateRenderer.validateForwardBlockSyntax("{<<}")
+        }
+        assertFailsWith<IllegalArgumentException> {
+            PushTemplateRenderer.validateForwardBlockSyntax("{>>}outer {>>} inner {<<}{<<}")
+        }
     }
 
     @Test
