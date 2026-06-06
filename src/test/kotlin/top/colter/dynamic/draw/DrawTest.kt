@@ -44,6 +44,9 @@ import top.colter.skiko.data.Ratio
 
 private const val TEST_IMAGE_PREFIX = "test://image/"
 private const val TEST_EMOJI_PREFIX = "test://emoji/"
+private const val PREVIEW_LAYOUTS_PROPERTY = "dynamic.draw.preview.layouts"
+private const val PREVIEW_LAYOUTS_ENV = "DYNAMIC_DRAW_PREVIEW_LAYOUTS"
+private val defaultPreviewLayouts = listOf("default", "minimal")
 
 class DrawTest {
     @BeforeTest
@@ -55,8 +58,15 @@ class DrawTest {
 
     @Test
     fun `test common dynamic previews`() {
+        val layouts = previewLayouts()
         commonDynamicPreviews().forEach { preview ->
-            renderToOutput(preview.fileName, preview.update, preview.config ?: drawConfig())
+            layouts.forEach { layout ->
+                renderToOutput(
+                    fileName = previewFileName(layout, preview.fileName),
+                    update = preview.update,
+                    config = drawConfig(layout = layout, ornament = preview.ornament),
+                )
+            }
         }
     }
 
@@ -69,25 +79,25 @@ class DrawTest {
             DynamicPreview(
                 fileName = "preview_02_text_images_card.png",
                 update = textImagesCardDynamic(),
-                config = drawConfig(ornament = DrawOrnament.QRCODE),
+                ornament = DrawOrnament.QRCODE,
             ),
-//            DynamicPreview(
-//                fileName = "preview_03_title_text_images_card.png",
-//                update = titleTextImagesCardDynamic(),
-//            ),
-//            DynamicPreview(
-//                fileName = "preview_04_text_video_card.png",
-//                update = textVideoCardDynamic(),
-//                config = drawConfig(ornament = DrawOrnament.QRCODE),
-//            ),
-//            DynamicPreview(
-//                fileName = "preview_05_repost_dynamic.png",
-//                update = repostDynamic(),
-//            ),
-//            DynamicPreview(
-//                fileName = "preview_06_title_long_images.png",
-//                update = titleLongTextImagesDynamic(),
-//            ),
+            DynamicPreview(
+                fileName = "preview_03_title_text_images_card.png",
+                update = titleTextImagesCardDynamic(),
+            ),
+            DynamicPreview(
+                fileName = "preview_04_text_video_card.png",
+                update = textVideoCardDynamic(),
+                ornament = DrawOrnament.QRCODE,
+            ),
+            DynamicPreview(
+                fileName = "preview_05_repost_dynamic.png",
+                update = repostDynamic(),
+            ),
+            DynamicPreview(
+                fileName = "preview_06_title_long_images.png",
+                update = titleLongTextImagesDynamic(),
+            ),
         )
     }
 
@@ -281,8 +291,24 @@ class DrawTest {
     private data class DynamicPreview(
         val fileName: String,
         val update: SourceUpdate,
-        val config: DrawConfig? = null,
+        val ornament: DrawOrnament = DrawOrnament.LOGO,
     )
+
+    private fun previewLayouts(): List<String> {
+        val configured = System.getProperty(PREVIEW_LAYOUTS_PROPERTY)
+            ?: System.getenv(PREVIEW_LAYOUTS_ENV)
+            ?: return defaultPreviewLayouts
+        return configured
+            .split(',', ';')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .ifEmpty { defaultPreviewLayouts }
+    }
+
+    private fun previewFileName(layout: String, fileName: String): String {
+        val safeLayout = layout.replace(Regex("[^A-Za-z0-9_-]"), "_")
+        return "${safeLayout}_$fileName"
+    }
 
     private fun richTextBlock(vararg nodes: DynamicContentNode): TextBlock {
         return TextBlock(DynamicContent(nodes.toList()))

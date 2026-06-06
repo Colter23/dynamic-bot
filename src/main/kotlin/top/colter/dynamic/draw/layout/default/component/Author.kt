@@ -9,10 +9,6 @@ import top.colter.skiko.data.TextShadow
 import top.colter.skiko.data.TextStroke
 import top.colter.skiko.layout.*
 
-private val authorNameStroke = TextStroke(
-    width = 2.dp,
-    color = Color.BLACK.withAlpha(0.28f),
-)
 private val authorNameShadows = listOf(
     TextShadow(
         offsetX = 2.dp,
@@ -63,57 +59,80 @@ internal fun Layout.Author(
 ) {
     //require(modifier.height.isNotNull()) { "必须指定高度" }
 
-    Row(
+    AuthorContent(
+        face = face,
+        pendant = pendant,
+        name = name,
+        time = time,
+        ornament = ornament,
+        badge = badge,
+        qrCode = qrCode,
+        accentColor = accentColor,
         modifier = Modifier()
             .fillMaxWidth()
+            .fillMaxHeight(),
+    )
+}
+
+/**
+ * 作者内容行，不包含外层卡片、背景、圆角和阴影。
+ */
+internal fun Layout.AuthorContent(
+    face: Image,
+    pendant: Image? = null,
+    name: String,
+    time: String,
+    ornament: Image? = null,
+    badge: Image? = null,
+    qrCode: Image? = null,
+    accentColor: Int = Color.makeRGB(251, 114, 153),
+    modifier: Modifier,
+) = Row(
+    modifier = modifier,
+) {
+    Avatar(
+        face = face,
+        pendant = pendant,
+        badge = badge,
+        modifier = Modifier()
             .fillMaxHeight()
-    ) {
-        Avatar(
-            face = face,
-            pendant = pendant,
-            badge = badge,
-            modifier = Modifier()
-                .fillMaxHeight()
-                .padding(horizontal = 5.dp, vertical = 20.dp)
+            .padding(horizontal = 5.dp, vertical = 20.dp)
+    )
+
+    Column(modifier = Modifier().fillWidth().fillMaxHeight().padding(vertical = 10.dp)) {
+        Text(
+            text = name,
+            color = Color.WHITE,
+            fontSize = 45.dp,
+            stroke = TextStroke(
+                width = 3.dp,
+                color = accentColor,
+            ),
+            textShadows = authorNameShadows,
+            alignment = LayoutAlignment.LEFT,
+            modifier = Modifier().fillMaxWidth().fillRatioHeight(0.6f)
         )
-
-        Column(modifier = Modifier().fillWidth().fillMaxHeight().padding(vertical = 10.dp)) {
-            Text(
-                text = name,
-                color = Color.WHITE,
-                fontSize = 45.dp,
-                stroke = TextStroke(
-                    width = 3.dp,
-                    color = accentColor,
+        Text(
+            text = time,
+            color = Color.WHITE.withAlpha(0.85f),
+            fontSize = 32.dp,
+            textShadows = listOf(
+                TextShadow(
+                    offsetX = 1.dp,
+                    offsetY = 1.dp,
+                    blur = 1.dp,
+                    color = Color.BLACK.withAlpha(0.42f),
                 ),
-                textShadows = authorNameShadows,
-                alignment = LayoutAlignment.LEFT,
-                modifier = Modifier().fillMaxWidth().fillRatioHeight(0.6f)
-            )
-            Text(
-                text = time,
-                color = Color.WHITE.withAlpha(0.85f),
-                fontSize = 32.dp,
-                textShadows = listOf(
-                    TextShadow(
-                        offsetX = 1.dp,
-                        offsetY = 1.dp,
-                        blur = 1.dp,
-                        color = Color.BLACK.withAlpha(0.42f),
-                    ),
-                ),
-                alignment = LayoutAlignment.LEFT,
-                modifier = Modifier().fillMaxWidth().fillRatioHeight(1f - 0.4f)
-            )
-        }
-
-        Decorate(
-            image = ornament,
-            qrCode = qrCode,
-            accentColor = accentColor,
-            modifier = Modifier().fillMaxHeight()
+            ),
+            alignment = LayoutAlignment.LEFT,
+            modifier = Modifier().fillMaxWidth().fillRatioHeight(1f - 0.4f)
         )
-
     }
 
+    Decorate(
+        image = ornament,
+        qrCode = qrCode,
+        accentColor = accentColor,
+        modifier = Modifier().fillMaxHeight()
+    )
 }

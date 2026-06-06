@@ -44,8 +44,17 @@ internal class LinkAutoParseListener(
         }
 
         var progressReceipt: LinkParseProgressReceipt? = null
+        var result: LinkParseBatchResult? = null
+        suspend fun sendProgressOnce() {
+            if (progressReceipt == null) {
+                progressReceipt = progressMessenger.send(event, linkParsing.progressReply)
+            }
+        }
         val autoDedupe = dedupe.takeIf { triggerMode == LinkParseTriggerMode.ALWAYS }
-        val result = try {
+        val finalResult = try {
+            if (linkParseService.hasSupportedLinkCandidate(event.rawText, linkParsing.maxLinksPerMessage)) {
+                sendProgressOnce()
+            }
             linkParseService.parseAndDispatch(
                 text = event.rawText,
                 context = event.context,
@@ -57,30 +66,28 @@ internal class LinkAutoParseListener(
                     secondsToMillis(linkParsing.autoDedupeTtlSeconds, minimumMillis = 0)
                 },
                 onForwardingStarted = {
-                    if (progressReceipt == null) {
-                        progressReceipt = progressMessenger.send(event, linkParsing.progressReply)
-                    }
+                    sendProgressOnce()
                 },
-            )
+            ).also { result = it }
         } finally {
-            if (linkParsing.progressReply.recallOnComplete) {
+            if (linkParsing.progressReply.recallOnComplete || result?.hasForwarded != true) {
                 progressReceipt?.let { progressMessenger.recall(it) }
             }
         }
 
         if (linkParsing.replyOnFailure) {
             when {
-                result.disabledReason != null -> reply(event, "链接解析失败：${result.disabledReason}", CommandStatus.FAILED)
-                !result.hasSupportedLinks -> reply(event, "未找到支持的链接", CommandStatus.FAILED)
-                result.failures.isNotEmpty() && !result.hasForwarded -> {
-                    reply(event, "链接解析失败：${result.failureSummary.ifBlank { "没有链接成功解析" }}", CommandStatus.FAILED)
+                finalResult.disabledReason != null -> reply(event, "链接解析失败：${finalResult.disabledReason}", CommandStatus.FAILED)
+                !finalResult.hasSupportedLinks -> reply(event, "未找到支持的链接", CommandStatus.FAILED)
+                finalResult.failures.isNotEmpty() && !finalResult.hasForwarded -> {
+                    reply(event, "链接解析失败：${finalResult.failureSummary.ifBlank { "没有链接成功解析" }}", CommandStatus.FAILED)
                 }
-                result.failures.isNotEmpty() -> {
-                    reply(event, "部分链接解析失败：${result.failureSummary}", CommandStatus.SUCCESS)
+                finalResult.failures.isNotEmpty() -> {
+                    reply(event, "部分链接解析失败：${finalResult.failureSummary}", CommandStatus.SUCCESS)
                 }
             }
         }
-        logForwardResult(event, result)
+        logForwardResult(event, finalResult)
     }
 
     private fun reply(event: CommandEvent, message: String, status: CommandStatus) {

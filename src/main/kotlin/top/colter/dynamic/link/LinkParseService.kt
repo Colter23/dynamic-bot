@@ -110,8 +110,18 @@ public class LinkParseService(
         return LinkParseBatchResult(results)
     }
 
+    internal fun hasSupportedLinkCandidate(text: String, maxLinks: Int = 1): Boolean {
+        if (maxLinks <= 0) return false
+        val urls = LinkUrlExtractor.extract(text)
+        if (urls.isEmpty()) return false
+        val resolvers = resolversProvider()
+        if (resolvers.isEmpty()) return false
+        return urls.any { url -> resolvers.any { resolver -> resolver.safeMatchesLink(url) } }
+    }
+
     private suspend fun parseUrl(url: String, resolvers: List<LinkResolver>): ParsedLinkCandidate? {
         resolvers.forEach { resolver ->
+            if (!resolver.safeMatchesLink(url)) return@forEach
             val parsedLink = runCatching { resolver.parseLink(url) }
                 .onFailure {
                     linkParseLogger.warn(it) {
@@ -123,6 +133,16 @@ public class LinkParseService(
             return ParsedLinkCandidate(resolver, parsedLink)
         }
         return null
+    }
+
+    private fun LinkResolver.safeMatchesLink(url: String): Boolean {
+        return runCatching { matchesLink(url) }
+            .onFailure {
+                linkParseLogger.warn(it) {
+                    "链接匹配失败：resolver=${platformId.value}，url=$url"
+                }
+            }
+            .getOrDefault(false)
     }
 
     private suspend fun forwardDynamic(
@@ -204,9 +224,16 @@ public class LinkParseService(
             }
             listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText()))))
         }
-        val videoBatch = downloadVideoBatchOrNull(preview, parsedLink)
-        val batches = if (videoBatch == null) previewBatches else previewBatches + videoBatch
-        return forwardMessage(batches, parsedLink, context)
+        val previewResult = forwardMessage(previewBatches, parsedLink, context)
+        if (previewResult !is LinkParseItemResult.Forwarded) return previewResult
+
+        val videoBatch = downloadVideoBatchOrNull(preview, parsedLink) ?: return previewResult
+        val videoResult = forwardMessage(listOf(videoBatch), parsedLink, context)
+        return if (videoResult is LinkParseItemResult.Forwarded) {
+            previewResult.copy(deliveryCount = previewResult.deliveryCount + videoResult.deliveryCount)
+        } else {
+            previewResult
+        }
     }
 
     private suspend fun downloadVideoBatchOrNull(

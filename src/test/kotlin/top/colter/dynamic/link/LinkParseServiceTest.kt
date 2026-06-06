@@ -7,6 +7,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -165,6 +166,74 @@ class LinkParseServiceTest {
     }
 
     @Test
+    fun `auto parser should send progress before slow link detection completes`() = runBlocking {
+        initDb("auto-progress-before-parse")
+        val resolver = BlockingLinkResolver()
+        val sourceUpdates = RecordingSourceUpdatePublisher()
+        val messenger = RecordingProgressMessenger()
+        val listener = LinkAutoParseListener(
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        fallbackTriggerMode = LinkParseTriggerMode.ALWAYS,
+                        progressReply = LinkParseProgressReplyConfig(),
+                    ),
+                )
+            },
+            linkParseService = LinkParseService(
+                resolversProvider = { listOf(resolver) },
+                sourceUpdatePublisher = sourceUpdates,
+            ),
+            progressMessenger = messenger,
+        )
+
+        val job = async {
+            listener.onMessage(commandEvent("https://slow.example/1"))
+        }
+        withTimeout(3_000) { resolver.parseStarted.await() }
+
+        assertEquals(1, messenger.sentTexts.size)
+        assertEquals(0, resolver.resolveCalls)
+
+        resolver.continueParsing.complete(Unit)
+        val request = withTimeout(3_000) { sourceUpdates.receive() }
+        job.await()
+
+        assertEquals("1", request.update.key.externalId)
+        assertEquals(1, resolver.resolveCalls)
+        assertEquals(listOf("progress-1"), messenger.recalledIds)
+    }
+
+    @Test
+    fun `auto parser should not send progress for unsupported urls`() = runBlocking {
+        initDb("auto-progress-unsupported")
+        val resolver = FakeLinkResolver()
+        val sourceUpdates = RecordingSourceUpdatePublisher()
+        val messenger = RecordingProgressMessenger()
+        val listener = LinkAutoParseListener(
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        fallbackTriggerMode = LinkParseTriggerMode.ALWAYS,
+                        progressReply = LinkParseProgressReplyConfig(),
+                    ),
+                )
+            },
+            linkParseService = LinkParseService(
+                resolversProvider = { listOf(resolver) },
+                sourceUpdatePublisher = sourceUpdates,
+            ),
+            progressMessenger = messenger,
+        )
+
+        listener.onMessage(commandEvent("https://example.com/not-supported"))
+
+        assertEquals(emptyList(), messenger.sentTexts)
+        assertEquals(0, resolver.parseCalls)
+        assertEquals(0, resolver.resolveCalls)
+    }
+
+    @Test
     fun `auto parser should only run on primary bot by default`() = runBlocking {
         initDb("auto-primary-bot")
         val resolver = FakeLinkResolver()
@@ -228,7 +297,7 @@ class LinkParseServiceTest {
     }
 
     @Test
-    fun `video preview should append downloaded video batch when enabled`() = runBlocking {
+    fun `video preview should enqueue preview before downloading and video separately when enabled`() = runBlocking {
         initDb("video-download")
         val cacheRoot = createTempDirectory("dynamic-bot-link-video-cache")
         val videoFile = cacheRoot.resolve("video.mp4")
@@ -241,6 +310,13 @@ class LinkParseServiceTest {
                 title = "demo video",
                 durationSeconds = 120,
             ),
+            onRequest = {
+                val deliveries = MessageDeliveryRepository.findRecent(limit = 10)
+                assertEquals(1, deliveries.size)
+                val previewMessage = MessageDeliveryRepository.findMessage(deliveries.single().messageId)!!
+                assertEquals(1, previewMessage.batches.size)
+                assertTrue(previewMessage.batches.single().content.single() is MessageContent.Image)
+            },
         )
         val service = LinkParseService(
             resolversProvider = { listOf(resolver) },
@@ -269,12 +345,14 @@ class LinkParseServiceTest {
         )
 
         assertEquals(1, result.forwarded.size)
+        assertEquals(2, result.forwarded.single().deliveryCount)
         assertEquals("BV1xx411c7mD", downloader.requests.single().parsedLink.targetId)
-        val delivery = MessageDeliveryRepository.findRecent(limit = 1).single()
-        val message = MessageDeliveryRepository.findMessage(delivery.messageId)!!
-        assertEquals(2, message.batches.size)
-        assertTrue(message.batches.first().content.single() is MessageContent.Image)
-        val video = message.batches[1].content.single() as MessageContent.Video
+        val messages = MessageDeliveryRepository.findRecent(limit = 10)
+            .mapNotNull { MessageDeliveryRepository.findMessage(it.messageId) }
+        assertEquals(2, messages.size)
+        assertEquals(1, messages.count { it.batches.single().content.single() is MessageContent.Image })
+        val videoMessage = messages.single { it.batches.single().content.single() is MessageContent.Video }
+        val video = videoMessage.batches.single().content.single() as MessageContent.Video
         assertEquals(videoFile.toString(), video.video.uri)
         assertEquals(MediaKind.VIDEO, video.video.kind)
     }
@@ -422,11 +500,18 @@ class LinkParseServiceTest {
         ),
     ) : LinkResolver {
         override val platformId: PlatformId = PlatformId.of("bilibili")
+        var parseCalls: Int = 0
+            private set
         var resolveCalls: Int = 0
             private set
         val resolvedIds: MutableList<String> = mutableListOf()
 
+        override fun matchesLink(inputUrl: String): Boolean {
+            return inputUrl.startsWith("https://t.bilibili.com/")
+        }
+
         override suspend fun parseLink(inputUrl: String): ParsedLink? {
+            parseCalls += 1
             val id = inputUrl.substringAfter("https://t.bilibili.com/", missingDelimiterValue = "")
                 .takeWhile { it.isDigit() }
                 .takeIf { it.isNotBlank() }
@@ -453,8 +538,50 @@ class LinkParseServiceTest {
         }
     }
 
+    private class BlockingLinkResolver : LinkResolver {
+        override val platformId: PlatformId = PlatformId.of("bilibili")
+        val parseStarted = CompletableDeferred<Unit>()
+        val continueParsing = CompletableDeferred<Unit>()
+        var resolveCalls: Int = 0
+            private set
+
+        override fun matchesLink(inputUrl: String): Boolean {
+            return inputUrl.startsWith("https://slow.example/")
+        }
+
+        override suspend fun parseLink(inputUrl: String): ParsedLink? {
+            parseStarted.complete(Unit)
+            continueParsing.await()
+            return ParsedLink(
+                platformId = platformId,
+                kind = LinkKinds.DYNAMIC,
+                targetId = "1",
+                normalizedUrl = "https://t.bilibili.com/1",
+                sourceUrl = inputUrl,
+            )
+        }
+
+        override suspend fun resolveLink(parsedLink: ParsedLink): LinkResolution {
+            resolveCalls += 1
+            return LinkResolution.Dynamic(
+                parsedLink = parsedLink,
+                update = testDynamicUpdate(
+                    publisher = testPublisherInfo(
+                        key = testPublisherKey(platformId = "bilibili", externalId = "123"),
+                        name = "demo-up",
+                    ),
+                    externalId = parsedLink.targetId,
+                ).copy(link = parsedLink.normalizedUrl),
+            )
+        }
+    }
+
     private class FakeVideoLinkResolver : LinkResolver {
         override val platformId: PlatformId = PlatformId.of("bilibili")
+
+        override fun matchesLink(inputUrl: String): Boolean {
+            return inputUrl.startsWith("https://www.bilibili.com/video/")
+        }
 
         override suspend fun parseLink(inputUrl: String): ParsedLink? {
             val id = inputUrl.substringAfterLast("/").substringBefore("?").takeIf { it.isNotBlank() } ?: return null
@@ -484,12 +611,14 @@ class LinkParseServiceTest {
 
     private class FakeVideoDownloader(
         private val result: LinkVideoDownloadResult,
+        private val onRequest: suspend () -> Unit = {},
     ) : LinkVideoDownloader {
         override val platformId: PlatformId = PlatformId.of("bilibili")
         val requests: MutableList<LinkVideoDownloadRequest> = mutableListOf()
 
         override suspend fun downloadVideoLink(request: LinkVideoDownloadRequest): LinkVideoDownloadResult {
             requests += request
+            onRequest()
             return result
         }
     }

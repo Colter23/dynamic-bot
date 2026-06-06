@@ -55,6 +55,10 @@ class LinkResolverTest {
     private class FakeLinkResolver : LinkResolver {
         override val platformId: PlatformId = PlatformId.of("example")
 
+        override fun matchesLink(inputUrl: String): Boolean {
+            return inputUrl.startsWith("https://example.com/dynamic/")
+        }
+
         override suspend fun parseLink(inputUrl: String): ParsedLink? {
             return ParsedLink(
                 platformId = platformId,
