@@ -4,6 +4,7 @@ import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
 import top.colter.skiko.*
 import top.colter.skiko.data.LayoutAlignment
+import top.colter.skiko.data.TextShadow
 import top.colter.skiko.layout.Layout
 import top.colter.skiko.layout.Row
 import top.colter.skiko.layout.Text
@@ -12,6 +13,14 @@ private val authorSmallAvatarSize = 46.dp
 private val authorSmallAvatarTrailing = 16.dp
 private val authorSmallNameTop = 0.dp
 private val authorSmallTimeTop = 7.dp
+private val authorSmallNameShadows = listOf(
+    TextShadow(
+        offsetX = 0.dp,
+        offsetY = 1.dp,
+        blur = 2.dp,
+        color = Color.BLACK.withAlpha(0.18f),
+    ),
+)
 
 /**
  * 作者小组件
@@ -50,6 +59,7 @@ internal fun Layout.AuthorSmall(
             text = name,
             color = accentColor,
             fontSize = 30.dp,
+            textShadows = authorSmallNameShadows,
             alignment = LayoutAlignment.LEFT_TOP,
             modifier = Modifier().margin(top = authorSmallNameTop, right = 15.dp)
         )

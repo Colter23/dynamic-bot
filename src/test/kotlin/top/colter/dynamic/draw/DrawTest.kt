@@ -4,7 +4,9 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import top.colter.dynamic.DrawOrnament
 import top.colter.dynamic.DrawSettings
+import top.colter.dynamic.core.data.DynamicBlockRole
 import top.colter.dynamic.core.data.DynamicContent
+import top.colter.dynamic.core.data.DynamicContentNode
 import top.colter.dynamic.core.data.DynamicContentNodeEmoji
 import top.colter.dynamic.core.data.DynamicContentNodeLink
 import top.colter.dynamic.core.data.DynamicContentNodeMention
@@ -18,16 +20,14 @@ import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.DynamicReferenceKind
 import top.colter.dynamic.core.data.ImageGridBlock
 import top.colter.dynamic.core.data.ImageItem
-import top.colter.dynamic.core.data.LivePayload
-import top.colter.dynamic.core.data.LiveStatus
 import top.colter.dynamic.core.data.MediaCardBlock
 import top.colter.dynamic.core.data.MediaCardStyle
 import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MediaReference
 import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.RepostBlock
-import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.core.data.mediaReferences
@@ -42,6 +42,9 @@ import top.colter.skiko.Dp
 import top.colter.skiko.Fonts
 import top.colter.skiko.data.Ratio
 
+private const val TEST_IMAGE_PREFIX = "test://image/"
+private const val TEST_EMOJI_PREFIX = "test://emoji/"
+
 class DrawTest {
     @BeforeTest
     fun init() {
@@ -51,189 +54,196 @@ class DrawTest {
     }
 
     @Test
-    fun `test dynamic`() {
-        val update = testDynamicUpdate(
-            payload = DynamicPayload(
-                blocks = listOf(
-                    textBlock("Demo content"),
-                    ImageGridBlock(
-                        images = listOf(ImageItem(testMedia("https://example.com/pic.png", MediaKind.IMAGE))),
-                    )
-                ),
-            ),
-        )
-        renderToOutput("test1.png", update)
-    }
-
-    @Test
-    fun `test dynamic content nodes`() {
-        val update = testDynamicUpdate(
-            payload = DynamicPayload(
-                title = "Content node demo",
-                blocks = listOf(
-                    TextBlock(
-                        DynamicContent(
-                            nodes = listOf(
-                                DynamicContentNodeText("Plain text "),
-                                DynamicContentNodeEmoji(
-                                    text = "[tv_doge]",
-                                    image = testMedia("https://example.com/emoji/tv_doge.png", MediaKind.EMOJI),
-                                ),
-                                DynamicContentNodeLink(
-                                    text = " link",
-                                    icon = testMedia("https://example.com/icon.png", MediaKind.IMAGE),
-                                    url = "https://example.com",
-                                ),
-                                DynamicContentNodeMention(
-                                    text = " @demo",
-                                    publisherKey = testPublisherKey(externalId = "mention-demo"),
-                                    url = "https://example.com/mention",
-                                ),
-                                DynamicContentNodeTag(
-                                    text = " #topic",
-                                    tagType = DynamicContentTagType.TOPIC,
-                                    externalId = "topic-demo",
-                                    url = "https://example.com/topic",
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        )
-        renderToOutput("dynamic_content_nodes.png", update)
-    }
-
-    @Test
-    fun `test dynamic content adaptive font sizes`() {
-        data class FontSample(
-            val name: String,
-            val title: String,
-            val text: String,
-        )
-
-        val samples = listOf(
-            FontSample(
-                name = "short",
-                title = "今晚开播",
-                text = "今晚开播！",
-            ),
-            FontSample(
-                name = "medium",
-                title = "动态绘制效果更新",
-                text = "今天整理了一下新版本的动态绘制效果，作者卡片、转发内容和媒体卡片都做了细节调整，欢迎帮忙看看整体观感是否舒服。",
-            ),
-            FontSample(
-                name = "long",
-                title = "动态转发工具开发记录",
-                text = listOf(
-                    "今天主要想记录一下动态转发工具的开发进度：绘图模块已经支持主题色、平台资源、转发动态和多种媒体卡片，",
-                    "接下来还会继续打磨边距、字号、二维码和不同平台的特殊样式。因为最终图片会被发送到 QQ、Discord 等聊天平台，",
-                    "所以整体阅读体验需要在手机小屏上也保持清晰。短内容应该更有冲击力，长内容则需要稳一点，避免一屏里文字显得太挤。",
-                    "这段文字故意写得比较长，用来观察自适应字号在长动态中的表现，包括换行密度、卡片高度、正文和附件之间的距离，",
-                    "以及中文标点、英文 dynamic-bot 和数字 12345 混排时是否仍然自然。后续如果觉得缩放区间不合适，可以继续微调阈值。",
-                ).joinToString(""),
-            ),
-        )
-
-        samples.forEach { sample ->
-            val update = testDynamicUpdate(
-                externalId = "adaptive-font-${sample.name}",
-                payload = DynamicPayload(
-                    title = sample.title,
-                    blocks = listOf(textBlock(sample.text)),
-                ),
-            )
-            renderToOutput("dynamic_content_font_${sample.name}.png", update)
+    fun `test common dynamic previews`() {
+        commonDynamicPreviews().forEach { preview ->
+            renderToOutput(preview.fileName, preview.update, preview.config ?: drawConfig())
         }
     }
 
-    @Test
-    fun `test dynamic image grids`() {
-        val update = testDynamicUpdate(
-            payload = DynamicPayload(
-                blocks = listOf(
-                    textBlock("Image grid variants"),
-                    imageBlock(count = 2, prefix = "two"),
-                    imageBlock(count = 4, prefix = "four"),
-                    imageBlock(count = 9, prefix = "nine"),
-                ),
+    private fun commonDynamicPreviews(): List<DynamicPreview> {
+        return listOf(
+            DynamicPreview(
+                fileName = "preview_01_title_short_text.png",
+                update = titleShortTextDynamic(),
             ),
+            DynamicPreview(
+                fileName = "preview_02_text_images_card.png",
+                update = textImagesCardDynamic(),
+                config = drawConfig(ornament = DrawOrnament.QRCODE),
+            ),
+//            DynamicPreview(
+//                fileName = "preview_03_title_text_images_card.png",
+//                update = titleTextImagesCardDynamic(),
+//            ),
+//            DynamicPreview(
+//                fileName = "preview_04_text_video_card.png",
+//                update = textVideoCardDynamic(),
+//                config = drawConfig(ornament = DrawOrnament.QRCODE),
+//            ),
+//            DynamicPreview(
+//                fileName = "preview_05_repost_dynamic.png",
+//                update = repostDynamic(),
+//            ),
+//            DynamicPreview(
+//                fileName = "preview_06_title_long_images.png",
+//                update = titleLongTextImagesDynamic(),
+//            ),
         )
-        renderToOutput("dynamic_image_grids.png", update)
     }
 
-    @Test
-    fun `test dynamic video attachment`() {
-        val update = testDynamicUpdate(
+    private fun titleShortTextDynamic(): SourceUpdate {
+        return testDynamicUpdate(
+            publisher = previewPublisher(
+                id = "preview-short",
+                name = "可可萝优妮-KokoroUni",
+                header = "header2.png",
+            ),
+            externalId = "preview-title-short-text",
             payload = DynamicPayload(
+                title = "今晚八点开播",
                 blocks = listOf(
-                    textBlock("Video attachment"),
-                    videoBlock(
-                        id = "video-demo",
-                        title = "Demo video title",
-                        description = "A rendered video card with cover, badge, duration, and metrics.",
-                        cover = testMedia("https://example.com/video-cover.jpg", MediaKind.COVER),
-                        durationSeconds = 83,
-                        badge = "Video",
-                        metrics = listOf(
-                            DynamicMetric(key = "play", raw = 12000, display = "1.2w"),
-                            DynamicMetric(key = "danmaku", raw = 345, display = "345"),
-                        ),
+                    richTextBlock(
+                        text("准备了新的动态绘制效果预览，今晚一起看成片。"),
+                        emoji("[热词系列_知识增加]"),
+                        text(" 记得带上小零食。"),
                     ),
                 ),
             ),
         )
-        renderToOutput("dynamic_video.png", update)
     }
 
-    @Test
-    fun `test dynamic card attachment`() {
-        val update = testDynamicUpdate(
+    private fun textImagesCardDynamic(): SourceUpdate {
+        return testDynamicUpdate(
+            publisher = previewPublisher(
+                id = "preview-images-card",
+                name = "云边观察员",
+                header = "header2.png",
+                avatar = "avatar1.jpg",
+            ),
+            externalId = "preview-text-images-card",
             payload = DynamicPayload(
                 blocks = listOf(
-                    textBlock("Card attachment"),
-                    cardBlock(
-                        id = "article-demo",
-                        kind = DynamicMediaCardKind.ARTICLE,
-                        sourceKind = "article",
-                        title = "Demo article card",
-                        description = "A rendered card with a banner cover and badge.",
-                        badge = "Article",
-                        cover = testMedia("https://example.com/article-cover.jpg", MediaKind.COVER),
-                        coverRatio = Ratio.BANNER,
+                    richTextBlock(
+                        text("今天整理了一组绘图模块的组合预览，主要看正文、图片和附加卡片放在一起时的节奏。"),
+                        emoji("[阿库娅_不关我事]"),
+                        text(" 图片之间的间距、正文和卡片之间的留白都需要一起观察，单独看某个组件反而不容易发现问题。"),
+                        topic("绘图预览"),
+                    ),
+                    imageGrid(count = 3),
+                    articleCard(
+                        id = "preview-extra-article-small",
+                        title = "动态转发工具排版记录",
+                        description = "记录这次默认布局的边距、字号、主题色和媒体卡片联动效果。",
+                        style = MediaCardStyle.SMALL,
                     ),
                 ),
             ),
         )
-        renderToOutput("dynamic_card.png", update)
     }
 
-    @Test
-    fun `test dynamic origin reference`() {
+    private fun titleTextImagesCardDynamic(): SourceUpdate {
+        return testDynamicUpdate(
+            publisher = previewPublisher(
+                id = "preview-title-images-card",
+                name = "栗子工坊",
+                header = "header1.png",
+            ),
+            externalId = "preview-title-text-images-card",
+            payload = DynamicPayload(
+                title = "四月绘图更新说明",
+                blocks = listOf(
+                    richTextBlock(
+                        text("这次更新把标题、正文、图文内容和卡片放到同一张动态里检查。"),
+                        emoji("[热词系列_大展宏兔]"),
+                        text(" 如果标题字号变大后仍然舒服，说明正文缩放区间大致是稳的。"),
+                        link("查看完整记录"),
+                    ),
+                    imageGrid(count = 4),
+                    articleCard(
+                        id = "preview-extra-article-large",
+                        title = "默认布局视觉调整汇总",
+                        description = "包含作者卡片、转发动态、二维码区域、媒体卡片和正文自适应字号。",
+                        style = MediaCardStyle.LARGE,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    private fun textVideoCardDynamic(): SourceUpdate {
+        return testDynamicUpdate(
+            publisher = previewPublisher(
+                id = "preview-video-card",
+                name = "薄荷放映室",
+                header = "header2.png",
+                avatar = "avatar1.jpg",
+            ),
+            externalId = "preview-text-video-card",
+            payload = DynamicPayload(
+                blocks = listOf(
+                    richTextBlock(
+                        text("新视频已经上传啦，封面和附加卡片一起看看效果。"),
+                        emoji("[阿库娅_生气]"),
+                    ),
+                    videoCard(
+                        id = "preview-video",
+                        title = "默认布局从零打磨到能看的全过程",
+                        description = "这一期主要聊绘图模块的设计取舍，以及为什么边距和字号会影响转发动态的阅读体验。",
+                        badge = "视频",
+                        style = MediaCardStyle.LARGE,
+                    ),
+                    musicCard(
+                        id = "preview-extra-music",
+                        title = "夜间调试用背景音乐",
+                        description = "音乐 · 轻快 · 循环播放",
+                    ),
+                ),
+            ),
+        )
+    }
+
+    private fun repostDynamic(): SourceUpdate {
         val origin = testDynamicUpdate(
-            externalId = "origin-dynamic",
-            publisher = demoPublisher("origin"),
+            publisher = previewPublisher(
+                id = "preview-origin",
+                name = "原图发布者",
+                header = "header1.png",
+                avatar = "avatar1.jpg",
+                withPendant = false,
+            ),
+            externalId = "preview-origin-dynamic",
             payload = DynamicPayload(
+                title = "原动态的完整内容",
                 blocks = listOf(
-                    textBlock("Original dynamic content"),
-                    videoBlock(
-                        id = "origin-video",
-                        title = "Forward mode video card",
-                        description = "Rendered through the embedded origin dynamic path.",
-                        cover = testMedia("https://example.com/origin-video-cover.jpg", MediaKind.COVER),
-                        durationSeconds = 3723,
-                        badge = "Replay",
-                        style = MediaCardStyle.SMALL
+                    richTextBlock(
+                        text("这是被转发的原始动态，里面有正文、表情和一个小卡片。"),
+                        emoji("[热词系列_知识增加]"),
+                        text(" 用它来观察转发卡片里的作者栏、正文和附加内容是否协调。"),
+                    ),
+                    articleCard(
+                        id = "preview-origin-card",
+                        title = "原动态里的附加说明",
+                        description = "这里模拟原作者附带的专栏卡片，用来检查嵌套卡片的空间感。",
+                        style = MediaCardStyle.SMALL,
                     ),
                 ),
             ),
         )
-        val update = testDynamicUpdate(
-            externalId = "repost-dynamic",
+
+        return testDynamicUpdate(
+            publisher = previewPublisher(
+                id = "preview-repost",
+                name = "转发观察员",
+                header = "header2.png",
+            ),
+            externalId = "preview-repost-dynamic",
             payload = DynamicPayload(
                 blocks = listOf(
-                    textBlock("Repost with embedded origin"),
+                    richTextBlock(
+                        text("转发一下这个版本的效果，重点看原动态作者栏和正文之间的距离。"),
+                        emoji("[阿库娅_不关我事]"),
+                        mention("原图发布者"),
+                    ),
                     RepostBlock(
                         referenceKind = DynamicReferenceKind.ORIGIN,
                         key = origin.key,
@@ -243,119 +253,152 @@ class DrawTest {
                 ),
             ),
         )
-        renderToOutput("dynamic_origin_reference.png", update)
     }
 
-    @Test
-    fun `test dynamic publisher ornaments`() {
-        val publisher = demoPublisher("ornament").copy(avatarBadgeKey = "avatarBadge.official.individual")
-        val update = testDynamicUpdate(
-            publisher = publisher,
-            payload = DynamicPayload(blocks = listOf(textBlock("Publisher ornament variants"))),
-        )
-
-        renderToOutput(
-            fileName = "dynamic_publisher_qrcode.png",
-            update = update,
-            config = drawConfig(ornament = DrawOrnament.QRCODE),
-        )
-        renderToOutput(
-            fileName = "dynamic_publisher_none.png",
-            update = update,
-            config = drawConfig(ornament = DrawOrnament.NONE),
-        )
-    }
-
-    @Test
-    fun `test dynamic publisher default head`() {
-        val publisher = testPublisherInfo(
-            key = testPublisherKey(externalId = "publisher-default-head"),
-            name = "demo-default-head",
-            avatar = testMedia("https://example.com/default-head-avatar.jpg", MediaKind.AVATAR),
-            banner = null,
-        )
-        val update = testDynamicUpdate(
-            publisher = publisher,
-            payload = DynamicPayload(blocks = listOf(textBlock("Publisher without banner uses default head"))),
-        )
-
-        renderToOutput("dynamic_publisher_default_head.png", update)
-    }
-
-    @Test
-    fun `test minimal dynamic layout`() {
-        val update = testDynamicUpdate(
+    private fun titleLongTextImagesDynamic(): SourceUpdate {
+        return testDynamicUpdate(
+            publisher = previewPublisher(
+                id = "preview-long-images",
+                name = "长文记录本",
+                header = "header1.png",
+            ),
+            externalId = "preview-title-long-images",
             payload = DynamicPayload(
-                title = "Minimal layout demo",
+                title = "长文字和多图的阅读密度观察",
                 blocks = listOf(
-                    textBlock("Minimal currently delegates to the default dynamic renderer."),
-                    imageBlock(count = 3, prefix = "minimal"),
+                    richTextBlock(
+                        text("这条动态故意写得稍微长一些，用来观察自适应字号在长文本下的表现。"),
+                        emoji("[热词系列_大展宏兔]"),
+                        text(" 当正文超过几百字后，图片区域、作者卡片和标题之间的比例会变得更敏感；如果字号太小，聊天窗口里会显得像一整块灰色文字，如果字号太大，又会让整张图被拉得过长。"),
+                        text(" 所以这里把多图也放进来，顺便检查九宫格附近的上下边距是否自然。"),
+                    ),
+                    imageGrid(count = 9),
                 ),
             ),
         )
-        renderToOutput(
-            fileName = "dynamic_minimal_layout.png",
-            update = update,
-            config = drawConfig(layout = "minimal"),
+    }
+
+    private data class DynamicPreview(
+        val fileName: String,
+        val update: SourceUpdate,
+        val config: DrawConfig? = null,
+    )
+
+    private fun richTextBlock(vararg nodes: DynamicContentNode): TextBlock {
+        return TextBlock(DynamicContent(nodes.toList()))
+    }
+
+    private fun text(value: String): DynamicContentNodeText {
+        return DynamicContentNodeText(value)
+    }
+
+    private fun emoji(text: String): DynamicContentNodeEmoji {
+        return DynamicContentNodeEmoji(
+            text = text,
+            image = emojiMedia("$text.png"),
         )
     }
 
-    @Test
-    fun `test live started layout`() {
-        val update = testDynamicUpdate(
-            publisher = demoPublisher("live"),
-            eventType = SourceEventType.LIVE_STARTED,
-            externalId = "live-started",
-            payload = LivePayload(
-                roomId = "456",
-                title = "Live started demo",
-                area = "Games",
-                cover = testMedia("https://example.com/live-cover.jpg", MediaKind.COVER),
-                status = LiveStatus.OPEN,
-                previousStatus = LiveStatus.CLOSE,
-                startedAtEpochSeconds = 1L,
-            ),
+    private fun topic(value: String): DynamicContentNodeTag {
+        return DynamicContentNodeTag(
+            text = " #$value#",
+            tagType = DynamicContentTagType.TOPIC,
+            externalId = value,
+            url = "https://example.com/topic/$value",
         )
-
-        renderLiveToOutput("live_started_layout.png", update)
     }
 
-    private fun textBlock(text: String): TextBlock {
-        return TextBlock(DynamicContent.text(text))
+    private fun link(value: String): DynamicContentNodeLink {
+        return DynamicContentNodeLink(
+            text = " $value",
+            url = "https://example.com/preview",
+        )
     }
 
-    private fun imageBlock(count: Int, prefix: String): ImageGridBlock {
+    private fun mention(value: String): DynamicContentNodeMention {
+        return DynamicContentNodeMention(
+            text = " @$value",
+            publisherKey = testPublisherKey(externalId = value),
+            url = "https://example.com/publisher/$value",
+        )
+    }
+
+    private fun imageGrid(count: Int): ImageGridBlock {
         return ImageGridBlock(
             images = (1..count).map { index ->
                 ImageItem(
-                    image = testMedia("https://example.com/$prefix-image-$index.png", MediaKind.IMAGE),
-                    badge = if (index == 1) "$count pics" else null,
+                    image = imageMedia("bg1.jpg", MediaKind.IMAGE),
+                    badge = imageBadge(index).takeIf { count > 1 },
                 )
             },
         )
     }
 
-    private fun videoBlock(
+    private fun imageBadge(index: Int): String {
+        return listOf("图一", "图二", "图三", "图四", "图五", "图六", "图七", "图八", "图九")[index - 1]
+    }
+
+    private fun articleCard(
         id: String,
         title: String,
         description: String,
-        cover: top.colter.dynamic.core.data.MediaRef,
-        durationSeconds: Long,
+        style: MediaCardStyle,
+        role: DynamicBlockRole = DynamicBlockRole.ADDITIONAL,
+    ): MediaCardBlock {
+        return cardBlock(
+            id = id,
+            kind = DynamicMediaCardKind.ARTICLE,
+            sourceKind = "专栏",
+            title = title,
+            description = description,
+            badge = "专栏",
+            cover = imageMedia("bg1.jpg", MediaKind.COVER),
+            coverRatio = Ratio.BANNER,
+            style = style,
+            role = role,
+        )
+    }
+
+    private fun videoCard(
+        id: String,
+        title: String,
+        description: String,
         badge: String,
-        metrics: List<DynamicMetric> = emptyList(),
-        style: MediaCardStyle = MediaCardStyle.LARGE,
+        style: MediaCardStyle,
     ): MediaCardBlock {
         return cardBlock(
             id = id,
             kind = DynamicMediaCardKind.VIDEO,
-            sourceKind = "video",
+            sourceKind = "视频",
             title = title,
             description = description,
-            cover = cover,
-            durationSeconds = durationSeconds,
             badge = badge,
-            metrics = metrics,
+            cover = imageMedia("bg1.jpg", MediaKind.COVER),
+            durationSeconds = 633,
+            metrics = listOf(
+                DynamicMetric(key = "play", raw = 12600, display = "一万二"),
+                DynamicMetric(key = "danmaku", raw = 358, display = "三百五十八"),
+            ),
             style = style,
+        )
+    }
+
+    private fun musicCard(
+        id: String,
+        title: String,
+        description: String,
+    ): MediaCardBlock {
+        return cardBlock(
+            id = id,
+            kind = DynamicMediaCardKind.MUSIC,
+            sourceKind = "音乐",
+            title = title,
+            description = description,
+            badge = "音乐",
+            cover = imageMedia("bg1.jpg", MediaKind.COVER),
+            coverRatio = Ratio.SQUARE,
+            style = MediaCardStyle.MINI,
+            role = DynamicBlockRole.ADDITIONAL,
         )
     }
 
@@ -366,14 +409,16 @@ class DrawTest {
         title: String,
         description: String,
         badge: String,
-        cover: top.colter.dynamic.core.data.MediaRef,
+        cover: MediaRef,
         coverRatio: Float? = null,
         durationSeconds: Long? = null,
         metrics: List<DynamicMetric> = emptyList(),
         style: MediaCardStyle = MediaCardStyle.LARGE,
+        role: DynamicBlockRole = DynamicBlockRole.BODY,
     ): MediaCardBlock {
         return MediaCardBlock(
             style = style,
+            role = role,
             card = DynamicMediaCard(
                 kind = kind,
                 sourceKind = sourceKind,
@@ -389,13 +434,36 @@ class DrawTest {
         )
     }
 
-    private fun demoPublisher(suffix: String): PublisherInfo {
+    private fun previewPublisher(
+        id: String,
+        name: String,
+        header: String,
+        avatar: String = "avatar.jpg",
+        withPendant: Boolean = true,
+    ): PublisherInfo {
         return testPublisherInfo(
-            key = testPublisherKey(externalId = "publisher-$suffix"),
-            name = "demo-$suffix",
-            avatar = testMedia("https://example.com/avatar-$suffix.jpg", MediaKind.AVATAR),
-            banner = testMedia("https://example.com/banner-$suffix.jpg", MediaKind.COVER),
-            pendant = testMedia("https://example.com/pendant-$suffix.png", MediaKind.AVATAR),
+            key = testPublisherKey(externalId = id),
+            name = name,
+            avatarBadgeKey = "avatarBadge.official.individual",
+            avatar = imageMedia(avatar, MediaKind.AVATAR),
+            banner = imageMedia(header, MediaKind.COVER),
+            pendant = imageMedia("pendant.png", MediaKind.AVATAR).takeIf { withPendant },
+        )
+    }
+
+    private fun imageMedia(fileName: String, kind: MediaKind): MediaRef {
+        return testMedia(
+            uri = "$TEST_IMAGE_PREFIX$fileName",
+            kind = kind,
+            alt = fileName,
+        )
+    }
+
+    private fun emojiMedia(fileName: String): MediaRef {
+        return testMedia(
+            uri = "$TEST_EMOJI_PREFIX$fileName",
+            kind = MediaKind.EMOJI,
+            alt = fileName,
         )
     }
 
@@ -409,22 +477,12 @@ class DrawTest {
         testOutput.resolve(fileName).writeBytes(img.encodeToData()!!.bytes)
     }
 
-    private fun renderLiveToOutput(
-        fileName: String,
-        update: SourceUpdate,
-        config: DrawConfig = drawConfig(),
-    ) {
-        cacheMedia(update)
-        val img = renderLiveImage(update = update, config = config)
-        testOutput.resolve(fileName).writeBytes(img.encodeToData()!!.bytes)
-    }
-
     private fun drawConfig(
         layout: String = "default",
         ornament: DrawOrnament = DrawOrnament.LOGO,
     ): DrawConfig {
         return DrawConfig(
-            platform = PlatformDescriptor.of("bilibili", "Bilibili"),
+            platform = PlatformDescriptor.of("bilibili", "哔哩哔哩"),
             settings = DrawSettings(layout = layout, ornament = ornament),
         )
     }
@@ -438,11 +496,12 @@ class DrawTest {
     private fun testImageBytes(reference: MediaReference): ByteArray {
         val uri = reference.media.uri
         val resource = when {
-            "pendant" in uri -> "image" to "pendant.png"
-            "banner" in uri -> "image" to "banner.jpg"
-            reference.kind == MediaKind.EMOJI -> "emoji" to "[tv_doge].png"
+            uri.startsWith(TEST_IMAGE_PREFIX) -> "image" to uri.removePrefix(TEST_IMAGE_PREFIX)
+            uri.startsWith(TEST_EMOJI_PREFIX) -> "emoji" to uri.removePrefix(TEST_EMOJI_PREFIX)
+            reference.kind == MediaKind.EMOJI -> "emoji" to "[热词系列_知识增加].png"
+            reference.kind == MediaKind.AVATAR -> "image" to "avatar.jpg"
             reference.kind == MediaKind.COVER -> "image" to "bg1.jpg"
-            else -> "image" to "avatar.jpg"
+            else -> "image" to "bg1.jpg"
         }
         return loadTestResource(resource.first, resource.second).readBytes()
     }

@@ -5,7 +5,22 @@ import top.colter.skiko.*
 import top.colter.skiko.data.Gradient
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.Shadow
+import top.colter.skiko.data.TextShadow
+import top.colter.skiko.data.TextStroke
 import top.colter.skiko.layout.*
+
+private val authorNameStroke = TextStroke(
+    width = 2.dp,
+    color = Color.BLACK.withAlpha(0.28f),
+)
+private val authorNameShadows = listOf(
+    TextShadow(
+        offsetX = 2.dp,
+        offsetY = 2.dp,
+        blur = 2.dp,
+        color = Color.BLACK.withAlpha(0.42f),
+    ),
+)
 
 
 /**
@@ -62,20 +77,33 @@ internal fun Layout.Author(
                 .padding(horizontal = 5.dp, vertical = 20.dp)
         )
 
-        Column(modifier = Modifier().fillWidth().fillMaxHeight().padding(vertical = 20.dp)) {
+        Column(modifier = Modifier().fillWidth().fillMaxHeight().padding(vertical = 10.dp)) {
             Text(
                 text = name,
-                color = accentColor,
-                fontSize = 36.dp,
+                color = Color.WHITE,
+                fontSize = 45.dp,
+                stroke = TextStroke(
+                    width = 3.dp,
+                    color = accentColor,
+                ),
+                textShadows = authorNameShadows,
                 alignment = LayoutAlignment.LEFT,
-                modifier = Modifier().fillMaxWidth().fillRatioHeight(0.56f)
+                modifier = Modifier().fillMaxWidth().fillRatioHeight(0.6f)
             )
             Text(
                 text = time,
                 color = Color.WHITE.withAlpha(0.85f),
-                fontSize = 26.dp,
+                fontSize = 32.dp,
+                textShadows = listOf(
+                    TextShadow(
+                        offsetX = 1.dp,
+                        offsetY = 1.dp,
+                        blur = 1.dp,
+                        color = Color.BLACK.withAlpha(0.42f),
+                    ),
+                ),
                 alignment = LayoutAlignment.LEFT,
-                modifier = Modifier().fillMaxWidth().fillRatioHeight(1f - 0.56f)
+                modifier = Modifier().fillMaxWidth().fillRatioHeight(1f - 0.4f)
             )
         }
 
