@@ -208,6 +208,7 @@ public object DynamicApplication : CoroutineScope {
             onMessagesQueued = {
                 deliveryDispatcher.dispatchDue()
             },
+            backgroundScope = this,
         )
 
         listenerTokens += eventBus.subscribe(

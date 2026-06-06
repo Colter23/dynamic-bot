@@ -118,7 +118,7 @@ internal class LinkPreviewTemplateRenderer(
             "draw" -> {
                 val image = context.drawImage() ?: return
                 contents += MessageContent.Image(
-                    fallbackText = context.preview.fallbackText(),
+                    fallbackText = "",
                     image = image.copy(kind = MediaKind.IMAGE),
                     altText = context.preview.title.takeIf { it.isNotBlank() },
                 )

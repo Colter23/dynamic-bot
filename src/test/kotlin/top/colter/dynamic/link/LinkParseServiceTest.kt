@@ -9,6 +9,7 @@ import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import top.colter.dynamic.LinkParseProgressReplyConfig
@@ -235,6 +236,43 @@ class LinkParseServiceTest {
     }
 
     @Test
+    fun `auto parser should reply when supported link resolution fails`() = runBlocking {
+        initDb("auto-resolution-failure")
+        val eventBus = EventBus()
+        val reply = CompletableDeferred<CommandResultEvent>()
+        eventBus.subscribe(
+            object : Listener<CommandResultEvent> {
+                override suspend fun onMessage(event: CommandResultEvent) {
+                    reply.complete(event)
+                }
+            },
+        )
+        val messenger = RecordingProgressMessenger()
+        val listener = LinkAutoParseListener(
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        fallbackTriggerMode = LinkParseTriggerMode.ALWAYS,
+                        progressReply = LinkParseProgressReplyConfig(),
+                    ),
+                )
+            },
+            linkParseService = LinkParseService(
+                resolversProvider = { listOf(FailedVideoResolver()) },
+            ),
+            eventBus = eventBus,
+            progressMessenger = messenger,
+        )
+
+        listener.onMessage(commandEvent("https://fail.example/video/BV1PnV46DEP"))
+        val result = withTimeout(3_000) { reply.await() }
+
+        assertEquals(CommandStatus.FAILED, result.status)
+        assertTrue(renderMessage(result).contains("CODE: -400; MESSAGE: 请求错误"))
+        assertEquals(listOf("progress-1"), messenger.recalledIds)
+    }
+
+    @Test
     fun `auto parser should only run on primary bot by default`() = runBlocking {
         initDb("auto-primary-bot")
         val resolver = FakeLinkResolver()
@@ -316,7 +354,9 @@ class LinkParseServiceTest {
                 assertEquals(1, deliveries.size)
                 val previewMessage = MessageDeliveryRepository.findMessage(deliveries.single().messageId)!!
                 assertEquals(1, previewMessage.batches.size)
-                assertTrue(previewMessage.batches.single().content.single() is MessageContent.Image)
+                val content = previewMessage.batches.single().content
+                assertTrue(content.any { it is MessageContent.Image })
+                assertTrue(content.filterIsInstance<MessageContent.Text>().single().fallbackText.contains("视频正在下载"))
             },
         )
         val service = LinkParseService(
@@ -351,11 +391,68 @@ class LinkParseServiceTest {
         val messages = MessageDeliveryRepository.findRecent(limit = 10)
             .mapNotNull { MessageDeliveryRepository.findMessage(it.messageId) }
         assertEquals(2, messages.size)
-        assertEquals(1, messages.count { it.batches.single().content.single() is MessageContent.Image })
-        val videoMessage = messages.single { it.batches.single().content.single() is MessageContent.Video }
+        assertEquals(1, messages.count { message -> message.batches.single().content.any { it is MessageContent.Image } })
+        val videoMessage = messages.single { message -> message.batches.single().content.any { it is MessageContent.Video } }
         val video = videoMessage.batches.single().content.single() as MessageContent.Video
         assertEquals(videoFile.toString(), video.video.uri)
         assertEquals(MediaKind.VIDEO, video.video.kind)
+    }
+
+    @Test
+    fun `video download should continue in background when scope is configured`() = runBlocking {
+        initDb("video-download-background")
+        val cacheRoot = createTempDirectory("dynamic-bot-link-video-cache")
+        val videoFile = cacheRoot.resolve("video.mp4")
+        videoFile.writeBytes(byteArrayOf(0, 0, 0, 1))
+        val downloadStarted = CompletableDeferred<Unit>()
+        val releaseDownload = CompletableDeferred<Unit>()
+        val downloader = FakeVideoDownloader(
+            result = LinkVideoDownloadResult(
+                video = MediaRef(videoFile.toString(), MediaKind.VIDEO, mimeType = "video/mp4"),
+                fileSizeBytes = 4,
+            ),
+            onRequest = {
+                downloadStarted.complete(Unit)
+                releaseDownload.await()
+            },
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeVideoLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        videoDownload = LinkVideoDownloadConfig(
+                            enabled = true,
+                            maxFileMegabytes = 1.0,
+                            cacheRoot = cacheRoot.toString(),
+                        ),
+                    ),
+                )
+            },
+            videoDownloadersProvider = { listOf(downloader) },
+            previewRenderer = LinkPreviewRenderer {
+                MediaRef("https://example.com/preview.png", MediaKind.IMAGE)
+            },
+            backgroundScope = this,
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://www.bilibili.com/video/BV1xx411c7mD",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(1, result.forwarded.size)
+        assertEquals(1, result.forwarded.single().deliveryCount)
+        withTimeout(3_000) { downloadStarted.await() }
+        assertEquals(1, MessageDeliveryRepository.findRecent(limit = 10).size)
+
+        releaseDownload.complete(Unit)
+        withTimeout(3_000) {
+            while (MessageDeliveryRepository.findRecent(limit = 10).size < 2) {
+                delay(10)
+            }
+        }
     }
 
     @Test
@@ -391,6 +488,49 @@ class LinkParseServiceTest {
             "【视频】demo video\nbilibili@BV1xx411c7mD\ndemo description\nhttps://www.bilibili.com/video/BV1xx411c7mD",
             text.fallbackText,
         )
+    }
+
+    @Test
+    fun `video preview should append skipped download hint when duration exceeds limit`() = runBlocking {
+        initDb("video-download-skip-duration")
+        val downloader = FakeVideoDownloader(
+            result = LinkVideoDownloadResult(
+                video = MediaRef("video.mp4", MediaKind.VIDEO, mimeType = "video/mp4"),
+                fileSizeBytes = 4,
+            ),
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeVideoLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        videoDownload = LinkVideoDownloadConfig(
+                            enabled = true,
+                            maxDurationSeconds = 60,
+                            maxFileMegabytes = 1.0,
+                        ),
+                    ),
+                )
+            },
+            videoDownloadersProvider = { listOf(downloader) },
+            previewRenderer = LinkPreviewRenderer {
+                MediaRef("https://example.com/preview.png", MediaKind.IMAGE)
+            },
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://www.bilibili.com/video/BV1xx411c7mD",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(1, result.forwarded.size)
+        assertEquals(emptyList(), downloader.requests)
+        val message = MessageDeliveryRepository.findMessage(MessageDeliveryRepository.findRecent(limit = 1).single().messageId)!!
+        val content = message.batches.single().content
+        val image = content.filterIsInstance<MessageContent.Image>().single()
+        assertEquals("", image.fallbackText)
+        assertTrue(content.filterIsInstance<MessageContent.Text>().single().fallbackText.contains("视频下载已跳过"))
     }
 
     @Test
@@ -608,6 +748,31 @@ class LinkParseServiceTest {
                     ),
                     externalId = parsedLink.targetId,
                 ).copy(link = parsedLink.normalizedUrl),
+            )
+        }
+    }
+
+    private class FailedVideoResolver : LinkResolver {
+        override val platformId: PlatformId = PlatformId.of("bilibili")
+
+        override fun matchesLink(inputUrl: String): Boolean {
+            return inputUrl.startsWith("https://fail.example/video/")
+        }
+
+        override suspend fun parseLink(inputUrl: String): ParsedLink {
+            return ParsedLink(
+                platformId = platformId,
+                kind = LinkKinds.VIDEO,
+                targetId = inputUrl.substringAfterLast("/"),
+                normalizedUrl = inputUrl,
+                sourceUrl = inputUrl,
+            )
+        }
+
+        override suspend fun resolveLink(parsedLink: ParsedLink): LinkResolution {
+            return LinkResolution.Failed(
+                parsedLink = parsedLink,
+                reason = "CODE: -400; MESSAGE: 请求错误",
             )
         }
     }

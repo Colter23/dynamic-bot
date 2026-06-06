@@ -51,8 +51,12 @@ internal class LinkAutoParseListener(
             }
         }
         val autoDedupe = dedupe.takeIf { triggerMode == LinkParseTriggerMode.ALWAYS }
+        val hasSupportedCandidate = linkParseService.hasSupportedLinkCandidate(
+            event.rawText,
+            linkParsing.maxLinksPerMessage,
+        )
         val finalResult = try {
-            if (linkParseService.hasSupportedLinkCandidate(event.rawText, linkParsing.maxLinksPerMessage)) {
+            if (hasSupportedCandidate) {
                 sendProgressOnce()
             }
             linkParseService.parseAndDispatch(
@@ -75,9 +79,15 @@ internal class LinkAutoParseListener(
             }
         }
 
-        if (linkParsing.replyOnFailure) {
+        val shouldReplyFailure = linkParsing.replyOnFailure ||
+            (hasSupportedCandidate && !finalResult.hasSupportedLinks) ||
+            (finalResult.hasSupportedLinks && !finalResult.hasForwarded && finalResult.failures.isNotEmpty())
+        if (shouldReplyFailure) {
             when {
                 finalResult.disabledReason != null -> reply(event, "链接解析失败：${finalResult.disabledReason}", CommandStatus.FAILED)
+                hasSupportedCandidate && !finalResult.hasSupportedLinks -> {
+                    reply(event, "链接解析失败：无法获取链接信息，请检查链接是否正确或稍后再试。", CommandStatus.FAILED)
+                }
                 !finalResult.hasSupportedLinks -> reply(event, "未找到支持的链接", CommandStatus.FAILED)
                 finalResult.failures.isNotEmpty() && !finalResult.hasForwarded -> {
                     reply(event, "链接解析失败：${finalResult.failureSummary.ifBlank { "没有链接成功解析" }}", CommandStatus.FAILED)
