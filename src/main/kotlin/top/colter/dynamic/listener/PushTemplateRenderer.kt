@@ -304,10 +304,10 @@ public class PushTemplateRenderer {
         if (isEmpty()) return this
         val result = toMutableList()
         (result.firstOrNull() as? MessageContent.Text)?.let {
-            result[0] = it.copy(fallbackText = it.fallbackText.trimStart('\n'))
+            result[0] = it.copy(fallbackText = it.fallbackText.trimStart('\r', '\n'))
         }
         (result.lastOrNull() as? MessageContent.Text)?.let {
-            result[result.lastIndex] = it.copy(fallbackText = it.fallbackText.trimEnd('\n'))
+            result[result.lastIndex] = it.copy(fallbackText = it.fallbackText.trimEnd('\r', '\n'))
         }
         return result
     }

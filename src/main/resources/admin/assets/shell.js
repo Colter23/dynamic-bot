@@ -806,7 +806,10 @@ const $ = id => document.getElementById(id);
     $("modalCancel").onclick = closeModal;
     $("modalConfirm").onclick = submitModal;
     $("modalBackdrop").addEventListener("click", event => {
-      if (event.target === $("modalBackdrop")) closeModal();
+      if (event.target === $("modalBackdrop")) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
     });
     $("stopApplication").onclick = stopApplication;
 

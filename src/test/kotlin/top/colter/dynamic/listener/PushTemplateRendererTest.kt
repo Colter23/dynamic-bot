@@ -115,6 +115,19 @@ class PushTemplateRendererTest {
     }
 
     @Test
+    fun shouldTrimBoundaryLineBreaksFromEveryMessage() {
+        val chains = renderer.render(
+            "\r\n{name}\r\n\\r\r\n{link}\r\n",
+            demoDynamic(),
+            drawImage = null,
+        )
+
+        assertEquals(2, chains.size)
+        assertEquals("Demo UP", chains[0].content.single().fallbackText)
+        assertEquals("https://t.bilibili.com/dynamic-1", chains[1].content.single().fallbackText)
+    }
+
+    @Test
     fun shouldRenderMergedForwardBlockWithNodes() {
         val chains = renderer.render(
             "head {name}{>>}完整文字：\\n{content}\\r全部原图：\\n{images}{<<}tail",
@@ -133,6 +146,22 @@ class PushTemplateRendererTest {
         assertEquals("全部原图：\n", forward.nodes[1].batches.single().content[0].fallbackText)
         assertEquals("https://example.com/pic-a.png", (forward.nodes[1].batches.single().content[1] as MessageContent.Image).image.uri)
         assertEquals("tail", contents[2].fallbackText)
+    }
+
+    @Test
+    fun shouldTrimBoundaryLineBreaksFromMergedForwardNodes() {
+        val chains = renderer.render(
+            "{>>}\r\n{content}\r\n\\r\r\n{images}\r\n{<<}",
+            demoDynamic(),
+            drawImage = null,
+        )
+
+        val forward = assertIs<MessageContent.Forward>(chains.single().content.single())
+        assertEquals("Demo contentlink", forward.nodes[0].batches.single().content.single().fallbackText)
+        val imageContents = forward.nodes[1].batches.single().content
+        assertEquals(2, imageContents.size)
+        assertEquals("https://example.com/pic-a.png", (imageContents[0] as MessageContent.Image).image.uri)
+        assertEquals("https://example.com/pic-b.png", (imageContents[1] as MessageContent.Image).image.uri)
     }
 
     @Test

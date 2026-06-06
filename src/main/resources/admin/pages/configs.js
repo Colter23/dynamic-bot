@@ -746,7 +746,7 @@ function messageTemplateForwardToken(kind) {
     };
   }
   return {
-    value: "{>>}\\n完整文字：\\n{content}\\r全部原图：\\n{images}\\r原始链接：{link}\\n{<<}",
+    value: "{>>}{name}@{uid}\\n{time}\\n\\n{content}\\n\\n{links}\\r{images}{<<}",
     label: "{>>}...{<<}",
     title: "合并转发块",
   };
