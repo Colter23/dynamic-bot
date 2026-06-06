@@ -11,7 +11,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.LinkVideoDownloadConfig
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.data.CommandContext
-import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
@@ -27,6 +26,7 @@ import top.colter.dynamic.core.link.LinkPreview
 import top.colter.dynamic.core.link.LinkResolution
 import top.colter.dynamic.core.link.LinkResolver
 import top.colter.dynamic.core.link.LinkVideoDownloadRequest
+import top.colter.dynamic.core.link.LinkVideoDownloadResult
 import top.colter.dynamic.core.link.LinkVideoDownloader
 import top.colter.dynamic.core.link.ParsedLink
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
@@ -53,6 +53,7 @@ public class LinkParseService(
     private val projectRootProvider: () -> File = { File(System.getProperty("user.dir")) },
 ) {
     private val videoDownloadSemaphores: MutableMap<Int, Semaphore> = ConcurrentHashMap()
+    private val templateRenderer: LinkPreviewTemplateRenderer = LinkPreviewTemplateRenderer(previewRenderer)
 
     internal suspend fun parseAndDispatch(
         text: String,
@@ -206,18 +207,9 @@ public class LinkParseService(
         context: CommandContext,
     ): LinkParseItemResult {
         val previewBatches = runCatching {
-            val image = previewRenderer.render(preview)
-            listOf(
-                MessageBatch(
-                    listOf(
-                        MessageContent.Image(
-                            fallbackText = preview.fallbackText(),
-                            image = image.copy(kind = MediaKind.IMAGE),
-                            altText = preview.title.takeIf { it.isNotBlank() },
-                        )
-                    )
-                )
-            )
+            templateRenderer.renderPreview(configProvider().linkParsing.templates.forKind(preview.kind), preview)
+                .takeIf { it.isNotEmpty() }
+                ?: listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText()))))
         }.getOrElse { error ->
             linkParseLogger.warn(error) {
                 "链接卡片绘图失败，回退为文本：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
@@ -227,8 +219,18 @@ public class LinkParseService(
         val previewResult = forwardMessage(previewBatches, parsedLink, context)
         if (previewResult !is LinkParseItemResult.Forwarded) return previewResult
 
-        val videoBatch = downloadVideoBatchOrNull(preview, parsedLink) ?: return previewResult
-        val videoResult = forwardMessage(listOf(videoBatch), parsedLink, context)
+        val video = downloadVideoOrNull(preview, parsedLink) ?: return previewResult
+        val videoBatches = runCatching {
+            templateRenderer.renderVideoFile(configProvider().linkParsing.templates.videoFile, preview, video)
+                .takeIf { it.isNotEmpty() }
+                ?: listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText()))))
+        }.getOrElse { error ->
+            linkParseLogger.warn(error) {
+                "链接视频模板渲染失败，跳过视频消息：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
+            }
+            return previewResult
+        }
+        val videoResult = forwardMessage(videoBatches, parsedLink, context)
         return if (videoResult is LinkParseItemResult.Forwarded) {
             previewResult.copy(deliveryCount = previewResult.deliveryCount + videoResult.deliveryCount)
         } else {
@@ -236,10 +238,10 @@ public class LinkParseService(
         }
     }
 
-    private suspend fun downloadVideoBatchOrNull(
+    private suspend fun downloadVideoOrNull(
         preview: LinkPreview,
         parsedLink: ParsedLink,
-    ): MessageBatch? {
+    ): LinkVideoDownloadResult? {
         val config = configProvider().linkParsing.videoDownload
         if (!config.enabled) return null
         if (parsedLink.kind != LinkKinds.VIDEO || preview.kind != LinkKinds.VIDEO) return null
@@ -294,15 +296,7 @@ public class LinkParseService(
                 linkParseLogger.info {
                     "链接视频下载完成：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，size=${result.fileSizeBytes}"
                 }
-                MessageBatch(
-                    listOf(
-                        MessageContent.Video(
-                            fallbackText = "",
-                            video = result.video.copy(kind = MediaKind.VIDEO),
-                            altText = result.title.takeIf { it.isNotBlank() } ?: preview.title.takeIf { it.isNotBlank() },
-                        ),
-                    ),
-                )
+                result
             }
         } catch (e: CancellationException) {
             throw e
@@ -443,27 +437,6 @@ public class LinkParseService(
             banner = primary.banner ?: fallback.banner,
             pendant = primary.pendant ?: fallback.pendant,
         )
-    }
-
-    private fun LinkPreview.fallbackText(): String {
-        return buildString {
-            append(title.ifBlank { url })
-            description.trim().takeIf { it.isNotBlank() }?.let {
-                appendLine()
-                append(it)
-            }
-            metrics
-                .mapNotNull { metric -> metric.display?.takeIf { it.isNotBlank() }?.let { "${metric.key}: $it" } }
-                .takeIf { it.isNotEmpty() }
-                ?.let {
-                    appendLine()
-                    append(it.joinToString(" / "))
-                }
-            url.takeIf { it.isNotBlank() }?.let {
-                appendLine()
-                append(it)
-            }
-        }
     }
 
     private data class ParsedLinkCandidate(

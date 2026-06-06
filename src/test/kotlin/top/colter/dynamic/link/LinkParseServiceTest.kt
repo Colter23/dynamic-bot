@@ -13,6 +13,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import top.colter.dynamic.LinkParseProgressReplyConfig
 import top.colter.dynamic.LinkParseTriggerMode
+import top.colter.dynamic.LinkParseTemplates
 import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.LinkVideoDownloadConfig
 import top.colter.dynamic.MainDynamicConfig
@@ -358,6 +359,41 @@ class LinkParseServiceTest {
     }
 
     @Test
+    fun `link preview should use configured text template without drawing`() = runBlocking {
+        initDb("preview-template-text")
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeVideoLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(
+                            video = "【{kind}】{title}\\n{name}@{uid}\\n{content}\\n{link}",
+                        ),
+                    ),
+                )
+            },
+            previewRenderer = LinkPreviewRenderer {
+                error("纯文本链接解析模板不应触发绘图")
+            },
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://www.bilibili.com/video/BV1xx411c7mD",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(1, result.forwarded.size)
+        val delivery = MessageDeliveryRepository.findRecent(limit = 1).single()
+        val message = MessageDeliveryRepository.findMessage(delivery.messageId)!!
+        val text = message.batches.single().content.single() as MessageContent.Text
+        assertEquals(
+            "【视频】demo video\nbilibili@BV1xx411c7mD\ndemo description\nhttps://www.bilibili.com/video/BV1xx411c7mD",
+            text.fallbackText,
+        )
+    }
+
+    @Test
     fun `video download should resolve blank ffmpeg path from project root`() = runBlocking {
         initDb("video-download-ffmpeg")
         val cacheRoot = createTempDirectory("dynamic-bot-link-video-cache")
@@ -603,6 +639,7 @@ class LinkParseServiceTest {
                     id = parsedLink.targetId,
                     url = parsedLink.normalizedUrl,
                     title = "demo video",
+                    description = "demo description",
                     durationSeconds = 120,
                 ),
             )

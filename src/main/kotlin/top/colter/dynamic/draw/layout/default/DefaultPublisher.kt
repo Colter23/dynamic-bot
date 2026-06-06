@@ -17,6 +17,7 @@ import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.draw.layout.default.component.Author
 import top.colter.dynamic.draw.layout.default.component.AuthorSmall
+import top.colter.dynamic.draw.layout.default.component.defaultAuthorContentStyle
 import top.colter.dynamic.draw.resource.qrCode
 import top.colter.skiko.Modifier
 import top.colter.skiko.dp
@@ -26,9 +27,6 @@ import top.colter.skiko.layout.Layout
 import top.colter.skiko.margin
 import top.colter.skiko.offset
 import top.colter.skiko.withAlpha
-
-private val publisherLogoHeight = 120.dp
-private val publisherQrCodeHeight = 150.dp
 
 internal fun Layout.drawPublisher(
     publisher: PublisherInfo,
@@ -66,7 +64,7 @@ internal fun Layout.drawPublisher(
             DrawOrnament.QRCODE -> platformTextLogoImage ?: platformLogoImage
             DrawOrnament.NONE -> null
         }
-        val publisherHeight = if (qrCodeImage != null) publisherQrCodeHeight else publisherLogoHeight
+        val publisherHeight = defaultAuthorContentStyle(qrCodeImage != null).height
 
         Author(
             face = config.image(publisher.avatar),

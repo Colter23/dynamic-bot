@@ -689,6 +689,36 @@ function messageTemplatePlaceholders(kind) {
     { value: "{uid}", label: "{uid}", title: "发布者 ID" },
     { value: "{link}", label: "{link}", title: "主链接" },
   ];
+  if (kind && kind.startsWith("LINK_")) {
+    const linkCommon = [
+      { value: "{draw}", label: "{draw}", title: "预览绘图" },
+      { value: "{cover}", label: "{cover}", title: "封面图" },
+      { value: "{name}", label: "{name}", title: "发布者 / 账号名称" },
+      { value: "{uid}", label: "{uid}", title: "发布者 / 账号 ID" },
+      { value: "{id}", label: "{id}", title: "链接对象 ID" },
+      { value: "{kind}", label: "{kind}", title: "链接类型" },
+      { value: "{title}", label: "{title}", title: "标题" },
+      { value: "{content}", label: "{content}", title: "描述 / 正文" },
+      { value: "{link}", label: "{link}", title: "链接" },
+      { value: "{stats}", label: "{stats}", title: "数据指标" },
+      { value: "{duration}", label: "{duration}", title: "时长" },
+    ];
+    if (kind === "LINK_VIDEO_FILE") {
+      return [
+        { value: "{video}", label: "{video}", title: "下载后的视频" },
+        ...linkCommon.filter(item => !["{draw}", "{cover}", "{kind}", "{stats}"].includes(item.value)),
+        { value: "{size}", label: "{size}", title: "视频大小" },
+        { value: "\\r", label: "\\r", title: "拆分为下一条消息" },
+        { value: "\\n", label: "\\n", title: "换行" },
+      ];
+    }
+    return [
+      ...linkCommon,
+      { value: "\\r", label: "\\r", title: "拆分为下一条消息" },
+      messageTemplateForwardToken(kind),
+      { value: "\\n", label: "\\n", title: "换行" },
+    ];
+  }
   if (kind === "LIVE_STARTED") {
     return [
       { value: "{draw}", label: "{draw}", title: "直播绘图" },
@@ -731,6 +761,13 @@ function messageTemplatePlaceholders(kind) {
 }
 
 function messageTemplateForwardToken(kind) {
+  if (kind && kind.startsWith("LINK_")) {
+    return {
+      value: "{>>}{title}\\n{content}\\r{cover}\\r{link}{<<}",
+      label: "{>>}...{<<}",
+      title: "合并转发块",
+    };
+  }
   if (kind === "LIVE_STARTED") {
     return {
       value: "{>>}\\n直播标题：{title}\\n分区：{area}\\r封面：\\n{cover}\\r直播间：{link}\\n{<<}",
@@ -858,6 +895,29 @@ function renderMessageTemplatePreviewItem(item, index) {
 }
 
 function messageTemplateSampleValues(kind) {
+  if (kind && kind.startsWith("LINK_")) {
+    const base = {
+      draw: "【链接预览图】",
+      cover: "【封面图】",
+      video: "【视频文件】",
+      name: "示例 UP",
+      uid: "10001",
+      id: kind === "LINK_LIVE" ? "230001" : "BV1xx411c7mD",
+      kind: kind === "LINK_LIVE" ? "直播" : (kind === "LINK_USER" ? "用户" : "视频"),
+      title: kind === "LINK_LIVE" ? "今晚一起写代码" : (kind === "LINK_USER" ? "示例 UP 的主页" : "示例视频标题"),
+      content: kind === "LINK_USER" ? "Bilibili 用户 10001" : "这里是链接解析拿到的简介内容。",
+      link: kind === "LINK_LIVE" ? "https://live.bilibili.com/230001" : "https://www.bilibili.com/video/BV1xx411c7mD",
+      stats: "12.3万播放 / 456弹幕 / 789点赞",
+      duration: "3m 21s",
+      size: "18.5 MB",
+    };
+    if (kind === "LINK_VIDEO_FILE") {
+      base.draw = "";
+      base.cover = "";
+      base.kind = "视频";
+    }
+    return base;
+  }
   if (kind === "LIVE_STARTED") {
     return {
       draw: "【直播绘图】",

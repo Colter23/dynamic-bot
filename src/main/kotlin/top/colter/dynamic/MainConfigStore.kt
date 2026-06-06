@@ -19,6 +19,7 @@ import top.colter.dynamic.core.plugin.MessageSinkRoutingStrategy
 import top.colter.dynamic.admin.AdminLogBuffer
 import top.colter.dynamic.draw.DrawLayoutRegistry
 import top.colter.dynamic.draw.DrawThemeFactory
+import top.colter.dynamic.link.LinkPreviewTemplateRenderer
 import top.colter.dynamic.listener.PushTemplateRenderer
 
 public class MainConfigStore(
@@ -264,6 +265,57 @@ public object MainConfigForms {
                     type = ConfigFieldType.BOOLEAN,
                     section = "链接解析",
                     description = "解析结果发送完成或失败后，尽量撤回解析中的提示消息；不支持撤回的平台会忽略。",
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.templates.video",
+                    label = "视频链接模板",
+                    type = ConfigFieldType.TEXTAREA,
+                    section = "链接解析模板",
+                    description = "解析视频页时使用。支持 {draw} {cover} {name} {uid} {id} {kind} {title} {content} {duration} {stats} {link}；\\n 换行，\\r 分割为多条消息；{>>}...{<<} 包裹内容会作为合并转发发送。",
+                    component = "MESSAGE_TEMPLATE_EDITOR",
+                    metadata = mapOf("templateKind" to "LINK_VIDEO"),
+                    required = true,
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.templates.live",
+                    label = "直播链接模板",
+                    type = ConfigFieldType.TEXTAREA,
+                    section = "链接解析模板",
+                    description = "解析直播间链接时使用。支持 {draw} {cover} {name} {uid} {id} {kind} {title} {content} {stats} {link}；\\n 换行，\\r 分割为多条消息；{>>}...{<<} 包裹内容会作为合并转发发送。",
+                    component = "MESSAGE_TEMPLATE_EDITOR",
+                    metadata = mapOf("templateKind" to "LINK_LIVE"),
+                    required = true,
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.templates.user",
+                    label = "用户页链接模板",
+                    type = ConfigFieldType.TEXTAREA,
+                    section = "链接解析模板",
+                    description = "解析用户页链接时使用。支持 {draw} {cover} {name} {uid} {id} {kind} {title} {content} {link}；\\n 换行，\\r 分割为多条消息；{>>}...{<<} 包裹内容会作为合并转发发送。",
+                    component = "MESSAGE_TEMPLATE_EDITOR",
+                    metadata = mapOf("templateKind" to "LINK_USER"),
+                    required = true,
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.templates.fallback",
+                    label = "通用链接模板",
+                    type = ConfigFieldType.TEXTAREA,
+                    section = "链接解析模板",
+                    description = "解析未单独分类的链接预览时使用。支持 {draw} {cover} {name} {uid} {id} {kind} {title} {content} {stats} {link}；\\n 换行，\\r 分割为多条消息；{>>}...{<<} 包裹内容会作为合并转发发送。",
+                    component = "MESSAGE_TEMPLATE_EDITOR",
+                    metadata = mapOf("templateKind" to "LINK_FALLBACK"),
+                    required = true,
+                ),
+                ConfigFieldSpec(
+                    path = "linkParsing.templates.videoFile",
+                    label = "下载视频模板",
+                    type = ConfigFieldType.TEXTAREA,
+                    section = "链接解析模板",
+                    description = "视频下载成功后发送单独消息时使用。支持 {video} {name} {uid} {id} {title} {content} {duration} {size} {link}；\\n 换行，\\r 分割为多条消息。",
+                    component = "MESSAGE_TEMPLATE_EDITOR",
+                    metadata = mapOf("templateKind" to "LINK_VIDEO_FILE"),
+                    required = true,
+                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.videoDownload.enabled",
@@ -820,6 +872,16 @@ public object MainConfigForms {
         if (config.linkParsing.progressReply.enabled) {
             require(config.linkParsing.progressReply.text.isNotBlank()) { "解析中提示文字不能为空" }
         }
+        require(config.linkParsing.templates.video.isNotBlank()) { "视频链接模板不能为空" }
+        require(config.linkParsing.templates.live.isNotBlank()) { "直播链接模板不能为空" }
+        require(config.linkParsing.templates.user.isNotBlank()) { "用户页链接模板不能为空" }
+        require(config.linkParsing.templates.fallback.isNotBlank()) { "通用链接模板不能为空" }
+        require(config.linkParsing.templates.videoFile.isNotBlank()) { "下载视频模板不能为空" }
+        LinkPreviewTemplateRenderer.validate(config.linkParsing.templates.video)
+        LinkPreviewTemplateRenderer.validate(config.linkParsing.templates.live)
+        LinkPreviewTemplateRenderer.validate(config.linkParsing.templates.user)
+        LinkPreviewTemplateRenderer.validate(config.linkParsing.templates.fallback)
+        LinkPreviewTemplateRenderer.validate(config.linkParsing.templates.videoFile)
         val videoDownload = config.linkParsing.videoDownload
         require(videoDownload.maxDurationSeconds >= 0) { "视频最大时长不能为负数" }
         require(videoDownload.maxFileMegabytes.isFiniteNumber()) { "视频最大大小必须是有效数字" }

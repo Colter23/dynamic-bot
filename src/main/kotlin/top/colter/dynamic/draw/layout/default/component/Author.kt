@@ -17,6 +17,92 @@ private val authorNameShadows = listOf(
         color = Color.BLACK.withAlpha(0.42f),
     ),
 )
+private val authorTimeShadows = listOf(
+    TextShadow(
+        offsetX = 1.dp,
+        offsetY = 1.dp,
+        blur = 1.dp,
+        color = Color.BLACK.withAlpha(0.42f),
+    ),
+)
+
+internal data class AuthorContentStyle(
+    val height: Dp,
+    val avatarSize: Dp,
+    val avatarLeft: Dp,
+    val avatarTop: Dp,
+    val avatarTextSpacing: Dp,
+    val textTop: Dp,
+    val textRightSpacing: Dp,
+    val nameFontSize: Dp,
+    val timeFontSize: Dp,
+    val timeTopSpacing: Dp,
+    val nameStrokeWidth: Dp,
+)
+
+internal fun defaultAuthorContentStyle(hasQrCode: Boolean): AuthorContentStyle {
+    return if (hasQrCode) {
+        AuthorContentStyle(
+            height = 150.dp,
+            avatarSize = 112.dp,
+            avatarLeft = 20.dp,
+            avatarTop = 18.dp,
+            avatarTextSpacing = 16.dp,
+            textTop = 24.dp,
+            textRightSpacing = 12.dp,
+            nameFontSize = 45.dp,
+            timeFontSize = 32.dp,
+            timeTopSpacing = 0.dp,
+            nameStrokeWidth = 3.dp,
+        )
+    } else {
+        AuthorContentStyle(
+            height = 120.dp,
+            avatarSize = 92.dp,
+            avatarLeft = 20.dp,
+            avatarTop = 14.dp,
+            avatarTextSpacing = 16.dp,
+            textTop = 13.dp,
+            textRightSpacing = 12.dp,
+            nameFontSize = 45.dp,
+            timeFontSize = 32.dp,
+            timeTopSpacing = (-6).dp,
+            nameStrokeWidth = 3.dp,
+        )
+    }
+}
+
+internal fun minimalAuthorContentStyle(hasQrCode: Boolean): AuthorContentStyle {
+    return if (hasQrCode) {
+        AuthorContentStyle(
+            height = 122.dp,
+            avatarSize = 92.dp,
+            avatarLeft = 12.dp,
+            avatarTop = 10.dp,
+            avatarTextSpacing = 16.dp,
+            textTop = 18.dp,
+            textRightSpacing = 10.dp,
+            nameFontSize = 43.dp,
+            timeFontSize = 30.dp,
+            timeTopSpacing = 0.dp,
+            nameStrokeWidth = 3.dp,
+        )
+    } else {
+        AuthorContentStyle(
+            height = 92.dp,
+            avatarSize = 84.dp,
+            avatarLeft = 12.dp,
+            avatarTop = 2.dp,
+            avatarTextSpacing = 16.dp,
+            textTop = 8.dp,
+            textRightSpacing = 10.dp,
+            nameFontSize = 43.dp,
+            timeFontSize = 30.dp,
+            timeTopSpacing = (-6).dp,
+            nameStrokeWidth = 3.dp,
+        )
+    }
+}
 
 
 /**
@@ -32,7 +118,7 @@ internal fun Layout.Author(
     badge: Image? = null,
     qrCode: Image? = null,
     accentColor: Int = Color.makeRGB(251, 114, 153),
-    cardHeight: Dp = 150.dp,
+    cardHeight: Dp = defaultAuthorContentStyle(qrCode != null).height,
     alignment: LayoutAlignment = LayoutAlignment.CENTER,
     modifier: Modifier
 ) = Box (
@@ -68,6 +154,7 @@ internal fun Layout.Author(
         badge = badge,
         qrCode = qrCode,
         accentColor = accentColor,
+        style = defaultAuthorContentStyle(qrCode != null),
         modifier = Modifier()
             .fillMaxWidth()
             .fillMaxHeight(),
@@ -86,6 +173,7 @@ internal fun Layout.AuthorContent(
     badge: Image? = null,
     qrCode: Image? = null,
     accentColor: Int = Color.makeRGB(251, 114, 153),
+    style: AuthorContentStyle = defaultAuthorContentStyle(qrCode != null),
     modifier: Modifier,
 ) = Row(
     modifier = modifier,
@@ -95,37 +183,41 @@ internal fun Layout.AuthorContent(
         pendant = pendant,
         badge = badge,
         modifier = Modifier()
-            .fillMaxHeight()
-            .padding(horizontal = 5.dp, vertical = 20.dp)
+            .width(style.avatarSize)
+            .height(style.avatarSize)
+            .margin(
+                top = style.avatarTop,
+                right = style.avatarTextSpacing,
+                left = style.avatarLeft,
+            )
     )
 
-    Column(modifier = Modifier().fillWidth().fillMaxHeight().padding(vertical = 10.dp)) {
+    Column(
+        modifier = Modifier()
+            .fillWidth()
+            .margin(top = style.textTop, right = style.textRightSpacing)
+    ) {
         Text(
             text = name,
             color = Color.WHITE,
-            fontSize = 45.dp,
+            fontSize = style.nameFontSize,
             stroke = TextStroke(
-                width = 3.dp,
+                width = style.nameStrokeWidth,
                 color = accentColor,
             ),
             textShadows = authorNameShadows,
             alignment = LayoutAlignment.LEFT,
-            modifier = Modifier().fillMaxWidth().fillRatioHeight(0.6f)
+            modifier = Modifier().fillMaxWidth()
         )
         Text(
             text = time,
             color = Color.WHITE.withAlpha(0.85f),
-            fontSize = 32.dp,
-            textShadows = listOf(
-                TextShadow(
-                    offsetX = 1.dp,
-                    offsetY = 1.dp,
-                    blur = 1.dp,
-                    color = Color.BLACK.withAlpha(0.42f),
-                ),
-            ),
+            fontSize = style.timeFontSize,
+            textShadows = authorTimeShadows,
             alignment = LayoutAlignment.LEFT,
-            modifier = Modifier().fillMaxWidth().fillRatioHeight(1f - 0.4f)
+            modifier = Modifier()
+                .fillMaxWidth()
+                .margin(top = style.timeTopSpacing)
         )
     }
 

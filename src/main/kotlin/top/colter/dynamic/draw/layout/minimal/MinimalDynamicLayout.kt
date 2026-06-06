@@ -9,6 +9,7 @@ import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.draw.layout.default.DynamicRenderMode
 import top.colter.dynamic.draw.layout.default.component.AuthorContent
+import top.colter.dynamic.draw.layout.default.component.minimalAuthorContentStyle
 import top.colter.dynamic.draw.layout.default.drawDynamicBlocks
 import top.colter.dynamic.draw.layout.default.dynamicTitleFontSize
 import top.colter.dynamic.draw.layout.default.orderDynamicBlocksForLayout
@@ -17,6 +18,7 @@ import top.colter.dynamic.util.formatTime
 import top.colter.skiko.Dp
 import top.colter.skiko.Modifier
 import top.colter.skiko.background
+import top.colter.skiko.bleed
 import top.colter.skiko.border
 import top.colter.skiko.data.Gradient
 import top.colter.skiko.data.LayoutAlignment
@@ -28,18 +30,19 @@ import top.colter.skiko.layout.Layout
 import top.colter.skiko.layout.Text
 import top.colter.skiko.layout.View
 import top.colter.skiko.margin
+import top.colter.skiko.offset
 import top.colter.skiko.padding
 import top.colter.skiko.withAlpha
 import top.colter.skiko.width
 
 private val scenePadding: Dp = 20.dp
 private val contentSpacing: Dp = 20.dp
-private val cardPadding: Dp = 20.dp
+private val cardPadding: Dp = 14.dp
 private val cardBorderWidth: Dp = 3.dp
 private val cardRadius: Dp = 15.dp
-private val publisherLogoHeight: Dp = 120.dp
-private val publisherQrCodeHeight: Dp = 150.dp
-private val authorBottomSpacing: Dp = 20.dp
+private val authorLogoBottomSpacing: Dp = 24.dp
+private val authorQrBottomSpacing: Dp = 12.dp
+private val authorQrTopOffset: Dp = (-10).dp
 
 internal fun renderMinimalDynamic(update: SourceUpdate, config: DrawConfig): Image {
     return View(
@@ -83,7 +86,17 @@ private fun Layout.MinimalDynamicView(
             ?: config.platformAssetImage(PlatformDrawAssetKeys.PRIMARY_LOGO)
         DrawOrnament.NONE -> null
     }
-    val publisherHeight = if (qrCodeImage != null) publisherQrCodeHeight else publisherLogoHeight
+    val authorStyle = minimalAuthorContentStyle(qrCodeImage != null)
+    val authorBottomSpacing = if (qrCodeImage != null) authorQrBottomSpacing else authorLogoBottomSpacing
+    val authorModifier = Modifier()
+        .fillMaxWidth()
+        .height(authorStyle.height)
+        .margin(bottom = if (title != null || hasBlocks) authorBottomSpacing else 0.dp)
+    if (qrCodeImage != null) {
+        authorModifier
+            .bleed(right = cardPadding)
+            .offset(y = authorQrTopOffset)
+    }
 
     Column(
         modifier = Modifier()
@@ -101,10 +114,8 @@ private fun Layout.MinimalDynamicView(
             time = update.occurredAtEpochSeconds.formatTime,
             badge = avatarBadgeImage,
             accentColor = config.theme.primaryColor,
-            modifier = Modifier()
-                .fillMaxWidth()
-                .height(publisherHeight)
-                .margin(bottom = if (title != null || hasBlocks) authorBottomSpacing else 0.dp),
+            style = authorStyle,
+            modifier = authorModifier,
         )
 
         title?.let {
