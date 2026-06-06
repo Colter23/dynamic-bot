@@ -33,6 +33,8 @@ import top.colter.dynamic.core.link.LinkVideoDownloader
 import top.colter.dynamic.core.link.ParsedLink
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.tools.loggerFor
+import top.colter.dynamic.draw.DefaultLinkPreviewRenderer
+import top.colter.dynamic.draw.LinkPreviewRenderer
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository

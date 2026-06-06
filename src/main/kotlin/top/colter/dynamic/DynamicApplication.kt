@@ -38,11 +38,11 @@ import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.dynamic.draw.image.ImageFileCleaner
 import top.colter.dynamic.draw.DefaultDynamicDrawService
+import top.colter.dynamic.draw.DefaultLinkPreviewRenderer
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.listener.DeliveryDispatcher
 import top.colter.dynamic.link.LinkAutoParseListener
 import top.colter.dynamic.link.DeliveryLinkParseProgressMessenger
-import top.colter.dynamic.link.DefaultLinkPreviewRenderer
 import top.colter.dynamic.link.LinkParseService
 import top.colter.dynamic.listener.SourceUpdateProcessor
 import top.colter.dynamic.media.OutboundMediaService

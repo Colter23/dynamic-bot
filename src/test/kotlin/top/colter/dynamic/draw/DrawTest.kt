@@ -25,12 +25,15 @@ import top.colter.dynamic.core.data.MediaCardStyle
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MediaReference
+import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.RepostBlock
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.core.data.mediaReferences
+import top.colter.dynamic.core.link.LinkKinds
+import top.colter.dynamic.core.link.LinkPreview
 import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.dynamic.loadTestResource
 import top.colter.dynamic.testDynamicUpdate
@@ -70,6 +73,20 @@ class DrawTest {
         }
     }
 
+    @Test
+    fun `test link preview draw previews`() {
+        val layouts = previewLayouts()
+        linkPreviewPreviews().forEach { preview ->
+            layouts.forEach { layout ->
+                renderLinkPreviewToOutput(
+                    fileName = previewFileName(layout, preview.fileName),
+                    preview = preview.preview,
+                    config = drawConfig(layout = layout, ornament = preview.ornament),
+                )
+            }
+        }
+    }
+
     private fun commonDynamicPreviews(): List<DynamicPreview> {
         return listOf(
             DynamicPreview(
@@ -97,6 +114,144 @@ class DrawTest {
             DynamicPreview(
                 fileName = "preview_06_title_long_images.png",
                 update = titleLongTextImagesDynamic(),
+            ),
+        )
+    }
+
+    private fun linkPreviewPreviews(): List<LinkPreviewCase> {
+        return listOf(
+            LinkPreviewCase(
+                fileName = "link_preview_01_video_cover.png",
+                preview = videoLinkPreview(),
+            ),
+            LinkPreviewCase(
+                fileName = "link_preview_02_live_qrcode.png",
+                preview = liveLinkPreview(),
+                ornament = DrawOrnament.QRCODE,
+            ),
+            LinkPreviewCase(
+                fileName = "link_preview_03_user_banner.png",
+                preview = userLinkPreview(),
+            ),
+            LinkPreviewCase(
+                fileName = "link_preview_04_long_no_cover.png",
+                preview = longNoCoverLinkPreview(),
+                ornament = DrawOrnament.QRCODE,
+            ),
+            LinkPreviewCase(
+                fileName = "link_preview_05_article_cover.png",
+                preview = articleLinkPreview(),
+            ),
+        )
+    }
+
+    private fun videoLinkPreview(): LinkPreview {
+        return LinkPreview(
+            platformId = PlatformId.of("bilibili"),
+            kind = LinkKinds.VIDEO,
+            id = "BV1Preview001",
+            url = "https://www.bilibili.com/video/BV1Preview001",
+            title = "链接解析绘图模块重构记录",
+            description = "这是一条通过链接解析得到的视频预览，主要观察封面、标题、简介、时长和播放数据在媒体卡片里的组合效果。",
+            badge = "视频",
+            cover = imageMedia("bg1.jpg", MediaKind.COVER),
+            publisher = previewPublisher(
+                id = "link-video-up",
+                name = "链接解析观察员",
+                header = "header1.png",
+            ),
+            metrics = listOf(
+                DynamicMetric(key = "play", raw = 246000, display = "24.6万"),
+                DynamicMetric(key = "danmaku", raw = 1832, display = "1832"),
+                DynamicMetric(key = "like", raw = 37000, display = "3.7万"),
+            ),
+            durationSeconds = 9 * 60 + 36,
+        )
+    }
+
+    private fun liveLinkPreview(): LinkPreview {
+        return LinkPreview(
+            platformId = PlatformId.of("bilibili"),
+            kind = LinkKinds.LIVE,
+            id = "23058",
+            url = "https://live.bilibili.com/23058",
+            title = "今晚一起看动态卡片排版",
+            description = "绘图 / 开发杂谈",
+            badge = "直播中",
+            cover = imageMedia("bg1.jpg", MediaKind.COVER),
+            publisher = previewPublisher(
+                id = "link-live-up",
+                name = "云端调试台",
+                header = "header2.png",
+                avatar = "avatar1.jpg",
+                withPendant = false,
+            ),
+            metrics = listOf(
+                DynamicMetric(key = "online", raw = 12800, display = "1.3万"),
+                DynamicMetric(key = "follow", raw = 560000, display = "56万"),
+            ),
+        )
+    }
+
+    private fun userLinkPreview(): LinkPreview {
+        return LinkPreview(
+            platformId = PlatformId.of("bilibili"),
+            kind = LinkKinds.USER,
+            id = "10086",
+            url = "https://space.bilibili.com/10086",
+            title = "可可萝优妮-KokoroUni",
+            description = "Bilibili 用户 10086",
+            badge = "用户",
+            cover = imageMedia("header2.png", MediaKind.COVER),
+            publisher = previewPublisher(
+                id = "10086",
+                name = "可可萝优妮-KokoroUni",
+                header = "header2.png",
+                avatar = "avatar1.jpg",
+            ),
+        )
+    }
+
+    private fun longNoCoverLinkPreview(): LinkPreview {
+        return LinkPreview(
+            platformId = PlatformId.of("bilibili"),
+            kind = "article",
+            id = "cv-preview-long",
+            url = "https://www.bilibili.com/read/cv-preview-long",
+            title = "一篇关于动态转发绘图的长说明",
+            description = "这条链接没有封面，所以测试会把标题提到动态标题位置，并把较长的简介作为正文绘制。这样可以观察链接解析结果在没有封面时是否仍然有完整的信息层级：先看到标题，再读到正文，最后通过一个紧凑的小卡片知道它来自哪个页面。这里故意写得稍长一些，避免小媒体卡片把正文裁得过碎。",
+            badge = "专栏",
+            publisher = previewPublisher(
+                id = "link-article-up",
+                name = "文档整理站",
+                header = "header1.png",
+                withPendant = false,
+            ),
+            metrics = listOf(
+                DynamicMetric(key = "like", raw = 9200, display = "9200"),
+                DynamicMetric(key = "comment", raw = 316, display = "316"),
+            ),
+        )
+    }
+
+    private fun articleLinkPreview(): LinkPreview {
+        return LinkPreview(
+            platformId = PlatformId.of("bilibili"),
+            kind = "article",
+            id = "cv-preview-cover",
+            url = "https://www.bilibili.com/read/cv-preview-cover",
+            title = "默认布局边距调整记录",
+            description = "整理作者卡片、二维码区域、媒体卡片和转发动态卡片的最新视觉调整。",
+            badge = "专栏",
+            cover = imageMedia("bg1.jpg", MediaKind.COVER),
+            publisher = previewPublisher(
+                id = "link-cover-up",
+                name = "排版备忘录",
+                header = "header2.png",
+            ),
+            metrics = listOf(
+                DynamicMetric(key = "like", raw = 18000, display = "1.8万"),
+                DynamicMetric(key = "favorite", raw = 8200, display = "8200"),
             ),
         )
     }
@@ -291,6 +446,12 @@ class DrawTest {
     private data class DynamicPreview(
         val fileName: String,
         val update: SourceUpdate,
+        val ornament: DrawOrnament = DrawOrnament.LOGO,
+    )
+
+    private data class LinkPreviewCase(
+        val fileName: String,
+        val preview: LinkPreview,
         val ornament: DrawOrnament = DrawOrnament.LOGO,
     )
 
@@ -501,6 +662,21 @@ class DrawTest {
         cacheMedia(update)
         val img = renderDynamicImage(update = update, config = config)
         testOutput.resolve(fileName).writeBytes(img.encodeToData()!!.bytes)
+    }
+
+    private fun renderLinkPreviewToOutput(
+        fileName: String,
+        preview: LinkPreview,
+        config: DrawConfig = drawConfig(),
+    ) {
+        renderToOutput(
+            fileName = fileName,
+            update = buildLinkPreviewSourceUpdate(
+                preview = preview,
+                occurredAtEpochSeconds = 1L,
+            ),
+            config = config,
+        )
     }
 
     private fun drawConfig(

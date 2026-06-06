@@ -41,6 +41,7 @@ import top.colter.dynamic.core.link.LinkVideoDownloadResult
 import top.colter.dynamic.core.link.LinkVideoDownloader
 import top.colter.dynamic.core.link.ParsedLink
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
+import top.colter.dynamic.draw.LinkPreviewRenderer
 import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus

@@ -4,8 +4,11 @@ import org.jetbrains.skia.FontStyle
 import org.jetbrains.skia.Image
 import top.colter.dynamic.core.data.DynamicBlock
 import top.colter.dynamic.core.data.DynamicBlockRole
+import top.colter.dynamic.core.data.DynamicMediaCardKind
 import top.colter.dynamic.core.data.DynamicPayload
+import top.colter.dynamic.core.data.MediaCardBlock
 import top.colter.dynamic.core.data.SourceUpdate
+import top.colter.dynamic.core.link.LinkKinds
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.util.formatTime
 import top.colter.skiko.Dp
@@ -65,6 +68,7 @@ internal fun Layout.DefaultDynamicView(
     val hasBlocks = blocks.isNotEmpty()
     val hasBodyContent = title != null || hasBlocks
     val titleFontSize = dynamicTitleFontSize(blocks)
+    val drawBlocksWithoutContentCard = shouldDrawBlocksWithoutContentCard(update, title, blocks, mode)
 
     Column(modifier = Modifier().fillMaxWidth()) {
         if (mode == DynamicRenderMode.ROOT) {
@@ -78,43 +82,73 @@ internal fun Layout.DefaultDynamicView(
         }
 
         if (hasBodyContent || mode == DynamicRenderMode.FORWARD) {
-            Column(
-                modifier = Modifier()
-                    .fillMaxWidth()
-                    .margin(top = topSpacing)
-                    .padding(cardPadding)
-                    .background(config.theme.cardColor)
-                    .border(cardBorderWidth, cardRadius, config.theme.borderColor)
-            ) {
-                if (mode == DynamicRenderMode.FORWARD) {
-                    drawPublisher(
-                        publisher = update.publisher,
-                        time = update.occurredAtEpochSeconds.formatTime,
-                        link = update.link.orEmpty(),
-                        config = config,
-                        mode = mode,
-                    )
-                }
-
-                title?.let {
-                    Text(
-                        text = it,
-                        color = config.theme.textColor,
-                        fontSize = titleFontSize,
-                        fontStyle = FontStyle.BOLD,
-                        maxLinesCount = 2,
-                        modifier = Modifier().margin(bottom = if (hasBlocks) contentSpacing else 0.dp),
-                    )
-                }
-                if (hasBlocks) {
+            if (drawBlocksWithoutContentCard) {
+                Column(
+                    modifier = Modifier()
+                        .fillMaxWidth()
+                        .margin(top = topSpacing)
+                ) {
                     drawDynamicBlocks(blocks, config, mode)
+                }
+            } else {
+                Column(
+                    modifier = Modifier()
+                        .fillMaxWidth()
+                        .margin(top = topSpacing)
+                        .padding(cardPadding)
+                        .background(config.theme.cardColor)
+                        .border(cardBorderWidth, cardRadius, config.theme.borderColor)
+                ) {
+                    if (mode == DynamicRenderMode.FORWARD) {
+                        drawPublisher(
+                            publisher = update.publisher,
+                            time = update.occurredAtEpochSeconds.formatTime,
+                            link = update.link.orEmpty(),
+                            config = config,
+                            mode = mode,
+                        )
+                    }
+
+                    title?.let {
+                        Text(
+                            text = it,
+                            color = config.theme.textColor,
+                            fontSize = titleFontSize,
+                            fontStyle = FontStyle.BOLD,
+                            maxLinesCount = 2,
+                            modifier = Modifier().margin(bottom = if (hasBlocks) contentSpacing else 0.dp),
+                        )
+                    }
+                    if (hasBlocks) {
+                        drawDynamicBlocks(blocks, config, mode)
+                    }
                 }
             }
         }
     }
 }
 
+private fun shouldDrawBlocksWithoutContentCard(
+    update: SourceUpdate,
+    title: String?,
+    blocks: List<DynamicBlock>,
+    mode: DynamicRenderMode,
+): Boolean {
+    if (mode != DynamicRenderMode.ROOT || title != null || blocks.size != 1) return false
+    val kind = update.key.externalId
+        .takeIf { it.startsWith(LINK_PREVIEW_EXTERNAL_ID_PREFIX) }
+        ?.removePrefix(LINK_PREVIEW_EXTERNAL_ID_PREFIX)
+        ?.substringBefore(':')
+        ?: return false
+    if (kind != LinkKinds.VIDEO && kind != LinkKinds.LIVE) return false
+
+    val card = blocks.singleOrNull() as? MediaCardBlock ?: return false
+    return card.card.kind == DynamicMediaCardKind.VIDEO || card.card.kind == DynamicMediaCardKind.LIVE
+}
+
 internal fun orderDynamicBlocksForLayout(blocks: List<DynamicBlock>): List<DynamicBlock> {
     return blocks.filterNot { it.role == DynamicBlockRole.ADDITIONAL } +
         blocks.filter { it.role == DynamicBlockRole.ADDITIONAL }
 }
+
+private const val LINK_PREVIEW_EXTERNAL_ID_PREFIX = "link-preview:"

@@ -9,6 +9,7 @@ import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.link.LinkKinds
 import top.colter.dynamic.core.link.LinkPreview
 import top.colter.dynamic.core.link.LinkVideoDownloadResult
+import top.colter.dynamic.draw.LinkPreviewRenderer
 import top.colter.dynamic.util.formatTime
 
 internal class LinkPreviewTemplateRenderer(
