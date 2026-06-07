@@ -28,21 +28,24 @@ import top.colter.dynamic.core.command.CommandInvocation
 import top.colter.dynamic.core.command.CommandPublisher
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.command.CommandSpec
-import top.colter.dynamic.core.data.Message
-import top.colter.dynamic.core.data.MessageBatch
-import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.EntityState
+import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.PlatformId
+import top.colter.dynamic.core.data.Publisher
+import top.colter.dynamic.core.data.PublisherKey
+import top.colter.dynamic.core.data.PublisherKind
+import top.colter.dynamic.core.data.Subscriber
+import top.colter.dynamic.core.data.Subscription
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.event.EventBus
-import top.colter.dynamic.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.core.event.SourceUpdatePublisher
+import top.colter.dynamic.core.event.SubscriptionChangeType
 import top.colter.dynamic.core.event.SubscriptionChangedEvent
 import top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION
 import top.colter.dynamic.core.plugin.CommandContributor
-import top.colter.dynamic.core.plugin.MessageDeliveryRequest
-import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.core.plugin.Plugin
 import top.colter.dynamic.core.plugin.PluginContext
@@ -243,25 +246,24 @@ class PluginManagerLifecycleTest {
     }
 
     @Test
-    fun stopShouldDrainInFlightSinkCallbacks() = runBlocking {
+    fun stopShouldDrainInFlightSubscriptionCallbacks() = runBlocking {
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val manager = PluginManager(
             pluginDirPath = createTempDirectory("plugin-manager-drain").toString(),
             scope = scope,
-            sinkMaxConcurrency = 1,
             shutdownDrainTimeoutMs = 3000,
         )
-        val plugin = BlockingSinkPlugin()
+        val plugin = BlockingSourcePlugin()
         manager.registerPluginForTest(
-            descriptor = descriptor("blocking-sink", plugin),
+            descriptor = descriptor("blocking-source", plugin),
             instance = plugin,
             state = PluginState.ACTIVE,
         )
 
-        manager.dispatchMessageToSinks(demoMessageEvent())
+        manager.dispatchSubscriptionChangedToSources(demoSubscriptionChangedEvent())
         withTimeout(3_000) { plugin.started.await() }
 
-        val stopJob = launch(Dispatchers.Default) { manager.stopPlugin("blocking-sink") }
+        val stopJob = launch(Dispatchers.Default) { manager.stopPlugin("blocking-source") }
         delay(100)
         assertFalse(stopJob.isCompleted)
 
@@ -316,15 +318,33 @@ class PluginManagerLifecycleTest {
         )
     }
 
-    private fun demoMessageEvent(): MessageEvent {
-        return MessageEvent(
-            sourcePlugin = "test",
-            message = Message(
-                id = "message-1",
-                time = 1,
-                targets = listOf(TargetAddress.of("qq", TargetKind.GROUP, "100")),
-                batches = listOf(MessageBatch(listOf(MessageContent.Text("hello")))),
+    private fun demoSubscriptionChangedEvent(): SubscriptionChangedEvent {
+        return SubscriptionChangedEvent(
+            changeType = SubscriptionChangeType.SUBSCRIBED,
+            subscription = Subscription(
+                id = 1,
+                subscriberId = 1,
+                publisherId = 1,
+                createdAtEpochSeconds = 1,
+                updatedAtEpochSeconds = 1,
             ),
+            publisher = Publisher(
+                id = 1,
+                key = PublisherKey.of("bilibili", PublisherKind.USER, "100"),
+                name = "publisher",
+                avatar = MediaRef("https://example.com/avatar.png", MediaKind.AVATAR),
+                createTime = 1,
+                createUser = 0,
+            ),
+            subscriber = Subscriber(
+                id = 1,
+                address = TargetAddress.of("qq", TargetKind.GROUP, "100"),
+                name = "group",
+                state = EntityState.ACTIVE,
+                createTime = 1,
+                createUser = 0,
+            ),
+            changedAtEpochSeconds = 1,
         )
     }
 
@@ -368,18 +388,16 @@ class PluginManagerLifecycleTest {
         }
     }
 
-    private class BlockingSinkPlugin : MessageSinkPlugin {
-        override val transportId: String = "onebot"
-        override val supportedTargetPlatforms: Set<PlatformId> = setOf(PlatformId.of("qq"))
+    private class BlockingSourcePlugin : PublisherSourcePlugin {
+        override val platformId: PlatformId = PlatformId.of("bilibili")
         val started: CompletableDeferred<Unit> = CompletableDeferred()
         val release: CompletableDeferred<Unit> = CompletableDeferred()
         var completed: Boolean = false
 
-        override suspend fun sendMessage(request: MessageDeliveryRequest): MessageSendResult {
+        override suspend fun onSubscriptionChanged(event: SubscriptionChangedEvent) {
             started.complete(Unit)
             release.await()
             completed = true
-            return MessageSendResult.sent()
         }
     }
 }

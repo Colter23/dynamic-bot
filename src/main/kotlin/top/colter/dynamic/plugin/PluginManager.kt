@@ -11,8 +11,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.core.command.CommandPublisher
 import top.colter.dynamic.command.CommandRegistry
@@ -20,11 +18,9 @@ import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.config.ConfigurablePlugin
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.config.YamlPluginDataStore
-import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.event.ListenerToken
-import top.colter.dynamic.event.MessageEvent
 import top.colter.dynamic.event.SystemNotificationEvent
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.core.event.SourceUpdatePublisher
@@ -36,13 +32,8 @@ import top.colter.dynamic.core.event.SystemNotificationSeverity
 import top.colter.dynamic.core.link.LinkResolver
 import top.colter.dynamic.core.link.LinkVideoDownloader
 import top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION
-import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
 import top.colter.dynamic.core.plugin.CommandContributor
-import top.colter.dynamic.core.plugin.CommandResultSendRequest
-import top.colter.dynamic.core.plugin.MessageDeliveryRequest
-import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
-import top.colter.dynamic.core.plugin.MessageSinkRouteState
 import top.colter.dynamic.core.plugin.Plugin
 import top.colter.dynamic.core.plugin.PluginContext
 import top.colter.dynamic.core.plugin.PluginDescriptor
@@ -55,10 +46,6 @@ import top.colter.dynamic.core.plugin.SubscriptionQueryService
 import top.colter.dynamic.core.task.TaskScheduler
 import top.colter.dynamic.task.DefaultTaskScheduler
 import top.colter.dynamic.core.tools.loggerFor
-import top.colter.dynamic.core.data.DeliveryStatus
-import top.colter.dynamic.core.data.Message
-import top.colter.dynamic.core.data.MessageDelivery
-import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import java.io.File
 import java.net.URLClassLoader
@@ -84,7 +71,6 @@ public class PluginManager(
     private val sourceStateStore: SourceStateStore = RepositorySourceStateStore,
     private val subscriptionQueryService: SubscriptionQueryService = RepositorySubscriptionQueryService,
     private val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
-    private val sinkMaxConcurrency: Int = 4,
     private val shutdownDrainTimeoutMs: Long = 5000,
     private val pluginHookTimeoutMs: Long = DEFAULT_PLUGIN_HOOK_TIMEOUT_MS,
 ) {
@@ -92,7 +78,7 @@ public class PluginManager(
     private val objectMapper: ObjectMapper = ObjectMapper(YAMLFactory()).registerKotlinModule()
     private val scanner: PluginScanner = PluginScanner(pluginDir, objectMapper)
     private val loader: PluginLoader = PluginLoader()
-    private val sinkSemaphore: Semaphore = Semaphore(sinkMaxConcurrency)
+    private val hookRunner: PluginHookRunner = PluginHookRunner(pluginHookTimeoutMs)
 
     private val plugins = ConcurrentHashMap<String, PluginRuntime>()
     private val inFlightDispatchJobs = ConcurrentHashMap<String, MutableSet<Job>>()
@@ -387,83 +373,6 @@ public class PluginManager(
                     oldState = oldState,
                 )
                 throw e
-            }
-        }
-    }
-
-    public fun dispatchMessageToSinks(event: MessageEvent) {
-        if (isShuttingDown) {
-            logger.debug { "应用关闭中，跳过消息分发：messageId=${event.message.id}" }
-            return
-        }
-
-        val eventId = event.message.id
-        activeMessageSinkPlugins().forEach { runtime ->
-            val sink = runtime.instance as? MessageSinkPlugin ?: return@forEach
-            launchForPlugin(runtime.descriptor.id) {
-                if (isShuttingDown) return@launchForPlugin
-                sinkSemaphore.withPermit {
-                    event.message.targets
-                        .filter { sink.supportsTarget(it) }
-                        .forEachIndexed { index, target ->
-                            val request = MessageDeliveryRequest(
-                                delivery = legacyDelivery(event.message, target, index),
-                                message = event.message.copy(targets = listOf(target)),
-                            )
-                            runCatching {
-                                if (sink is AccountRoutedMessageSinkPlugin) {
-                                    val route = sink.listMessageSinkRoutes(target)
-                                        .firstOrNull { it.enabled && it.state == MessageSinkRouteState.READY }
-                                        ?: error("消息出口无可用发送路线：target=${target.stableValue()}")
-                                    sink.sendMessage(request, route.routeId)
-                                } else {
-                                    sink.sendMessage(request)
-                                }
-                            }
-                                .onFailure {
-                                    logger.error(it) {
-                                        "消息分发失败：pluginId=${runtime.descriptor.id}，messageId=$eventId"
-                                    }
-                                }
-                            }
-                }
-            }
-        }
-    }
-
-    public fun dispatchCommandResultToSinks(event: CommandResultEvent) {
-        if (isShuttingDown) {
-            logger.debug { "应用关闭中，跳过命令结果分发：traceId=${event.inReplyTo}" }
-            return
-        }
-
-        activeMessageSinkPlugins().forEach { runtime ->
-            val sink = runtime.instance as? MessageSinkPlugin ?: return@forEach
-            launchForPlugin(runtime.descriptor.id) {
-                if (isShuttingDown) return@launchForPlugin
-                sinkSemaphore.withPermit {
-                    if (!sink.supportsTarget(event.target.address)) return@withPermit
-                    runCatching {
-                        val request = CommandResultSendRequest(
-                            target = event.target,
-                            chain = event.chain,
-                            inReplyTo = event.inReplyTo,
-                        )
-                        if (sink is AccountRoutedMessageSinkPlugin) {
-                            val route = sink.listMessageSinkRoutes(event.target.address)
-                                .firstOrNull { it.enabled && it.state == MessageSinkRouteState.READY }
-                                ?: error("命令结果无可用发送路线：target=${event.target.address.stableValue()}")
-                            sink.sendCommandResult(request, route.routeId)
-                        } else {
-                            sink.sendCommandResult(request)
-                        }
-                    }
-                        .onFailure {
-                            logger.error(it) {
-                                "命令结果分发失败：pluginId=${runtime.descriptor.id}，traceId=${event.inReplyTo}"
-                            }
-                        }
-                }
             }
         }
     }
@@ -809,13 +718,7 @@ public class PluginManager(
     }
 
     private fun runPluginHook(pluginId: String, operation: String, block: suspend () -> Unit) {
-        runBlocking {
-            withTimeoutOrNull(pluginHookTimeoutMs) {
-                block()
-            } ?: throw IllegalStateException(
-                "插件 $operation 钩子执行超时：pluginId=$pluginId，timeoutMs=$pluginHookTimeoutMs",
-            )
-        }
+        hookRunner.run(pluginId, operation, block)
     }
 
     private fun ensureSubscriptionListenerRegistered() {
@@ -932,20 +835,6 @@ public class PluginManager(
                 inFlightDispatchJobs.remove(pluginId, jobSet)
             }
         }
-    }
-
-    private fun legacyDelivery(message: Message, target: TargetAddress, index: Int): MessageDelivery {
-        return MessageDelivery(
-            id = -index - 1,
-            messageId = message.id,
-            sourceUpdateKey = message.sourceUpdateKey,
-            renderVariant = message.renderVariant,
-            target = target,
-            status = DeliveryStatus.PENDING,
-            attempts = 0,
-            createdAtEpochSeconds = message.time,
-            updatedAtEpochSeconds = message.time,
-        )
     }
 
     private fun drainDispatchJobs(pluginId: String) {
