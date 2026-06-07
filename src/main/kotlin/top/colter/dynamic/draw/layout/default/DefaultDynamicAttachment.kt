@@ -14,6 +14,7 @@ import top.colter.skiko.data.Shadow
 import top.colter.skiko.layout.*
 
 private val attachmentSpacing: Dp = 20.dp
+private val mediaCardSpacing: Dp = 28.dp
 
 internal fun Layout.drawDynamicBlocks(
     blocks: List<DynamicBlock>,
@@ -22,12 +23,18 @@ internal fun Layout.drawDynamicBlocks(
     bottomSpacing: Dp = 0.dp,
 ) {
     blocks.forEachIndexed { index, block ->
+        val blockBottomSpacing = blockBottomSpacing(
+            block = block,
+            nextBlock = blocks.getOrNull(index + 1),
+            isLast = index == blocks.lastIndex,
+            bottomSpacing = bottomSpacing,
+        )
         val modifier = Modifier()
             .fillMaxWidth()
-            .margin(bottom = if (index < blocks.lastIndex) attachmentSpacing else bottomSpacing)
+            .margin(bottom = blockBottomSpacing)
 
         when (block) {
-            is TextBlock -> drawDynamicContent(block.content, config, bottomSpacing = if (index < blocks.lastIndex) attachmentSpacing else bottomSpacing)
+            is TextBlock -> drawDynamicContent(block.content, config, bottomSpacing = blockBottomSpacing)
             is ImageGridBlock -> drawDynamicImages(block.images, config, modifier)
             is MediaCardBlock -> drawDynamicMediaCard(block, config, modifier)
             is PollBlock -> drawDynamicPoll(block, config, modifier)
@@ -42,6 +49,20 @@ internal fun Layout.drawDynamicBlocks(
                 }
             }
         }
+    }
+}
+
+private fun blockBottomSpacing(
+    block: DynamicBlock,
+    nextBlock: DynamicBlock?,
+    isLast: Boolean,
+    bottomSpacing: Dp,
+): Dp {
+    if (isLast) return bottomSpacing
+    return if (block is MediaCardBlock && nextBlock is MediaCardBlock) {
+        mediaCardSpacing
+    } else {
+        attachmentSpacing
     }
 }
 
