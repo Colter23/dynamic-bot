@@ -45,29 +45,29 @@ internal fun defaultAuthorContentStyle(hasQrCode: Boolean): AuthorContentStyle {
         AuthorContentStyle(
             height = 150.dp,
             avatarSize = 112.dp,
-            avatarLeft = 20.dp,
+            avatarLeft = 40.dp,
             avatarTop = 18.dp,
-            avatarTextSpacing = 16.dp,
-            textTop = 24.dp,
+            avatarTextSpacing = 20.dp,
+            textTop = 20.dp,
             textRightSpacing = 12.dp,
-            nameFontSize = 45.dp,
-            timeFontSize = 32.dp,
+            nameFontSize = 48.dp,
+            timeFontSize = 34.dp,
             timeTopSpacing = 0.dp,
-            nameStrokeWidth = 3.dp,
+            nameStrokeWidth = 5.dp,
         )
     } else {
         AuthorContentStyle(
             height = 120.dp,
             avatarSize = 92.dp,
-            avatarLeft = 20.dp,
+            avatarLeft = 40.dp,
             avatarTop = 14.dp,
-            avatarTextSpacing = 16.dp,
-            textTop = 13.dp,
+            avatarTextSpacing = 20.dp,
+            textTop = 10.dp,
             textRightSpacing = 12.dp,
-            nameFontSize = 45.dp,
+            nameFontSize = 43.dp,
             timeFontSize = 32.dp,
-            timeTopSpacing = (-6).dp,
-            nameStrokeWidth = 3.dp,
+            timeTopSpacing = (-10).dp,
+            nameStrokeWidth = 5.dp,
         )
     }
 }
