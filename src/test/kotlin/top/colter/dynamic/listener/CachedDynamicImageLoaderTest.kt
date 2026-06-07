@@ -101,6 +101,18 @@ class CachedDynamicImageLoaderTest {
         }
     }
 
+    @Test
+    fun httpDownloaderShouldReadAbsoluteLocalFiles(): Unit = runBlocking {
+        val root = createTempDirectory("dynamic-loader-local-absolute")
+        val file = root.resolve("header.png")
+        val bytes = pngBytes(Color.MAGENTA)
+        file.writeBytes(bytes)
+
+        val loaded = HttpImageDownloader().download(file.toAbsolutePath().toString(), timeoutMs = 1_000, maxBytes = 1024)
+
+        assertEquals(bytes.size, loaded.size)
+    }
+
     private fun loader(
         sourceRoot: String,
         maxConcurrentDownloads: Int = 8,

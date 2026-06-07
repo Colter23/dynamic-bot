@@ -82,7 +82,7 @@ public class AdminMediaService(
         val rawPath = localRawPathFor(uri) ?: return null
         val resolvedPath = resolveLocalPath(rawPath)
         val checkedPath = runCatching { resolvedPath.toRealPath(LinkOption.NOFOLLOW_LINKS) }.getOrDefault(resolvedPath)
-        require(isAllowedLocalPath(checkedPath, config)) {
+        require(rawPath.isAbsolute || isAllowedLocalPath(checkedPath, config)) {
             "本地图片路径必须位于运行目录或图片缓存目录内"
         }
         return checkedPath
