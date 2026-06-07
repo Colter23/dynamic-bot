@@ -474,7 +474,11 @@ private object AdminAuth {
         if (expectedToken.isBlank()) return false
         val header = call.request.headers[HttpHeaders.Authorization] ?: return false
         val token = header.removePrefix("Bearer ").takeIf { it != header } ?: return false
-        return MessageDigest.isEqual(token.toByteArray(), expectedToken.toByteArray())
+        return MessageDigest.isEqual(sha256(token), sha256(expectedToken))
+    }
+
+    private fun sha256(value: String): ByteArray {
+        return MessageDigest.getInstance("SHA-256").digest(value.toByteArray())
     }
 }
 
@@ -499,7 +503,7 @@ private suspend inline fun <reified T : Any> ApplicationCall.respondApi(crossinl
         respond(HttpStatusCode.Conflict, ErrorResponse(e.message ?: "当前状态不允许执行该操作"))
     } catch (e: Exception) {
         logger.error(e) { "Web 后台 API 处理失败：${request.path()}" }
-        respond(HttpStatusCode.InternalServerError, ErrorResponse(e.message ?: "后台接口处理失败"))
+        respond(HttpStatusCode.InternalServerError, ErrorResponse("后台接口处理失败"))
     }
 }
 

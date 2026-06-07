@@ -3,6 +3,7 @@ package top.colter.dynamic.admin
 import io.ktor.http.ContentType
 import java.io.ByteArrayOutputStream
 import java.io.InputStream
+import java.net.InetAddress
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
@@ -29,7 +30,7 @@ public data class AdminMediaResult(
 public class AdminMediaService(
     private val configProvider: () -> MainDynamicConfig = { MainDynamicConfig() },
     private val client: HttpClient = HttpClient.newBuilder()
-        .followRedirects(HttpClient.Redirect.NORMAL)
+        .followRedirects(HttpClient.Redirect.NEVER)
         .connectTimeout(Duration.ofSeconds(10))
         .build(),
 ) {
@@ -82,7 +83,7 @@ public class AdminMediaService(
         val rawPath = localRawPathFor(uri) ?: return null
         val resolvedPath = resolveLocalPath(rawPath)
         val checkedPath = runCatching { resolvedPath.toRealPath(LinkOption.NOFOLLOW_LINKS) }.getOrDefault(resolvedPath)
-        require(rawPath.isAbsolute || isAllowedLocalPath(checkedPath, config)) {
+        require(isAllowedLocalPath(checkedPath, config)) {
             "本地图片路径必须位于运行目录或图片缓存目录内"
         }
         return checkedPath
@@ -129,38 +130,100 @@ public class AdminMediaService(
     }
 
     private suspend fun downloadHttpImage(uri: String, timeoutMs: Long, maxBytes: Long): DownloadedImage = withContext(Dispatchers.IO) {
-        val parsed = runCatching { URI(uri) }
+        var currentUri = runCatching { URI(uri) }
             .getOrElse { throw IllegalArgumentException("图片地址无效：$uri") }
-        val scheme = parsed.scheme?.lowercase()
-        require(scheme == "http" || scheme == "https") { "本地图片不存在，且不是可下载的 HTTP/HTTPS 地址" }
 
-        val requestBuilder = HttpRequest.newBuilder(parsed)
-            .timeout(Duration.ofMillis(timeoutMs))
-            .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-            .header("User-Agent", USER_AGENT)
-            .GET()
-        refererFor(parsed)?.let { requestBuilder.header("Referer", it) }
+        repeat(MAX_REDIRECTS + 1) {
+            val scheme = currentUri.scheme?.lowercase()
+            require(scheme == "http" || scheme == "https") { "本地图片不存在，且不是可下载的 HTTP/HTTPS 地址" }
+            requirePublicHost(currentUri)
 
-        val response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofInputStream())
-        if (response.statusCode() !in 200..299) {
-            throw IllegalStateException("图片下载失败：HTTP ${response.statusCode()}")
+            val requestBuilder = HttpRequest.newBuilder(currentUri)
+                .timeout(Duration.ofMillis(timeoutMs))
+                .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
+                .header("User-Agent", USER_AGENT)
+                .GET()
+            refererFor(currentUri)?.let { requestBuilder.header("Referer", it) }
+
+            val response = client.send(requestBuilder.build(), HttpResponse.BodyHandlers.ofInputStream())
+            val status = response.statusCode()
+
+            if (status in 300..399) {
+                response.body().use { it.readAllBytes() }
+                val location = response.headers().firstValue("Location").orElse(null)
+                    ?: throw IllegalStateException("图片下载失败：重定向缺少 Location")
+                currentUri = runCatching { currentUri.resolve(location) }
+                    .getOrElse { throw IllegalArgumentException("图片地址无效：$location") }
+                return@repeat
+            }
+
+            if (status !in 200..299) {
+                response.body().use { it.readAllBytes() }
+                throw IllegalStateException("图片下载失败：HTTP $status")
+            }
+
+            response.headers()
+                .firstValue("Content-Length")
+                .orElse(null)
+                ?.toLongOrNull()
+                ?.takeIf { it > maxBytes }
+                ?.let { throw IllegalStateException("图片下载超过大小限制：size=$it，maxBytes=$maxBytes") }
+
+            val bytes = response.body().use { input -> readBytesLimited(input, maxBytes) }
+            val headerContentType = contentTypeFromHeader(response.headers().firstValue("Content-Type").orElse(null))
+            val detectedContentType = contentTypeFor(null, uri, bytes)
+            val contentType = if (headerContentType?.isImage() == true) headerContentType else detectedContentType
+            requireImageContentType(contentType)
+            return@withContext DownloadedImage(
+                bytes = bytes,
+                contentType = contentType,
+            )
         }
-        response.headers()
-            .firstValue("Content-Length")
-            .orElse(null)
-            ?.toLongOrNull()
-            ?.takeIf { it > maxBytes }
-            ?.let { throw IllegalStateException("图片下载超过大小限制：size=$it，maxBytes=$maxBytes") }
+        throw IllegalStateException("图片下载失败：重定向次数过多")
+    }
 
-        val bytes = response.body().use { input -> readBytesLimited(input, maxBytes) }
-        val headerContentType = contentTypeFromHeader(response.headers().firstValue("Content-Type").orElse(null))
-        val detectedContentType = contentTypeFor(null, uri, bytes)
-        val contentType = if (headerContentType?.isImage() == true) headerContentType else detectedContentType
-        requireImageContentType(contentType)
-        DownloadedImage(
-            bytes = bytes,
-            contentType = contentType,
-        )
+    private fun requirePublicHost(uri: URI) {
+        val host = uri.host?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("图片地址缺少主机名：$uri")
+        val addresses = runCatching { InetAddress.getAllByName(host) }
+            .getOrElse { throw IllegalArgumentException("无法解析图片地址主机：$host") }
+        require(addresses.isNotEmpty()) { "无法解析图片地址主机：$host" }
+        addresses.forEach { address ->
+            require(!isBlockedAddress(address)) { "不允许访问内网或本地地址：$host" }
+        }
+    }
+
+    private fun isBlockedAddress(address: InetAddress): Boolean {
+        if (address.isLoopbackAddress ||
+            address.isAnyLocalAddress ||
+            address.isLinkLocalAddress ||
+            address.isSiteLocalAddress ||
+            address.isMulticastAddress
+        ) {
+            return true
+        }
+        val bytes = address.address
+        if (bytes.size == 4) {
+            val b0 = bytes[0].toInt() and 0xff
+            val b1 = bytes[1].toInt() and 0xff
+            // 100.64.0.0/10 CGNAT
+            if (b0 == 100 && b1 in 64..127) return true
+        }
+        if (bytes.size == 16) {
+            // fc00::/7 IPv6 唯一本地地址
+            if ((bytes[0].toInt() and 0xfe) == 0xfc) return true
+            // ::ffff:x.x.x.x IPv4-mapped，取内嵌 v4 复判
+            val isV4Mapped = (0..9).all { bytes[it].toInt() == 0 } &&
+                (bytes[10].toInt() and 0xff) == 0xff &&
+                (bytes[11].toInt() and 0xff) == 0xff
+            if (isV4Mapped) {
+                val mapped = runCatching {
+                    InetAddress.getByAddress(bytes.copyOfRange(12, 16))
+                }.getOrNull()
+                if (mapped != null && isBlockedAddress(mapped)) return true
+            }
+        }
+        return false
     }
 
     private fun readBytesLimited(input: InputStream, maxBytes: Long): ByteArray {
@@ -266,6 +329,7 @@ public class AdminMediaService(
         private val runtimeRoot: Path = Paths.get("").toAbsolutePath().normalize()
         private val windowsAbsolutePath = Regex("""^[A-Za-z]:[\\/].+""")
         private val whitespaceBytes = setOf(' '.code.toByte(), '\n'.code.toByte(), '\r'.code.toByte(), '\t'.code.toByte())
+        private const val MAX_REDIRECTS = 3
         private val OCTET_STREAM = ContentType("application", "octet-stream")
         private const val USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"

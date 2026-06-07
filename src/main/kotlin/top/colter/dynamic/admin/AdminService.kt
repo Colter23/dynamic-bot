@@ -1162,7 +1162,7 @@ public class AdminService(
             pluginState = info.state.name,
             sourcePath = configService.resolvePath(plugin.configId).toString(),
             schema = plugin.configFormSpec,
-            values = AdminConfigJson.valuesFor(current, plugin.configFormSpec, maskSecrets = false),
+            values = AdminConfigJson.valuesFor(current, plugin.configFormSpec, maskSecrets = true),
             secretStates = AdminConfigJson.secretStates(current, plugin.configFormSpec),
         )
     }
@@ -1201,7 +1201,7 @@ public class AdminService(
             description = "主项目配置",
             sourcePath = configService.resolvePath(MainDynamicConfig.CONFIG_ID).toString(),
             schema = MainConfigForms.formSpec,
-            values = AdminConfigJson.valuesFor(current, MainConfigForms.formSpec, maskSecrets = false),
+            values = AdminConfigJson.valuesFor(current, MainConfigForms.formSpec, maskSecrets = true),
             secretStates = AdminConfigJson.secretStates(current, MainConfigForms.formSpec),
         )
     }
@@ -1227,7 +1227,7 @@ public class AdminService(
             restartTargets = result.restartTargets,
             message = result.message,
             pluginId = null,
-            values = AdminConfigJson.valuesFor(saved, MainConfigForms.formSpec, maskSecrets = false),
+            values = AdminConfigJson.valuesFor(saved, MainConfigForms.formSpec, maskSecrets = true),
             secretStates = AdminConfigJson.secretStates(saved, MainConfigForms.formSpec),
         )
     }
@@ -1278,7 +1278,7 @@ public class AdminService(
             restartTargets = result.restartTargets,
             message = result.message,
             pluginId = info.descriptor.id,
-            values = AdminConfigJson.valuesFor(saved, plugin.configFormSpec, maskSecrets = false),
+            values = AdminConfigJson.valuesFor(saved, plugin.configFormSpec, maskSecrets = true),
             secretStates = AdminConfigJson.secretStates(saved, plugin.configFormSpec),
         )
     }
