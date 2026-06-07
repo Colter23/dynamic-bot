@@ -443,7 +443,7 @@ function catalogStatusBanner(catalog) {
 
 function catalogFilterBar(rows, filteredRows) {
   const active = pluginFilters.catalogStatus || pluginFilters.catalogCapability || pluginFilters.catalogKeyword;
-  const statusValues = ["NOT_INSTALLED", "UPDATE_AVAILABLE", "INSTALLED", "INCOMPATIBLE"]
+  const statusValues = ["NOT_INSTALLED", "UPDATE_AVAILABLE", "INSTALLED", "INCOMPATIBLE", "RESOLVE_FAILED"]
     .filter(value => rows.some(item => item.catalogStatus === value));
   return `<div class="entity-filter-bar plugin-filter-bar">
     <span class="entity-filter-title">筛选</span>
@@ -536,6 +536,9 @@ function catalogOperationButton(item) {
   }
   if (item.catalogStatus === "INCOMPATIBLE") {
     return `<button class="secondary" disabled>不兼容</button>`;
+  }
+  if (item.catalogStatus === "RESOLVE_FAILED") {
+    return `<button class="secondary" disabled>不可用</button>`;
   }
   return `<button class="secondary" disabled>已安装</button>`;
 }
@@ -730,6 +733,7 @@ function catalogStatusText(value) {
     INSTALLED: "已安装",
     UPDATE_AVAILABLE: "可更新",
     INCOMPATIBLE: "不兼容",
+    RESOLVE_FAILED: "解析失败",
   };
   return map[value] || value || "-";
 }
@@ -745,7 +749,7 @@ function catalogStatusPill(value) {
 function catalogToneClass(value) {
   if (value === "UPDATE_AVAILABLE") return "needs-update";
   if (value === "NOT_INSTALLED") return "installable";
-  if (value === "INCOMPATIBLE") return "blocked";
+  if (value === "INCOMPATIBLE" || value === "RESOLVE_FAILED") return "blocked";
   return "installed";
 }
 

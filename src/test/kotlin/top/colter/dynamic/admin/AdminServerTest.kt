@@ -161,16 +161,16 @@ class AdminServerTest {
     fun adminApiShouldServePluginCatalog() = testApplication {
         val catalog = """
             {
-              "schemaVersion": 1,
+              "schemaVersion": 2,
               "plugins": [
                 {
                   "id": "demo-plugin",
                   "name": "Demo Plugin",
-                  "version": "1.0.0",
-                  "apiVersion": "4.0.0",
-                  "downloadUrl": "https://example.com/demo-plugin.jar",
-                  "sha256": "${"a".repeat(64)}",
-                  "sizeBytes": 128,
+                  "release": {
+                    "provider": "GITHUB_RELEASE",
+                    "repository": "Colter23/demo-plugin",
+                    "assetPattern": "demo-plugin-*-all.jar"
+                  },
                   "capabilities": ["MESSAGE_SINK"]
                 }
               ]
@@ -188,7 +188,7 @@ class AdminServerTest {
                     message = "ok",
                 )
             },
-            downloader = StaticCatalogDownloader(catalog),
+            downloader = StaticCatalogDownloader(catalog, sha256 = "a".repeat(64)),
         )
         application {
             adminModule(staticRouteContext(pluginCatalogService = catalogService))
@@ -881,9 +881,24 @@ class AdminServerTest {
 
     private class StaticCatalogDownloader(
         private val catalogBytes: ByteArray,
+        private val sha256: String = "a".repeat(64),
     ) : PluginCatalogDownloader {
         override fun downloadToByteArray(url: String, timeoutSeconds: Double, maxBytes: Long): ByteArray {
-            return catalogBytes
+            if (!url.contains("api.github.com/repos/")) return catalogBytes
+            return """
+                {
+                  "tag_name": "v1.0.0",
+                  "html_url": "https://github.com/Colter23/demo-plugin/releases/tag/v1.0.0",
+                  "assets": [
+                    {
+                      "name": "demo-plugin-1.0.0-all.jar",
+                      "browser_download_url": "https://github.com/Colter23/demo-plugin/releases/download/v1.0.0/demo-plugin-1.0.0-all.jar",
+                      "size": 128,
+                      "digest": "sha256:$sha256"
+                    }
+                  ]
+                }
+            """.trimIndent().toByteArray(Charsets.UTF_8)
         }
 
         override fun downloadToFile(
