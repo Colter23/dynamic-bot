@@ -11,8 +11,8 @@ import top.colter.skiko.layout.Text
 
 private val authorSmallAvatarSize = 46.dp
 private val authorSmallAvatarTrailing = 16.dp
-private val authorSmallNameTop = 0.dp
-private val authorSmallTimeTop = 7.dp
+private val authorSmallNameTop = (-5).dp
+private val authorSmallTimeTop = 6.dp
 private val authorSmallNameShadows = listOf(
     TextShadow(
         offsetX = 0.dp,
@@ -58,17 +58,19 @@ internal fun Layout.AuthorSmall(
         Text(
             text = name,
             color = accentColor,
-            fontSize = 30.dp,
+            fontSize = 33.dp,
             textShadows = authorSmallNameShadows,
             alignment = LayoutAlignment.LEFT_TOP,
-            modifier = Modifier().margin(top = authorSmallNameTop, right = 15.dp)
+            modifier = Modifier()
+                .margin(right = 10.dp)
+                .offset(y = authorSmallNameTop)
         )
         Text(
             text = time,
             color = mutedColor,
-            fontSize = 22.dp,
+            fontSize = 26.dp,
             alignment = LayoutAlignment.LEFT_TOP,
-            modifier = Modifier().margin(top = authorSmallTimeTop),
+            modifier = Modifier().offset(y = authorSmallTimeTop),
         )
     }
 }

@@ -11,9 +11,9 @@ import top.colter.skiko.layout.*
 
 private val authorNameShadows = listOf(
     TextShadow(
-        offsetX = 2.dp,
-        offsetY = 2.dp,
-        blur = 2.dp,
+        offsetX = 3.dp,
+        offsetY = 3.dp,
+        blur = 3.dp,
         color = Color.BLACK.withAlpha(0.42f),
     ),
 )
@@ -45,23 +45,23 @@ internal fun defaultAuthorContentStyle(hasQrCode: Boolean): AuthorContentStyle {
         AuthorContentStyle(
             height = 150.dp,
             avatarSize = 112.dp,
-            avatarLeft = 40.dp,
+            avatarLeft = 30.dp,
             avatarTop = 18.dp,
-            avatarTextSpacing = 20.dp,
-            textTop = 20.dp,
+            avatarTextSpacing = 18.dp,
+            textTop = 18.dp,
             textRightSpacing = 12.dp,
             nameFontSize = 48.dp,
             timeFontSize = 34.dp,
-            timeTopSpacing = 0.dp,
+            timeTopSpacing = (-6).dp,
             nameStrokeWidth = 5.dp,
         )
     } else {
         AuthorContentStyle(
             height = 120.dp,
             avatarSize = 92.dp,
-            avatarLeft = 40.dp,
+            avatarLeft = 30.dp,
             avatarTop = 14.dp,
-            avatarTextSpacing = 20.dp,
+            avatarTextSpacing = 18.dp,
             textTop = 10.dp,
             textRightSpacing = 12.dp,
             nameFontSize = 43.dp,
@@ -77,29 +77,29 @@ internal fun minimalAuthorContentStyle(hasQrCode: Boolean): AuthorContentStyle {
         AuthorContentStyle(
             height = 122.dp,
             avatarSize = 92.dp,
-            avatarLeft = 12.dp,
+            avatarLeft = 15.dp,
             avatarTop = 10.dp,
             avatarTextSpacing = 16.dp,
-            textTop = 18.dp,
+            textTop = 10.dp,
             textRightSpacing = 10.dp,
-            nameFontSize = 43.dp,
-            timeFontSize = 30.dp,
-            timeTopSpacing = 0.dp,
-            nameStrokeWidth = 3.dp,
+            nameFontSize = 46.dp,
+            timeFontSize = 32.dp,
+            timeTopSpacing = (-10).dp,
+            nameStrokeWidth = 5.dp,
         )
     } else {
         AuthorContentStyle(
             height = 92.dp,
             avatarSize = 84.dp,
-            avatarLeft = 12.dp,
+            avatarLeft = 15.dp,
             avatarTop = 2.dp,
             avatarTextSpacing = 16.dp,
-            textTop = 8.dp,
+            textTop = 0.dp,
             textRightSpacing = 10.dp,
             nameFontSize = 43.dp,
             timeFontSize = 30.dp,
-            timeTopSpacing = (-6).dp,
-            nameStrokeWidth = 3.dp,
+            timeTopSpacing = (-10).dp,
+            nameStrokeWidth = 5.dp,
         )
     }
 }
@@ -178,6 +178,14 @@ internal fun Layout.AuthorContent(
 ) = Row(
     modifier = modifier,
 ) {
+    if (style.avatarLeft > 0.dp) {
+        Box(
+            modifier = Modifier()
+                .width(style.avatarLeft)
+                .fillMaxHeight()
+        )
+    }
+
     Avatar(
         face = face,
         pendant = pendant,
@@ -187,10 +195,16 @@ internal fun Layout.AuthorContent(
             .height(style.avatarSize)
             .margin(
                 top = style.avatarTop,
-                right = style.avatarTextSpacing,
-                left = style.avatarLeft,
             )
     )
+
+    if (style.avatarTextSpacing > 0.dp) {
+        Box(
+            modifier = Modifier()
+                .width(style.avatarTextSpacing)
+                .fillMaxHeight()
+        )
+    }
 
     Column(
         modifier = Modifier()
@@ -199,11 +213,11 @@ internal fun Layout.AuthorContent(
     ) {
         Text(
             text = name,
-            color = Color.WHITE,
+            color = accentColor,
             fontSize = style.nameFontSize,
             stroke = TextStroke(
                 width = style.nameStrokeWidth,
-                color = accentColor,
+                color = Color.WHITE,
             ),
             textShadows = authorNameShadows,
             alignment = LayoutAlignment.LEFT,
@@ -211,13 +225,18 @@ internal fun Layout.AuthorContent(
         )
         Text(
             text = time,
-            color = Color.WHITE.withAlpha(0.85f),
+            color = Color.WHITE,
             fontSize = style.timeFontSize,
             textShadows = authorTimeShadows,
+            stroke = TextStroke(
+                width = 3.dp,
+                color = accentColor.withAlpha(0.8f),
+            ),
             alignment = LayoutAlignment.LEFT,
             modifier = Modifier()
                 .fillMaxWidth()
-                .margin(top = style.timeTopSpacing)
+                .margin(left = 3.dp)
+                .offset(y = style.timeTopSpacing)
         )
     }
 

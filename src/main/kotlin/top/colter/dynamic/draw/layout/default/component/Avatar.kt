@@ -7,7 +7,6 @@ import top.colter.skiko.aspectRatio
 import top.colter.skiko.border
 import top.colter.skiko.circle
 import top.colter.skiko.dp
-import top.colter.skiko.fillMaxHeight
 import top.colter.skiko.fillMaxSize
 import top.colter.skiko.fillRatioWidth
 import top.colter.skiko.overflowRatioHeight
@@ -34,55 +33,52 @@ internal fun Layout.Avatar(
     badge: Image? = null,
     faceBorderWidth: Dp = 4.dp,
     badgeBorderWidth: Dp = 3.dp,
-    alignment: LayoutAlignment = LayoutAlignment.CENTER,
+    alignment: LayoutAlignment = LayoutAlignment.LEFT_TOP,
     modifier: Modifier
 ) = Box(
     alignment = alignment,
-    modifier = modifier.aspectRatio(1f)
+    modifier = if (modifier.width.isNotNull() && modifier.height.isNotNull()) {
+        modifier
+    } else {
+        modifier.aspectRatio(1f)
+    }
 ) {
     val hasPendant = pendant != null
     val faceRatio = if (hasPendant) 0.78f else 1f
     val badgeRatio = if (hasPendant) 0.25f else 0.33f
 
-    Box(
+    Image(
+        image = face,
+        ratio = 1f / 1f,
         alignment = LayoutAlignment.CENTER,
         modifier = Modifier()
-            .fillMaxHeight()
-            .aspectRatio(1f)
-    ) {
+            .fillRatioWidth(faceRatio)
+            .circle()
+            .border(faceBorderWidth)
+            .shadows(Shadow.ELEVATION_2)
+    )
+
+    if (pendant != null) {
         Image(
-            image = face,
+            image = pendant,
             ratio = 1f / 1f,
             alignment = LayoutAlignment.CENTER,
             modifier = Modifier()
-                .fillRatioWidth(faceRatio)
-                .circle()
-                .border(faceBorderWidth)
-                .shadows(Shadow.ELEVATION_2)
+                .fillMaxSize()
+                .overflowRatioWidth(1.375f)
+                .overflowRatioHeight(1.375f)
         )
+    }
 
-        if (pendant != null) {
-            Image(
-                image = pendant,
-                ratio = 1f / 1f,
-                alignment = LayoutAlignment.CENTER,
-                modifier = Modifier()
-                    .fillMaxSize()
-                    .overflowRatioWidth(1.375f)
-                    .overflowRatioHeight(1.375f)
-            )
-        }
-
-        if (badge != null) {
-            Image(
-                image = badge,
-                ratio = 1f / 1f,
-                alignment = LayoutAlignment.RIGHT_BOTTOM,
-                modifier = Modifier()
-                    .fillRatioWidth(badgeRatio)
-                    .circle()
-                    .border(badgeBorderWidth)
-            )
-        }
+    if (badge != null) {
+        Image(
+            image = badge,
+            ratio = 1f / 1f,
+            alignment = LayoutAlignment.RIGHT_BOTTOM,
+            modifier = Modifier()
+                .fillRatioWidth(badgeRatio)
+                .circle()
+                .border(badgeBorderWidth)
+        )
     }
 }
