@@ -20,6 +20,8 @@ import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.DynamicReferenceKind
 import top.colter.dynamic.core.data.ImageGridBlock
 import top.colter.dynamic.core.data.ImageItem
+import top.colter.dynamic.core.data.LivePayload
+import top.colter.dynamic.core.data.LiveStatus
 import top.colter.dynamic.core.data.MediaCardBlock
 import top.colter.dynamic.core.data.MediaCardStyle
 import top.colter.dynamic.core.data.MediaKind
@@ -87,6 +89,20 @@ class DrawTest {
         }
     }
 
+    @Test
+    fun `test live open draw previews`() {
+        val layouts = previewLayouts()
+        liveOpenPreviews().forEach { preview ->
+            layouts.forEach { layout ->
+                renderLiveToOutput(
+                    fileName = previewFileName(layout, preview.fileName),
+                    update = preview.update,
+                    config = drawConfig(layout = layout, ornament = preview.ornament),
+                )
+            }
+        }
+    }
+
     private fun commonDynamicPreviews(): List<DynamicPreview> {
         return listOf(
             DynamicPreview(
@@ -114,6 +130,16 @@ class DrawTest {
             DynamicPreview(
                 fileName = "preview_06_title_long_images.png",
                 update = titleLongTextImagesDynamic(),
+            ),
+        )
+    }
+
+    private fun liveOpenPreviews(): List<DynamicPreview> {
+        return listOf(
+            DynamicPreview(
+                fileName = "live_preview_01_open.png",
+                update = liveOpenUpdate(),
+                ornament = DrawOrnament.QRCODE,
             ),
         )
     }
@@ -190,6 +216,8 @@ class DrawTest {
                 DynamicMetric(key = "online", raw = 12800, display = "1.3万"),
                 DynamicMetric(key = "follow", raw = 560000, display = "56万"),
             ),
+            liveStatus = LiveStatus.OPEN,
+            liveStartedAtEpochSeconds = 1L,
         )
     }
 
@@ -254,6 +282,27 @@ class DrawTest {
                 DynamicMetric(key = "favorite", raw = 8200, display = "8200"),
             ),
         )
+    }
+
+    private fun liveOpenUpdate(): SourceUpdate {
+        return testDynamicUpdate(
+            publisher = previewPublisher(
+                id = "preview-live-open",
+                name = "星河直播间",
+                header = "header1.png",
+                avatar = "avatar1.jpg",
+                withPendant = false,
+            ),
+            externalId = "preview-live-open",
+            payload = LivePayload(
+                roomId = "23058",
+                title = "今晚八点一起看动态绘图效果",
+                area = "绘图 / 开发杂谈",
+                cover = imageMedia("bg1.jpg", MediaKind.COVER),
+                status = LiveStatus.OPEN,
+                startedAtEpochSeconds = 1L,
+            ),
+        ).copy(link = "https://live.bilibili.com/23058")
     }
 
     private fun titleShortTextDynamic(): SourceUpdate {
@@ -660,7 +709,10 @@ class DrawTest {
         config: DrawConfig = drawConfig(),
     ) {
         cacheMedia(update)
-        val img = renderDynamicImage(update = update, config = config)
+        val img = when (update.payload) {
+            is DynamicPayload -> renderDynamicImage(update = update, config = config)
+            is LivePayload -> renderLiveImage(update = update, config = config)
+        }
         testOutput.resolve(fileName).writeBytes(img.encodeToData()!!.bytes)
     }
 
@@ -677,6 +729,14 @@ class DrawTest {
             ),
             config = config,
         )
+    }
+
+    private fun renderLiveToOutput(
+        fileName: String,
+        update: SourceUpdate,
+        config: DrawConfig = drawConfig(),
+    ) {
+        renderToOutput(fileName = fileName, update = update, config = config)
     }
 
     private fun drawConfig(

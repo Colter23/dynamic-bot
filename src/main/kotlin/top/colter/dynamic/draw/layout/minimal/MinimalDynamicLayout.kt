@@ -4,6 +4,7 @@ import org.jetbrains.skia.FontStyle
 import org.jetbrains.skia.Image
 import top.colter.dynamic.DrawOrnament
 import top.colter.dynamic.core.data.DynamicPayload
+import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.draw.DrawConfig
@@ -11,6 +12,7 @@ import top.colter.dynamic.draw.layout.default.DynamicRenderMode
 import top.colter.dynamic.draw.layout.default.component.AuthorContent
 import top.colter.dynamic.draw.layout.default.component.minimalAuthorContentStyle
 import top.colter.dynamic.draw.layout.default.drawDynamicBlocks
+import top.colter.dynamic.draw.layout.default.drawLiveMediaCard
 import top.colter.dynamic.draw.layout.default.dynamicTitleFontSize
 import top.colter.dynamic.draw.layout.default.orderDynamicBlocksForLayout
 import top.colter.dynamic.draw.resource.qrCode
@@ -59,6 +61,24 @@ internal fun renderMinimalDynamic(update: SourceUpdate, config: DrawConfig): Ima
             )
     ) {
         MinimalDynamicView(update, config)
+    }
+}
+
+internal fun renderMinimalLive(update: SourceUpdate, config: DrawConfig): Image {
+    return View(
+        fontRegistry = config.fontRegistry,
+        modifier = Modifier()
+            .width(config.settings.width.dp)
+            .padding(scenePadding)
+            .background(
+                gradient = Gradient(
+                    LayoutAlignment.LEFT_TOP,
+                    LayoutAlignment.RIGHT_BOTTOM,
+                    config.theme.backgroundColors,
+                )
+            )
+    ) {
+        MinimalLiveView(update, config)
     }
 }
 
@@ -132,5 +152,68 @@ private fun Layout.MinimalDynamicView(
         if (hasBlocks) {
             drawDynamicBlocks(blocks, config, DynamicRenderMode.ROOT)
         }
+    }
+}
+
+private fun Layout.MinimalLiveView(
+    update: SourceUpdate,
+    config: DrawConfig,
+) {
+    val live = update.payload as? LivePayload ?: return
+    val cover = live.cover?.let(config::image)
+    val liveTime = live.startedAtEpochSeconds ?: update.occurredAtEpochSeconds
+    val avatarBadgeImage = update.publisher.avatarBadgeKey?.let {
+        config.platformAssetImage(it, width = 100, height = 100)
+    }
+    val link = update.link.orEmpty()
+    val qrCodeImage = if (config.settings.ornament == DrawOrnament.QRCODE && link.isNotBlank()) {
+        qrCode(link, config.theme.primaryColor.withAlpha(1f))
+    } else {
+        null
+    }
+    val ornamentImage = when (config.settings.ornament) {
+        DrawOrnament.LOGO -> config.platformAssetImage(PlatformDrawAssetKeys.PRIMARY_LOGO)
+        DrawOrnament.QRCODE -> config.platformAssetImage(PlatformDrawAssetKeys.TEXT_LOGO)
+            ?: config.platformAssetImage(PlatformDrawAssetKeys.PRIMARY_LOGO)
+        DrawOrnament.NONE -> null
+    }
+    val authorStyle = minimalAuthorContentStyle(qrCodeImage != null)
+    val authorBottomSpacing = if (qrCodeImage != null) authorQrBottomSpacing else authorLogoBottomSpacing
+    val authorModifier = Modifier()
+        .fillMaxWidth()
+        .height(authorStyle.height)
+        .margin(bottom = authorBottomSpacing)
+    if (qrCodeImage != null) {
+        authorModifier
+            .bleed(right = cardPadding)
+            .offset(y = authorQrTopOffset)
+    }
+
+    Column(
+        modifier = Modifier()
+            .fillMaxWidth()
+            .padding(cardPadding)
+            .background(config.theme.cardColor)
+            .border(cardBorderWidth, cardRadius, config.theme.borderColor)
+    ) {
+        AuthorContent(
+            face = config.image(update.publisher.avatar),
+            pendant = update.publisher.pendant?.let { config.image(it) },
+            ornament = ornamentImage,
+            qrCode = qrCodeImage,
+            name = update.publisher.name,
+            time = liveTime.formatTime,
+            badge = avatarBadgeImage,
+            accentColor = config.theme.primaryColor,
+            style = authorStyle,
+            modifier = authorModifier,
+        )
+
+        drawLiveMediaCard(
+            live = live,
+            cover = cover,
+            config = config,
+            modifier = Modifier().fillMaxWidth(),
+        )
     }
 }

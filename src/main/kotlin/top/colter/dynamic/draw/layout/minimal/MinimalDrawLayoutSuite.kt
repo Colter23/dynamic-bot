@@ -4,7 +4,6 @@ import org.jetbrains.skia.Image
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.draw.DrawLayoutSuite
 import top.colter.dynamic.draw.DrawScene
-import top.colter.dynamic.draw.layout.default.renderDefaultLive
 
 internal object MinimalDrawLayoutSuite : DrawLayoutSuite {
     override val id: String = "minimal"
@@ -13,7 +12,7 @@ internal object MinimalDrawLayoutSuite : DrawLayoutSuite {
     override fun render(scene: DrawScene, config: DrawConfig): Image {
         return when (scene) {
             is DrawScene.DynamicScene -> renderMinimalDynamic(scene.update, config)
-            is DrawScene.LiveScene -> renderDefaultLive(scene.update, config)
+            is DrawScene.LiveScene -> renderMinimalLive(scene.update, config)
         }
     }
 }

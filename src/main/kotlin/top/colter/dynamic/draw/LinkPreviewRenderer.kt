@@ -8,6 +8,8 @@ import top.colter.dynamic.core.data.DynamicMediaCard
 import top.colter.dynamic.core.data.DynamicMediaCardKind
 import top.colter.dynamic.core.data.DynamicMetric
 import top.colter.dynamic.core.data.DynamicPayload
+import top.colter.dynamic.core.data.LivePayload
+import top.colter.dynamic.core.data.LiveStatus
 import top.colter.dynamic.core.data.MediaCardBlock
 import top.colter.dynamic.core.data.MediaCardStyle
 import top.colter.dynamic.core.data.MediaKind
@@ -17,6 +19,7 @@ import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.PublisherKind
 import top.colter.dynamic.core.data.SourceEventType
+import top.colter.dynamic.core.data.SourcePayload
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.core.data.UpdateKey
@@ -66,7 +69,7 @@ internal fun buildLinkPreviewSourceUpdate(
         occurredAtEpochSeconds = occurredAtEpochSeconds,
         observedAtEpochSeconds = occurredAtEpochSeconds,
         link = preview.url,
-        payload = buildLinkPreviewPayload(preview),
+        payload = buildLinkPreviewSourcePayload(preview, occurredAtEpochSeconds),
     )
 }
 
@@ -83,6 +86,33 @@ private fun resolvePreviewPublisher(
         incomingPublisher != null -> mergePublisherInfo(incomingPublisher, fallback)
         else -> fallback
     }
+}
+
+private fun buildLinkPreviewSourcePayload(preview: LinkPreview, occurredAtEpochSeconds: Long): SourcePayload {
+    return if (preview.kind == LinkKinds.LIVE) {
+        buildLivePreviewPayload(preview, occurredAtEpochSeconds)
+    } else {
+        buildLinkPreviewPayload(preview)
+    }
+}
+
+private fun buildLivePreviewPayload(preview: LinkPreview, occurredAtEpochSeconds: Long): LivePayload {
+    val status = preview.liveStatus ?: preview.badge.toLiveStatus() ?: LiveStatus.OPEN
+    val startedAt = when (status) {
+        LiveStatus.OPEN -> preview.liveStartedAtEpochSeconds ?: occurredAtEpochSeconds
+        LiveStatus.ROUND,
+        LiveStatus.CLOSE -> preview.liveStartedAtEpochSeconds
+    }
+    return LivePayload(
+        roomId = preview.id.trim().takeIf { it.isNotBlank() } ?: preview.url.stableFallbackId(),
+        title = preview.title.trim().takeIf { it.isNotBlank() } ?: "直播间",
+        area = preview.normalizedDescription().takeIf { it.isNotBlank() },
+        cover = preview.cover?.takeIf { it.uri.isNotBlank() },
+        status = status,
+        statusText = preview.badge?.trim()?.takeIf { it.isNotBlank() },
+        startedAtEpochSeconds = startedAt,
+        metrics = preview.metrics,
+    )
 }
 
 private fun buildLinkPreviewPayload(preview: LinkPreview): DynamicPayload {
@@ -212,6 +242,17 @@ private fun String.label(): String {
         LinkKinds.USER -> "用户"
         LinkKinds.DYNAMIC -> "动态"
         else -> "链接"
+    }
+}
+
+private fun String?.toLiveStatus(): LiveStatus? {
+    val value = this?.trim().orEmpty()
+    if (value.isBlank()) return null
+    return when {
+        "轮播" in value -> LiveStatus.ROUND
+        "未开播" in value || "已结束" in value || "下播" in value -> LiveStatus.CLOSE
+        "直播中" in value || "开播" in value -> LiveStatus.OPEN
+        else -> null
     }
 }
 
