@@ -37,8 +37,18 @@ public class DefaultTaskScheduler(
         return runtime.start()
     }
 
+    override fun start(id: String): Boolean {
+        return runtimes[id]?.start() == true
+    }
+
     override suspend fun stop(id: String): Boolean {
         return runtimes[id]?.stop() == true
+    }
+
+    override suspend fun restart(id: String): Boolean {
+        val runtime = runtimes[id] ?: return false
+        runtime.stop()
+        return runtime.start()
     }
 
     override suspend fun stopAll() {
@@ -125,7 +135,11 @@ private class TaskRuntime(
     fun snapshot(): TaskSnapshot {
         return TaskSnapshot(
             id = task.id,
+            name = task.name,
+            description = task.description,
             status = status,
+            schedule = task.schedule,
+            retryBackoffMillis = task.retryBackoff.inWholeMilliseconds,
             nextRunAtMillis = nextRunAtMillis,
             lastRunAtMillis = lastRunAtMillis,
             lastSuccessAtMillis = lastSuccessAtMillis,

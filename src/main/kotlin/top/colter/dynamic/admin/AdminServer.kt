@@ -38,6 +38,7 @@ import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
+import top.colter.dynamic.core.task.TaskScheduler
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
@@ -61,6 +62,7 @@ public class AdminServer(
     private val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
     private val outboundMessageService: OutboundMessageService = OutboundMessageService(),
     private val outboundMediaService: OutboundMediaService = OutboundMediaService(configProvider),
+    private val taskScheduler: TaskScheduler? = null,
     private val stopRequester: ((String) -> Unit)? = null,
     private val startedAtEpochMillis: Long = System.currentTimeMillis(),
 ) {
@@ -83,6 +85,7 @@ public class AdminServer(
                 commandRegistry = commandRegistry,
                 eventBus = eventBus,
                 outboundMessageService = outboundMessageService,
+                mainTaskScheduler = taskScheduler,
                 startedAtEpochMillis = startedAtEpochMillis,
             ),
             loginService = adminLoginService,
@@ -199,6 +202,40 @@ public fun Application.adminModule(context: AdminServerContext) {
             get("/system/status") {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.systemStatus() }
+            }
+            get("/tasks") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi { context.service.tasks() }
+            }
+            post("/tasks/start") {
+                if (!call.ensureAuthorized(context)) return@post
+                call.respondApi {
+                    context.service.startTask(
+                        ownerType = call.requiredQueryString("ownerType"),
+                        ownerId = call.requiredQueryString("ownerId"),
+                        taskId = call.requiredQueryString("taskId"),
+                    )
+                }
+            }
+            post("/tasks/stop") {
+                if (!call.ensureAuthorized(context)) return@post
+                call.respondApi {
+                    context.service.stopTask(
+                        ownerType = call.requiredQueryString("ownerType"),
+                        ownerId = call.requiredQueryString("ownerId"),
+                        taskId = call.requiredQueryString("taskId"),
+                    )
+                }
+            }
+            post("/tasks/restart") {
+                if (!call.ensureAuthorized(context)) return@post
+                call.respondApi {
+                    context.service.restartTask(
+                        ownerType = call.requiredQueryString("ownerType"),
+                        ownerId = call.requiredQueryString("ownerId"),
+                        taskId = call.requiredQueryString("taskId"),
+                    )
+                }
             }
             get("/logs") {
                 if (!call.ensureAuthorized(context)) return@get
@@ -581,6 +618,13 @@ private fun ApplicationCall.pathInt(name: String): Int {
 
 private fun ApplicationCall.pathString(name: String): String {
     return parameters[name] ?: throw IllegalArgumentException("缺少路径参数：$name")
+}
+
+private fun ApplicationCall.requiredQueryString(name: String): String {
+    return request.queryParameters[name]
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?: throw IllegalArgumentException("缺少查询参数：$name")
 }
 
 private fun ApplicationCall.optionalQueryInt(name: String): Int? {

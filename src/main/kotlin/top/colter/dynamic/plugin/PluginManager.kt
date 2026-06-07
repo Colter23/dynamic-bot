@@ -44,6 +44,7 @@ import top.colter.dynamic.core.plugin.PublisherSourcePlugin
 import top.colter.dynamic.core.plugin.SourceStateStore
 import top.colter.dynamic.core.plugin.SubscriptionQueryService
 import top.colter.dynamic.core.task.TaskScheduler
+import top.colter.dynamic.core.task.TaskSnapshot
 import top.colter.dynamic.task.DefaultTaskScheduler
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
@@ -436,6 +437,43 @@ public class PluginManager(
 
     public fun getConfigurablePlugins(): List<PluginHandle<ConfigurablePlugin<*>>> {
         return extensionHandles(activeOnly = false)
+    }
+
+    public fun getPluginTasks(): List<PluginTaskInfo> {
+        return plugins.values
+            .flatMap { runtime ->
+                runtime.taskScheduler.snapshots().map { snapshot ->
+                    runtime.toPluginTaskInfo(snapshot)
+                }
+            }
+            .sortedWith(compareBy<PluginTaskInfo> { it.pluginId }.thenBy { it.task.id })
+    }
+
+    public fun getPluginTask(pluginId: String, taskId: String): PluginTaskInfo? {
+        val runtime = plugins[pluginId] ?: return null
+        val snapshot = runtime.taskScheduler.snapshot(taskId) ?: return null
+        return runtime.toPluginTaskInfo(snapshot)
+    }
+
+    public fun startPluginTask(pluginId: String, taskId: String): Boolean {
+        val scheduler = synchronized(lifecycleLock) {
+            plugins[pluginId]?.taskScheduler
+        } ?: return false
+        return scheduler.start(taskId)
+    }
+
+    public suspend fun stopPluginTask(pluginId: String, taskId: String): Boolean {
+        val scheduler = synchronized(lifecycleLock) {
+            plugins[pluginId]?.taskScheduler
+        } ?: return false
+        return scheduler.stop(taskId)
+    }
+
+    public suspend fun restartPluginTask(pluginId: String, taskId: String): Boolean {
+        val scheduler = synchronized(lifecycleLock) {
+            plugins[pluginId]?.taskScheduler
+        } ?: return false
+        return scheduler.restart(taskId)
     }
 
     public fun getPublisherLoginProviders(): List<PluginHandle<PublisherLoginProvider>> {
@@ -901,6 +939,14 @@ public class PluginManager(
             loadTime = loadTime,
             error = error,
         )
+
+        fun toPluginTaskInfo(task: TaskSnapshot): PluginTaskInfo = PluginTaskInfo(
+            pluginId = descriptor.id,
+            pluginName = descriptor.name,
+            pluginVersion = descriptor.version,
+            pluginState = state,
+            task = task,
+        )
     }
 
     private companion object {
@@ -931,4 +977,12 @@ public data class PluginInstallResult(
     val oldVersion: String? = null,
     val newVersion: String? = null,
     val message: String,
+)
+
+public data class PluginTaskInfo(
+    val pluginId: String,
+    val pluginName: String,
+    val pluginVersion: String,
+    val pluginState: PluginState,
+    val task: TaskSnapshot,
 )

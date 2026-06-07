@@ -16,6 +16,10 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.LinkParsingConfig
@@ -54,12 +58,17 @@ import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKind
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
+import top.colter.dynamic.core.task.TaskDefinition
+import top.colter.dynamic.core.task.TaskSchedule
+import top.colter.dynamic.core.task.TaskSnapshot
+import top.colter.dynamic.core.task.TaskStatus
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.plugin.PluginCapability
 import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.plugin.PluginInfo
 import top.colter.dynamic.plugin.PluginState
+import top.colter.dynamic.plugin.PluginTaskInfo
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.LinkParseTargetConfigRepository
 import top.colter.dynamic.repository.MessageDeliveryRepository
@@ -70,6 +79,8 @@ import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.testPublisherInfo
 import java.io.File
+import kotlin.time.Duration.Companion.seconds
+import top.colter.dynamic.task.DefaultTaskScheduler
 
 class AdminServerTest {
     @Test
@@ -83,6 +94,7 @@ class AdminServerTest {
         val js = client.get("/admin/assets/shell.js")
         val page = client.get("/admin/pages/dashboard.html")
         val messagesPage = client.get("/admin/pages/messages.html")
+        val tasksPage = client.get("/admin/pages/tasks.html")
         val illegal = client.get("/admin/pages/%2e%2e/x")
 
         assertEquals(HttpStatusCode.OK, shell.status)
@@ -91,10 +103,13 @@ class AdminServerTest {
         assertTrue(css.bodyAsText().contains(":root"))
         assertEquals(HttpStatusCode.OK, js.status)
         assertTrue(js.bodyAsText().contains("/admin/pages/dashboard.js"))
+        assertTrue(js.bodyAsText().contains("/admin/pages/tasks.js"))
         assertEquals(HttpStatusCode.OK, page.status)
         assertTrue(page.bodyAsText().contains("data-page-root"))
         assertEquals(HttpStatusCode.OK, messagesPage.status)
         assertTrue(messagesPage.bodyAsText().contains("data-page=\"messages\""))
+        assertEquals(HttpStatusCode.OK, tasksPage.status)
+        assertTrue(tasksPage.bodyAsText().contains("data-page=\"tasks\""))
         assertTrue(illegal.status.value in 400..404)
     }
 
@@ -155,6 +170,125 @@ class AdminServerTest {
         assertTrue(body.contains("\"pathText\":\"link set\""))
         assertTrue(body.contains("\"aliases\":[[\"link\",\"config\"]]"))
         assertTrue(body.contains("\"requiredRole\":\"MANAGER\""))
+    }
+
+    @Test
+    fun adminApiShouldServeAndOperateMainTasks() = testApplication {
+        val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val scheduler = DefaultTaskScheduler(scope)
+        scheduler.start(
+            TaskDefinition(
+                id = "main-demo",
+                name = "测试主任务",
+                description = "用于后台任务 API 测试",
+                schedule = TaskSchedule.FixedDelay(1.seconds),
+                action = {},
+            )
+        )
+        try {
+            val service = AdminService(
+                pluginProvider = { emptyList() },
+                publisherLookupResolver = { null },
+                publisherFollowResolver = { null },
+                configProvider = { MainDynamicConfig() },
+                mainTaskScheduler = scheduler,
+            )
+            application {
+                adminModule(
+                    AdminServerContext(
+                        token = "test-token",
+                        service = service,
+                        loginService = AdminLoginService(loginProviderResolver = { null }),
+                    )
+                )
+            }
+
+            val list = client.get("/api/tasks") {
+                header(HttpHeaders.Authorization, "Bearer test-token")
+            }
+            val stopped = client.post("/api/tasks/stop?ownerType=MAIN&ownerId=main&taskId=main-demo") {
+                header(HttpHeaders.Authorization, "Bearer test-token")
+            }
+            val restarted = client.post("/api/tasks/start?ownerType=MAIN&ownerId=main&taskId=main-demo") {
+                header(HttpHeaders.Authorization, "Bearer test-token")
+            }
+
+            assertEquals(HttpStatusCode.OK, list.status)
+            assertTrue(list.bodyAsText().contains("\"id\":\"main-demo\""))
+            assertTrue(list.bodyAsText().contains("\"name\":\"测试主任务\""))
+            assertTrue(list.bodyAsText().contains("\"description\":\"用于后台任务 API 测试\""))
+            assertTrue(list.bodyAsText().contains("\"scheduleType\":\"FIXED_DELAY\""))
+            assertEquals(HttpStatusCode.OK, stopped.status)
+            assertTrue(stopped.bodyAsText().contains("\"status\":\"CANCELLED\""))
+            assertEquals(HttpStatusCode.OK, restarted.status)
+            assertTrue(restarted.bodyAsText().contains("\"status\":\"RUNNING\""))
+        } finally {
+            runBlocking { scheduler.shutdown() }
+            scope.cancel()
+        }
+    }
+
+    @Test
+    fun adminServiceShouldServeAndOperatePluginTasks() = runBlocking {
+        var snapshot = TaskSnapshot(
+            id = "plugin-poll",
+            name = "插件轮询",
+            description = "测试插件任务描述",
+            status = TaskStatus.CANCELLED,
+            schedule = TaskSchedule.Once,
+            retryBackoffMillis = 5000,
+            nextRunAtMillis = null,
+            lastRunAtMillis = 100,
+            lastSuccessAtMillis = 100,
+            runCount = 1,
+            lastErrorSummary = null,
+        )
+        val pluginTask = {
+            PluginTaskInfo(
+                pluginId = "bilibili",
+                pluginName = "Bilibili",
+                pluginVersion = "0.0.1",
+                pluginState = PluginState.ACTIVE,
+                task = snapshot,
+            )
+        }
+        val service = AdminService(
+            pluginProvider = { emptyList() },
+            publisherLookupResolver = { null },
+            publisherFollowResolver = { null },
+            configProvider = { MainDynamicConfig() },
+            pluginTaskProvider = { listOf(pluginTask()) },
+            pluginTaskResolver = { pluginId, taskId ->
+                pluginTask().takeIf { pluginId == it.pluginId && taskId == it.task.id }
+            },
+            pluginTaskStarter = { _, _ ->
+                snapshot = snapshot.copy(status = TaskStatus.RUNNING)
+                true
+            },
+            pluginTaskStopper = { _, _ ->
+                snapshot = snapshot.copy(status = TaskStatus.CANCELLED)
+                true
+            },
+            pluginTaskRestarter = { _, _ ->
+                snapshot = snapshot.copy(status = TaskStatus.RUNNING, runCount = snapshot.runCount + 1)
+                true
+            },
+        )
+
+        val listed = service.tasks().tasks.single()
+        val started = service.startTask("PLUGIN", "bilibili", "plugin-poll")
+        val restarted = service.restartTask("PLUGIN", "bilibili", "plugin-poll")
+
+        assertEquals("PLUGIN", listed.ownerType)
+        assertEquals("Bilibili", listed.ownerName)
+        assertEquals("插件轮询", listed.name)
+        assertEquals("测试插件任务描述", listed.description)
+        assertEquals("ONCE", listed.scheduleType)
+        assertEquals("RUNNING", started.status)
+        assertTrue(started.changed)
+        assertEquals("RUNNING", restarted.status)
+        assertTrue(restarted.changed)
+        assertEquals(2L, service.tasks().tasks.single().runCount)
     }
 
     @Test

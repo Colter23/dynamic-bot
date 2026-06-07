@@ -269,6 +269,7 @@ public object DynamicApplication : CoroutineScope {
             drawAssetRegistry = drawAssetRegistry,
             outboundMessageService = outboundMessageService,
             outboundMediaService = outboundMediaService,
+            taskScheduler = taskScheduler,
             stopRequester = { reason -> requestStop(reason) },
             startedAtEpochMillis = startedAtEpochMillis,
         )
@@ -317,6 +318,8 @@ public object DynamicApplication : CoroutineScope {
         taskScheduler.start(
             TaskDefinition(
                 id = "main-image-cleanup",
+                name = "缓存清理",
+                description = "按配置清理原图、渲染图和视频缓存，并清空内存图片缓存。",
                 schedule = TaskSchedule.Cron(config.imageCache.cleanupCron),
                 action = {
                     val current = configStore.current()
@@ -366,6 +369,8 @@ public object DynamicApplication : CoroutineScope {
         taskScheduler.start(
             TaskDefinition(
                 id = "main-delivery-dispatch",
+                name = "消息投递调度",
+                description = "扫描待投递消息，执行发送与失败重试。",
                 schedule = TaskSchedule.FixedDelay(
                     delay = config.delivery.retryDelaySeconds.seconds,
                     runImmediately = true,
@@ -381,6 +386,8 @@ public object DynamicApplication : CoroutineScope {
         taskScheduler.start(
             TaskDefinition(
                 id = "main-delivery-cleanup",
+                name = "消息记录清理",
+                description = "按保留天数清理历史投递记录和消息内容。",
                 schedule = TaskSchedule.Cron(config.delivery.cleanupCron),
                 action = {
                     val cutoff = System.currentTimeMillis() / 1000 -
@@ -402,6 +409,8 @@ public object DynamicApplication : CoroutineScope {
         taskScheduler.start(
             TaskDefinition(
                 id = "main-message-sink-route-monitor",
+                name = "消息出口监控",
+                description = "定期检查消息出口账号路线状态，发现运行期异常时触发系统通知。",
                 schedule = TaskSchedule.FixedDelay(
                     delay = config.notifications.routeMonitorIntervalSeconds.seconds,
                     runImmediately = false,

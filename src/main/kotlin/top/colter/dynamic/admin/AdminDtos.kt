@@ -42,6 +42,49 @@ public data class StateCountDto(
 )
 
 @Serializable
+public data class TaskListResponse(
+    val generatedAtEpochMillis: Long,
+    val tasks: List<TaskDto>,
+    val statusCounts: List<StateCountDto>,
+)
+
+@Serializable
+public data class TaskDto(
+    val key: String,
+    val ownerType: String,
+    val ownerId: String,
+    val ownerName: String,
+    val pluginVersion: String? = null,
+    val pluginState: String? = null,
+    val id: String,
+    val name: String,
+    val description: String = "",
+    val status: String,
+    val scheduleType: String,
+    val scheduleText: String,
+    val runImmediately: Boolean? = null,
+    val retryBackoffMillis: Long? = null,
+    val nextRunAtMillis: Long? = null,
+    val lastRunAtMillis: Long? = null,
+    val lastSuccessAtMillis: Long? = null,
+    val runCount: Long,
+    val lastErrorSummary: String? = null,
+    val canStart: Boolean,
+    val canStop: Boolean,
+    val canRestart: Boolean,
+)
+
+@Serializable
+public data class TaskOperationResponse(
+    val changed: Boolean,
+    val ownerType: String,
+    val ownerId: String,
+    val taskId: String,
+    val status: String? = null,
+    val message: String,
+)
+
+@Serializable
 public data class SystemStatusDto(
     val startedAtEpochMillis: Long,
     val uptimeMs: Long,

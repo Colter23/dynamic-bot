@@ -40,6 +40,7 @@ import top.colter.dynamic.plugin.PluginInfo
 import top.colter.dynamic.plugin.PluginManager
 import top.colter.dynamic.plugin.PluginReloadResult
 import top.colter.dynamic.plugin.PluginState
+import top.colter.dynamic.plugin.PluginTaskInfo
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.plugin.PublisherLoginProvider
@@ -47,6 +48,10 @@ import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.plugin.PublisherLoginMethod
 import top.colter.dynamic.core.plugin.PluginDescriptor
+import top.colter.dynamic.core.task.TaskSchedule
+import top.colter.dynamic.core.task.TaskScheduler
+import top.colter.dynamic.core.task.TaskSnapshot
+import top.colter.dynamic.core.task.TaskStatus
 import top.colter.dynamic.draw.DefaultPublisherThemeInitializer
 import top.colter.dynamic.draw.DrawThemePalette
 import top.colter.dynamic.draw.PublisherDrawThemeService
@@ -101,6 +106,12 @@ public class AdminService(
     private val pluginStopper: (String) -> Unit = {
         throw IllegalStateException("插件停止功能未配置")
     },
+    private val mainTaskScheduler: TaskScheduler? = null,
+    private val pluginTaskProvider: () -> List<PluginTaskInfo> = { emptyList() },
+    private val pluginTaskResolver: (String, String) -> PluginTaskInfo? = { _, _ -> null },
+    private val pluginTaskStarter: (String, String) -> Boolean = { _, _ -> false },
+    private val pluginTaskStopper: suspend (String, String) -> Boolean = { _, _ -> false },
+    private val pluginTaskRestarter: suspend (String, String) -> Boolean = { _, _ -> false },
     private val pluginCatalogService: PluginCatalogService? = null,
     private val startedAtEpochMillis: Long = System.currentTimeMillis(),
     private val databasePathProvider: () -> String? = { PersistenceManager.currentPath() },
@@ -119,6 +130,7 @@ public class AdminService(
         commandRegistry: CommandRegistry = CommandRegistry(),
         eventBus: EventBus = EventBus(),
         outboundMessageService: OutboundMessageService = OutboundMessageService(),
+        mainTaskScheduler: TaskScheduler? = null,
         startedAtEpochMillis: Long = System.currentTimeMillis(),
     ) : this(
         pluginProvider = { pluginManager.getAllPlugins() },
@@ -137,6 +149,12 @@ public class AdminService(
         pluginReloader = pluginManager::reloadPlugin,
         pluginStarter = pluginManager::startPlugin,
         pluginStopper = pluginManager::stopPlugin,
+        mainTaskScheduler = mainTaskScheduler,
+        pluginTaskProvider = pluginManager::getPluginTasks,
+        pluginTaskResolver = pluginManager::getPluginTask,
+        pluginTaskStarter = pluginManager::startPluginTask,
+        pluginTaskStopper = pluginManager::stopPluginTask,
+        pluginTaskRestarter = pluginManager::restartPluginTask,
         pluginCatalogService = PluginCatalogService(
             configProvider = { configProvider().pluginCatalog },
             pluginProvider = { pluginManager.getAllPlugins() },
@@ -189,6 +207,48 @@ public class AdminService(
             webAdminHost = config.webAdmin.host,
             webAdminPort = config.webAdmin.port,
         )
+    }
+
+    public fun tasks(): TaskListResponse {
+        val taskDtos = currentTaskDtos()
+        return TaskListResponse(
+            generatedAtEpochMillis = System.currentTimeMillis(),
+            tasks = taskDtos,
+            statusCounts = taskDtos
+                .groupingBy { it.status }
+                .eachCount()
+                .toStateCounts(taskDtos.size.toLong()),
+        )
+    }
+
+    public suspend fun startTask(ownerType: String, ownerId: String, taskId: String): TaskOperationResponse {
+        return operateTask(ownerType, ownerId, taskId, "恢复") { normalizedType, normalizedOwner, id ->
+            when (normalizedType) {
+                TASK_OWNER_MAIN -> mainTaskScheduler?.start(id) ?: false
+                TASK_OWNER_PLUGIN -> pluginTaskStarter(normalizedOwner, id)
+                else -> false
+            }
+        }
+    }
+
+    public suspend fun stopTask(ownerType: String, ownerId: String, taskId: String): TaskOperationResponse {
+        return operateTask(ownerType, ownerId, taskId, "停止") { normalizedType, normalizedOwner, id ->
+            when (normalizedType) {
+                TASK_OWNER_MAIN -> mainTaskScheduler?.stop(id) ?: false
+                TASK_OWNER_PLUGIN -> pluginTaskStopper(normalizedOwner, id)
+                else -> false
+            }
+        }
+    }
+
+    public suspend fun restartTask(ownerType: String, ownerId: String, taskId: String): TaskOperationResponse {
+        return operateTask(ownerType, ownerId, taskId, "重启") { normalizedType, normalizedOwner, id ->
+            when (normalizedType) {
+                TASK_OWNER_MAIN -> mainTaskScheduler?.restart(id) ?: false
+                TASK_OWNER_PLUGIN -> pluginTaskRestarter(normalizedOwner, id)
+                else -> false
+            }
+        }
     }
 
     public fun logs(
@@ -1318,11 +1378,184 @@ public class AdminService(
         }
         return null
     }
+
+    private fun currentTaskDtos(): List<TaskDto> {
+        return buildList {
+            mainTaskScheduler?.snapshots().orEmpty().forEach { snapshot ->
+                add(snapshot.toTaskDto(TASK_OWNER_MAIN, TASK_OWNER_MAIN_ID, "主项目"))
+            }
+            pluginTaskProvider().forEach { pluginTask ->
+                add(
+                    pluginTask.task.toTaskDto(
+                        ownerType = TASK_OWNER_PLUGIN,
+                        ownerId = pluginTask.pluginId,
+                        ownerName = pluginTask.pluginName,
+                        pluginVersion = pluginTask.pluginVersion,
+                        pluginState = pluginTask.pluginState.name,
+                    )
+                )
+            }
+        }.sortedWith(
+            compareBy<TaskDto> { it.ownerType }
+                .thenBy { it.ownerId }
+                .thenBy { it.id }
+        )
+    }
+
+    private suspend fun operateTask(
+        ownerType: String,
+        ownerId: String,
+        taskId: String,
+        operationLabel: String,
+        operation: suspend (normalizedType: String, normalizedOwnerId: String, normalizedTaskId: String) -> Boolean,
+    ): TaskOperationResponse {
+        val before = taskDtoOrThrow(ownerType, ownerId, taskId)
+        val changed = operation(before.ownerType, before.ownerId, before.id)
+        val after = taskDtoOrNull(before.ownerType, before.ownerId, before.id) ?: before
+        val taskName = before.name.ifBlank { before.id }
+        val message = if (changed) {
+            "任务已${operationLabel}：${before.ownerName} / $taskName"
+        } else {
+            "任务状态未变化：${before.ownerName} / $taskName"
+        }
+        return TaskOperationResponse(
+            changed = changed,
+            ownerType = before.ownerType,
+            ownerId = before.ownerId,
+            taskId = before.id,
+            status = after.status,
+            message = message,
+        )
+    }
+
+    private fun taskDtoOrThrow(ownerType: String, ownerId: String, taskId: String): TaskDto {
+        return taskDtoOrNull(ownerType, ownerId, taskId)
+            ?: throw NoSuchElementException("未找到任务：${normalizeTaskOwnerType(ownerType)}:${ownerId.trim()}:${taskId.trim()}")
+    }
+
+    private fun taskDtoOrNull(ownerType: String, ownerId: String, taskId: String): TaskDto? {
+        val normalizedType = normalizeTaskOwnerType(ownerType)
+        val normalizedOwnerId = normalizeTaskOwnerId(normalizedType, ownerId)
+        val normalizedTaskId = taskId.trim()
+        require(normalizedTaskId.isNotBlank()) { "任务 ID 不能为空" }
+        return when (normalizedType) {
+            TASK_OWNER_MAIN -> mainTaskScheduler
+                ?.snapshot(normalizedTaskId)
+                ?.toTaskDto(TASK_OWNER_MAIN, TASK_OWNER_MAIN_ID, "主项目")
+            TASK_OWNER_PLUGIN -> pluginTaskResolver(normalizedOwnerId, normalizedTaskId)
+                ?.let { pluginTask ->
+                    pluginTask.task.toTaskDto(
+                        ownerType = TASK_OWNER_PLUGIN,
+                        ownerId = pluginTask.pluginId,
+                        ownerName = pluginTask.pluginName,
+                        pluginVersion = pluginTask.pluginVersion,
+                        pluginState = pluginTask.pluginState.name,
+                    )
+                }
+            else -> null
+        }
+    }
 }
 
 public class PluginReloadFailedException(
     public val response: PluginReloadResponse,
 ) : IllegalStateException(response.error ?: response.message)
+
+private fun TaskSnapshot.toTaskDto(
+    ownerType: String,
+    ownerId: String,
+    ownerName: String,
+    pluginVersion: String? = null,
+    pluginState: String? = null,
+): TaskDto {
+    val schedule = schedule
+    val scheduleType = schedule.typeText()
+    val statusName = status.name
+    return TaskDto(
+        key = listOf(ownerType, ownerId, id).joinToString(":"),
+        ownerType = ownerType,
+        ownerId = ownerId,
+        ownerName = ownerName,
+        pluginVersion = pluginVersion,
+        pluginState = pluginState,
+        id = id,
+        name = name.ifBlank { id },
+        description = description,
+        status = statusName,
+        scheduleType = scheduleType,
+        scheduleText = schedule.describe(),
+        runImmediately = (schedule as? TaskSchedule.FixedDelay)?.runImmediately,
+        retryBackoffMillis = retryBackoffMillis,
+        nextRunAtMillis = nextRunAtMillis,
+        lastRunAtMillis = lastRunAtMillis,
+        lastSuccessAtMillis = lastSuccessAtMillis,
+        runCount = runCount,
+        lastErrorSummary = lastErrorSummary,
+        canStart = status != TaskStatus.RUNNING,
+        canStop = status == TaskStatus.RUNNING,
+        canRestart = true,
+    )
+}
+
+private fun TaskSchedule?.typeText(): String {
+    return when (this) {
+        null -> "UNKNOWN"
+        TaskSchedule.Once -> "ONCE"
+        is TaskSchedule.FixedDelay -> "FIXED_DELAY"
+        is TaskSchedule.Cron -> "CRON"
+    }
+}
+
+private fun TaskSchedule?.describe(): String {
+    return when (this) {
+        null -> "未知调度"
+        TaskSchedule.Once -> "一次性任务"
+        is TaskSchedule.FixedDelay -> {
+            val suffix = if (runImmediately) "启动后立即执行" else "启动后先等待"
+            "固定间隔 ${formatDurationMillis(delay.inWholeMilliseconds)}，$suffix"
+        }
+        is TaskSchedule.Cron -> "Cron $expression，时区 ${zone.id}"
+    }
+}
+
+private fun normalizeTaskOwnerType(value: String): String {
+    return when (value.trim().uppercase()) {
+        TASK_OWNER_MAIN -> TASK_OWNER_MAIN
+        TASK_OWNER_PLUGIN -> TASK_OWNER_PLUGIN
+        else -> throw IllegalArgumentException("任务来源类型无效：$value")
+    }
+}
+
+private fun normalizeTaskOwnerId(ownerType: String, ownerId: String): String {
+    val normalized = ownerId.trim()
+    return when (ownerType) {
+        TASK_OWNER_MAIN -> TASK_OWNER_MAIN_ID
+        TASK_OWNER_PLUGIN -> {
+            require(normalized.isNotBlank()) { "插件 ID 不能为空" }
+            normalized
+        }
+        else -> normalized
+    }
+}
+
+private fun formatDurationMillis(value: Long): String {
+    val millis = value.coerceAtLeast(0)
+    if (millis < 1_000) return "${millis}ms"
+    val seconds = millis / 1_000.0
+    if (seconds < 60) return "${trimDecimal(seconds)} 秒"
+    val minutes = seconds / 60.0
+    if (minutes < 60) return "${trimDecimal(minutes)} 分钟"
+    val hours = minutes / 60.0
+    return "${trimDecimal(hours)} 小时"
+}
+
+private fun trimDecimal(value: Double): String {
+    return if (value % 1.0 == 0.0) {
+        value.toLong().toString()
+    } else {
+        String.format(java.util.Locale.ROOT, "%.2f", value).trimEnd('0').trimEnd('.')
+    }
+}
 
 private fun PluginInfo.toDto(catalog: PluginCatalogEntryDto? = null): PluginDto = PluginDto(
     id = descriptor.id,
@@ -1609,3 +1842,6 @@ private fun PublisherInfo.normalized(): PublisherInfo = copy(
 
 private const val LOGIN_STATE_CACHE_TTL_MS: Long = 15_000
 private const val LOGIN_STATE_TIMEOUT_MS: Long = 5_000
+private const val TASK_OWNER_MAIN: String = "MAIN"
+private const val TASK_OWNER_PLUGIN: String = "PLUGIN"
+private const val TASK_OWNER_MAIN_ID: String = "main"

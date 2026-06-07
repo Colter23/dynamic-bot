@@ -7,6 +7,7 @@ const $ = id => document.getElementById(id);
       subscriptions: ["订阅管理", "订阅策略与过滤规则", "/admin/pages/subscriptions.html", "/admin/pages/subscriptions.js"],
       entities: ["发布者与目标", "来源与消息出口", "/admin/pages/entities.html", "/admin/pages/entities.js"],
       messages: ["消息记录", "投递结果与失败诊断", "/admin/pages/messages.html", "/admin/pages/messages.js"],
+      tasks: ["任务查看", "调度状态与操作", "/admin/pages/tasks.html", "/admin/pages/tasks.js"],
       logs: ["日志查看", "进程内实时日志", "/admin/pages/logs.html", "/admin/pages/logs.js"],
       configs: ["配置", "主项目与插件配置", "/admin/pages/configs.html", "/admin/pages/configs.js"],
       system: ["系统维护", "运行信息与维护", "/admin/pages/system.html", "/admin/pages/system.js"]
@@ -78,6 +79,7 @@ const $ = id => document.getElementById(id);
     function label(value) {
       const map = {
         ACTIVE: "运行中", LOADED: "已加载", FAILED: "失败", DISABLED: "停用",
+        RUNNING: "运行中", COMPLETED: "已完成", CANCELLED: "已取消",
         PENDING: "等待", SENDING: "发送中", SENT: "已发送",
         SUCCESS: "已登录", CANCELED: "已取消", EXPIRED: "已过期", UNSUPPORTED: "不支持",
         COOKIE: "Cookie", QR_CODE: "二维码",
@@ -97,9 +99,9 @@ const $ = id => document.getElementById(id);
     }
     function pill(value) {
       const text = label(value);
-      const cls = ["ACTIVE", "SUCCESS", "SENT", "OPEN"].includes(value) ? "ok"
+      const cls = ["ACTIVE", "SUCCESS", "SENT", "OPEN", "RUNNING"].includes(value) ? "ok"
         : ["FAILED", "EXPIRED", "ERROR"].includes(value) ? "bad"
-        : ["PENDING", "SENDING", "LOADED", "CANCELED", "WARN"].includes(value) ? "warn" : "info";
+        : ["PENDING", "SENDING", "LOADED", "CANCELED", "CANCELLED", "WARN"].includes(value) ? "warn" : "info";
       return `<span class="pill ${cls}">${esc(text)}</span>`;
     }
     function tags(items) {
@@ -745,6 +747,7 @@ const $ = id => document.getElementById(id);
             subscriptions: ["subscriptions"],
             entities: ["publishers", "subscribers"],
             messages: ["deliveries"],
+            tasks: ["tasks"],
             logs: [],
             configs: ["configs"],
             system: ["system"]

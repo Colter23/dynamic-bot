@@ -39,6 +39,8 @@ class TaskSchedulerTest {
             scheduler.start(
                 TaskDefinition(
                     id = "one",
+                    name = "一次性测试任务",
+                    description = "验证任务快照携带名称和描述",
                     schedule = TaskSchedule.Once,
                     action = { counter.incrementAndGet() },
                     retryBackoff = 10.milliseconds,
@@ -49,6 +51,8 @@ class TaskSchedulerTest {
 
         assertEquals(1, counter.get())
         val snapshot = assertNotNull(scheduler.snapshot("one"))
+        assertEquals("一次性测试任务", snapshot.name)
+        assertEquals("验证任务快照携带名称和描述", snapshot.description)
         assertEquals(TaskStatus.COMPLETED, snapshot.status)
         assertEquals(1, snapshot.runCount)
         assertEquals(clock.millis(), snapshot.lastRunAtMillis)
@@ -234,6 +238,39 @@ class TaskSchedulerTest {
         assertEquals(1, secondCounter.get())
         assertTrue(scheduler.isRunning("restart"))
         scheduler.stop("restart")
+    }
+
+    @Test
+    fun stoppedTaskCanStartByIdAndRunningTaskCanRestart(): Unit = runTest {
+        val clock = MutableClock()
+        val scheduler = taskScheduler(clock)
+        val counter = AtomicInteger(0)
+
+        scheduler.start(
+            TaskDefinition(
+                id = "managed",
+                schedule = TaskSchedule.FixedDelay(100.milliseconds),
+                action = { counter.incrementAndGet() },
+                retryBackoff = 10.milliseconds,
+            )
+        )
+        runCurrent()
+
+        assertTrue(scheduler.stop("managed"))
+        assertEquals(TaskStatus.CANCELLED, scheduler.snapshot("managed")?.status)
+        assertTrue(scheduler.start("managed"))
+        runCurrent()
+        assertTrue(scheduler.isRunning("managed"))
+        assertEquals(2, counter.get())
+
+        assertTrue(scheduler.restart("managed"))
+        runCurrent()
+        assertTrue(scheduler.isRunning("managed"))
+        assertEquals(3, counter.get())
+        assertEquals(TaskSchedule.FixedDelay(100.milliseconds), scheduler.snapshot("managed")?.schedule)
+        assertEquals(10L, scheduler.snapshot("managed")?.retryBackoffMillis)
+
+        scheduler.stop("managed")
     }
 
     @Test
