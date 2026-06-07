@@ -90,6 +90,15 @@ public class PluginManager(
     @Volatile
     private var isShuttingDown: Boolean = false
 
+    @Volatile
+    private var systemNotificationsEnabled: Boolean = false
+
+    public fun enableSystemNotifications() {
+        if (systemNotificationsEnabled) return
+        systemNotificationsEnabled = true
+        logger.info { "系统通知已启用，运行期异常将通知管理员" }
+    }
+
     public fun loadAllPlugins(): LoadResult {
         synchronized(lifecycleLock) {
             val result = LoadResult()
@@ -408,6 +417,7 @@ public class PluginManager(
         synchronized(lifecycleLock) {
             if (isShuttingDown) return
             isShuttingDown = true
+            systemNotificationsEnabled = false
         }
         stopAllPlugins()
         subscriptionChangedListenerToken?.let { eventBus.unsubscribe(it) }
@@ -569,6 +579,12 @@ public class PluginManager(
     }
 
     private fun notificationPublisherFor(pluginId: String): SystemNotificationPublisher = SystemNotificationPublisher { request ->
+        if (!systemNotificationsEnabled) {
+            logger.debug {
+                "启动阶段忽略插件系统通知：pluginId=$pluginId，type=${request.type}，title=${request.title}"
+            }
+            return@SystemNotificationPublisher SystemNotificationPublishResult.ignored("系统通知尚未启用：启动阶段")
+        }
         eventBus.broadcast(
             SystemNotificationEvent(
                 sourcePlugin = pluginId,
@@ -598,6 +614,12 @@ public class PluginManager(
         errorText: String,
         title: String,
     ) {
+        if (!systemNotificationsEnabled) {
+            logger.debug {
+                "启动阶段忽略插件生命周期通知：pluginId=$pluginId，operation=$operation，title=$title"
+            }
+            return
+        }
         eventBus.broadcast(
             SystemNotificationEvent(
                 sourcePlugin = pluginId,

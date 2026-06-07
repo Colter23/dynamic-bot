@@ -148,6 +148,7 @@ public object DynamicApplication : CoroutineScope {
         runBlocking { deliveryDispatcher.dispatchDue() }
         startAdminServer(config)
 
+        pluginManager.enableSystemNotifications()
         logger.info { "主项目已启动，已加载插件=${loadResult.loadedPlugins}" }
     }
 

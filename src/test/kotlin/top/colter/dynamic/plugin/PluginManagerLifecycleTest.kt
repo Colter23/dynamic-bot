@@ -44,6 +44,8 @@ import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.core.event.SourceUpdatePublisher
 import top.colter.dynamic.core.event.SubscriptionChangeType
 import top.colter.dynamic.core.event.SubscriptionChangedEvent
+import top.colter.dynamic.core.event.SystemNotificationPublishRequest
+import top.colter.dynamic.core.event.SystemNotificationSeverity
 import top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION
 import top.colter.dynamic.core.plugin.CommandContributor
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
@@ -54,12 +56,15 @@ import top.colter.dynamic.core.plugin.PublisherSourcePlugin
 import top.colter.dynamic.core.plugin.SourceStateStore
 import top.colter.dynamic.core.plugin.SubscriptionQueryService
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
+import top.colter.dynamic.event.Listener
+import top.colter.dynamic.event.SystemNotificationEvent
 
 class PluginManagerLifecycleTest {
 
     @AfterTest
     fun cleanup() {
         LifecycleRecordingPlugin.reset()
+        StartupNotificationPlugin.reset()
     }
 
     @Test
@@ -225,6 +230,79 @@ class PluginManagerLifecycleTest {
         assertEquals(1, plugin.stopCalls)
         assertEquals(null, commandRegistry.match(listOf("unique")))
         assertNotNull(commandRegistry.match(listOf("existing")))
+    }
+
+    @Test
+    fun lifecycleFailureNotificationsShouldWaitUntilSystemNotificationsAreEnabled() = runBlocking {
+        val eventBus = EventBus()
+        eventBus.configureScope(this)
+        val received = CompletableDeferred<SystemNotificationEvent>()
+        eventBus.subscribe(
+            object : Listener<SystemNotificationEvent> {
+                override suspend fun onMessage(event: SystemNotificationEvent) {
+                    received.complete(event)
+                }
+            },
+        )
+        val commandRegistry = CommandRegistry()
+        commandRegistry.register(TestCommandHandler("existing"), "existing-owner")
+        val manager = PluginManager(
+            pluginDirPath = createTempDirectory("plugin-manager-notification-lifecycle").toString(),
+            eventBus = eventBus,
+            commandRegistry = commandRegistry,
+        )
+
+        manager.registerPluginForTest(descriptor("startup-failure", RollbackCommandPlugin()), RollbackCommandPlugin())
+        manager.startPlugin("startup-failure")
+        delay(100)
+        assertFalse(received.isCompleted)
+
+        manager.registerPluginForTest(descriptor("runtime-failure", RollbackCommandPlugin()), RollbackCommandPlugin())
+        manager.enableSystemNotifications()
+        manager.startPlugin("runtime-failure")
+
+        val event = withTimeout(3_000) { received.await() }
+        assertEquals("runtime-failure", event.sourcePlugin)
+        assertEquals("plugin.lifecycle_failed", event.notification.type)
+        assertEquals("start", event.notification.details["operation"])
+
+        manager.shutdown()
+        eventBus.shutdown()
+    }
+
+    @Test
+    fun pluginPublishedNotificationsShouldBeIgnoredBeforeSystemNotificationsAreEnabled() = runBlocking {
+        val pluginDir = createTempDirectory("plugin-manager-notification-publisher").toFile()
+        val eventBus = EventBus()
+        eventBus.configureScope(this)
+        val received = CompletableDeferred<SystemNotificationEvent>()
+        eventBus.subscribe(
+            object : Listener<SystemNotificationEvent> {
+                override suspend fun onMessage(event: SystemNotificationEvent) {
+                    received.complete(event)
+                }
+            },
+        )
+        val manager = PluginManager(
+            pluginDirPath = pluginDir.path,
+            eventBus = eventBus,
+        )
+        createPluginJar(
+            pluginDir = pluginDir,
+            id = "startup-notifier",
+            mainClass = StartupNotificationPlugin::class.java.name,
+        )
+
+        val result = manager.loadAllPlugins()
+
+        assertEquals(listOf("startup-notifier"), result.loadedPlugins)
+        assertEquals(false, StartupNotificationPlugin.publishResultAccepted)
+        assertTrue(StartupNotificationPlugin.publishResultMessage?.contains("启动阶段") == true)
+        delay(100)
+        assertFalse(received.isCompleted)
+
+        manager.shutdown()
+        eventBus.shutdown()
     }
 
     @Test
@@ -448,6 +526,34 @@ class LifecycleRecordingPlugin : MessageSinkPlugin {
             loadedDataDir = null
             loadedSourceStateStore = null
             loadedSubscriptionQueryService = null
+        }
+    }
+}
+
+class StartupNotificationPlugin : MessageSinkPlugin {
+    override val transportId: String = "startup-notifier"
+    override val supportedTargetPlatforms: Set<PlatformId> = setOf(PlatformId.of("qq"))
+
+    override suspend fun onLoad(context: PluginContext) {
+        val result = context.notificationPublisher.publish(
+            SystemNotificationPublishRequest(
+                type = "test.startup",
+                severity = SystemNotificationSeverity.ERROR,
+                title = "startup notification",
+                content = "should be ignored before startup is complete",
+            ),
+        )
+        publishResultAccepted = result.accepted
+        publishResultMessage = result.message
+    }
+
+    companion object {
+        var publishResultAccepted: Boolean? = null
+        var publishResultMessage: String? = null
+
+        fun reset() {
+            publishResultAccepted = null
+            publishResultMessage = null
         }
     }
 }

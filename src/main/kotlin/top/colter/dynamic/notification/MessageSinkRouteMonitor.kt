@@ -19,6 +19,7 @@ public class MessageSinkRouteMonitor(
     private val eventBus: EventBus,
 ) {
     private val previousRoutes: MutableMap<String, RouteSnapshot> = ConcurrentHashMap()
+    private val notifiedUnavailableRouteIds: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     @Volatile
     private var initialized: Boolean = false
@@ -36,7 +37,7 @@ public class MessageSinkRouteMonitor(
                 .onFailure { error ->
                     failedPluginIds += pluginId
                     routeMonitorLogger.warn(error) { "消息出口路线状态读取失败：pluginId=$pluginId" }
-                    if (initialized) {
+                    if (initialized && hadReadyRoute(pluginId)) {
                         publishRouteListFailure(pluginId, error)
                     }
                 }
@@ -66,22 +67,37 @@ public class MessageSinkRouteMonitor(
                     next[previous.routeId] = missing
                     if (previous.present && previous.state == MessageSinkRouteState.READY) {
                         publishRouteUnavailable(missing, "消息出口账号路线已消失")
+                        notifiedUnavailableRouteIds += previous.routeId
                     }
                     return@forEach
                 }
 
                 if (previous.state != latest.state) {
                     when (latest.state) {
-                        MessageSinkRouteState.READY -> publishRouteRecovered(latest)
-                        MessageSinkRouteState.UNAVAILABLE -> publishRouteUnavailable(latest, "消息出口账号路线不可用")
+                        MessageSinkRouteState.READY -> {
+                            if (notifiedUnavailableRouteIds.remove(latest.routeId)) {
+                                publishRouteRecovered(latest)
+                            }
+                        }
+                        MessageSinkRouteState.UNAVAILABLE -> {
+                            publishRouteUnavailable(latest, "消息出口账号路线不可用")
+                            notifiedUnavailableRouteIds += latest.routeId
+                        }
                     }
                 }
             }
         }
 
+        notifiedUnavailableRouteIds.retainAll(next.keys)
         previousRoutes.clear()
         previousRoutes.putAll(next)
         initialized = true
+    }
+
+    private fun hadReadyRoute(pluginId: String): Boolean {
+        return previousRoutes.values.any { route ->
+            route.pluginId == pluginId && route.present && route.state == MessageSinkRouteState.READY
+        }
     }
 
     private fun publishRouteListFailure(pluginId: String, error: Throwable) {
