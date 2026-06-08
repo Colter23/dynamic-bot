@@ -506,6 +506,90 @@
       border-radius: 7px;
       background: #f8faff;
     }
+    .config-field-title {
+      min-width: 0;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .config-field-title label {
+      min-width: 0;
+    }
+    button.config-field-help {
+      position: relative;
+      width: 20px;
+      min-width: 20px;
+      min-height: 20px;
+      height: 20px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0;
+      border-color: #c7d2fe;
+      border-radius: 999px;
+      background: #f4f7ff;
+      color: #4f46e5;
+      font-size: 12px;
+      font-weight: 900;
+      line-height: 1;
+      filter: none;
+    }
+    button.config-field-help:hover,
+    button.config-field-help[data-expanded="true"] {
+      border-color: #a5b4fc;
+      background: #eef2ff;
+      color: #3730a3;
+    }
+    button.config-field-help::after {
+      content: attr(data-summary);
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 8px);
+      z-index: 30;
+      width: max-content;
+      max-width: min(320px, calc(100vw - 48px));
+      padding: 7px 9px;
+      border: 1px solid #c7d2fe;
+      border-radius: 7px;
+      background: #101828;
+      color: #fff;
+      box-shadow: var(--shadow);
+      font-size: 12px;
+      font-weight: 750;
+      line-height: 1.45;
+      white-space: normal;
+      text-align: left;
+      overflow-wrap: anywhere;
+      opacity: 0;
+      pointer-events: none;
+      transform: translate(-50%, 4px);
+      transition: opacity 0.14s ease, transform 0.14s ease;
+    }
+    button.config-field-help:hover::after,
+    button.config-field-help:focus-visible::after {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+    .config-field-description {
+      display: block;
+      min-width: 0;
+      max-width: 100%;
+      box-sizing: border-box;
+      padding: 8px 10px;
+      border: 1px solid #d8e0ea;
+      border-radius: 7px;
+      background: #f8fafc;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 650;
+      line-height: 1.55;
+      white-space: pre-line;
+      overflow-wrap: anywhere;
+      animation: plugin-card-in 0.14s ease both;
+    }
+    .config-field-description[hidden] {
+      display: none;
+    }
     .publisher-create-form {
       max-width: 100%;
     }
@@ -2138,6 +2222,9 @@
       justify-content: space-between;
       align-items: flex-start;
       gap: 10px;
+    }
+    .message-template-head .config-field-title {
+      display: inline-flex;
     }
     .message-template-edit-button {
       border-color: #b9cffc;

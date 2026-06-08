@@ -126,6 +126,10 @@ export async function handleAction(nextCtx, { action, button, id }) {
     toggleConfigSection(button);
     return true;
   }
+  if (action === "toggle-config-description") {
+    toggleConfigDescription(button);
+    return true;
+  }
   if (action === "toggle-config-secret") {
     await withButtonLoading(button, "•••", () => toggleConfigSecret(button));
     return true;
@@ -577,10 +581,10 @@ function configFieldHtml(detail, field) {
   const raw = detail.values[field.path];
   const value = displayConfigValue(raw);
   const fieldLabel = configFieldLabelHtml(field);
-  const labelHtml = `<label for="cfg-${attr(field.path)}">${fieldLabel}</label>`;
+  const labelHtml = configFieldTitleHtml(field, `cfg-${field.path}`);
   const descriptionHtml = configFieldDescriptionHtml(field);
   if (field.type === "BOOLEAN") {
-    return `<div class="${configFieldClass(field)}" data-config-field-path="${attr(field.path)}"><label class="check"><input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="checkbox"${raw === true ? " checked" : ""}${readOnlyDisabledAttrs(field)}>${fieldLabel}</label>${descriptionHtml}</div>`;
+    return `<div class="${configFieldClass(field)}" data-config-field-path="${attr(field.path)}"><div class="config-field-title"><label class="check"><input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="checkbox"${raw === true ? " checked" : ""}${readOnlyDisabledAttrs(field)}>${fieldLabel}</label>${configFieldHelpButtonHtml(field)}</div>${descriptionHtml}</div>`;
   }
   if (field.type === "SELECT") {
     return `<div class="${configFieldClass(field)}" data-config-field-path="${attr(field.path)}">${labelHtml}<select id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}"${readOnlyDisabledAttrs(field)}>${(field.options || []).map(opt => `<option value="${attr(opt.value)}"${String(raw) === String(opt.value) ? " selected" : ""}>${esc(opt.label)}</option>`).join("")}</select>${descriptionHtml}</div>`;
@@ -601,9 +605,37 @@ function configFieldClass(field, extra = "") {
   return ["field", extra, field.readOnly ? "readonly-field" : ""].filter(Boolean).join(" ");
 }
 
+function configFieldTitleHtml(field, id) {
+  return `<div class="config-field-title"><label for="${attr(id)}">${configFieldLabelHtml(field)}</label>${configFieldHelpButtonHtml(field)}</div>`;
+}
+
 function configFieldLabelHtml(field, options = {}) {
   const includeRestart = options.includeRestart !== false;
   return `${esc(field.label)}${field.required ? `<span class="required-mark">*</span>` : ""}${includeRestart && field.restartRequired ? ` <span class="restart-mark" title="保存后需重启">⚠️</span>` : ""}${readOnlyBadgeHtml(field)}`;
+}
+
+function configFieldHelpButtonHtml(field) {
+  const summary = configFieldSummary(field);
+  const description = configFieldDescription(field);
+  if (!summary && !description) return "";
+  const target = configDescriptionDomId(field.path);
+  return `<button type="button" class="config-field-help" data-action="toggle-config-description" data-target="${attr(target)}" data-summary="${attr(summary || description)}" aria-expanded="false" aria-controls="${attr(target)}" title="${attr(summary || "查看说明")}">?</button>`;
+}
+
+function configFieldSummary(field) {
+  const summary = String(field.summary || "").trim();
+  if (summary) return summary;
+  const description = configFieldDescription(field);
+  if (!description) return "";
+  return description.split(/[。！？\n]/).map(item => item.trim()).find(Boolean) || description;
+}
+
+function configFieldDescription(field) {
+  return String(field.description || "").trim();
+}
+
+function configDescriptionDomId(path) {
+  return `config-desc-${String(path || "").replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
 }
 
 function readOnlyBadgeHtml(field) {
@@ -644,6 +676,16 @@ function secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml) {
   </div>`;
 }
 
+function toggleConfigDescription(button) {
+  const targetId = button.dataset.target;
+  const target = targetId ? pageRoot().querySelector(`#${targetId}`) : null;
+  if (!target) return;
+  const expanded = target.hidden;
+  target.hidden = !expanded;
+  button.dataset.expanded = expanded ? "true" : "false";
+  button.setAttribute("aria-expanded", expanded ? "true" : "false");
+}
+
 function showConfigSecretEditor(input) {
   const field = input.closest("[data-secret-field]");
   if (!field) return;
@@ -659,7 +701,9 @@ function secretEyeIconHtml() {
 }
 
 function configFieldDescriptionHtml(field) {
-  return field.description ? `<span class="inline-note">${esc(field.description)}</span>` : "";
+  const description = configFieldDescription(field);
+  if (!description) return "";
+  return `<div id="${attr(configDescriptionDomId(field.path))}" class="config-field-description" hidden>${esc(description)}</div>`;
 }
 
 function messageTemplateFieldHtml(detail, field) {
@@ -674,7 +718,7 @@ function messageTemplateFieldHtml(detail, field) {
     <div class="message-template-shell">
       <div class="message-template-head">
         <div>
-          <span class="primary-line">${fieldLabel}</span>
+          <span class="primary-line config-field-title">${fieldLabel}${configFieldHelpButtonHtml(field)}</span>
           <span id="${attr(statsId)}" class="sub-line">${esc(messageTemplateStats(value, kind))}</span>
         </div>
         ${field.readOnly ? "" : `<button type="button" class="compact message-template-edit-button" data-action="edit-message-template" data-path="${attr(field.path)}">编辑</button>`}
@@ -1065,7 +1109,7 @@ function oneBotConnectionsFieldHtml(detail, field) {
   const connections = normalizeOneBotConnections(detail.values[field.path]);
   const readOnly = !!field.readOnly;
   return `<div class="${configFieldClass(field, "onebot-connection-field")}" data-config-field-path="${attr(field.path)}">
-    <label for="cfg-onebot-connections">${configFieldLabelHtml(field)}</label>
+    ${configFieldTitleHtml(field, "cfg-onebot-connections")}
     ${configFieldDescriptionHtml(field)}
     <input id="cfg-onebot-connections" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(connections))}">
     ${readOnly ? readOnlyTableNoteHtml(field) : `<div class="command-permission-toolbar">
@@ -1080,7 +1124,7 @@ function messageRoutingPlatformPoliciesFieldHtml(detail, field) {
   const policies = normalizeMessageRoutingPlatformPolicies(detail.values[field.path]);
   const readOnly = !!field.readOnly;
   return `<div class="${configFieldClass(field, "message-routing-policy-field")}" data-config-field-path="${attr(field.path)}">
-    <label for="cfg-message-routing-platform-policies">${configFieldLabelHtml(field)}</label>
+    ${configFieldTitleHtml(field, "cfg-message-routing-platform-policies")}
     ${configFieldDescriptionHtml(field)}
     <input id="cfg-message-routing-platform-policies" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(policies))}">
     ${readOnly ? readOnlyTableNoteHtml(field) : `<div class="command-permission-toolbar">
@@ -1380,7 +1424,7 @@ function notificationTargetsFieldHtml(detail, field) {
   const targets = normalizeNotificationTargets(detail.values[field.path]);
   const readOnly = !!field.readOnly;
   return `<div class="${configFieldClass(field, "notification-target-field")}" data-config-field-path="${attr(field.path)}">
-    <label for="cfg-notification-targets">${configFieldLabelHtml(field)}</label>
+    ${configFieldTitleHtml(field, "cfg-notification-targets")}
     ${configFieldDescriptionHtml(field)}
     <input id="cfg-notification-targets" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(targets))}">
     ${readOnly ? readOnlyTableNoteHtml(field) : `<div class="command-permission-toolbar">
@@ -1728,7 +1772,7 @@ function commandPermissionsFieldHtml(detail, field) {
   const rules = Array.isArray(detail.values[field.path]) ? detail.values[field.path] : [];
   const readOnly = !!field.readOnly;
   return `<div class="${configFieldClass(field, "command-permission-field")}" data-config-field-path="${attr(field.path)}">
-    <label for="cfg-command-permissions">${configFieldLabelHtml(field)}</label>
+    ${configFieldTitleHtml(field, "cfg-command-permissions")}
     ${configFieldDescriptionHtml(field)}
     <input id="cfg-command-permissions" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(rules))}">
     ${readOnly ? readOnlyTableNoteHtml(field) : `<div class="command-permission-toolbar">
