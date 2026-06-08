@@ -1,12 +1,13 @@
 ﻿package top.colter.dynamic.draw.layout.default
 
-import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
 import top.colter.dynamic.core.data.*
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.draw.layout.default.component.Media
+import top.colter.dynamic.draw.layout.default.component.MediaCardColors
 import top.colter.dynamic.draw.layout.default.component.MediaMini
 import top.colter.dynamic.draw.layout.default.component.MediaSmall
+import top.colter.dynamic.draw.layout.default.component.mediaCardColors
 import top.colter.skiko.*
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.Ratio
@@ -73,7 +74,8 @@ private fun Layout.drawDynamicImages(
     modifier: Modifier = Modifier().fillMaxWidth(),
 ) {
     val imgList = pics.map { it to config.image(it.image) }
-    val imgModifier = Modifier().background(config.theme.cardColor).border(2.dp, 10.dp, config.theme.borderColor).shadows(Shadow.ELEVATION_1)
+    val colors = mediaCardColors(config.theme)
+    val imgModifier = Modifier().background(colors.cardColor).border(2.dp, 10.dp, colors.borderColor).shadows(Shadow.ELEVATION_1)
     if (imgList.size == 1) imgModifier.fillMaxWidth()
     val lineCount = if (imgList.size == 1) 1 else if (imgList.size == 2 || imgList.size == 4) 2 else 3
     Grid(
@@ -88,6 +90,7 @@ private fun Layout.drawDynamicImages(
                 badge = pic.badge,
                 lineCount = lineCount,
                 ratio = if (imgList.size == 1) 0f else Ratio.SQUARE,
+                colors = colors,
                 modifier = imgModifier
             )
         }
@@ -99,9 +102,10 @@ private fun Layout.DynamicImageTile(
     badge: String? = null,
     lineCount: Int,
     ratio: Float = 0f,
+    colors: MediaCardColors,
     modifier: Modifier,
 ) = Box(modifier = modifier) {
-    val imgModifier = Modifier().border(2.dp, 10.dp)
+    val imgModifier = Modifier().border(2.dp, 10.dp, colors.coverBorderColor)
 
     // 图片限高，最高为绘图宽度的两倍 2000dp
     if (image.height > image.width * 2) imgModifier.maxHeight(2000.dp)
@@ -116,13 +120,13 @@ private fun Layout.DynamicImageTile(
             modifier = Modifier()
                 .margin((25 - 5 * lineCount).dp)
                 .padding(horizontal = (20 - 3 * lineCount).dp, vertical = (4 - 1 * lineCount).dp)
-                .background(color = Color.BLACK.withAlpha(0.5f))
+                .background(color = colors.overlayPillColor)
                 .border(0.dp, (13 - 2 * lineCount).dp)
         ) {
             Text(
                 text = badge,
                 fontSize = (36 - 6 * lineCount).dp,
-                color = Color.WHITE,
+                color = colors.overlayTextColor,
                 modifier = Modifier().maxWidth(500.dp)
             )
         }
@@ -138,6 +142,7 @@ private fun Layout.drawDynamicMediaCard(
     val card = block.card
     val cover = card.cover?.let(config::image)
     val duration = card.durationSeconds?.toDurationText().orEmpty()
+    val colors = mediaCardColors(config.theme)
     val info = card.info ?: listOf(card.metricText("play", "播放"), card.metricText("danmaku", "弹幕"))
         .filter { it.isNotBlank() }
         .joinToString(" ")
@@ -150,11 +155,7 @@ private fun Layout.drawDynamicMediaCard(
                     desc = card.description,
                     duration = duration,
                     badge = card.badge.orEmpty(),
-                    accentColor = config.theme.primaryColor,
-                    cardColor = config.theme.cardColor,
-                    borderColor = config.theme.borderColor,
-                    titleColor = config.theme.textColor,
-                    secondaryTextColor = config.theme.secondaryTextColor,
+                    colors = colors,
                     modifier = modifier,
                 )
             } else {
@@ -166,11 +167,7 @@ private fun Layout.drawDynamicMediaCard(
                     badge = card.badge.orEmpty(),
                     info = info,
                     coverRatio = card.coverRatio ?: Ratio.COVER_1,
-                    accentColor = config.theme.primaryColor,
-                    cardColor = config.theme.cardColor,
-                    borderColor = config.theme.borderColor,
-                    titleColor = config.theme.textColor,
-                    secondaryTextColor = config.theme.secondaryTextColor,
+                    colors = colors,
                     modifier = modifier,
                 )
             }
@@ -182,11 +179,7 @@ private fun Layout.drawDynamicMediaCard(
             duration = duration,
             badge = card.badge.orEmpty(),
             coverRatio = card.coverRatio ?: Ratio.COVER_2,
-            accentColor = config.theme.primaryColor,
-            cardColor = config.theme.cardColor,
-            borderColor = config.theme.borderColor,
-            titleColor = config.theme.textColor,
-            secondaryTextColor = config.theme.secondaryTextColor,
+            colors = colors,
             modifier = modifier,
         )
         MediaCardStyle.MINI -> MediaMini(
@@ -195,11 +188,7 @@ private fun Layout.drawDynamicMediaCard(
             desc = card.description,
             badge = card.badge.orEmpty(),
             coverRatio = card.coverRatio ?: Ratio.COVER_2,
-            accentColor = config.theme.primaryColor,
-            cardColor = config.theme.cardColor,
-            borderColor = config.theme.borderColor,
-            titleColor = config.theme.textColor,
-            secondaryTextColor = config.theme.secondaryTextColor,
+            colors = colors,
             modifier = modifier,
         )
     }
@@ -218,11 +207,7 @@ private fun Layout.drawDynamicPoll(
         title = poll.title,
         desc = options,
         badge = "投票",
-        accentColor = config.theme.primaryColor,
-        cardColor = config.theme.cardColor,
-        borderColor = config.theme.borderColor,
-        titleColor = config.theme.textColor,
-        secondaryTextColor = config.theme.secondaryTextColor,
+        colors = mediaCardColors(config.theme),
         modifier = modifier,
     )
 }

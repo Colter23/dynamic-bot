@@ -51,6 +51,7 @@ private const val TEST_IMAGE_PREFIX = "test://image/"
 private const val TEST_EMOJI_PREFIX = "test://emoji/"
 private const val PREVIEW_LAYOUTS_PROPERTY = "dynamic.draw.preview.layouts"
 private const val PREVIEW_LAYOUTS_ENV = "DYNAMIC_DRAW_PREVIEW_LAYOUTS"
+private const val DARK_PREVIEW_THEME_COLORS = "#101624;#24182D;#0D2630"
 private val defaultPreviewLayouts = listOf("default", "minimal")
 
 class DrawTest {
@@ -98,6 +99,50 @@ class DrawTest {
                     fileName = previewFileName(layout, preview.fileName),
                     update = preview.update,
                     config = drawConfig(layout = layout, ornament = preview.ornament),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `test dark theme draw previews`() {
+        val layouts = previewLayouts()
+        commonDynamicPreviews().forEach { preview ->
+            layouts.forEach { layout ->
+                renderToOutput(
+                    fileName = previewFileName("dark_$layout", preview.fileName),
+                    update = preview.update,
+                    config = drawConfig(
+                        layout = layout,
+                        ornament = preview.ornament,
+                        themeColors = DARK_PREVIEW_THEME_COLORS,
+                    ),
+                )
+            }
+        }
+        linkPreviewPreviews().forEach { preview ->
+            layouts.forEach { layout ->
+                renderLinkPreviewToOutput(
+                    fileName = previewFileName("dark_$layout", preview.fileName),
+                    preview = preview.preview,
+                    config = drawConfig(
+                        layout = layout,
+                        ornament = preview.ornament,
+                        themeColors = DARK_PREVIEW_THEME_COLORS,
+                    ),
+                )
+            }
+        }
+        liveOpenPreviews().forEach { preview ->
+            layouts.forEach { layout ->
+                renderLiveToOutput(
+                    fileName = previewFileName("dark_$layout", preview.fileName),
+                    update = preview.update,
+                    config = drawConfig(
+                        layout = layout,
+                        ornament = preview.ornament,
+                        themeColors = DARK_PREVIEW_THEME_COLORS,
+                    ),
                 )
             }
         }
@@ -481,10 +526,8 @@ class DrawTest {
                 title = "长文字和多图的阅读密度观察",
                 blocks = listOf(
                     richTextBlock(
-                        text("这条动态故意写得稍微长一些，用来观察自适应字号在长文本下的表现。"),
-                        emoji("[热词系列_大展宏兔]"),
-                        text(" 当正文超过几百字后，图片区域、作者卡片和标题之间的比例会变得更敏感；如果字号太小，聊天窗口里会显得像一整块灰色文字，如果字号太大，又会让整张图被拉得过长。"),
-                        text(" 所以这里把多图也放进来，顺便检查九宫格附近的上下边距是否自然。"),
+                        text("看到这个评论就想简单讲一下，其实也没啥特别的技巧，毛坯买的是一米三玉米须万用，为了还原立绘那种长发。做法就是前面的头发再烫一遍很蓬松的玉米须，只有烫蓬松了才能做出来层次感。\n" +
+                                "然后分区开始做刘海，先分三大块最后再做层次细分。我比较喜欢保留一点毛流感，所以需要两侧刘海要打薄，这样做出来有层次感。其实原图没这么层次感，只是做毛的时候喜欢加一点自己理解进去。做中间这一缕，要想有层次就要从这这块最底下这层发排取一部分作为侧面刘海收进去（其实我中间刘海发量取多了有点挡脸，而且鬓角做多了，其实不用那么多。）边做边喷一点水，过会再喷发胶，还没干的时候用手掐用尖尾梳弄出一点纹理来都可以。后面头发做了一点防炸，但是拍到后面也炸了。。还得再研究下防炸方法。当然我也没什么技巧，纯属为了省钱自学的，可能有些方法并不是很主流"),
                     ),
                     imageGrid(count = 9),
                 ),
@@ -742,10 +785,15 @@ class DrawTest {
     private fun drawConfig(
         layout: String = "default",
         ornament: DrawOrnament = DrawOrnament.LOGO,
+        themeColors: String = "#FE65A6",
     ): DrawConfig {
         return DrawConfig(
             platform = PlatformDescriptor.of("bilibili", "哔哩哔哩"),
-            settings = DrawSettings(layout = layout, ornament = ornament),
+            settings = DrawSettings(
+                layout = layout,
+                ornament = ornament,
+                themeColors = themeColors,
+            ),
         )
     }
 

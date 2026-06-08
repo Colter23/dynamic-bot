@@ -266,8 +266,10 @@ public class LinkParseService(
         val video = when (val outcome = downloadVideo(preview, parsedLink, downloader)) {
             is VideoDownloadOutcome.Downloaded -> outcome.result
             is VideoDownloadOutcome.NotSent -> {
+                val message = outcome.message.trim()
+                if (message.isBlank()) return previewResult
                 val feedback = forwardMessage(
-                    listOf(MessageBatch(listOf(MessageContent.Text(outcome.message)))),
+                    listOf(MessageBatch(listOf(MessageContent.Text(message)))),
                     parsedLink,
                     context,
                 )
@@ -302,9 +304,25 @@ public class LinkParseService(
         downloader: LinkVideoDownloader,
     ): VideoDownloadOutcome {
         val config = configProvider().linkParsing.videoDownload
-        if (!config.enabled) return VideoDownloadOutcome.NotSent("视频下载未推送：视频下载功能未开启。")
+        if (!config.enabled) {
+            return VideoDownloadOutcome.NotSent(
+                videoPrompt(
+                    config.prompts.failed,
+                    preview,
+                    parsedLink,
+                    mapOf("reason" to "视频下载功能未开启"),
+                ),
+            )
+        }
         if (parsedLink.kind != LinkKinds.VIDEO || preview.kind != LinkKinds.VIDEO) {
-            return VideoDownloadOutcome.NotSent("视频下载未推送：当前链接不是视频。")
+            return VideoDownloadOutcome.NotSent(
+                videoPrompt(
+                    config.prompts.failed,
+                    preview,
+                    parsedLink,
+                    mapOf("reason" to "当前链接不是视频"),
+                ),
+            )
         }
 
         val duration = preview.durationSeconds
@@ -312,14 +330,24 @@ public class LinkParseService(
             linkParseLogger.info {
                 "链接视频下载跳过：时长未知，platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}"
             }
-            return VideoDownloadOutcome.NotSent("视频下载已跳过：视频时长未知。")
+            return VideoDownloadOutcome.NotSent(
+                videoPrompt(config.prompts.durationUnknown, preview, parsedLink),
+            )
         }
         if (config.maxDurationSeconds > 0 && duration > config.maxDurationSeconds) {
             linkParseLogger.info {
                 "链接视频下载跳过：时长超限，platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，duration=$duration，max=${config.maxDurationSeconds}"
             }
             return VideoDownloadOutcome.NotSent(
-                "视频下载已跳过：视频时长 ${duration.formatDuration()} 超过限制 ${config.maxDurationSeconds.formatDuration()}。",
+                videoPrompt(
+                    config.prompts.durationTooLong,
+                    preview,
+                    parsedLink,
+                    mapOf(
+                        "duration" to duration.formatDuration(),
+                        "maxDuration" to config.maxDurationSeconds.formatDuration(),
+                    ),
+                ),
             )
         }
 
@@ -340,7 +368,12 @@ public class LinkParseService(
                         "链接视频下载超时，已回退预览：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，timeoutSeconds=${config.timeoutSeconds}"
                     }
                     return VideoDownloadOutcome.NotSent(
-                        "视频下载未推送：下载超时（限制 ${config.timeoutSeconds.formatSeconds()}）。",
+                        videoPrompt(
+                            config.prompts.timeout,
+                            preview,
+                            parsedLink,
+                            mapOf("timeout" to config.timeoutSeconds.formatSeconds()),
+                        ),
                     )
                 }
                 if (result.fileSizeBytes > config.maxFileBytes) {
@@ -348,7 +381,15 @@ public class LinkParseService(
                         "链接视频下载结果超出大小限制，已回退预览：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，size=${result.fileSizeBytes}，max=${config.maxFileBytes}"
                     }
                     return VideoDownloadOutcome.NotSent(
-                        "视频下载未推送：文件大小 ${result.fileSizeBytes.formatMegabytes()} 超过限制 ${config.maxFileBytes.formatMegabytes()}。",
+                        videoPrompt(
+                            config.prompts.fileTooLarge,
+                            preview,
+                            parsedLink,
+                            mapOf(
+                                "size" to result.fileSizeBytes.formatMegabytes(),
+                                "maxSize" to config.maxFileBytes.formatMegabytes(),
+                            ),
+                        ),
                     )
                 }
                 linkParseLogger.info {
@@ -362,7 +403,7 @@ public class LinkParseService(
             linkParseLogger.warn(e) {
                 "链接视频下载失败，已回退预览：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，原因=${e.message ?: "未知错误"}"
             }
-            VideoDownloadOutcome.NotSent(e.toVideoDownloadFeedback(config))
+            VideoDownloadOutcome.NotSent(e.toVideoDownloadFeedback(config, preview, parsedLink))
         }
     }
 
@@ -378,13 +419,21 @@ public class LinkParseService(
         if (duration == null) {
             return VideoDownloadPlan(
                 shouldDownload = false,
-                hint = "视频下载已跳过：视频时长未知。",
+                hint = videoPrompt(config.prompts.durationUnknown, preview, parsedLink),
             )
         }
         if (config.maxDurationSeconds > 0 && duration > config.maxDurationSeconds) {
             return VideoDownloadPlan(
                 shouldDownload = false,
-                hint = "视频下载已跳过：视频时长 ${duration.formatDuration()} 超过限制 ${config.maxDurationSeconds.formatDuration()}。",
+                hint = videoPrompt(
+                    config.prompts.durationTooLong,
+                    preview,
+                    parsedLink,
+                    mapOf(
+                        "duration" to duration.formatDuration(),
+                        "maxDuration" to config.maxDurationSeconds.formatDuration(),
+                    ),
+                ),
             )
         }
         val downloader = videoDownloadersProvider()
@@ -392,12 +441,12 @@ public class LinkParseService(
         if (downloader == null) {
             return VideoDownloadPlan(
                 shouldDownload = false,
-                hint = "视频下载已跳过：当前没有可用的视频下载器。",
+                hint = videoPrompt(config.prompts.noDownloader, preview, parsedLink),
             )
         }
         return VideoDownloadPlan(
             shouldDownload = true,
-            hint = "视频正在下载，完成后会继续推送。",
+            hint = videoPrompt(config.prompts.downloading, preview, parsedLink),
             downloader = downloader,
         )
     }
@@ -564,17 +613,60 @@ public class LinkParseService(
         }
     }
 
-    private fun Throwable.toVideoDownloadFeedback(config: LinkVideoDownloadConfig): String {
+    private fun videoPrompt(
+        template: String,
+        preview: LinkPreview,
+        parsedLink: ParsedLink,
+        values: Map<String, String> = emptyMap(),
+    ): String {
+        val replacements = linkedMapOf(
+            "platform" to parsedLink.platformId.value,
+            "kind" to parsedLink.kind,
+            "id" to parsedLink.targetId,
+            "title" to preview.title.ifBlank { parsedLink.targetId },
+            "link" to preview.url.ifBlank { parsedLink.normalizedUrl },
+            "url" to preview.url.ifBlank { parsedLink.normalizedUrl },
+        )
+        replacements.putAll(values)
+        return replacements.entries.fold(template) { current, (key, value) ->
+            current.replace("{$key}", value)
+        }.trim()
+    }
+
+    private fun Throwable.toVideoDownloadFeedback(
+        config: LinkVideoDownloadConfig,
+        preview: LinkPreview,
+        parsedLink: ParsedLink,
+    ): String {
         val reason = message?.trim()?.takeIf { it.isNotBlank() } ?: "下载失败，原因未知"
+        val isSizeExceeded = reason.contains("maxBytes", ignoreCase = true) ||
+            reason.contains("大小") ||
+            reason.contains("size", ignoreCase = true)
         val normalized = when {
-            reason.contains("maxBytes", ignoreCase = true) ||
-                reason.contains("大小") ||
-                reason.contains("size", ignoreCase = true) -> {
+            isSizeExceeded -> {
                 "文件超过大小限制 ${config.maxFileBytes.formatMegabytes()}"
             }
             else -> reason
         }.trimEnd('。', '.', '！', '!')
-        return "视频下载未推送：$normalized。"
+        return if (isSizeExceeded) {
+            videoPrompt(
+                config.prompts.fileTooLarge,
+                preview,
+                parsedLink,
+                mapOf(
+                    "size" to "未知",
+                    "maxSize" to config.maxFileBytes.formatMegabytes(),
+                    "reason" to normalized,
+                ),
+            )
+        } else {
+            videoPrompt(
+                config.prompts.failed,
+                preview,
+                parsedLink,
+                mapOf("reason" to normalized),
+            )
+        }
     }
 
     private fun secondsToMillis(seconds: Double, minimumMillis: Long): Long {

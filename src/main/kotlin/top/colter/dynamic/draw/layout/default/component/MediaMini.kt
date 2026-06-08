@@ -1,6 +1,5 @@
 ﻿package top.colter.dynamic.draw.layout.default.component
 
-import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
 import top.colter.skiko.*
 import top.colter.skiko.data.LayoutAlignment
@@ -17,18 +16,14 @@ internal fun Layout.MediaMini(
     desc: String,
     badge: String? = null,
     coverRatio: Float = Ratio.COVER_2,
-    accentColor: Int = Color.makeRGB(251, 114, 153),
-    cardColor: Int = Color.WHITE.withAlpha(0.6f),
-    borderColor: Int = Color.WHITE,
-    titleColor: Int = Color.BLACK,
-    secondaryTextColor: Int = Color.BLACK.withAlpha(0.7f),
+    colors: MediaCardColors = MediaCardColors(),
     modifier: Modifier = Modifier()
 ) = Row (
     modifier = modifier
         .height(100.dp)
         .fillMaxWidth()
-        .background(cardColor)
-        .border(3.dp, 15.dp, borderColor)
+        .background(colors.cardColor)
+        .border(3.dp, 15.dp, colors.borderColor)
         .shadows(Shadow.ELEVATION_3)
 ) {
     require(modifier.height.isNotNull()) { "必须指定高度" }
@@ -38,7 +33,7 @@ internal fun Layout.MediaMini(
         Image(
             image = cover,
             ratio = coverRatio,
-            modifier = Modifier().fillMaxHeight().border(3.dp, 10.dp).shadows(Shadow.ELEVATION_2)
+            modifier = Modifier().fillMaxHeight().border(3.dp, 10.dp, colors.coverBorderColor).shadows(Shadow.ELEVATION_2)
         )
     }
 
@@ -48,7 +43,7 @@ internal fun Layout.MediaMini(
             Text(
                 text = title,
                 fontSize = 22.dp,
-                color = titleColor,
+                color = colors.titleColor,
                 maxLinesCount = 1,
                 alignment = LayoutAlignment.LEFT,
                 modifier = Modifier().fillMaxWidth()
@@ -57,7 +52,7 @@ internal fun Layout.MediaMini(
         Box(modifier = Modifier().fillMaxWidth().fillRatioHeight(0.6f)) {
             Text(
                 text = desc,
-                color = secondaryTextColor,
+                color = colors.secondaryTextColor,
                 maxLinesCount = 2,
                 alignment = LayoutAlignment.LEFT,
                 modifier = Modifier().fillMaxWidth()
@@ -71,14 +66,14 @@ internal fun Layout.MediaMini(
             alignment = LayoutAlignment.RIGHT_TOP,
             modifier = Modifier()
                 .padding(horizontal = 20.dp, vertical = 3.dp)
-                .background(color = accentColor)
-                .border(2.dp, listOf(0.dp, 10.dp, 0.dp, 10.dp))
+                .background(color = colors.accentColor)
+                .border(2.dp, listOf(0.dp, 10.dp, 0.dp, 10.dp), colors.badgeBorderColor)
                 .shadows(Shadow.ELEVATION_2)
         ) {
             Text(
                 text = badge,
                 fontSize = 20.dp,
-                color = Color.WHITE,
+                color = colors.badgeTextColor,
                 modifier = Modifier().maxWidth(200.dp)
             )
         }

@@ -1,5 +1,4 @@
 ﻿package top.colter.dynamic.draw.layout.default.component
-import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
 import top.colter.skiko.*
 import top.colter.skiko.data.LayoutAlignment
@@ -17,18 +16,14 @@ internal fun Layout.MediaSmall(
     duration: String? = null,
     badge: String? = null,
     coverRatio: Float = Ratio.COVER_2,
-    accentColor: Int = Color.makeRGB(251, 114, 153),
-    cardColor: Int = Color.WHITE.withAlpha(0.6f),
-    borderColor: Int = Color.WHITE,
-    titleColor: Int = Color.BLACK,
-    secondaryTextColor: Int = Color.BLACK.withAlpha(0.7f),
+    colors: MediaCardColors = MediaCardColors(),
     modifier: Modifier = Modifier()
 ) = Row (
     modifier = modifier
         .height(200.dp)
         .fillMaxWidth()
-        .background(cardColor)
-        .border(3.dp, 15.dp, borderColor)
+        .background(colors.cardColor)
+        .border(3.dp, 15.dp, colors.borderColor)
         .shadows(Shadow.ELEVATION_3)
 ) {
     require(modifier.height.isNotNull()) { "必须指定高度" }
@@ -40,7 +35,7 @@ internal fun Layout.MediaSmall(
             Image(
                 image = cover,
                 ratio = coverRatio,
-                modifier = Modifier().fillMaxHeight().border(3.dp, 10.dp).shadows(Shadow.ELEVATION_2)
+                modifier = Modifier().fillMaxHeight().border(3.dp, 10.dp, colors.coverBorderColor).shadows(Shadow.ELEVATION_2)
             )
 
             if (!badge.isNullOrBlank()) {
@@ -48,14 +43,14 @@ internal fun Layout.MediaSmall(
                     alignment = LayoutAlignment.LEFT_TOP,
                     modifier = Modifier()
                         .padding(horizontal = 24.dp, vertical = 3.dp)
-                        .background(color = accentColor)
-                        .border(2.dp, listOf(10.dp, 0.dp, 10.dp, 0.dp))
+                        .background(color = colors.accentColor)
+                        .border(2.dp, listOf(10.dp, 0.dp, 10.dp, 0.dp), colors.badgeBorderColor)
                         .shadows(Shadow.ELEVATION_1)
                 ) {
                     Text(
                         text = badge,
                         fontSize = 22.dp,
-                        color = Color.WHITE,
+                        color = colors.badgeTextColor,
                         modifier = Modifier().maxWidth(200.dp)
                     )
                 }
@@ -67,13 +62,13 @@ internal fun Layout.MediaSmall(
                     modifier = Modifier()
                         .margin(right = 25.dp, bottom = 20.dp)
                         .padding(horizontal = 15.dp, vertical = 2.dp)
-                        .background(color = Color.BLACK.withAlpha(0.5f))
+                        .background(color = colors.overlayPillColor)
                         .border(0.dp, 10.dp)
                 ) {
                     Text(
                         text = duration,
                         fontSize = 20.dp,
-                        color = Color.WHITE,
+                        color = colors.overlayTextColor,
                         modifier = Modifier().maxWidth(400.dp)
                     )
                 }
@@ -84,14 +79,14 @@ internal fun Layout.MediaSmall(
             alignment = LayoutAlignment.LEFT_TOP,
             modifier = Modifier()
                 .padding(horizontal = 24.dp, vertical = 3.dp)
-                .background(color = accentColor)
-                .border(2.dp, listOf(10.dp, 0.dp, 10.dp, 0.dp))
+                .background(color = colors.accentColor)
+                .border(2.dp, listOf(10.dp, 0.dp, 10.dp, 0.dp), colors.badgeBorderColor)
                 .shadows(Shadow.ELEVATION_1)
         ) {
             Text(
                 text = badge,
                 fontSize = 22.dp,
-                color = Color.WHITE,
+                color = colors.badgeTextColor,
                 modifier = Modifier().maxWidth(200.dp)
             )
         }
@@ -102,7 +97,7 @@ internal fun Layout.MediaSmall(
         Text(
             text = title,
             fontSize = 23.dp,
-            color = titleColor,
+            color = colors.titleColor,
             maxLinesCount = 2,
             alignment = LayoutAlignment.LEFT,
             modifier = Modifier().fillRatioHeight(0.4f)
@@ -110,7 +105,7 @@ internal fun Layout.MediaSmall(
 
         Text(
             text = desc,
-            color = secondaryTextColor,
+            color = colors.secondaryTextColor,
             maxLinesCount = 4,
             alignment = LayoutAlignment.LEFT,
             modifier = Modifier().fillRatioHeight(0.6f)

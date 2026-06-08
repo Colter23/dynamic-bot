@@ -8,6 +8,7 @@ import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.draw.layout.default.component.Media
 import top.colter.dynamic.draw.layout.default.component.MediaSmall
+import top.colter.dynamic.draw.layout.default.component.mediaCardColors
 import top.colter.dynamic.util.formatTime
 import top.colter.skiko.Dp
 import top.colter.skiko.Modifier
@@ -83,17 +84,14 @@ internal fun Layout.drawLiveMediaCard(
         info.takeIf { cover == null && it.isNotBlank() },
     ).joinToString(" / ")
     val badge = live.statusLabel()
+    val colors = mediaCardColors(config.theme)
     if (cover == null) {
         MediaSmall(
             cover = null,
             title = title,
             desc = subtitle,
             badge = badge,
-            accentColor = config.theme.primaryColor,
-            cardColor = config.theme.cardColor,
-            borderColor = config.theme.borderColor,
-            titleColor = config.theme.textColor,
-            secondaryTextColor = config.theme.secondaryTextColor,
+            colors = colors,
             modifier = modifier,
         )
     } else {
@@ -104,11 +102,7 @@ internal fun Layout.drawLiveMediaCard(
             badge = badge,
             coverRatio = Ratio.COVER_1,
             info = info,
-            accentColor = config.theme.primaryColor,
-            cardColor = config.theme.cardColor,
-            borderColor = config.theme.borderColor,
-            titleColor = config.theme.textColor,
-            secondaryTextColor = config.theme.secondaryTextColor,
+            colors = colors,
             modifier = modifier,
         )
     }

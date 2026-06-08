@@ -1,6 +1,5 @@
 ﻿package top.colter.dynamic.draw.layout.default.component
 
-import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
 import top.colter.skiko.*
 import top.colter.skiko.data.Gradient
@@ -30,17 +29,13 @@ internal fun Layout.Media(
     duration: String? = null,
     info: String? = null,
     coverRatio: Float = Ratio.COVER_1,
-    accentColor: Int = Color.makeRGB(251, 114, 153),
-    cardColor: Int = Color.WHITE.withAlpha(0.6f),
-    borderColor: Int = Color.WHITE,
-    titleColor: Int = Color.BLACK,
-    secondaryTextColor: Int = Color.BLACK.withAlpha(0.7f),
+    colors: MediaCardColors = MediaCardColors(),
     modifier: Modifier = Modifier()
 ) = Column(
     modifier = modifier
         .fillMaxWidth()
-        .background(cardColor)
-        .border(3.dp, 15.dp, borderColor)
+        .background(colors.cardColor)
+        .border(3.dp, 15.dp, colors.borderColor)
         .shadows(Shadow.ELEVATION_3)
 ) {
     //require(modifier.width.isNotNull()) { "必须指定宽度" }
@@ -52,7 +47,7 @@ internal fun Layout.Media(
         Image(
             image = cover,
             ratio = coverRatio,
-            modifier = Modifier().border(3.dp, 10.dp).shadows(Shadow.ELEVATION_2)
+            modifier = Modifier().border(3.dp, 10.dp, colors.coverBorderColor).shadows(Shadow.ELEVATION_2)
         )
 
         // TAG
@@ -61,14 +56,14 @@ internal fun Layout.Media(
                 alignment = LayoutAlignment.RIGHT_TOP,
                 modifier = Modifier()
                     .padding(horizontal = 30.dp, vertical = 3.dp)
-                    .background(color = accentColor)
-                    .border(2.dp, listOf(0.dp, 10.dp, 0.dp, 10.dp))
+                    .background(color = colors.accentColor)
+                    .border(2.dp, listOf(0.dp, 10.dp, 0.dp, 10.dp), colors.badgeBorderColor)
                     .shadows(Shadow.ELEVATION_1)
             ) {
                 Text(
                     text = badge,
                     fontSize = 30.dp,
-                    color = Color.WHITE,
+                    color = colors.badgeTextColor,
                     modifier = Modifier().maxWidth(200.dp)
                 )
             }
@@ -85,7 +80,7 @@ internal fun Layout.Media(
                     .background(gradient = Gradient(
                         LayoutAlignment.BOTTOM,
                         LayoutAlignment.TOP,
-                        listOf(Color.BLACK.withAlpha(0.5f), Color.BLACK.withAlpha(0f))
+                        listOf(colors.overlayColor, colors.overlayTransparentColor)
                     ))
                     .border(0.dp, listOf(0.dp, 0.dp, 10.dp, 10.dp))
             ) {
@@ -96,13 +91,13 @@ internal fun Layout.Media(
                         modifier = Modifier()
                             .margin(left = 40.dp)
                             .padding(horizontal = 15.dp, vertical = 4.dp)
-                            .background(color = Color.BLACK.withAlpha(0.5f))
+                            .background(color = colors.overlayPillColor)
                             .border(0.dp, 10.dp)
                     ) {
                         Text(
                             text = duration,
                             fontSize = 26.dp,
-                            color = Color.WHITE,
+                            color = colors.overlayTextColor,
                             modifier = Modifier().maxWidth(400.dp)
                         )
                     }
@@ -113,7 +108,7 @@ internal fun Layout.Media(
                     Text(
                         text = info,
                         fontSize = 28.dp,
-                        color = Color.WHITE,
+                        color = colors.overlayTextColor,
                         alignment = LayoutAlignment.LEFT,
                         modifier = Modifier().maxWidth(600.dp).margin(left = 15.dp)
                     )
@@ -127,7 +122,7 @@ internal fun Layout.Media(
     Text(
         text = title,
         fontSize = 34.dp,
-        color = titleColor,
+        color = colors.titleColor,
         maxLinesCount = 2,
         modifier = Modifier().margin(top = 15.dp, right = 15.dp, bottom = 10.dp, left = 15.dp)
     )
@@ -136,7 +131,7 @@ internal fun Layout.Media(
     Text(
         text = desc,
         fontSize = 24.dp,
-        color = secondaryTextColor,
+        color = colors.secondaryTextColor,
         maxLinesCount = 3,
         modifier = Modifier().margin(right = 15.dp, bottom = 15.dp, left = 15.dp)
     )
