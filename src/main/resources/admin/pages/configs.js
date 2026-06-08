@@ -364,6 +364,7 @@ function configRestartChanged(detail) {
 }
 
 function configFieldChanged(detail, field) {
+  if (field.readOnly) return false;
   return JSON.stringify(currentConfigComparableValue(field)) !== JSON.stringify(configComparableValue(detail, field));
 }
 
@@ -575,17 +576,17 @@ function configFieldHtml(detail, field) {
   if (field.component === "NOTIFICATION_TARGET_TABLE") return notificationTargetsFieldHtml(detail, field);
   const raw = detail.values[field.path];
   const value = displayConfigValue(raw);
-  const fieldLabel = `${esc(field.label)}${field.required ? `<span class="required-mark">*</span>` : ""}${field.restartRequired ? ` <span class="restart-mark" title="保存后需重启">⚠️</span>` : ""}`;
+  const fieldLabel = configFieldLabelHtml(field);
   const labelHtml = `<label for="cfg-${attr(field.path)}">${fieldLabel}</label>`;
   const descriptionHtml = configFieldDescriptionHtml(field);
   if (field.type === "BOOLEAN") {
-    return `<div class="field" data-config-field-path="${attr(field.path)}"><label class="check"><input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="checkbox"${raw === true ? " checked" : ""}>${fieldLabel}</label>${descriptionHtml}</div>`;
+    return `<div class="${configFieldClass(field)}" data-config-field-path="${attr(field.path)}"><label class="check"><input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="checkbox"${raw === true ? " checked" : ""}${readOnlyDisabledAttrs(field)}>${fieldLabel}</label>${descriptionHtml}</div>`;
   }
   if (field.type === "SELECT") {
-    return `<div class="field" data-config-field-path="${attr(field.path)}">${labelHtml}<select id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}">${(field.options || []).map(opt => `<option value="${attr(opt.value)}"${String(raw) === String(opt.value) ? " selected" : ""}>${esc(opt.label)}</option>`).join("")}</select>${descriptionHtml}</div>`;
+    return `<div class="${configFieldClass(field)}" data-config-field-path="${attr(field.path)}">${labelHtml}<select id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}"${readOnlyDisabledAttrs(field)}>${(field.options || []).map(opt => `<option value="${attr(opt.value)}"${String(raw) === String(opt.value) ? " selected" : ""}>${esc(opt.label)}</option>`).join("")}</select>${descriptionHtml}</div>`;
   }
   if (field.type === "TEXTAREA" || field.type === "JSON") {
-    return `<div class="field full" data-config-field-path="${attr(field.path)}">${labelHtml}<textarea id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}">${esc(value)}</textarea>${descriptionHtml}</div>`;
+    return `<div class="${configFieldClass(field, "full")}" data-config-field-path="${attr(field.path)}">${labelHtml}<textarea id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}"${readOnlyInputAttrs(field)}>${esc(value)}</textarea>${descriptionHtml}</div>`;
   }
   if (field.type === "SECRET") {
     return secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml);
@@ -593,22 +594,49 @@ function configFieldHtml(detail, field) {
   const inputType = field.type === "NUMBER" ? "number" : "text";
   const step = field.numberKind === "INTEGER" ? "1" : "any";
   const numberAttrs = field.type === "NUMBER" ? ` step="${step}"${field.numberKind === "INTEGER" ? ' inputmode="numeric"' : ""}${field.min !== undefined && field.min !== null ? ` min="${attr(field.min)}"` : ""}${field.max !== undefined && field.max !== null ? ` max="${attr(field.max)}"` : ""}` : "";
-  return `<div class="field" data-config-field-path="${attr(field.path)}">${labelHtml}<input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="${inputType}"${numberAttrs} value="${attr(value)}">${descriptionHtml}</div>`;
+  return `<div class="${configFieldClass(field)}" data-config-field-path="${attr(field.path)}">${labelHtml}<input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="${inputType}"${numberAttrs}${readOnlyInputAttrs(field)} value="${attr(value)}">${descriptionHtml}</div>`;
+}
+
+function configFieldClass(field, extra = "") {
+  return ["field", extra, field.readOnly ? "readonly-field" : ""].filter(Boolean).join(" ");
+}
+
+function configFieldLabelHtml(field, options = {}) {
+  const includeRestart = options.includeRestart !== false;
+  return `${esc(field.label)}${field.required ? `<span class="required-mark">*</span>` : ""}${includeRestart && field.restartRequired ? ` <span class="restart-mark" title="保存后需重启">⚠️</span>` : ""}${readOnlyBadgeHtml(field)}`;
+}
+
+function readOnlyBadgeHtml(field) {
+  return field.readOnly ? `<span class="readonly-mark" title="此配置项只能查看，保存时会保留当前值">只读</span>` : "";
+}
+
+function readOnlyInputAttrs(field) {
+  return field.readOnly ? ` readonly aria-readonly="true"` : "";
+}
+
+function readOnlyDisabledAttrs(field) {
+  return field.readOnly ? ` disabled aria-readonly="true"` : "";
+}
+
+function readOnlyTableNoteHtml(field) {
+  return field.readOnly ? `<span class="inline-note readonly-table-note">此配置项为只读，只能查看当前内容。</span>` : "";
 }
 
 function secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml) {
   const hasSecret = !!(detail.secretStates && detail.secretStates[field.path]);
   const value = displayConfigValue(detail.values[field.path]);
   const editorHidden = hasSecret && !value;
-  return `<div class="field" data-config-field-path="${attr(field.path)}">
+  const fetchText = field.readOnly ? "当前已保存密钥，点击后显示但不可编辑。" : "当前已保存密钥，点击后显示并可编辑。";
+  const placeholder = field.readOnly ? "未设置" : (hasSecret ? "" : "请输入密钥");
+  return `<div class="${configFieldClass(field)}" data-config-field-path="${attr(field.path)}">
     ${labelHtml}
     <div class="config-secret-box" data-secret-field>
       <div class="secret-fetch-panel" data-secret-fetch-panel${editorHidden ? "" : " hidden"}>
         <button type="button" class="secret-fetch-button" data-action="load-config-secret" data-path="${attr(field.path)}">获取密钥</button>
-        <span>当前已保存密钥，点击后显示并可编辑。</span>
+        <span>${esc(fetchText)}</span>
       </div>
       <div class="secret-control" data-secret-editor${editorHidden ? " hidden" : ""}>
-        <input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-secret-input="true" data-secret-has-value="${hasSecret ? "true" : "false"}" data-secret-loaded="${editorHidden ? "false" : "true"}" type="${editorHidden ? "hidden" : "password"}" value="${attr(value)}" data-secret-original="${attr(value)}" placeholder="${hasSecret ? "" : "请输入密钥"}" autocomplete="off">
+        <input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-secret-input="true" data-secret-has-value="${hasSecret ? "true" : "false"}" data-secret-loaded="${editorHidden ? "false" : "true"}" type="${editorHidden ? "hidden" : "password"}" value="${attr(value)}" data-secret-original="${attr(value)}" placeholder="${attr(placeholder)}" autocomplete="off"${readOnlyInputAttrs(field)}>
         <button type="button" class="secret-eye" data-action="toggle-config-secret" data-path="${attr(field.path)}" data-revealed="false" aria-pressed="false" title="查看真实值">${secretEyeIconHtml()}</button>
       </div>
     </div>
@@ -640,8 +668,8 @@ function messageTemplateFieldHtml(detail, field) {
   const inputId = messageTemplateDomId("cfg-template", field.path);
   const previewId = messageTemplateDomId("messageTemplatePreview", field.path);
   const statsId = messageTemplateDomId("messageTemplateStats", field.path);
-  const fieldLabel = `${esc(field.label)}${field.required ? `<span class="required-mark">*</span>` : ""}`;
-  return `<div class="field message-template-field" data-config-field-path="${attr(field.path)}">
+  const fieldLabel = configFieldLabelHtml(field);
+  return `<div class="${configFieldClass(field, "message-template-field")}" data-config-field-path="${attr(field.path)}">
     <textarea id="${attr(inputId)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" hidden>${esc(value)}</textarea>
     <div class="message-template-shell">
       <div class="message-template-head">
@@ -649,10 +677,11 @@ function messageTemplateFieldHtml(detail, field) {
           <span class="primary-line">${fieldLabel}</span>
           <span id="${attr(statsId)}" class="sub-line">${esc(messageTemplateStats(value, kind))}</span>
         </div>
-        <button type="button" class="compact message-template-edit-button" data-action="edit-message-template" data-path="${attr(field.path)}">编辑</button>
+        ${field.readOnly ? "" : `<button type="button" class="compact message-template-edit-button" data-action="edit-message-template" data-path="${attr(field.path)}">编辑</button>`}
       </div>
       <div id="${attr(previewId)}" class="message-template-preview">${renderMessageTemplatePreview(value, kind)}</div>
     </div>
+    ${configFieldDescriptionHtml(field)}
   </div>`;
 }
 
@@ -1034,29 +1063,31 @@ function messageTemplateSampleValues(kind) {
 
 function oneBotConnectionsFieldHtml(detail, field) {
   const connections = normalizeOneBotConnections(detail.values[field.path]);
-  return `<div class="field onebot-connection-field" data-config-field-path="${attr(field.path)}">
-    <label for="cfg-onebot-connections">${esc(field.label)}</label>
+  const readOnly = !!field.readOnly;
+  return `<div class="${configFieldClass(field, "onebot-connection-field")}" data-config-field-path="${attr(field.path)}">
+    <label for="cfg-onebot-connections">${configFieldLabelHtml(field)}</label>
     ${configFieldDescriptionHtml(field)}
-    <input id="cfg-onebot-connections" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="hidden" value="${attr(JSON.stringify(connections))}">
-    <div class="command-permission-toolbar">
+    <input id="cfg-onebot-connections" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(connections))}">
+    ${readOnly ? readOnlyTableNoteHtml(field) : `<div class="command-permission-toolbar">
       <button type="button" data-action="add-onebot-connection">添加连接</button>
       <button type="button" class="secondary" data-action="clear-onebot-connections">清空</button>
-    </div>
-    <div id="oneBotConnectionTable">${renderOneBotConnectionTable(connections)}</div>
+    </div>`}
+    <div id="oneBotConnectionTable">${renderOneBotConnectionTable(connections, readOnly)}</div>
   </div>`;
 }
 
 function messageRoutingPlatformPoliciesFieldHtml(detail, field) {
   const policies = normalizeMessageRoutingPlatformPolicies(detail.values[field.path]);
-  return `<div class="field message-routing-policy-field" data-config-field-path="${attr(field.path)}">
-    <label for="cfg-message-routing-platform-policies">${esc(field.label)}</label>
+  const readOnly = !!field.readOnly;
+  return `<div class="${configFieldClass(field, "message-routing-policy-field")}" data-config-field-path="${attr(field.path)}">
+    <label for="cfg-message-routing-platform-policies">${configFieldLabelHtml(field)}</label>
     ${configFieldDescriptionHtml(field)}
-    <input id="cfg-message-routing-platform-policies" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="hidden" value="${attr(JSON.stringify(policies))}">
-    <div class="command-permission-toolbar">
+    <input id="cfg-message-routing-platform-policies" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(policies))}">
+    ${readOnly ? readOnlyTableNoteHtml(field) : `<div class="command-permission-toolbar">
       <button type="button" data-action="add-message-routing-policy">添加策略</button>
       <button type="button" class="secondary" data-action="clear-message-routing-policies">清空</button>
-    </div>
-    <div id="messageRoutingPlatformPolicyTable">${renderMessageRoutingPlatformPolicyTable(policies)}</div>
+    </div>`}
+    <div id="messageRoutingPlatformPolicyTable">${renderMessageRoutingPlatformPolicyTable(policies, readOnly)}</div>
   </div>`;
 }
 
@@ -1075,7 +1106,7 @@ function setMessageRoutingPlatformPolicies(policies) {
   const node = $("cfg-message-routing-platform-policies");
   if (node) node.value = JSON.stringify(normalized);
   const table = $("messageRoutingPlatformPolicyTable");
-  if (table) table.innerHTML = renderMessageRoutingPlatformPolicyTable(normalized);
+  if (table) table.innerHTML = renderMessageRoutingPlatformPolicyTable(normalized, node?.dataset.configReadonly === "true");
   if (state.currentConfigDetail) {
     updateConfigRestartButton(state.currentConfigDetail);
     updateConfigDirtyState(state.currentConfigDetail);
@@ -1111,18 +1142,21 @@ function dedupeMessageRoutingPlatformPolicies(policies) {
   return Array.from(seen.values());
 }
 
-function renderMessageRoutingPlatformPolicyTable(policies) {
+function renderMessageRoutingPlatformPolicyTable(policies, readOnly = false) {
   const rows = normalizeMessageRoutingPlatformPolicies(policies).map((policy, index) => Object.assign({ _index: index }, policy));
-  return renderTable(rows, [
+  const columns = [
     { title: "平台", render: row => `<span class="primary-line">${esc(row.platformId || "-")}</span>` },
     { title: "策略", render: row => pill(row.policy.strategy) },
     { title: "主账号", render: row => cell(row.policy.primaryAccountId || "留空", row.policy.primaryAccountId ? "优先从该账号发送" : "使用平台第一个可用账号") },
     { title: "冷却", render: row => `<span class="primary-line">${esc(`${Number(row.policy.failureCooldownSeconds || 0)} 秒`)}</span>` },
-    { title: "操作", render: row => `<div class="row-actions">
+  ];
+  if (!readOnly) {
+    columns.push({ title: "操作", render: row => `<div class="row-actions">
       <button type="button" class="secondary compact" data-action="edit-message-routing-policy" data-index="${row._index}">编辑</button>
       <button type="button" class="danger compact" data-action="delete-message-routing-policy" data-index="${row._index}">删除</button>
-    </div>` }
-  ]);
+    </div>` });
+  }
+  return renderTable(rows, columns);
 }
 
 async function openMessageRoutingPlatformPolicyModal(index = null) {
@@ -1240,7 +1274,7 @@ function setOneBotConnections(connections) {
   const node = $("cfg-onebot-connections");
   if (node) node.value = JSON.stringify(normalized);
   const table = $("oneBotConnectionTable");
-  if (table) table.innerHTML = renderOneBotConnectionTable(normalized);
+  if (table) table.innerHTML = renderOneBotConnectionTable(normalized, node?.dataset.configReadonly === "true");
   if (state.currentConfigDetail) {
     updateConfigRestartButton(state.currentConfigDetail);
     updateConfigDirtyState(state.currentConfigDetail);
@@ -1261,18 +1295,21 @@ function normalizeOneBotConnection(connection) {
   };
 }
 
-function renderOneBotConnectionTable(connections) {
+function renderOneBotConnectionTable(connections, readOnly = false) {
   const rows = normalizeOneBotConnections(connections).map((connection, index) => Object.assign({ _index: index }, connection));
-  return renderTable(rows, [
+  const columns = [
     { title: "标记名称", render: connection => cell(connection.name || "未标记", "仅用于后台识别") },
     { title: "地址", render: connection => `<span class="primary-line">${esc(connection.url || "-")}</span>` },
     { title: "Token", render: connection => `<span class="sub-line">${connection.accessToken ? "已填写" : "未填写"}</span>` },
     { title: "状态", render: connection => pill(connection.enabled ? "启用" : "停用") },
-    { title: "操作", render: connection => `<div class="row-actions">
+  ];
+  if (!readOnly) {
+    columns.push({ title: "操作", render: connection => `<div class="row-actions">
       <button type="button" class="secondary compact" data-action="edit-onebot-connection" data-index="${connection._index}">编辑</button>
       <button type="button" class="danger compact" data-action="delete-onebot-connection" data-index="${connection._index}">删除</button>
-    </div>` }
-  ]);
+    </div>` });
+  }
+  return renderTable(rows, columns);
 }
 
 function openOneBotConnectionModal(index = null) {
@@ -1341,15 +1378,16 @@ function toggleOneBotConnectionToken(button) {
 
 function notificationTargetsFieldHtml(detail, field) {
   const targets = normalizeNotificationTargets(detail.values[field.path]);
-  return `<div class="field notification-target-field" data-config-field-path="${attr(field.path)}">
-    <label for="cfg-notification-targets">${esc(field.label)}</label>
+  const readOnly = !!field.readOnly;
+  return `<div class="${configFieldClass(field, "notification-target-field")}" data-config-field-path="${attr(field.path)}">
+    <label for="cfg-notification-targets">${configFieldLabelHtml(field)}</label>
     ${configFieldDescriptionHtml(field)}
-    <input id="cfg-notification-targets" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="hidden" value="${attr(JSON.stringify(targets))}">
-    <div class="command-permission-toolbar">
+    <input id="cfg-notification-targets" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(targets))}">
+    ${readOnly ? readOnlyTableNoteHtml(field) : `<div class="command-permission-toolbar">
       <button type="button" data-action="add-notification-target">添加目标</button>
       <button type="button" class="secondary" data-action="clear-notification-targets">清空</button>
-    </div>
-    <div id="notificationTargetTable">${renderNotificationTargetTable(targets)}</div>
+    </div>`}
+    <div id="notificationTargetTable">${renderNotificationTargetTable(targets, readOnly)}</div>
   </div>`;
 }
 
@@ -1368,7 +1406,7 @@ function setNotificationTargets(targets) {
   const node = $("cfg-notification-targets");
   if (node) node.value = JSON.stringify(normalized);
   const table = $("notificationTargetTable");
-  if (table) table.innerHTML = renderNotificationTargetTable(normalized);
+  if (table) table.innerHTML = renderNotificationTargetTable(normalized, node?.dataset.configReadonly === "true");
   if (state.currentConfigDetail) {
     updateConfigRestartButton(state.currentConfigDetail);
     updateConfigDirtyState(state.currentConfigDetail);
@@ -1408,9 +1446,9 @@ function dedupeNotificationTargets(targets) {
   return Array.from(seen.values());
 }
 
-function renderNotificationTargetTable(targets) {
+function renderNotificationTargetTable(targets, readOnly = false) {
   const rows = normalizeNotificationTargets(targets).map((target, index) => Object.assign({ _index: index }, target));
-  return renderTable(rows, [
+  const columns = [
     { title: "名称", render: row => cell(row.name || row.externalId, row.externalId) },
     { title: "目标", render: row => `<div class="notification-target-cell">
       <span class="notification-target-line">${platformTag(row.platformId, row.platformId)}<span class="pill info">${esc(label(row.targetKind))}</span></span>
@@ -1418,11 +1456,14 @@ function renderNotificationTargetTable(targets) {
     </div>` },
     { title: "状态", render: row => `<span class="pill ${row.enabled ? "ok" : "warn"}">${row.enabled ? "启用" : "停用"}</span>` },
     { title: "优先账号", render: row => `<span class="primary-line">${esc(row.accountId || "全局路由")}</span>` },
-    { title: "操作", render: row => `<div class="row-actions">
+  ];
+  if (!readOnly) {
+    columns.push({ title: "操作", render: row => `<div class="row-actions">
       <button type="button" class="secondary compact soft-edit-button" data-action="edit-notification-target" data-index="${row._index}">编辑</button>
       <button type="button" class="danger compact" data-action="delete-notification-target" data-index="${row._index}">删除</button>
-    </div>` }
-  ]);
+    </div>` });
+  }
+  return renderTable(rows, columns);
 }
 
 function notificationTargetScopeText(target) {
@@ -1685,15 +1726,16 @@ function blankToNull(value) {
 
 function commandPermissionsFieldHtml(detail, field) {
   const rules = Array.isArray(detail.values[field.path]) ? detail.values[field.path] : [];
-  return `<div class="field command-permission-field" data-config-field-path="${attr(field.path)}">
-    <label for="cfg-command-permissions">${esc(field.label)}</label>
+  const readOnly = !!field.readOnly;
+  return `<div class="${configFieldClass(field, "command-permission-field")}" data-config-field-path="${attr(field.path)}">
+    <label for="cfg-command-permissions">${configFieldLabelHtml(field)}</label>
     ${configFieldDescriptionHtml(field)}
-    <input id="cfg-command-permissions" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="hidden" value="${attr(JSON.stringify(rules))}">
-    <div class="command-permission-toolbar">
+    <input id="cfg-command-permissions" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(rules))}">
+    ${readOnly ? readOnlyTableNoteHtml(field) : `<div class="command-permission-toolbar">
       <button type="button" data-action="add-command-permission">添加规则</button>
       <button type="button" class="secondary" data-action="clear-command-permissions">清空</button>
-    </div>
-    <div id="commandPermissionTable">${renderCommandPermissionTable(rules)}</div>
+    </div>`}
+    <div id="commandPermissionTable">${renderCommandPermissionTable(rules, readOnly)}</div>
   </div>`;
 }
 
@@ -1713,7 +1755,7 @@ function setCommandPermissionRules(rules) {
   const node = $("cfg-command-permissions");
   if (node) node.value = JSON.stringify(normalized);
   const table = $("commandPermissionTable");
-  if (table) table.innerHTML = renderCommandPermissionTable(normalized);
+  if (table) table.innerHTML = renderCommandPermissionTable(normalized, node?.dataset.configReadonly === "true");
   if (state.currentConfigDetail) {
     updateConfigRestartButton(state.currentConfigDetail);
     updateConfigDirtyState(state.currentConfigDetail);
@@ -1739,16 +1781,19 @@ function normalizeCommandPermissionRules(value) {
   return rows.map(normalizeCommandPermissionRule);
 }
 
-function renderCommandPermissionTable(rules) {
+function renderCommandPermissionTable(rules, readOnly = false) {
   const rows = normalizeCommandPermissionRules(rules).map((rule, index) => Object.assign({ _index: index }, rule));
-  return renderTable(rows, [
+  const columns = [
     { title: "命令", render: rule => `<span class="primary-line">${esc(wildcardText(rule.commandPath))}</span>` },
     { title: "平台", render: rule => `<span class="primary-line">${esc(wildcardText(rule.platformId))}</span>` },
     { title: "目标", render: rule => cell(commandPermissionTargetTitle(rule), commandPermissionScopeText(rule)) },
     { title: "发送者", render: rule => `<span class="primary-line">${esc(wildcardText(rule.senderId))}</span>` },
     { title: "角色", render: rule => pill(commandPermissionRoleText(rule.role)) },
-    { title: "操作", render: rule => `<button type="button" class="danger" data-action="delete-command-permission" data-index="${rule._index}">删除</button>` }
-  ]);
+  ];
+  if (!readOnly) {
+    columns.push({ title: "操作", render: rule => `<button type="button" class="danger" data-action="delete-command-permission" data-index="${rule._index}">删除</button>` });
+  }
+  return renderTable(rows, columns);
 }
 
 function commandPermissionTargetTitle(rule) {

@@ -65,10 +65,10 @@ internal object AdminConfigJson {
         spec.fields.forEach { field ->
             val incoming = values[field.path]
             val currentValue = jsonElementAt(currentNode, field.path) ?: JsonNull
-            val value = if (field.secret && isBlankSecret(incoming)) {
-                currentValue
-            } else {
-                incoming ?: currentValue
+            val value = when {
+                field.readOnly -> currentValue
+                field.secret && isBlankSecret(incoming) -> currentValue
+                else -> incoming ?: currentValue
             }
             setPath(root, field.path, toJsonNode(value))
         }
@@ -78,6 +78,7 @@ internal object AdminConfigJson {
 
     fun validateValues(values: JsonObject, spec: ConfigFormSpec) {
         spec.fields.forEach { field ->
+            if (field.readOnly) return@forEach
             val value = values[field.path] ?: return@forEach
             if (field.secret && isBlankSecret(value)) return@forEach
             if (field.required) {

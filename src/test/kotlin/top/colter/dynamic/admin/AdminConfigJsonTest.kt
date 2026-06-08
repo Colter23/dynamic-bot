@@ -48,6 +48,32 @@ class AdminConfigJsonTest {
     }
 
     @Test
+    fun decodeShouldPreserveExistingReadOnlyField() {
+        val decoded = AdminConfigJson.decode(
+            values = JsonObject(
+                mapOf(
+                    "name" to JsonPrimitive("new"),
+                    "editable" to JsonPrimitive("new"),
+                )
+            ),
+            current = ReadOnlyConfig(name = "old", editable = "old"),
+            spec = readOnlySpec(),
+            clazz = ReadOnlyConfig::class,
+        )
+
+        assertEquals("old", decoded.name)
+        assertEquals("new", decoded.editable)
+    }
+
+    @Test
+    fun validateValuesShouldIgnoreReadOnlyField() {
+        AdminConfigJson.validateValues(
+            values = JsonObject(mapOf("name" to JsonPrimitive(""))),
+            spec = readOnlySpec(),
+        )
+    }
+
+    @Test
     fun integerNumberFieldsShouldRejectDecimalsWithChineseLabel() {
         val spec = ConfigFormSpec(
             title = "测试配置",
@@ -107,7 +133,30 @@ class AdminConfigJsonTest {
         ),
     )
 
+    private fun readOnlySpec(): ConfigFormSpec = ConfigFormSpec(
+        title = "测试配置",
+        fields = listOf(
+            ConfigFieldSpec(
+                path = "name",
+                label = "只读名称",
+                type = ConfigFieldType.TEXT,
+                required = true,
+                readOnly = true,
+            ),
+            ConfigFieldSpec(
+                path = "editable",
+                label = "可编辑名称",
+                type = ConfigFieldType.TEXT,
+            ),
+        ),
+    )
+
     private data class SecretConfig(
         val token: String = "",
+    )
+
+    private data class ReadOnlyConfig(
+        val name: String = "",
+        val editable: String = "",
     )
 }

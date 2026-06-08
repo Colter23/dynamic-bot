@@ -67,6 +67,12 @@
       color: var(--text);
       background: #fff;
     }
+    input[readonly],
+    textarea[readonly] {
+      background: #f6f8fb;
+      color: #5f6b7a;
+      cursor: default;
+    }
     textarea { min-height: 96px; resize: vertical; }
     input:focus, select:focus, textarea:focus, button:focus-visible {
       outline: 3px solid var(--focus);
@@ -464,6 +470,41 @@
       margin-left: 3px;
       color: var(--red);
       font-weight: 900;
+    }
+    .readonly-mark {
+      display: inline-flex;
+      align-items: center;
+      min-height: 18px;
+      margin-left: 5px;
+      padding: 1px 6px;
+      border: 1px solid #c7d2fe;
+      border-radius: 999px;
+      background: #eef2ff;
+      color: #3730a3;
+      font-size: 11px;
+      font-weight: 900;
+      line-height: 1.2;
+      vertical-align: middle;
+    }
+    .readonly-field input[readonly],
+    .readonly-field textarea[readonly],
+    .readonly-field select:disabled,
+    .readonly-field input[type="checkbox"]:disabled {
+      border-color: #d8e0ea;
+      background: #f6f8fb;
+      color: #5f6b7a;
+      opacity: 1;
+      cursor: default;
+    }
+    .readonly-field .check {
+      color: var(--muted);
+      cursor: default;
+    }
+    .readonly-table-note {
+      padding: 7px 9px;
+      border: 1px dashed #c7d2fe;
+      border-radius: 7px;
+      background: #f8faff;
     }
     .publisher-create-form {
       max-width: 100%;
