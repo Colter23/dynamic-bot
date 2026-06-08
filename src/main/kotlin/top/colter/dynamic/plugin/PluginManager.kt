@@ -796,9 +796,17 @@ public class PluginManager(
     }
 
     private fun validateApiVersion(apiVersion: String) {
-        require(apiVersion == CORE_PLUGIN_API_VERSION) {
-            "不支持的 apiVersion=$apiVersion，期望 $CORE_PLUGIN_API_VERSION"
+        val pluginMajor = majorVersionOf(apiVersion)
+            ?: throw IllegalArgumentException("apiVersion 格式非法：$apiVersion，期望形如 $CORE_PLUGIN_API_VERSION")
+        val coreMajor = majorVersionOf(CORE_PLUGIN_API_VERSION)
+            ?: error("核心 apiVersion 常量非法：$CORE_PLUGIN_API_VERSION")
+        require(pluginMajor == coreMajor) {
+            "不兼容的 apiVersion=$apiVersion（主版本 $pluginMajor），核心要求主版本 $coreMajor"
         }
+    }
+
+    private fun majorVersionOf(version: String): Int? {
+        return version.trim().substringBefore('.').toIntOrNull()
     }
 
     private fun inferCapabilities(instance: Plugin): Set<PluginCapability> {

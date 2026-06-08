@@ -95,16 +95,14 @@ public class EventBus(
                 return@forEach
             }
             eventScope.launch {
-                try {
-                    runCatching { entry.listener.onMessage(event) }
-                        .onFailure {
-                            eventBusLogger.error(it) {
-                                "事件分发失败：event=$eventName，listener=${entry.token.id}"
-                            }
+                runCatching { entry.listener.onMessage(event) }
+                    .onFailure {
+                        eventBusLogger.error(it) {
+                            "事件分发失败：event=$eventName，listener=${entry.token.id}"
                         }
-                } finally {
-                    inFlightEvents.decrementAndGet()
-                }
+                    }
+            }.invokeOnCompletion {
+                inFlightEvents.decrementAndGet()
             }
         }
     }

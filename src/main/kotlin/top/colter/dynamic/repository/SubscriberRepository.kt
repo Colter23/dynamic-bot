@@ -29,7 +29,8 @@ public object SubscriberRepository {
                 it[state] = subscriber.state
                 it[createTime] = Instant.fromEpochSeconds(subscriber.createTime)
                 it[createUser] = subscriber.createUser
-            }.insertedCount
+            }
+            subscriber.id
         }
     }
 

@@ -1,6 +1,7 @@
 ﻿package top.colter.dynamic.table
 
 import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
 import kotlinx.serialization.encodeToString
 import org.jetbrains.exposed.v1.core.ColumnType
 import top.colter.dynamic.core.data.FilterCondition
@@ -21,7 +22,15 @@ public class JsonColumnType<T : Any>(
     override fun valueFromDB(value: Any): T {
         @Suppress("UNCHECKED_CAST")
         if (value !is String) return value as T
-        return coreTableJson.decodeFromString(serializer, value)
+        return try {
+            coreTableJson.decodeFromString(serializer, value)
+        } catch (e: SerializationException) {
+            val preview = value.take(200)
+            throw IllegalStateException(
+                "JSON 列解码失败：serializer=${serializer.descriptor.serialName}，原始值预览=$preview",
+                e,
+            )
+        }
     }
 
     override fun valueToDB(value: T?): Any? {

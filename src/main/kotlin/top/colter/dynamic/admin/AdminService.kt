@@ -1162,7 +1162,7 @@ public class AdminService(
             pluginState = info.state.name,
             sourcePath = configService.resolvePath(plugin.configId).toString(),
             schema = plugin.configFormSpec,
-            values = AdminConfigJson.valuesFor(current, plugin.configFormSpec, maskSecrets = true),
+            values = AdminConfigJson.valuesFor(current, plugin.configFormSpec, maskSecrets = false),
             secretStates = AdminConfigJson.secretStates(current, plugin.configFormSpec),
         )
     }

@@ -157,8 +157,14 @@ private class TaskRuntime(
     }
 
     private suspend fun runOnce() {
+        var failures = 0
         while (currentCoroutineContext().isActive) {
             if (runRound()) return
+            failures += 1
+            if (failures >= MAX_CONSECUTIVE_RETRIES) {
+                logger.error { "任务连续失败已达上限，放弃执行：taskId=${task.id}，retries=$failures" }
+                return
+            }
             delayFor(task.retryBackoff)
         }
     }
@@ -179,9 +185,15 @@ private class TaskRuntime(
             delayUntil(schedule.nextRunAtMillis(clock))
 
             var success = runRound()
+            var failures = if (success) 0 else 1
             while (!success && currentCoroutineContext().isActive) {
+                if (failures >= MAX_CONSECUTIVE_RETRIES) {
+                    logger.error { "任务本轮连续失败已达上限，跳过至下次计划时刻：taskId=${task.id}，retries=$failures" }
+                    break
+                }
                 delayFor(task.retryBackoff)
                 success = runRound()
+                if (!success) failures += 1
             }
         }
     }
@@ -246,5 +258,9 @@ private class TaskRuntime(
             nextRunAtMillis = null
             job = null
         }
+    }
+
+    private companion object {
+        private const val MAX_CONSECUTIVE_RETRIES: Int = 10
     }
 }

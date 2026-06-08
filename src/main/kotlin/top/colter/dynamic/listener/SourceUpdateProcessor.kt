@@ -182,6 +182,8 @@ public class SourceUpdateProcessor(
     }
 
     private fun List<DeliveryTarget>.filterSubscribedBefore(updateTime: Long): List<DeliveryTarget> {
+        // 更新时间未知/无效（来源未提供 pubTs/time）时不应用订阅时间闸门，否则会对所有真实订阅误丢动态。
+        if (updateTime <= 0L) return this
         return filter { target ->
             val subscription = target.subscription ?: return@filter true
             updateTime >= subscription.createdAtEpochSeconds

@@ -38,7 +38,8 @@ public object PublisherRepository {
                 it[pendant] = publisher.pendant
                 it[createTime] = Instant.fromEpochSeconds(publisher.createTime)
                 it[createUser] = publisher.createUser
-            }.insertedCount
+            }
+            publisher.id
         }
     }
 
