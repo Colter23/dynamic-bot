@@ -1,6 +1,5 @@
 package top.colter.dynamic.draw.layout.minimal
 
-import org.jetbrains.skia.FontStyle
 import org.jetbrains.skia.Image
 import top.colter.dynamic.DrawOrnament
 import top.colter.dynamic.core.data.DynamicPayload
@@ -12,8 +11,8 @@ import top.colter.dynamic.draw.layout.default.DynamicRenderMode
 import top.colter.dynamic.draw.layout.default.component.AuthorContent
 import top.colter.dynamic.draw.layout.default.component.minimalAuthorContentStyle
 import top.colter.dynamic.draw.layout.default.drawDynamicBlocks
+import top.colter.dynamic.draw.layout.default.drawDynamicTitle
 import top.colter.dynamic.draw.layout.default.drawLiveMediaCard
-import top.colter.dynamic.draw.layout.default.dynamicTitleFontSize
 import top.colter.dynamic.draw.layout.default.orderDynamicBlocksForLayout
 import top.colter.dynamic.draw.resource.qrCode
 import top.colter.dynamic.util.formatTime
@@ -29,7 +28,6 @@ import top.colter.skiko.fillMaxWidth
 import top.colter.skiko.height
 import top.colter.skiko.layout.Column
 import top.colter.skiko.layout.Layout
-import top.colter.skiko.layout.Text
 import top.colter.skiko.layout.View
 import top.colter.skiko.margin
 import top.colter.skiko.offset
@@ -90,7 +88,6 @@ private fun Layout.MinimalDynamicView(
     val title = payload.title?.takeIf { it.isNotBlank() }
     val blocks = orderDynamicBlocksForLayout(payload.blocks)
     val hasBlocks = blocks.isNotEmpty()
-    val titleFontSize = dynamicTitleFontSize(blocks)
     val avatarBadgeImage = update.publisher.avatarBadgeKey?.let {
         config.platformAssetImage(it, width = 100, height = 100)
     }
@@ -139,13 +136,11 @@ private fun Layout.MinimalDynamicView(
         )
 
         title?.let {
-            Text(
-                text = it,
-                color = config.theme.textColor,
-                fontSize = titleFontSize,
-                fontStyle = FontStyle.BOLD,
-                maxLinesCount = 2,
-                modifier = Modifier().margin(bottom = if (hasBlocks) contentSpacing else 0.dp),
+            drawDynamicTitle(
+                title = it,
+                blocks = blocks,
+                config = config,
+                bottomSpacing = if (hasBlocks) contentSpacing else 0.dp,
             )
         }
 

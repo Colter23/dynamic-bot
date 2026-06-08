@@ -1,5 +1,8 @@
 ﻿package top.colter.dynamic.draw.layout.default
 
+import org.jetbrains.skia.FontStyle
+import org.jetbrains.skia.Image
+import org.jetbrains.skia.paragraph.Alignment
 import org.jetbrains.skia.paragraph.TextStyle
 import top.colter.dynamic.core.data.DynamicBlock
 import top.colter.dynamic.core.data.DynamicContent
@@ -15,8 +18,8 @@ import top.colter.skiko.Modifier
 import top.colter.skiko.data.RichParagraphBuilder
 import top.colter.skiko.dp
 import top.colter.skiko.fillMaxWidth
+import top.colter.skiko.layout.AutoSizeRichText
 import top.colter.skiko.layout.Layout
-import top.colter.skiko.layout.RichText
 import top.colter.skiko.margin
 import top.colter.skiko.px
 
@@ -27,6 +30,7 @@ private const val MAX_CONTENT_FONT_SIZE = 48f
 private const val NORMAL_CONTENT_FONT_SIZE = 36f
 private const val MIN_CONTENT_FONT_SIZE = 30f
 private const val TITLE_TO_CONTENT_RATIO = 1.2f
+private const val FONT_SIZE_STEP = 0.5f
 private val minTitleFontSize = 38.dp
 private val maxTitleFontSize = 56.dp
 
@@ -37,43 +41,113 @@ internal fun Layout.drawDynamicContent(
 ) {
     if (content.nodes.isEmpty()) return
 
-    val fontSize = dynamicContentFontSize(content)
+    val contentParts = content.resolveParts(config)
+    val fontSizeRange = dynamicContentFontSizeRange(content)
+    AutoSizeRichText(
+        minFontSize = fontSizeRange.min,
+        maxFontSize = fontSizeRange.max,
+        fontSizeStep = FONT_SIZE_STEP.dp,
+        intrinsicAlignment = Alignment.JUSTIFY,
+        modifier = Modifier().margin(bottom = bottomSpacing).fillMaxWidth(),
+    ) { fontSize ->
+        buildDynamicContentParagraph(contentParts, config, fontSize)
+    }
+}
+
+internal fun Layout.drawDynamicTitle(
+    title: String,
+    blocks: List<DynamicBlock>,
+    config: DrawConfig,
+    bottomSpacing: Dp = 0.dp,
+) {
+    val fontSizeRange = dynamicTitleFontSizeRange(blocks)
+    AutoSizeRichText(
+        minFontSize = fontSizeRange.min,
+        maxFontSize = fontSizeRange.max,
+        fontSizeStep = FONT_SIZE_STEP.dp,
+        maxLinesCount = 2,
+        modifier = Modifier().margin(bottom = bottomSpacing),
+    ) { fontSize ->
+        val style = TextStyle()
+            .setColor(config.theme.textColor)
+            .setFontSize(fontSize.px)
+            .setFontStyle(FontStyle.BOLD)
+        RichParagraphBuilder(style)
+            .addText(title, style)
+            .build()
+    }
+}
+
+private fun buildDynamicContentParagraph(
+    parts: List<DynamicContentPart>,
+    config: DrawConfig,
+    fontSize: Dp,
+) = RichParagraphBuilder(
+    TextStyle()
+        .setColor(config.theme.textColor)
+        .setFontSize(fontSize.px)
+).also { paragraph ->
     val style = TextStyle()
         .setColor(config.theme.textColor)
         .setFontSize(fontSize.px)
     val linkStyle = TextStyle()
         .setColor(config.theme.linkColor)
         .setFontSize(fontSize.px)
-    val paragraph = RichParagraphBuilder(style)
 
-    content.nodes.forEach {
+    parts.forEach { part ->
+        when (part) {
+            is DynamicContentPart.Text -> paragraph.addText(part.text, if (part.link) linkStyle else style)
+            is DynamicContentPart.Emoji -> paragraph.addEmoji(part.text, part.image, linkStyle)
+        }
+    }
+}.build()
+
+private fun DynamicContent.resolveParts(config: DrawConfig): List<DynamicContentPart> {
+    return nodes.map {
         when (it) {
-            is DynamicContentNodeText -> paragraph.addText(it.text, style)
-            is DynamicContentNodeLink -> paragraph.addText(it.text, linkStyle)
-            is DynamicContentNodeMention -> paragraph.addText(it.text, linkStyle)
-            is DynamicContentNodeTag -> paragraph.addText(it.text, linkStyle)
+            is DynamicContentNodeText -> DynamicContentPart.Text(it.text)
+            is DynamicContentNodeLink -> DynamicContentPart.Text(it.text, link = true)
+            is DynamicContentNodeMention -> DynamicContentPart.Text(it.text, link = true)
+            is DynamicContentNodeTag -> DynamicContentPart.Text(it.text, link = true)
             is DynamicContentNodeEmoji -> {
                 val image = it.image
                 if (image == null) {
-                    paragraph.addText(it.text, style)
+                    DynamicContentPart.Text(it.text)
                 } else {
-                    paragraph.addEmoji(it.text, config.image(image), linkStyle)
+                    DynamicContentPart.Emoji(it.text, config.image(image))
                 }
             }
         }
     }
+}
 
-    RichText(
-        paragraph = paragraph.build(),
-        modifier = Modifier().margin(bottom = bottomSpacing).fillMaxWidth(),
+private sealed class DynamicContentPart {
+    data class Text(val text: String, val link: Boolean = false) : DynamicContentPart()
+    data class Emoji(val text: String, val image: Image) : DynamicContentPart()
+}
+
+private data class DynamicFontSizeRange(
+    val min: Dp,
+    val max: Dp,
+)
+
+private fun dynamicContentFontSizeRange(content: DynamicContent): DynamicFontSizeRange {
+    return dynamicContentFontSizeRange(content.displayCharCount())
+}
+
+private fun dynamicContentFontSizeRange(charCount: Int): DynamicFontSizeRange {
+    val base = dynamicContentBaseFontSize(charCount)
+    val min = (base - dynamicContentFontSizeDrop(charCount).dp)
+        .coerceAtLeast(MIN_CONTENT_FONT_SIZE.dp)
+    val max = (base + dynamicContentFontSizeBoost(charCount).dp)
+        .coerceAtMost(MAX_CONTENT_FONT_SIZE.dp)
+    return DynamicFontSizeRange(
+        min = min.coerceAtMost(max),
+        max = max,
     )
 }
 
-private fun dynamicContentFontSize(content: DynamicContent): Dp {
-    return dynamicContentFontSize(content.displayCharCount())
-}
-
-private fun dynamicContentFontSize(charCount: Int): Dp {
+private fun dynamicContentBaseFontSize(charCount: Int): Dp {
     val size = when {
         charCount <= SHORT_CONTENT_CHARS -> MAX_CONTENT_FONT_SIZE
         charCount <= NORMAL_CONTENT_CHARS -> interpolate(
@@ -91,14 +165,46 @@ private fun dynamicContentFontSize(charCount: Int): Dp {
     return size.dp
 }
 
-internal fun dynamicTitleFontSize(blocks: List<DynamicBlock>): Dp {
+private fun dynamicTitleFontSizeRange(blocks: List<DynamicBlock>): DynamicFontSizeRange {
     val bodyCharCount = blocks
         .filterIsInstance<TextBlock>()
         .sumOf { it.content.displayCharCount() }
-    val bodyFontSize = dynamicContentFontSize(bodyCharCount)
-    return (bodyFontSize * TITLE_TO_CONTENT_RATIO)
+    val bodyRange = dynamicContentFontSizeRange(bodyCharCount)
+    val min = (bodyRange.min * TITLE_TO_CONTENT_RATIO)
         .coerceAtLeast(minTitleFontSize)
         .coerceAtMost(maxTitleFontSize)
+    val max = (bodyRange.max * TITLE_TO_CONTENT_RATIO)
+        .coerceAtLeast(minTitleFontSize)
+        .coerceAtMost(maxTitleFontSize)
+    return DynamicFontSizeRange(
+        min = min.coerceAtMost(max),
+        max = max,
+    )
+}
+
+private fun dynamicContentFontSizeDrop(charCount: Int): Float {
+    return when {
+        charCount <= SHORT_CONTENT_CHARS -> 0f
+        charCount <= NORMAL_CONTENT_CHARS -> interpolate(
+            start = 2f,
+            end = 6f,
+            progress = (charCount - SHORT_CONTENT_CHARS).toFloat() / (NORMAL_CONTENT_CHARS - SHORT_CONTENT_CHARS),
+        )
+        charCount <= LONG_CONTENT_CHARS -> 8f
+        else -> 0f
+    }
+}
+
+private fun dynamicContentFontSizeBoost(charCount: Int): Float {
+    return when {
+        charCount <= SHORT_CONTENT_CHARS -> 0f
+        charCount <= NORMAL_CONTENT_CHARS -> interpolate(
+            start = 0f,
+            end = 1.5f,
+            progress = (charCount - SHORT_CONTENT_CHARS).toFloat() / (NORMAL_CONTENT_CHARS - SHORT_CONTENT_CHARS),
+        )
+        else -> 1f
+    }
 }
 
 private fun DynamicContent.displayCharCount(): Int {

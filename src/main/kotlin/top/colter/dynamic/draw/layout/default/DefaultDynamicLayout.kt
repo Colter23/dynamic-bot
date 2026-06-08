@@ -1,6 +1,5 @@
 ﻿package top.colter.dynamic.draw.layout.default
 
-import org.jetbrains.skia.FontStyle
 import org.jetbrains.skia.Image
 import top.colter.dynamic.core.data.DynamicBlock
 import top.colter.dynamic.core.data.DynamicBlockRole
@@ -21,7 +20,6 @@ import top.colter.skiko.dp
 import top.colter.skiko.fillMaxWidth
 import top.colter.skiko.layout.Column
 import top.colter.skiko.layout.Layout
-import top.colter.skiko.layout.Text
 import top.colter.skiko.layout.View
 import top.colter.skiko.margin
 import top.colter.skiko.padding
@@ -67,7 +65,6 @@ internal fun Layout.DefaultDynamicView(
     val blocks = orderDynamicBlocksForLayout(payload.blocks)
     val hasBlocks = blocks.isNotEmpty()
     val hasBodyContent = title != null || hasBlocks
-    val titleFontSize = dynamicTitleFontSize(blocks)
     val drawBlocksWithoutContentCard = shouldDrawBlocksWithoutContentCard(update, title, blocks, mode)
 
     Column(modifier = Modifier().fillMaxWidth()) {
@@ -110,13 +107,11 @@ internal fun Layout.DefaultDynamicView(
                     }
 
                     title?.let {
-                        Text(
-                            text = it,
-                            color = config.theme.textColor,
-                            fontSize = titleFontSize,
-                            fontStyle = FontStyle.BOLD,
-                            maxLinesCount = 2,
-                            modifier = Modifier().margin(bottom = if (hasBlocks) contentSpacing else 0.dp),
+                        drawDynamicTitle(
+                            title = it,
+                            blocks = blocks,
+                            config = config,
+                            bottomSpacing = if (hasBlocks) contentSpacing else 0.dp,
                         )
                     }
                     if (hasBlocks) {
