@@ -2249,22 +2249,92 @@
     .notification-target-manual-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
-    .secret-control {
+    .config-secret-box {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) 36px;
       gap: 8px;
+    }
+    .secret-fetch-panel {
+      display: flex;
       align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      min-height: 36px;
+      padding: 6px 8px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-soft);
+    }
+    .secret-fetch-panel span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+    }
+    button.secret-fetch-button {
+      min-height: 28px;
+      padding: 4px 9px;
+      border-color: #b9cffc;
+      background: #eef4ff;
+      color: #1d4ed8;
+      font-size: 12px;
+    }
+    .secret-control {
+      position: relative;
+      display: block;
+      min-width: 0;
+    }
+    .secret-control input {
+      padding-right: 44px;
     }
     .secret-eye {
-      width: 36px;
-      min-height: 36px;
+      position: absolute;
+      top: 50%;
+      right: 5px;
+      width: 30px;
+      min-height: 28px;
       display: grid;
       place-items: center;
       padding: 0;
-      background: #fff;
-      color: var(--text);
-      border-color: var(--line-strong);
-      font-size: 15px;
+      border-color: transparent;
+      background: transparent;
+      color: var(--muted);
+      transform: translateY(-50%);
+    }
+    .secret-eye:hover {
+      background: var(--panel-soft);
+      filter: none;
+    }
+    .secret-eye-shape {
+      position: relative;
+      width: 17px;
+      height: 11px;
+      border: 1.8px solid currentColor;
+      border-radius: 999px / 720px;
+    }
+    .secret-eye-shape::after {
+      content: "";
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      width: 5px;
+      height: 5px;
+      border-radius: 999px;
+      background: currentColor;
+      transform: translate(-50%, -50%);
+    }
+    .secret-eye-slash {
+      position: absolute;
+      width: 2px;
+      height: 22px;
+      border-radius: 999px;
+      background: currentColor;
+      opacity: 0;
+      transform: rotate(45deg);
+    }
+    .secret-eye[data-revealed="true"] {
+      color: var(--accent);
+    }
+    .secret-eye[data-revealed="true"] .secret-eye-slash {
+      opacity: 1;
     }
     .messages-page {
       min-width: 0;

@@ -61,7 +61,7 @@ function pageRoot() {
 }
 
 async function withButtonLoading(button, loadingText, task) {
-  const originalText = button?.textContent;
+  const originalHtml = button?.innerHTML;
   if (button) {
     button.disabled = true;
     button.textContent = loadingText;
@@ -71,7 +71,7 @@ async function withButtonLoading(button, loadingText, task) {
   } finally {
     if (button?.isConnected) {
       button.disabled = false;
-      if (originalText !== undefined) button.textContent = originalText;
+      if (originalHtml !== undefined) button.innerHTML = originalHtml;
     }
   }
 }
@@ -128,6 +128,10 @@ export async function handleAction(nextCtx, { action, button, id }) {
   }
   if (action === "toggle-config-secret") {
     await withButtonLoading(button, "•••", () => toggleConfigSecret(button));
+    return true;
+  }
+  if (action === "load-config-secret") {
+    await withButtonLoading(button, "获取中...", () => loadConfigSecret(button));
     return true;
   }
   if (action === "edit-message-template") {
@@ -524,16 +528,10 @@ async function restartCurrentConfigPlugin() {
   notify(result.message || "插件已重启", false);
 }
 
-async function toggleConfigSecret(button) {
+async function loadConfigSecret(button) {
   const path = button.dataset.path;
   const input = configInputFor({ path });
   if (!input) throw new Error("未找到密钥输入框");
-  if (button.dataset.revealed === "true") {
-    input.type = "password";
-    button.dataset.revealed = "false";
-    button.title = "查看真实值";
-    return;
-  }
   if (input.dataset.secretLoaded !== "true" && input.dataset.secretHasValue === "true" && !input.value) {
     const detail = state.currentConfigDetail;
     if (!detail) throw new Error("请选择配置文件");
@@ -542,11 +540,30 @@ async function toggleConfigSecret(button) {
     input.value = value;
     input.dataset.secretOriginal = value;
     input.dataset.secretLoaded = "true";
+    input.type = "password";
+    showConfigSecretEditor(input);
     updateConfigRestartButton(detail);
     updateConfigDirtyState(detail);
   }
+  showConfigSecretEditor(input);
+  input.focus();
+}
+
+async function toggleConfigSecret(button) {
+  const path = button.dataset.path;
+  const input = configInputFor({ path });
+  if (!input) throw new Error("未找到密钥输入框");
+  if (input.type === "hidden") await loadConfigSecret(button);
+  if (button.dataset.revealed === "true") {
+    input.type = "password";
+    button.dataset.revealed = "false";
+    button.setAttribute("aria-pressed", "false");
+    button.title = "查看真实值";
+    return;
+  }
   input.type = "text";
   button.dataset.revealed = "true";
+  button.setAttribute("aria-pressed", "true");
   button.title = "隐藏真实值";
 }
 
@@ -582,14 +599,35 @@ function configFieldHtml(detail, field) {
 function secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml) {
   const hasSecret = !!(detail.secretStates && detail.secretStates[field.path]);
   const value = displayConfigValue(detail.values[field.path]);
+  const editorHidden = hasSecret && !value;
   return `<div class="field" data-config-field-path="${attr(field.path)}">
     ${labelHtml}
-    <div class="secret-control">
-      <input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-secret-input="true" data-secret-has-value="${hasSecret ? "true" : "false"}" data-secret-loaded="${value ? "true" : "false"}" type="password" value="${attr(value)}" data-secret-original="${attr(value)}" placeholder="${hasSecret ? "********" : ""}" autocomplete="off">
-      <button type="button" class="secret-eye" data-action="toggle-config-secret" data-path="${attr(field.path)}" title="查看真实值">👁</button>
+    <div class="config-secret-box" data-secret-field>
+      <div class="secret-fetch-panel" data-secret-fetch-panel${editorHidden ? "" : " hidden"}>
+        <button type="button" class="secret-fetch-button" data-action="load-config-secret" data-path="${attr(field.path)}">获取密钥</button>
+        <span>当前已保存密钥，点击后显示并可编辑。</span>
+      </div>
+      <div class="secret-control" data-secret-editor${editorHidden ? " hidden" : ""}>
+        <input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-secret-input="true" data-secret-has-value="${hasSecret ? "true" : "false"}" data-secret-loaded="${editorHidden ? "false" : "true"}" type="${editorHidden ? "hidden" : "password"}" value="${attr(value)}" data-secret-original="${attr(value)}" placeholder="${hasSecret ? "" : "请输入密钥"}" autocomplete="off">
+        <button type="button" class="secret-eye" data-action="toggle-config-secret" data-path="${attr(field.path)}" data-revealed="false" aria-pressed="false" title="查看真实值">${secretEyeIconHtml()}</button>
+      </div>
     </div>
     ${descriptionHtml}
   </div>`;
+}
+
+function showConfigSecretEditor(input) {
+  const field = input.closest("[data-secret-field]");
+  if (!field) return;
+  const fetchPanel = field.querySelector("[data-secret-fetch-panel]");
+  const editor = field.querySelector("[data-secret-editor]");
+  if (fetchPanel) fetchPanel.hidden = true;
+  if (editor) editor.hidden = false;
+  if (input.type === "hidden") input.type = "password";
+}
+
+function secretEyeIconHtml() {
+  return `<span class="secret-eye-shape" aria-hidden="true"></span><span class="secret-eye-slash" aria-hidden="true"></span>`;
 }
 
 function configFieldDescriptionHtml(field) {
@@ -1262,7 +1300,7 @@ function openOneBotConnectionModal(index = null) {
         <label>Token</label>
         <div class="secret-control">
           <input id="onebotConnectionToken" type="password" value="${attr(current.accessToken)}" autocomplete="off" placeholder="留空表示不携带 Token">
-          <button type="button" class="secret-eye" data-action="toggle-onebot-connection-token" data-input-id="onebotConnectionToken" title="查看真实值">👁</button>
+          <button type="button" class="secret-eye" data-action="toggle-onebot-connection-token" data-input-id="onebotConnectionToken" data-revealed="false" aria-pressed="false" title="查看真实值">${secretEyeIconHtml()}</button>
         </div>
       </div>
     </div>
@@ -1291,10 +1329,12 @@ function toggleOneBotConnectionToken(button) {
   if (button.dataset.revealed === "true") {
     input.type = "password";
     button.dataset.revealed = "false";
+    button.setAttribute("aria-pressed", "false");
     button.title = "查看真实值";
   } else {
     input.type = "text";
     button.dataset.revealed = "true";
+    button.setAttribute("aria-pressed", "true");
     button.title = "隐藏真实值";
   }
 }
