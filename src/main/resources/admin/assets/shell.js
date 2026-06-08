@@ -113,7 +113,10 @@ const $ = id => document.getElementById(id);
     }
     function previewImageAttrs(className) {
       const tokens = String(className || "").split(/\s+/);
-      const title = tokens.includes("header-image") ? "头图预览" : tokens.includes("avatar") ? "头像预览" : "";
+      const title = tokens.includes("header-image") ? "头图预览"
+        : tokens.includes("entity-detail-cover") ? "直播封面预览"
+        : tokens.includes("avatar") ? "头像预览"
+        : "";
       return title ? {
         className: `${className} previewable-media`,
         attrs: ` data-preview-image="true" data-preview-title="${attr(title)}" title="点击预览" tabindex="0"`
