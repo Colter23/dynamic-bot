@@ -1127,6 +1127,78 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .entity-diagnostic-button {
+      border-color: #d7c3f4;
+      background: #f6f1ff;
+      color: #6d3bb5;
+    }
+    .entity-diagnostic {
+      display: grid;
+      gap: 14px;
+    }
+    .entity-diagnostic-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+    }
+    .entity-diagnostic-count {
+      min-height: 22px;
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border: 1px solid #d7c3f4;
+      border-radius: 999px;
+      background: #f6f1ff;
+      color: #6d3bb5;
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .entity-diagnostic-table-wrap {
+      width: 100%;
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+    }
+    .entity-diagnostic-table {
+      min-width: 820px;
+      table-layout: fixed;
+    }
+    .entity-diagnostic-table th,
+    .entity-diagnostic-table td {
+      padding: 7px 8px;
+      vertical-align: middle;
+    }
+    .entity-diagnostic-table.cursor {
+      min-width: 760px;
+    }
+    .entity-diagnostic-table .mono,
+    .diagnostic-long-text {
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+    }
+    .diagnostic-long-text {
+      display: block;
+      max-width: 100%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .entity-diagnostic-cover {
+      width: 46px;
+      height: 30px;
+      display: block;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      object-fit: cover;
+      background: var(--panel-soft);
+    }
+    .entity-diagnostic-empty {
+      border: 1px dashed var(--line);
+      border-radius: 8px;
+      background: var(--panel-soft);
+    }
     .cards {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
@@ -2852,7 +2924,8 @@
       display: grid;
       gap: 12px;
     }
-    .delivery-error-text {
+    .delivery-error-text,
+    .delivery-json-text {
       min-height: 96px;
       max-height: 260px;
       margin: 0;
@@ -2865,6 +2938,10 @@
       font: 12px/1.5 ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
       white-space: pre-wrap;
       overflow-wrap: anywhere;
+    }
+    .delivery-json-text {
+      min-height: 180px;
+      max-height: 360px;
     }
     .message-empty {
       height: 100%;

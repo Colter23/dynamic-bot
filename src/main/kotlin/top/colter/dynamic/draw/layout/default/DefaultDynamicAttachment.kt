@@ -1,10 +1,6 @@
 ﻿package top.colter.dynamic.draw.layout.default
 
-import org.jetbrains.skia.FilterMipmap
-import org.jetbrains.skia.FilterMode
 import org.jetbrains.skia.Image
-import org.jetbrains.skia.MipmapMode
-import org.jetbrains.skia.Rect
 import top.colter.dynamic.core.data.*
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.draw.layout.default.component.Media
@@ -20,7 +16,6 @@ import top.colter.skiko.layout.*
 
 private val attachmentSpacing: Dp = 20.dp
 private val mediaCardSpacing: Dp = 28.dp
-private val imageFilterMipmap = FilterMipmap(FilterMode.LINEAR, MipmapMode.NEAREST)
 
 internal fun Layout.drawDynamicBlocks(
     blocks: List<DynamicBlock>,
@@ -117,21 +112,13 @@ private fun Layout.DynamicImageTile(
     // 图片限高，最高为绘图宽度的两倍 2000dp
     if (image.height > image.width * 2) imgModifier.maxHeight(2000.dp)
 
-    // 绘制图片
-    if (cropTop) {
-        Canvas(modifier = imgModifier.fillMaxWidth().fillMaxHeight()) { rect ->
-            drawImageRect(
-                image,
-                image.coverSourceRect(rect.width, rect.height, cropTop = true),
-                rect,
-                imageFilterMipmap,
-                null,
-                false,
-            )
-        }
-    } else {
-        Image(image = image, ratio = ratio, modifier = imgModifier)
-    }
+    // 绘制图片：长图取顶部，普通图片居中裁剪。
+    Image(
+        image = image,
+        ratio = ratio,
+        cropAlignment = if (cropTop) LayoutAlignment.TOP else LayoutAlignment.CENTER,
+        modifier = imgModifier,
+    )
 
     // 绘制右下角标签
     if (!badge.isNullOrBlank()) {
@@ -158,25 +145,6 @@ private fun ImageItem.isLongImage(): Boolean {
     val height = height ?: return false
     return width > 0 && height > width * 2
 }
-
-private fun Image.coverSourceRect(dstWidth: Float, dstHeight: Float, cropTop: Boolean): Rect {
-    if (dstWidth <= 0f || dstHeight <= 0f || width <= 0 || height <= 0) {
-        return Rect.makeWH(width.toFloat(), height.toFloat())
-    }
-
-    val ratio = width.toFloat() / height.toFloat()
-    return if (dstWidth / ratio < dstHeight) {
-        val imgWidth = dstWidth * height / dstHeight
-        val offsetX = (width - imgWidth) / 2f
-        Rect.makeXYWH(offsetX, 0f, imgWidth, height.toFloat())
-    } else {
-        val imgHeight = dstHeight * width / dstWidth
-        val maxOffsetY = (height - imgHeight).coerceAtLeast(0f)
-        val offsetY = if (cropTop) 0f else maxOffsetY / 2f
-        Rect.makeXYWH(0f, offsetY.coerceIn(0f, maxOffsetY), width.toFloat(), imgHeight)
-    }
-}
-
 
 private fun Layout.drawDynamicMediaCard(
     block: MediaCardBlock,

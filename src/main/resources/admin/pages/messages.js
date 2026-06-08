@@ -94,7 +94,7 @@ export async function handleAction(nextCtx, { action, button, id }) {
     return true;
   }
   if (action === "delivery-detail") {
-    openDeliveryDetail(id);
+    await openDeliveryDetail(id, button);
     return true;
   }
   return false;
@@ -340,10 +340,31 @@ function renderDeliveryStatus() {
     <span>${latest ? `最新更新 ${fmtTime(latest.updatedAtEpochSeconds)}` : "暂无记录"}</span>`;
 }
 
-function openDeliveryDetail(id) {
-  const row = (state.deliveryRows || []).find(item => String(item.id) === String(id));
-  if (!row) throw new Error("消息记录不存在");
-  openModal("消息记录详情", `
+async function openDeliveryDetail(id, button) {
+  const fallback = (state.deliveryRows || []).find(item => String(item.id) === String(id));
+  if (!fallback) throw new Error("消息记录不存在");
+  const originalText = button?.textContent;
+  if (button) {
+    button.disabled = true;
+    button.textContent = "读取中...";
+  }
+  try {
+    const detail = await api(`/deliveries/${encodeURIComponent(id)}`);
+    const row = detail.delivery || fallback;
+    openModal("消息记录详情", renderDeliveryDetail(row, detail.message), null, {
+      size: "wide",
+      cancelText: "关闭",
+    });
+  } finally {
+    if (button?.isConnected) {
+      button.disabled = false;
+      if (originalText) button.textContent = originalText;
+    }
+  }
+}
+
+function renderDeliveryDetail(row, message) {
+  return `
     <div class="delivery-detail">
       <div class="plugin-detail-grid">
         ${detailItem("记录 ID", row.id)}
@@ -355,8 +376,13 @@ function openDeliveryDetail(id) {
         ${detailItem("目标平台", row.platformId)}
         ${detailItem("目标类型", label(row.targetKind))}
         ${detailItem("目标 ID", row.targetId, true)}
+        ${detailItem("目标作用域", row.targetScopeId || "-", true)}
+        ${detailItem("目标线程", row.targetThreadId || "-", true)}
+        ${detailItem("优先账号", row.targetAccountId || "-", true)}
         ${detailItem("目标地址", String(row.targetKey || "").replace(/\u001F/g, " / "), true)}
         ${detailItem("平台回执", row.sinkMessageId || "-", true)}
+        ${detailItem("发送路由", row.sinkRouteId || "-", true)}
+        ${detailItem("发送账号", row.sinkAccountId || "-", true)}
         ${detailItem("下次尝试", row.nextAttemptAtEpochSeconds ? fmtTime(row.nextAttemptAtEpochSeconds) : "-")}
         ${detailItem("锁定至", row.lockedUntilEpochSeconds ? fmtTime(row.lockedUntilEpochSeconds) : "-")}
         ${detailItem("创建时间", fmtTime(row.createdAtEpochSeconds))}
@@ -366,10 +392,11 @@ function openDeliveryDetail(id) {
         <h3>错误信息</h3>
         <pre class="delivery-error-text">${esc(row.lastError || "无错误信息")}</pre>
       </div>
-    </div>`, null, {
-    size: "medium",
-    cancelText: "关闭",
-  });
+      <div class="plugin-detail-section">
+        <h3>原始消息</h3>
+        <pre class="delivery-json-text">${esc(prettyJson(message))}</pre>
+      </div>
+    </div>`;
 }
 
 function detailItem(title, value, mono = false) {
@@ -377,4 +404,13 @@ function detailItem(title, value, mono = false) {
     <span>${esc(title)}</span>
     <strong class="${mono ? "mono" : ""}">${esc(value ?? "-")}</strong>
   </div>`;
+}
+
+function prettyJson(value) {
+  if (value == null) return "未找到原始消息，可能已被历史清理任务移除。";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch (error) {
+    return String(value);
+  }
 }

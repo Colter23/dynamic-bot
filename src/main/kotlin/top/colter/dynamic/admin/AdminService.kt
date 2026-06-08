@@ -12,6 +12,7 @@ import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.EntityState
+import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageDelivery
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MediaKind
@@ -26,6 +27,7 @@ import top.colter.dynamic.core.data.Subscription
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.data.coreJson
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.message.OutboundMessageService
 import top.colter.dynamic.message.RENDER_VARIANT_MANUAL_FORWARD
@@ -76,6 +78,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.encodeToJsonElement
 import top.colter.dynamic.plugin.PluginCapability
 import top.colter.dynamic.core.tools.loggerFor
 
@@ -297,6 +300,16 @@ public class AdminService(
                 limit = limit ?: 50,
             )
             .map { it.toDto() }
+    }
+
+    public fun delivery(id: Int): MessageDeliveryDetailDto {
+        val delivery = MessageDeliveryRepository.findById(id)
+            ?: throw NoSuchElementException("消息记录不存在：$id")
+        val message = MessageDeliveryRepository.findMessage(delivery.messageId)
+        return MessageDeliveryDetailDto(
+            delivery = delivery.toDto(),
+            message = message?.toJsonElement(),
+        )
     }
 
     public suspend fun forwardMessage(request: CreateMessageForwardRequest): MessageForwardResponse {
@@ -1717,6 +1730,7 @@ private fun SourceCursor.toDto(): SourceCursorDto = SourceCursorDto(
     eventType = eventType.value,
     lastSeenUpdateKey = lastSeenUpdateKey,
     lastSeenAtEpochSeconds = lastSeenAtEpochSeconds,
+    recentUpdateKeys = recentUpdateKeys,
 )
 
 private fun PublisherLiveStatus.toDto(): PublisherLiveStatusDto = PublisherLiveStatusDto(
@@ -1738,6 +1752,9 @@ private fun MessageDelivery.toDto(): MessageDeliveryDto = MessageDeliveryDto(
     platformId = target.platformId.value,
     targetKind = target.kind.name,
     targetId = target.externalId,
+    targetScopeId = target.scopeId,
+    targetThreadId = target.threadId,
+    targetAccountId = target.accountId,
     targetKey = target.stableValue(),
     status = status.name,
     attempts = attempts,
@@ -1750,6 +1767,8 @@ private fun MessageDelivery.toDto(): MessageDeliveryDto = MessageDeliveryDto(
     createdAtEpochSeconds = createdAtEpochSeconds,
     updatedAtEpochSeconds = updatedAtEpochSeconds,
 )
+
+private fun Message.toJsonElement() = coreJson.encodeToJsonElement(Message.serializer(), this)
 
 private fun MessageDelivery.toForwardDto(newDelivery: Boolean): MessageForwardDeliveryDto = MessageForwardDeliveryDto(
     deliveryId = id,

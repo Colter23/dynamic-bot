@@ -262,6 +262,10 @@ public fun Application.adminModule(context: AdminServerContext) {
                     )
                 }
             }
+            get("/deliveries/{id}") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi { context.service.delivery(call.pathInt("id")) }
+            }
             post("/message-forwards") {
                 if (!call.ensureAuthorized(context)) return@post
                 call.respondApi { context.service.forwardMessage(call.receive()) }

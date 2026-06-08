@@ -334,6 +334,16 @@ public object MessageDeliveryRepository {
         }
     }
 
+    public fun findById(id: Int): MessageDelivery? {
+        return transaction {
+            MessageDeliveryTable
+                .selectAll()
+                .where { MessageDeliveryTable.id eq id }
+                .firstOrNull()
+                ?.toMessageDelivery()
+        }
+    }
+
     public fun findByMessageId(messageId: String): List<MessageDelivery> {
         return transaction { findByMessageIdInCurrentTransaction(messageId) }
     }

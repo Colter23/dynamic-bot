@@ -368,6 +368,7 @@ public data class SourceCursorDto(
     val eventType: String,
     val lastSeenUpdateKey: String,
     val lastSeenAtEpochSeconds: Long,
+    val recentUpdateKeys: List<String> = emptyList(),
 )
 
 @Serializable
@@ -391,6 +392,9 @@ public data class MessageDeliveryDto(
     val platformId: String,
     val targetKind: String,
     val targetId: String,
+    val targetScopeId: String? = null,
+    val targetThreadId: String? = null,
+    val targetAccountId: String? = null,
     val targetKey: String,
     val status: String,
     val attempts: Int,
@@ -402,6 +406,12 @@ public data class MessageDeliveryDto(
     val lockedUntilEpochSeconds: Long? = null,
     val createdAtEpochSeconds: Long,
     val updatedAtEpochSeconds: Long,
+)
+
+@Serializable
+public data class MessageDeliveryDetailDto(
+    val delivery: MessageDeliveryDto,
+    val message: JsonElement? = null,
 )
 
 @Serializable

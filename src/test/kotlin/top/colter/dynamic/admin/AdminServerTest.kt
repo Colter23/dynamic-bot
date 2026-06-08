@@ -21,6 +21,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.MainDynamicConfig
@@ -742,7 +744,16 @@ class AdminServerTest {
         val message = Message(
             id = "message-admin",
             time = 1L,
-            targets = listOf(TargetAddress.of("qq", TargetKind.GROUP, "100")),
+            targets = listOf(
+                TargetAddress.of(
+                    platformId = "qq",
+                    kind = TargetKind.GROUP,
+                    externalId = "100",
+                    scopeId = "scope-1",
+                    threadId = "thread-1",
+                    accountId = "bot-1",
+                )
+            ),
             batches = listOf(MessageBatch(listOf(MessageContent.Text("hello")))),
         )
         MessageDeliveryRepository.enqueue(message)
@@ -763,6 +774,13 @@ class AdminServerTest {
         assertEquals(deliveries.single().id, filtered.single().id)
         assertTrue(missed.isEmpty())
         assertTrue(dashboard.deliveryStatusCounts.any { it.state == DeliveryStatus.FAILED.name && it.count == 1L })
+
+        val detail = service.delivery(delivery.id)
+        assertEquals(delivery.id, detail.delivery.id)
+        assertEquals("scope-1", detail.delivery.targetScopeId)
+        assertEquals("thread-1", detail.delivery.targetThreadId)
+        assertEquals("bot-1", detail.delivery.targetAccountId)
+        assertEquals("message-admin", assertNotNull(detail.message).jsonObject["id"]?.jsonPrimitive?.content)
     }
 
     @Test
