@@ -141,7 +141,7 @@ private fun Layout.DynamicImageTile(
                 .margin((25 - 5 * lineCount).dp)
                 .padding(horizontal = (20 - 3 * lineCount).dp, vertical = (4 - 1 * lineCount).dp)
                 .background(color = colors.overlayPillColor)
-                .border(0.dp, (13 - 2 * lineCount).dp)
+                .radius((13 - 2 * lineCount).dp)
         ) {
             Text(
                 text = badge,

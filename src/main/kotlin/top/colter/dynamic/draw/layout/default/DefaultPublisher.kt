@@ -15,6 +15,7 @@ import top.colter.dynamic.DrawOrnament
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.draw.DrawConfig
+import top.colter.dynamic.draw.DrawThemeMode
 import top.colter.dynamic.draw.layout.default.component.Author
 import top.colter.dynamic.draw.layout.default.component.AuthorSmall
 import top.colter.dynamic.draw.layout.default.component.defaultAuthorContentStyle
@@ -76,6 +77,7 @@ internal fun Layout.drawPublisher(
             time = time,
             qrCode = qrCodeImage,
             accentColor = config.theme.primaryColor,
+            darkTheme = config.theme.mode == DrawThemeMode.DARK,
             cardHeight = publisherHeight,
             modifier = Modifier().fillMaxWidth(),
         )

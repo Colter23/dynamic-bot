@@ -63,7 +63,7 @@ internal fun Layout.MediaSmall(
                         .margin(right = 25.dp, bottom = 20.dp)
                         .padding(horizontal = 15.dp, vertical = 2.dp)
                         .background(color = colors.overlayPillColor)
-                        .border(0.dp, 10.dp)
+                        .radius(10.dp)
                 ) {
                     Text(
                         text = duration,

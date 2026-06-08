@@ -82,7 +82,7 @@ internal fun Layout.Media(
                         LayoutAlignment.TOP,
                         listOf(colors.overlayColor, colors.overlayTransparentColor)
                     ))
-                    .border(0.dp, listOf(0.dp, 0.dp, 10.dp, 10.dp))
+                    .radius(listOf(0.dp, 0.dp, 10.dp, 10.dp))
             ) {
                 // 时长
                 if (!duration.isNullOrBlank()) {
@@ -92,7 +92,7 @@ internal fun Layout.Media(
                             .margin(left = 40.dp)
                             .padding(horizontal = 15.dp, vertical = 4.dp)
                             .background(color = colors.overlayPillColor)
-                            .border(0.dp, 10.dp)
+                            .radius(10.dp)
                     ) {
                         Text(
                             text = duration,

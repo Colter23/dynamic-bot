@@ -7,6 +7,7 @@ import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.draw.DrawConfig
+import top.colter.dynamic.draw.DrawThemeMode
 import top.colter.dynamic.draw.layout.default.DynamicRenderMode
 import top.colter.dynamic.draw.layout.default.component.AuthorContent
 import top.colter.dynamic.draw.layout.default.component.minimalAuthorContentStyle
@@ -131,6 +132,7 @@ private fun Layout.MinimalDynamicView(
             time = update.occurredAtEpochSeconds.formatTime,
             badge = avatarBadgeImage,
             accentColor = config.theme.primaryColor,
+            darkTheme = config.theme.mode == DrawThemeMode.DARK,
             style = authorStyle,
             modifier = authorModifier,
         )
@@ -200,6 +202,7 @@ private fun Layout.MinimalLiveView(
             time = liveTime.formatTime,
             badge = avatarBadgeImage,
             accentColor = config.theme.primaryColor,
+            darkTheme = config.theme.mode == DrawThemeMode.DARK,
             style = authorStyle,
             modifier = authorModifier,
         )

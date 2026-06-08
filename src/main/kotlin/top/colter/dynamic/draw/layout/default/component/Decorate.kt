@@ -7,7 +7,6 @@ import top.colter.skiko.Modifier
 import top.colter.skiko.aspectRatio
 import top.colter.skiko.background
 import top.colter.skiko.bleed
-import top.colter.skiko.border
 import top.colter.skiko.dp
 import top.colter.skiko.fillMaxHeight
 import top.colter.skiko.fillMaxWidth
@@ -17,6 +16,7 @@ import top.colter.skiko.layout.Box
 import top.colter.skiko.layout.Image
 import top.colter.skiko.layout.Layout
 import top.colter.skiko.padding
+import top.colter.skiko.radius
 import top.colter.skiko.width
 import top.colter.skiko.withAlpha
 import top.colter.skiko.data.Gradient
@@ -35,6 +35,7 @@ internal fun Layout.Decorate(
     image: Image? = null,
     qrCode: Image? = null,
     accentColor: Int = Color.makeRGB(251, 114, 153),
+    darkTheme: Boolean = false,
     alignment: LayoutAlignment = LayoutAlignment.CENTER,
     modifier: Modifier
 ) = Box(
@@ -47,16 +48,12 @@ internal fun Layout.Decorate(
             modifier = Modifier()
                 .fillMaxHeight()
                 .bleed(left = qrBackgroundBleedLeft)
-                .border(0.dp, listOf(0.dp, 15.dp, 15.dp, 0.dp))
+                .radius(listOf(0.dp, 15.dp, 15.dp, 0.dp))
                 .background(
                     gradient = Gradient(
                         LayoutAlignment.LEFT,
                         LayoutAlignment.RIGHT,
-                        listOf(
-                            blendWithWhite(accentColor, 0.08f).withAlpha(0f),
-                            blendWithWhite(accentColor, 0.12f).withAlpha(0.55f),
-                            blendWithWhite(accentColor, 0.24f),
-                        )
+                        qrBackgroundColors(accentColor, darkTheme)
                     )
                 )
         ) {
@@ -80,7 +77,7 @@ internal fun Layout.Decorate(
                             .height(qrLogoSize)
                             .padding(qrLogoPadding)
                             .background(color = Color.WHITE)
-                            .border(0.dp, qrLogoRadius)
+                            .radius(qrLogoRadius)
                     ) {
                         Box(
                             alignment = LayoutAlignment.CENTER,
@@ -88,7 +85,7 @@ internal fun Layout.Decorate(
                                 .fillMaxSize()
                                 .padding(horizontal = 2.dp, vertical = 4.dp)
                                 .background(color = accentColor)
-                                .border(0.dp, qrLogoInnerRadius)
+                                .radius(qrLogoInnerRadius)
                         ) {
                             Image(
                                 image = image,
@@ -111,10 +108,34 @@ internal fun Layout.Decorate(
     }
 }
 
+private fun qrBackgroundColors(accentColor: Int, darkTheme: Boolean): List<Int> {
+    return if (darkTheme) {
+        listOf(
+            blendWithBlack(accentColor, 0.10f).withAlpha(0f),
+            blendWithBlack(accentColor, 0.18f).withAlpha(0.72f),
+            blendWithBlack(accentColor, 0.30f),
+        )
+    } else {
+        listOf(
+            blendWithWhite(accentColor, 0.08f).withAlpha(0f),
+            blendWithWhite(accentColor, 0.12f).withAlpha(0.55f),
+            blendWithWhite(accentColor, 0.24f),
+        )
+    }
+}
+
 private fun blendWithWhite(color: Int, ratio: Float): Int {
     fun channel(shift: Int): Int {
         val value = (color ushr shift) and 0xFF
         return (255 + (value - 255) * ratio).roundToInt().coerceIn(0, 255)
+    }
+    return Color.makeRGB(channel(16), channel(8), channel(0))
+}
+
+private fun blendWithBlack(color: Int, ratio: Float): Int {
+    fun channel(shift: Int): Int {
+        val value = (color ushr shift) and 0xFF
+        return (value * ratio).roundToInt().coerceIn(0, 255)
     }
     return Color.makeRGB(channel(16), channel(8), channel(0))
 }

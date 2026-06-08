@@ -78,7 +78,7 @@ internal fun minimalAuthorContentStyle(hasQrCode: Boolean): AuthorContentStyle {
             height = 122.dp,
             avatarSize = 92.dp,
             avatarLeft = 15.dp,
-            avatarTop = 10.dp,
+            avatarTop = 16.dp,
             avatarTextSpacing = 16.dp,
             textTop = 10.dp,
             textRightSpacing = 10.dp,
@@ -92,7 +92,7 @@ internal fun minimalAuthorContentStyle(hasQrCode: Boolean): AuthorContentStyle {
             height = 92.dp,
             avatarSize = 84.dp,
             avatarLeft = 15.dp,
-            avatarTop = 2.dp,
+            avatarTop = 8.dp,
             avatarTextSpacing = 16.dp,
             textTop = 0.dp,
             textRightSpacing = 10.dp,
@@ -118,6 +118,7 @@ internal fun Layout.Author(
     badge: Image? = null,
     qrCode: Image? = null,
     accentColor: Int = Color.makeRGB(251, 114, 153),
+    darkTheme: Boolean = false,
     cardHeight: Dp = defaultAuthorContentStyle(qrCode != null).height,
     alignment: LayoutAlignment = LayoutAlignment.CENTER,
     modifier: Modifier
@@ -140,7 +141,7 @@ internal fun Layout.Author(
                 )
             )
         )
-        .border(0.dp, 15.dp)
+        .radius(15.dp)
         .shadows(Shadow.ELEVATION_3)
 ) {
     //require(modifier.height.isNotNull()) { "必须指定高度" }
@@ -154,6 +155,7 @@ internal fun Layout.Author(
         badge = badge,
         qrCode = qrCode,
         accentColor = accentColor,
+        darkTheme = darkTheme,
         style = defaultAuthorContentStyle(qrCode != null),
         modifier = Modifier()
             .fillMaxWidth()
@@ -173,6 +175,7 @@ internal fun Layout.AuthorContent(
     badge: Image? = null,
     qrCode: Image? = null,
     accentColor: Int = Color.makeRGB(251, 114, 153),
+    darkTheme: Boolean = false,
     style: AuthorContentStyle = defaultAuthorContentStyle(qrCode != null),
     modifier: Modifier,
 ) = Row(
@@ -244,6 +247,7 @@ internal fun Layout.AuthorContent(
         image = ornament,
         qrCode = qrCode,
         accentColor = accentColor,
+        darkTheme = darkTheme,
         modifier = Modifier().fillMaxHeight()
     )
 }
