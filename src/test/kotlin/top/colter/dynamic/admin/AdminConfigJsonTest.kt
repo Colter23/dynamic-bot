@@ -24,7 +24,7 @@ class AdminConfigJsonTest {
     }
 
     @Test
-    fun decodeShouldTreatBlankSecretAsExplicitClear() {
+    fun decodeShouldPreserveExistingSecretWhenIncomingSecretIsBlank() {
         val decoded = AdminConfigJson.decode(
             values = JsonObject(mapOf("token" to JsonPrimitive(""))),
             current = SecretConfig(token = "old"),
@@ -32,7 +32,19 @@ class AdminConfigJsonTest {
             clazz = SecretConfig::class,
         )
 
-        assertEquals("", decoded.token)
+        assertEquals("old", decoded.token)
+    }
+
+    @Test
+    fun decodeShouldApplyNonBlankSecret() {
+        val decoded = AdminConfigJson.decode(
+            values = JsonObject(mapOf("token" to JsonPrimitive("new"))),
+            current = SecretConfig(token = "old"),
+            spec = secretSpec(),
+            clazz = SecretConfig::class,
+        )
+
+        assertEquals("new", decoded.token)
     }
 
     @Test

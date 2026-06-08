@@ -2032,6 +2032,40 @@
       font-weight: 900;
       white-space: nowrap;
     }
+    .config-floating-actions {
+      position: fixed;
+      top: 100px;
+      right: 38px;
+      z-index: 8;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      max-width: min(520px, calc(100vw - 36px));
+      padding: 8px;
+      border: 2px solid #ff8888;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 2px 6px 25px rgb(255 0 0 / 30%);
+      backdrop-filter: blur(10px);
+      animation: plugin-card-in 0.16s ease both;
+    }
+    .config-floating-actions span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+    button.config-floating-save {
+      min-height: 30px;
+      padding: 5px 10px;
+    }
+    button.config-floating-restart {
+      min-height: 30px;
+      padding: 5px 10px;
+      border-color: #f0c98d;
+      background: #fff8ea;
+      color: var(--amber);
+    }
     .config-section .inline-note {
       display: block;
       min-width: 0;
@@ -3128,6 +3162,17 @@
       }
       .config-list {
         max-height: 260px;
+      }
+      .config-floating-actions {
+        top: auto;
+        right: 14px;
+        bottom: 14px;
+        left: 14px;
+        justify-content: flex-end;
+        flex-wrap: wrap;
+      }
+      .config-floating-actions span {
+        margin-right: auto;
       }
       .plugin-filter-bar input,
       .plugin-filter-bar select {

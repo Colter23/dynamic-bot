@@ -258,17 +258,16 @@ async function renderConfigDetail(id, request = beginPageRequest("configs")) {
   const target = $("configDetail");
   if (!target) return;
   target.innerHTML = `
+    <div id="configFloatingActions" class="config-floating-actions" hidden>
+      <span id="configFloatingHint">有未保存修改</span>
+      ${detail.pluginId ? `<button type="button" class="secondary config-floating-restart" id="floatingRestartConfigPlugin" data-action="restart-config-plugin" hidden>重启插件</button>` : ""}
+      <button type="button" class="config-floating-save" id="floatingSaveConfigButton" data-action="save-config" disabled>保存配置</button>
+    </div>
     <section class="panel config-section">
       <div class="toolbar">
         <div>
           <h2>${esc(detail.name)}</h2>
           <p class="sub-line">${esc(detail.sourcePath)}</p>
-        </div>
-        <div class="toolbar-actions">
-          ${detail.pluginId ? `<button class="secondary" id="restartConfigPlugin" data-action="restart-config-plugin" data-plugin-id="${attr(detail.pluginId)}" hidden>重启插件</button>` : ""}
-          <span id="configDirtyBadge" class="config-dirty-badge" hidden>未保存</span>
-          <button id="saveConfigButton" data-action="save-config" data-id="${attr(detail.id)}">保存配置</button>
-          <button class="secondary" data-action="refresh-config-detail" data-id="${attr(detail.id)}">刷新</button>
         </div>
       </div>
       <span class="sub-line">${esc((detail.schema && detail.schema.description) || detail.description || "当前配置内容")}</span>
@@ -312,12 +311,21 @@ function configComparableValue(detail, field) {
   const raw = detail.values[field.path];
   if (field.type === "BOOLEAN") return raw === true;
   if (field.type === "NUMBER") return Number(raw || 0);
+  if (field.type === "SECRET") return configSecretOriginalValue(detail, field);
   if (field.component === "MESSAGE_ROUTING_POLICY_TABLE") return normalizeMessageRoutingPlatformPolicies(normalizeConfigJsonValue(raw));
   if (field.component === "ONEBOT_CONNECTION_TABLE") return normalizeOneBotConnections(normalizeConfigJsonValue(raw));
   if (field.component === "COMMAND_PERMISSION_TABLE") return normalizeCommandPermissionRules(normalizeConfigJsonValue(raw));
   if (field.component === "NOTIFICATION_TARGET_TABLE") return normalizeNotificationTargets(normalizeConfigJsonValue(raw));
   if (field.type === "JSON") return normalizeConfigJsonValue(raw);
   return displayConfigValue(raw);
+}
+
+function configSecretOriginalValue(detail, field) {
+  const node = configInputFor(field);
+  if (node && Object.prototype.hasOwnProperty.call(node.dataset, "secretOriginal")) {
+    return node.dataset.secretOriginal || "";
+  }
+  return displayConfigValue(detail.values[field.path]);
 }
 
 function currentConfigComparableValue(field) {
@@ -368,10 +376,7 @@ async function canDiscardConfigChanges() {
 function updateConfigDirtyState(detail) {
   const dirty = configDirtyChanged(detail);
   state.currentConfigDirty = dirty;
-  const badge = $("configDirtyBadge");
-  if (badge) badge.hidden = !dirty;
-  const saveButton = $("saveConfigButton");
-  if (saveButton) saveButton.disabled = !dirty;
+  updateConfigFloatingActions(detail, dirty);
 }
 
 function jumpConfigSection(sectionId) {
@@ -410,10 +415,31 @@ function restoreConfigSectionCollapse(detail) {
 }
 
 function updateConfigRestartButton(detail) {
-  const button = $("restartConfigPlugin");
-  if (!button || !detail.pluginId) return;
-  const pending = !!state.pendingConfigRestarts[detail.pluginId];
-  button.hidden = !(pending || configRestartChanged(detail));
+  const showRestart = configShouldShowRestart(detail);
+  updateConfigFloatingActions(detail, undefined, showRestart);
+}
+
+function configShouldShowRestart(detail) {
+  if (!detail || !detail.pluginId) return false;
+  return !!state.pendingConfigRestarts[detail.pluginId] || configRestartChanged(detail);
+}
+
+function updateConfigFloatingActions(detail, dirty = undefined, showRestart = undefined) {
+  const bar = $("configFloatingActions");
+  if (!bar || !detail) return;
+  const isDirty = dirty === undefined ? configDirtyChanged(detail) : dirty;
+  const restartVisible = showRestart === undefined ? configShouldShowRestart(detail) : showRestart;
+  const saveButton = $("floatingSaveConfigButton");
+  if (saveButton) saveButton.disabled = !isDirty;
+  const restartButton = $("floatingRestartConfigPlugin");
+  if (restartButton) restartButton.hidden = !restartVisible;
+  const hint = $("configFloatingHint");
+  if (hint) {
+    hint.textContent = isDirty
+      ? (restartVisible ? "有未保存修改，保存后需重启" : "有未保存修改")
+      : "配置已保存，等待重启生效";
+  }
+  bar.hidden = !(isDirty || restartVisible);
 }
 
 function wireConfigRestartWatcher(detail) {
@@ -498,7 +524,7 @@ async function restartCurrentConfigPlugin() {
   notify(result.message || "插件已重启", false);
 }
 
-function toggleConfigSecret(button) {
+async function toggleConfigSecret(button) {
   const path = button.dataset.path;
   const input = configInputFor({ path });
   if (!input) throw new Error("未找到密钥输入框");
@@ -507,6 +533,17 @@ function toggleConfigSecret(button) {
     button.dataset.revealed = "false";
     button.title = "查看真实值";
     return;
+  }
+  if (input.dataset.secretLoaded !== "true" && input.dataset.secretHasValue === "true" && !input.value) {
+    const detail = state.currentConfigDetail;
+    if (!detail) throw new Error("请选择配置文件");
+    const response = await api(`/configs/${encodeURIComponent(detail.id)}/secrets/${encodeURIComponent(path)}`);
+    const value = displayConfigValue(response.value);
+    input.value = value;
+    input.dataset.secretOriginal = value;
+    input.dataset.secretLoaded = "true";
+    updateConfigRestartButton(detail);
+    updateConfigDirtyState(detail);
   }
   input.type = "text";
   button.dataset.revealed = "true";
@@ -548,7 +585,7 @@ function secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml) {
   return `<div class="field" data-config-field-path="${attr(field.path)}">
     ${labelHtml}
     <div class="secret-control">
-      <input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-secret-input="true" type="password" value="${attr(value)}" data-secret-original="${attr(value)}" placeholder="${hasSecret ? "********" : ""}" autocomplete="off">
+      <input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-secret-input="true" data-secret-has-value="${hasSecret ? "true" : "false"}" data-secret-loaded="${value ? "true" : "false"}" type="password" value="${attr(value)}" data-secret-original="${attr(value)}" placeholder="${hasSecret ? "********" : ""}" autocomplete="off">
       <button type="button" class="secret-eye" data-action="toggle-config-secret" data-path="${attr(field.path)}" title="查看真实值">👁</button>
     </div>
     ${descriptionHtml}
