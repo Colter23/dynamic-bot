@@ -2119,30 +2119,251 @@
       display: grid;
       gap: 14px;
     }
+    .config-hero {
+      display: grid;
+      gap: 8px;
+      padding: 12px 14px;
+      overflow: hidden;
+      border-color: #b9ded8;
+      background:
+        linear-gradient(135deg, rgba(233, 249, 246, 0.96), rgba(242, 246, 255, 0.96)),
+        #fff;
+      box-shadow: 0 10px 28px rgba(33, 107, 97, 0.10);
+    }
+    .config-hero-main {
+      min-width: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 14px;
+    }
+    .config-hero-title {
+      min-width: 0;
+      display: grid;
+      gap: 5px;
+    }
+    .config-title-line {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .config-hero-title h2 {
+      font-size: 18px;
+    }
+    .config-description-line {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .config-hero-title p {
+      max-width: 860px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+    .config-kind-pill {
+      width: max-content;
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 2px 8px;
+      border: 1px solid #9edbd4;
+      border-radius: 999px;
+      background: #fff;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 900;
+    }
+    .config-hero-meta {
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .config-hero-meta {
+      flex: 0 0 auto;
+    }
+    .config-hero-meta span {
+      min-height: 26px;
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border: 1px solid rgba(24, 33, 45, 0.08);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.76);
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
+    }
+    .config-source-path {
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .config-workbench {
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 218px minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+    }
+    .config-tab-panel {
+      position: sticky;
+      top: 0;
+      display: grid;
+      gap: 10px;
+      max-height: calc(100dvh - 96px);
+      overflow: hidden;
+      padding: 12px;
+    }
+    .config-tab-panel-head {
+      display: grid;
+      gap: 3px;
+      padding: 2px 2px 8px;
+      border-bottom: 1px solid var(--line);
+    }
+    .config-tab-panel-head span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .config-tab-panel-head strong {
+      color: var(--text);
+      font-size: 15px;
+      overflow-wrap: anywhere;
+    }
+    .config-tab-list {
+      min-height: 0;
+      display: grid;
+      gap: 7px;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding-right: 2px;
+    }
+    button.config-tab-button {
+      width: 100%;
+      min-height: 42px;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 9px;
+      border-color: var(--line);
+      background: #fff;
+      color: var(--text);
+      text-align: left;
+      white-space: normal;
+      transition: transform 0.14s ease, background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
+    }
+    button.config-tab-button:hover {
+      transform: translateX(2px);
+      border-color: #b9ded8;
+      background: #f6fbfa;
+      filter: none;
+    }
+    button.config-tab-button.active {
+      border-color: #74c7bd;
+      background: var(--accent-soft);
+      color: var(--accent);
+      box-shadow: inset 3px 0 0 var(--accent);
+    }
+    button.config-tab-button.changed {
+      border-color: #f0c98d;
+      background: #fffaf0;
+    }
+    button.config-tab-button.changed.active {
+      border-color: #d99b3d;
+      background: linear-gradient(90deg, #fff8ea, #eef8f6);
+      color: #8a5a00;
+      box-shadow: inset 3px 0 0 #d99b3d;
+    }
+    button.config-tab-button:disabled {
+      cursor: default;
+      opacity: 0.52;
+      transform: none;
+    }
+    .config-tab-name {
+      min-width: 0;
+      font-size: 13px;
+      font-weight: 900;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .config-tab-state {
+      min-height: 22px;
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    button.config-tab-button.changed .config-tab-state {
+      background: #fff1d6;
+      color: var(--amber);
+    }
+    button.config-tab-button.restart-changed .config-tab-state {
+      background: #fff1f0;
+      color: var(--red);
+    }
+    .config-tab-stage {
+      min-width: 0;
+      display: grid;
+      gap: 14px;
+    }
     .config-section {
+      min-width: 0;
       padding-top: 20px;
       padding-bottom: 20px;
       animation: plugin-card-in 0.16s ease both;
       scroll-margin-top: 88px;
     }
-    .config-section-nav {
+    .config-section[hidden] { display: none; }
+    .config-section-head {
       display: flex;
-      gap: 7px;
-      flex-wrap: wrap;
-      margin-top: 12px;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 14px;
     }
-    .config-section-nav-button {
-      min-height: 28px;
-      padding: 4px 9px;
-      border-color: #b9cffc;
-      background: #eef4ff;
-      color: #1d4ed8;
+    .config-section-head > div {
+      min-width: 0;
+      display: grid;
+      gap: 4px;
+    }
+    .config-section-head h2 {
+      font-size: 17px;
+    }
+    .config-section-kicker {
+      color: var(--muted);
       font-size: 12px;
+      font-weight: 850;
     }
-    .config-section-toggle {
-      border-color: #b9ded8;
-      background: #eef8f6;
-      color: var(--accent);
+    .config-section-count {
+      min-height: 26px;
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+      white-space: nowrap;
     }
     .config-dirty-badge {
       min-height: 28px;
@@ -2167,10 +2388,10 @@
       gap: 8px;
       max-width: min(520px, calc(100vw - 36px));
       padding: 8px;
-      border: 2px solid #ff8888;
+      border: 1px solid #f0c98d;
       border-radius: 10px;
       background: rgba(255, 255, 255, 0.96);
-      box-shadow: 2px 6px 25px rgb(255 0 0 / 30%);
+      box-shadow: 0 12px 32px rgba(138, 90, 0, 0.18);
       backdrop-filter: blur(10px);
       animation: plugin-card-in 0.16s ease both;
     }
@@ -2183,6 +2404,8 @@
     button.config-floating-save {
       min-height: 30px;
       padding: 5px 10px;
+      border-color: #9edbd4;
+      background: var(--accent);
     }
     button.config-floating-restart {
       min-height: 30px;
@@ -3360,6 +3583,31 @@
       }
       .config-list {
         max-height: 260px;
+      }
+      .config-hero-main {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .config-hero-meta {
+        justify-content: flex-start;
+      }
+      .config-workbench {
+        grid-template-columns: 1fr;
+      }
+      .config-tab-panel {
+        position: static;
+        max-height: none;
+        overflow: visible;
+      }
+      .config-tab-list {
+        display: flex;
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding: 0 0 2px;
+      }
+      button.config-tab-button {
+        width: min(210px, 72vw);
+        flex: 0 0 auto;
       }
       .config-floating-actions {
         top: auto;

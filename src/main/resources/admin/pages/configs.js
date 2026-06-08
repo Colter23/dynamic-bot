@@ -118,12 +118,8 @@ export async function handleAction(nextCtx, { action, button, id }) {
     await withButtonLoading(button, "保存中...", saveCurrentConfig);
     return true;
   }
-  if (action === "jump-config-section") {
-    jumpConfigSection(button.dataset.sectionId);
-    return true;
-  }
-  if (action === "toggle-config-section") {
-    toggleConfigSection(button);
+  if (action === "select-config-section") {
+    selectConfigSection(button);
     return true;
   }
   if (action === "toggle-config-description") {
@@ -242,8 +238,7 @@ async function loadConfigs(force) {
           <div class="panel-head"><h2>配置文件</h2></div>
           <div class="config-list">
             ${rows.map(item => `<button class="config-item${item.id === state.selectedConfigId ? " active" : ""}" data-action="select-config" data-id="${attr(item.id)}">
-              <strong>${esc(item.name)}</strong>
-              <span>${esc(item.id)}</span>
+              <strong>${esc(item.name)} <span>${esc(item.id)}</span></strong>
               <span>${esc(item.description || item.sourcePath)}</span>
             </button>`).join("") || `<div class="empty">暂无配置</div>`}
           </div>
@@ -263,6 +258,9 @@ async function renderConfigDetail(id, request = beginPageRequest("configs")) {
   const sections = configSections(detail);
   const sectionEntries = Object.entries(sections);
   const hasRestartFields = configHasRestartFields(detail);
+  const activeSection = activeConfigSectionName(detail, sectionEntries);
+  const totalFields = (detail.schema.fields || []).length;
+  const configDescription = (detail.schema && detail.schema.description) || detail.description || "当前配置内容";
   const target = $("configDetail");
   if (!target) return;
   target.innerHTML = `
@@ -271,30 +269,58 @@ async function renderConfigDetail(id, request = beginPageRequest("configs")) {
       ${detail.pluginId ? `<button type="button" class="secondary config-floating-restart" id="floatingRestartConfigPlugin" data-action="restart-config-plugin" hidden>重启插件</button>` : ""}
       <button type="button" class="config-floating-save" id="floatingSaveConfigButton" data-action="save-config" disabled>保存配置</button>
     </div>
-    <section class="panel config-section">
-      <div class="toolbar">
-        <div>
-          <h2>${esc(detail.name)}</h2>
-          <p class="sub-line">${esc(detail.sourcePath)}</p>
+    <section class="panel config-hero">
+      <div class="config-hero-main">
+        <div class="config-hero-title">
+          <div class="config-title-line">
+            <span class="config-kind-pill">${detail.pluginId ? "插件配置" : "主配置"}</span>
+            <h2>${esc(detail.name)}</h2>
+            <span class="config-source-path">${esc(detail.sourcePath)}</span>
+          </div>
+          <div class="config-description-line">
+            <p>${esc(configDescription)}</p>
+            ${hasRestartFields ? `<span class="restart-note">⚠️ 标记项保存后需要重启才会生效</span>` : ""}
+          </div>
+        </div>
+        <div class="config-hero-meta">
+          <span>${esc(`${sectionEntries.length} 个分组`)}</span>
+          <span>${esc(`${totalFields} 个配置项`)}</span>
+          ${detail.pluginId ? `<span>${esc(detail.pluginId)}</span>` : ""}
         </div>
       </div>
-      <span class="sub-line">${esc((detail.schema && detail.schema.description) || detail.description || "当前配置内容")}</span>
-      ${hasRestartFields ? `<div class="restart-note">⚠️ 标记的配置项保存后需要重启才会生效</div>` : ""}
-      ${sectionEntries.length > 1 ? `<div class="config-section-nav">
-        ${sectionEntries.map(([name], index) => `<button type="button" class="config-section-nav-button" data-action="jump-config-section" data-section-id="config-section-${index}">${esc(name)}</button>`).join("")}
-      </div>` : ""}
     </section>
-    ${sectionEntries.map(([name, fields], index) => `
-      <section id="config-section-${index}" class="panel config-section" data-config-section data-section-name="${attr(name)}">
-        <div class="panel-head">
-          <h2>${esc(name)}</h2>
-          <button type="button" class="secondary compact config-section-toggle" data-action="toggle-config-section">收起</button>
+    <div class="config-workbench">
+      <aside class="panel config-tab-panel">
+        <div class="config-tab-panel-head">
+          <span>配置分组</span>
+          <strong id="configActiveSectionTitle">${esc(activeSection || "常规")}</strong>
         </div>
-        <div class="form-grid" data-config-section-body>${fields.map(field => configFieldHtml(detail, field)).join("")}</div>
-      </section>`).join("")}`;
+        <div class="config-tab-list" role="tablist" aria-label="配置分组">
+          ${sectionEntries.map(([name, fields], index) => `
+            <button type="button" class="config-tab-button${name === activeSection ? " active" : ""}" data-action="select-config-section" data-config-section-tab data-section-name="${attr(name)}" role="tab" aria-selected="${name === activeSection ? "true" : "false"}" aria-controls="config-section-${index}">
+              <span class="config-tab-name">${esc(name)}</span>
+              <span class="config-tab-state" data-config-tab-state>${esc(`${fields.length} 项`)}</span>
+            </button>
+          `).join("")}
+        </div>
+      </aside>
+      <div class="config-tab-stage">
+        ${sectionEntries.map(([name, fields], index) => `
+          <section id="config-section-${index}" class="panel config-section" data-config-section data-section-name="${attr(name)}" data-config-section-available="true"${name === activeSection ? "" : " hidden"}>
+            <div class="config-section-head">
+              <div>
+                <span class="config-section-kicker">当前分组</span>
+                <h2>${esc(name)}</h2>
+              </div>
+              <span class="config-section-count">${esc(`${fields.length} 个配置项`)}</span>
+            </div>
+            <div class="form-grid" data-config-section-body>${fields.map(field => configFieldHtml(detail, field)).join("")}</div>
+          </section>`).join("")}
+      </div>
+    </div>`;
   wireConfigRestartWatcher(detail);
   wireConfigFieldVisibility(detail);
-  restoreConfigSectionCollapse(detail);
+  applyConfigSectionTabs(activeSection);
   updateConfigDirtyState(detail);
 }
 
@@ -385,42 +411,95 @@ async function canDiscardConfigChanges() {
 function updateConfigDirtyState(detail) {
   const dirty = configDirtyChanged(detail);
   state.currentConfigDirty = dirty;
+  updateConfigTabState(detail);
   updateConfigFloatingActions(detail, dirty);
 }
 
-function jumpConfigSection(sectionId) {
-  const section = sectionId ? pageRoot().querySelector(`#${sectionId}`) : null;
-  section?.scrollIntoView({ behavior: "smooth", block: "start" });
+function configActiveSections() {
+  if (!state.configActiveSections) state.configActiveSections = {};
+  return state.configActiveSections;
 }
 
-function configCollapseKey(detail, sectionName) {
-  return `${detail.id}\u001F${sectionName}`;
+function configActiveSectionKey(detail) {
+  return detail ? detail.id || "main" : "main";
 }
 
-function collapsedConfigSections() {
-  if (!state.collapsedConfigSections) state.collapsedConfigSections = {};
-  return state.collapsedConfigSections;
+function activeConfigSectionName(detail, sectionEntries) {
+  const entries = sectionEntries || Object.entries(configSections(detail));
+  const saved = configActiveSections()[configActiveSectionKey(detail)];
+  if (saved && entries.some(([name]) => name === saved)) return saved;
+  return entries[0]?.[0] || "";
 }
 
-function toggleConfigSection(button) {
+function selectConfigSection(button) {
   const detail = state.currentConfigDetail;
-  const section = button.closest("[data-config-section]");
-  if (!detail || !section) return;
-  const body = section.querySelector("[data-config-section-body]");
-  const collapsed = !body.hidden;
-  body.hidden = collapsed;
-  button.textContent = collapsed ? "展开" : "收起";
-  collapsedConfigSections()[configCollapseKey(detail, section.dataset.sectionName || "")] = collapsed;
+  const sectionName = button.dataset.sectionName || "";
+  if (!detail || !sectionName || button.disabled) return;
+  configActiveSections()[configActiveSectionKey(detail)] = sectionName;
+  applyConfigSectionTabs(sectionName);
 }
 
-function restoreConfigSectionCollapse(detail) {
-  pageRoot().querySelectorAll("[data-config-section]").forEach(section => {
-    const body = section.querySelector("[data-config-section-body]");
-    const button = section.querySelector(".config-section-toggle");
-    const collapsed = !!collapsedConfigSections()[configCollapseKey(detail, section.dataset.sectionName || "")];
-    if (body) body.hidden = collapsed;
-    if (button) button.textContent = collapsed ? "展开" : "收起";
+function applyConfigSectionTabs(activeName) {
+  const detail = state.currentConfigDetail;
+  if (!detail) return;
+  const sections = Array.from(pageRoot().querySelectorAll("[data-config-section]"));
+  const tabs = Array.from(pageRoot().querySelectorAll("[data-config-section-tab]"));
+  const availableTabs = tabs.filter(tab => tab.dataset.configSectionAvailable !== "false");
+  let nextActive = activeName && availableTabs.some(tab => tab.dataset.sectionName === activeName)
+    ? activeName
+    : availableTabs[0]?.dataset.sectionName || tabs[0]?.dataset.sectionName || "";
+  if (nextActive) configActiveSections()[configActiveSectionKey(detail)] = nextActive;
+  sections.forEach(section => {
+    const available = section.dataset.configSectionAvailable !== "false";
+    section.hidden = !available || section.dataset.sectionName !== nextActive;
   });
+  tabs.forEach(tab => {
+    const available = tab.dataset.configSectionAvailable !== "false";
+    const active = available && tab.dataset.sectionName === nextActive;
+    tab.classList.toggle("active", active);
+    tab.disabled = !available;
+    tab.setAttribute("aria-selected", active ? "true" : "false");
+  });
+  const title = $("configActiveSectionTitle");
+  if (title) title.textContent = nextActive || "常规";
+}
+
+function updateConfigTabState(detail) {
+  if (!detail) return;
+  const fields = detail.schema.fields || [];
+  pageRoot().querySelectorAll("[data-config-section-tab]").forEach(tab => {
+    const sectionName = tab.dataset.sectionName || "常规";
+    const sectionFields = fields.filter(field => (field.section || "常规") === sectionName);
+    const changed = sectionFields.some(field => configFieldChanged(detail, field));
+    const restartChanged = sectionFields.some(field => field.restartRequired && configFieldChanged(detail, field));
+    tab.classList.toggle("changed", changed);
+    tab.classList.toggle("restart-changed", restartChanged);
+    const stateNode = tab.querySelector("[data-config-tab-state]");
+    if (stateNode) {
+      stateNode.textContent = changed ? (restartChanged ? "需重启" : "已修改") : `${sectionFields.length} 项`;
+    }
+  });
+}
+
+function refreshConfigSectionAvailability(detail) {
+  const fields = detail.schema.fields || [];
+  pageRoot().querySelectorAll("[data-config-section]").forEach(section => {
+    const wrappers = Array.from(section.querySelectorAll("[data-config-field-path]"));
+    const available = wrappers.length === 0 || wrappers.some(item => !item.hidden);
+    section.dataset.configSectionAvailable = available ? "true" : "false";
+    const sectionName = section.dataset.sectionName || "";
+    const tab = Array.from(pageRoot().querySelectorAll("[data-config-section-tab]"))
+      .find(item => item.dataset.sectionName === sectionName);
+    if (tab) {
+      tab.dataset.configSectionAvailable = available ? "true" : "false";
+      const sectionFields = fields.filter(field => (field.section || "常规") === sectionName);
+      const stateNode = tab.querySelector("[data-config-tab-state]");
+      if (stateNode && !tab.classList.contains("changed")) {
+        stateNode.textContent = available ? `${sectionFields.length} 项` : "无可用项";
+      }
+    }
+  });
+  applyConfigSectionTabs(configActiveSections()[configActiveSectionKey(detail)]);
 }
 
 function updateConfigRestartButton(detail) {
@@ -478,10 +557,7 @@ function wireConfigFieldVisibility(detail) {
       const current = currentConfigValueForPath(rule.path);
       wrapper.hidden = values.length > 0 ? !values.includes(current) : !current;
     });
-    pageRoot().querySelectorAll("[data-config-section]").forEach(section => {
-      const wrappers = Array.from(section.querySelectorAll("[data-config-field-path]"));
-      section.hidden = wrappers.length > 0 && wrappers.every(item => item.hidden);
-    });
+    refreshConfigSectionAvailability(detail);
   };
   Array.from(new Set(fields.map(field => field.visibleWhen && field.visibleWhen.path).filter(Boolean))).forEach(path => {
     const input = configInputFor({ path });
