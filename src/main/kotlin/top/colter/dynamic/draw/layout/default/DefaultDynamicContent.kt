@@ -6,6 +6,7 @@ import org.jetbrains.skia.paragraph.Alignment
 import org.jetbrains.skia.paragraph.TextStyle
 import top.colter.dynamic.core.data.DynamicBlock
 import top.colter.dynamic.core.data.DynamicContent
+import top.colter.dynamic.core.data.DynamicContentIcon
 import top.colter.dynamic.core.data.DynamicContentNodeEmoji
 import top.colter.dynamic.core.data.DynamicContentNodeLink
 import top.colter.dynamic.core.data.DynamicContentNodeMention
@@ -98,23 +99,41 @@ private fun buildDynamicContentParagraph(
         when (part) {
             is DynamicContentPart.Text -> paragraph.addText(part.text, if (part.link) linkStyle else style)
             is DynamicContentPart.Emoji -> paragraph.addEmoji(part.text, part.image, linkStyle)
+            is DynamicContentPart.Icon -> {
+                paragraph.addEmoji(part.alt, part.image, linkStyle)
+                paragraph.addText(" ", linkStyle)
+            }
         }
     }
 }.build()
 
 private fun DynamicContent.resolveParts(config: DrawConfig): List<DynamicContentPart> {
-    return nodes.map {
-        when (it) {
-            is DynamicContentNodeText -> DynamicContentPart.Text(it.text)
-            is DynamicContentNodeLink -> DynamicContentPart.Text(it.text, link = true)
-            is DynamicContentNodeMention -> DynamicContentPart.Text(it.text, link = true)
-            is DynamicContentNodeTag -> DynamicContentPart.Text(it.text, link = true)
-            is DynamicContentNodeEmoji -> {
-                val image = it.image
-                if (image == null) {
-                    DynamicContentPart.Text(it.text)
-                } else {
-                    DynamicContentPart.Emoji(it.text, config.image(image))
+    return buildList {
+        nodes.forEach {
+            when (it) {
+                is DynamicContentNodeText -> add(DynamicContentPart.Text(it.text))
+                is DynamicContentNodeLink -> {
+                    val icon = it.icon
+                    icon?.resolveImage(config)?.let { image ->
+                        add(DynamicContentPart.Icon(icon.alt, image))
+                    }
+                    add(DynamicContentPart.Text(it.text, link = true))
+                }
+                is DynamicContentNodeMention -> add(DynamicContentPart.Text(it.text, link = true))
+                is DynamicContentNodeTag -> {
+                    val icon = it.icon
+                    icon?.resolveImage(config)?.let { image ->
+                        add(DynamicContentPart.Icon(icon.alt, image))
+                    }
+                    add(DynamicContentPart.Text(it.text, link = true))
+                }
+                is DynamicContentNodeEmoji -> {
+                    val image = it.image
+                    if (image == null) {
+                        add(DynamicContentPart.Text(it.text))
+                    } else {
+                        add(DynamicContentPart.Emoji(it.text, config.image(image)))
+                    }
                 }
             }
         }
@@ -124,6 +143,11 @@ private fun DynamicContent.resolveParts(config: DrawConfig): List<DynamicContent
 private sealed class DynamicContentPart {
     data class Text(val text: String, val link: Boolean = false) : DynamicContentPart()
     data class Emoji(val text: String, val image: Image) : DynamicContentPart()
+    data class Icon(val alt: String, val image: Image) : DynamicContentPart()
+}
+
+private fun DynamicContentIcon.resolveImage(config: DrawConfig): Image? {
+    return config.platformAssetImage(platformId, assetKey)
 }
 
 private data class DynamicFontSizeRange(

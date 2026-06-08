@@ -5,6 +5,7 @@ import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
 import top.colter.dynamic.DrawSettings
 import top.colter.dynamic.core.data.MediaRef
+import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.dynamic.draw.resource.DrawFonts
@@ -34,6 +35,15 @@ public data class DrawConfig(
 
     public fun platformAssetImage(key: String, width: Int? = null, height: Int? = null): Image? {
         return assetResolver.image(platform.id, key, width, height)
+    }
+
+    public fun platformAssetImage(
+        platformId: PlatformId,
+        key: String,
+        width: Int? = null,
+        height: Int? = null,
+    ): Image? {
+        return assetResolver.image(platformId, key, width, height)
     }
 }
 
