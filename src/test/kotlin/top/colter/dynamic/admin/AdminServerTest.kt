@@ -372,7 +372,9 @@ class AdminServerTest {
         }
 
         assertEquals(HttpStatusCode.InternalServerError, response.status)
-        assertTrue(response.bodyAsText().contains("boom"))
+        val body = response.bodyAsText()
+        assertTrue(body.contains("后台接口处理失败"))
+        assertFalse(body.contains("boom"))
     }
 
 
@@ -434,6 +436,30 @@ class AdminServerTest {
         assertEquals("100", response.subscription.subscriber?.name)
         assertEquals("bilibili", response.subscription.publisher?.platformId)
         assertNotNull(SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "100")))
+    }
+
+    @Test
+    fun createPublisherShouldInitializeDrawTheme() = runBlocking {
+        initDb("admin-create-publisher-theme")
+        var initializedPublisherId: Int? = null
+        var previousSubscriptionCount: Long? = null
+        val service = service(
+            plugin = FakePublisherFollowPlugin(),
+            publisherThemeInitializer = PublisherThemeInitializer { publisher, count ->
+                initializedPublisherId = publisher.id
+                previousSubscriptionCount = count
+            },
+        )
+
+        val publisher = service.createPublisher(
+            CreatePublisherRequest(
+                platformId = "bilibili",
+                externalId = "123",
+            ),
+        )
+
+        assertEquals(publisher.id, initializedPublisherId)
+        assertEquals(0L, previousSubscriptionCount)
     }
 
     @Test
@@ -916,6 +942,7 @@ class AdminServerTest {
         sink: MessageSinkPlugin? = null,
         config: MainDynamicConfig = MainDynamicConfig(),
         followPlugin: PublisherFollowPlugin? = plugin as? PublisherFollowPlugin,
+        publisherThemeInitializer: PublisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
     ): AdminService {
         return AdminService(
             pluginProvider = { emptyList() },
@@ -937,7 +964,7 @@ class AdminServerTest {
             publisherLookupResolver = { platformId -> plugin.takeIf { platformId == plugin.platformId.value } },
             publisherFollowResolver = { platformId -> followPlugin?.takeIf { platformId == it.platformId.value } },
             configProvider = { config },
-            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+            publisherThemeInitializer = publisherThemeInitializer,
         )
     }
 

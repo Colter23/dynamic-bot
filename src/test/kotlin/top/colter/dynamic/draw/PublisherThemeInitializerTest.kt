@@ -44,6 +44,29 @@ class PublisherThemeInitializerTest {
     }
 
     @Test
+    fun publisherUpsertShouldGenerateAndStoreThemeWhenAutoThemeEnabled() = runBlocking {
+        initTestDatabase("publisher-theme-initializer-upsert-auto")
+        val publisher = testPublisher(
+            id = 1,
+            avatar = testMedia("https://example.com/avatar.png", MediaKind.AVATAR),
+        )
+        PublisherRepository.create(publisher)
+        var loadCalls = 0
+        val initializer = DefaultPublisherThemeInitializer(
+            configProvider = { MainDynamicConfig(draw = DrawSettings(autoTheme = true)) },
+            imageLoader = DynamicImageLoader { loadCalls += 1 },
+            themeService = PublisherDrawThemeService(
+                avatarThemeExtractor = AvatarThemeExtractor { pngBytes(Color(64, 132, 220)) },
+            ),
+        )
+
+        initializer.initializeAfterPublisherUpsert(publisher)
+
+        assertEquals(1, loadCalls)
+        assertNotNull(PublisherDrawThemeRepository.findByPublisherId(publisher.id))
+    }
+
+    @Test
     fun initializerShouldSkipWhenAutoThemeDisabledOrNotFirstSubscription() = runBlocking {
         initTestDatabase("publisher-theme-initializer-skip")
         val publisher = testPublisher(id = 1)

@@ -690,6 +690,7 @@ public class AdminService(
         val (publisherInfo, _) = fetchPublisherInfo(platform, externalId)
         val upsert = PublisherRepository.upsertInfo(publisherInfo.normalized())
         val publisher = upsert.value
+        publisherThemeInitializer.initializeAfterPublisherUpsert(publisher)
         logger.info {
             "后台发布者已${upsert.operationLabel()}：publisherId=${publisher.id}，platform=$platform，externalId=$externalId"
         }

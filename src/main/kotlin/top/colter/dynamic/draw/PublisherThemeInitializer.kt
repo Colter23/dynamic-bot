@@ -16,6 +16,10 @@ private val themeInitializerLogger = loggerFor<DefaultPublisherThemeInitializer>
 
 public fun interface PublisherThemeInitializer {
     public suspend fun initializeAfterFirstSubscription(publisher: Publisher, previousSubscriptionCount: Long)
+
+    public suspend fun initializeAfterPublisherUpsert(publisher: Publisher) {
+        initializeAfterFirstSubscription(publisher, previousSubscriptionCount = 0)
+    }
 }
 
 public class DefaultPublisherThemeInitializer(
