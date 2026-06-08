@@ -135,9 +135,9 @@ class PushTemplateRendererTest {
             drawImage = null,
         )
 
-        val contents = chains.single().content
-        assertEquals("head Demo UP", contents[0].fallbackText)
-        val forward = assertIs<MessageContent.Forward>(contents[1])
+        assertEquals(3, chains.size)
+        assertEquals("head Demo UP", chains[0].content.single().fallbackText)
+        val forward = assertIs<MessageContent.Forward>(chains[1].content.single())
         assertEquals("Demo UP 的原始内容", forward.title)
         assertEquals("Demo UP", forward.sourceName)
         assertEquals("123", forward.nodes[0].senderId)
@@ -145,7 +145,39 @@ class PushTemplateRendererTest {
         assertEquals("完整文字：\nDemo contentlink", forward.nodes[0].batches.single().content.single().fallbackText)
         assertEquals("全部原图：\n", forward.nodes[1].batches.single().content[0].fallbackText)
         assertEquals("https://example.com/pic-a.png", (forward.nodes[1].batches.single().content[1] as MessageContent.Image).image.uri)
-        assertEquals("tail", contents[2].fallbackText)
+        assertEquals("tail", chains[2].content.single().fallbackText)
+    }
+
+    @Test
+    fun shouldTrimTrailingLineBreakBeforeAdjacentMergedForwardBlock() {
+        val chains = renderer.render(
+            "{draw}\n{name} 发布了新动态\n{link}\n\n{>>}{name}@{uid}\\n{time}\\n\\n{content}\\r{images}{<<}",
+            demoDynamic(),
+            drawImage = MediaRef("D:/tmp/draw.png", MediaKind.IMAGE),
+        )
+
+        assertEquals(2, chains.size)
+        val firstContents = chains[0].content
+        assertEquals("D:/tmp/draw.png", (firstContents[0] as MessageContent.Image).image.uri)
+        val text = firstContents[1].fallbackText
+        assertEquals("\nDemo UP 发布了新动态\nhttps://t.bilibili.com/dynamic-1", text)
+        assertFalse(text.endsWith("\n"))
+        assertIs<MessageContent.Forward>(chains[1].content.single())
+    }
+
+    @Test
+    fun shouldNormalizeWrappedEscapeMarkers() {
+        val chains = renderer.render(
+            "{>>}line\\\\" + "\n    nnext\\\\" + "\n    rlast{<<}",
+            demoDynamic(),
+            drawImage = null,
+        )
+
+        val forward = assertIs<MessageContent.Forward>(chains.single().content.single())
+        assertEquals(
+            listOf("line\nnext", "last"),
+            forward.nodes.map { it.batches.single().content.single().fallbackText },
+        )
     }
 
     @Test

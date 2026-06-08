@@ -55,7 +55,8 @@ public class PushTemplateRenderer {
             current.clear()
         }
 
-        parseTemplateSegments(template).forEach { segment ->
+        val normalizedTemplate = normalizeTemplateEscapes(template)
+        parseTemplateSegments(normalizedTemplate).forEach { segment ->
             when (segment) {
                 is TemplateSegment.Text -> appendTextSegment(
                     contents = current,
@@ -65,7 +66,11 @@ public class PushTemplateRenderer {
                     appendPlaceholder = appendPlaceholder,
                 )
                 is TemplateSegment.Forward -> renderForwardContent(segment.value, update, appendPlaceholder)
-                    ?.let { current += it }
+                    ?.let { forward ->
+                        flush()
+                        current += forward
+                        flush()
+                    }
             }
         }
         flush()
@@ -319,7 +324,13 @@ public class PushTemplateRenderer {
 
     public companion object {
         public fun validateForwardBlockSyntax(template: String) {
-            parseTemplateSegments(template)
+            parseTemplateSegments(normalizeTemplateEscapes(template))
+        }
+
+        private fun normalizeTemplateEscapes(template: String): String {
+            return WRAPPED_ESCAPE_MARKER_REGEX.replace(template) {
+                "\\${it.groupValues[1]}"
+            }
         }
 
         private fun parseTemplateSegments(template: String): List<TemplateSegment> {
@@ -368,5 +379,6 @@ public class PushTemplateRenderer {
         private const val SECONDS_PER_HOUR: Long = 60 * SECONDS_PER_MINUTE
         private const val SECONDS_PER_DAY: Long = 24 * SECONDS_PER_HOUR
         private val PLACEHOLDER_REGEX: Regex = Regex("\\{([a-zA-Z0-9_]+)\\}")
+        private val WRAPPED_ESCAPE_MARKER_REGEX: Regex = Regex("""\\+[ \t]*\r?\n[ \t]*([nr])""")
     }
 }

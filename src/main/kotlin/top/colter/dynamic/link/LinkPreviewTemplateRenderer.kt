@@ -47,7 +47,8 @@ internal class LinkPreviewTemplateRenderer(
             current.clear()
         }
 
-        parseTemplateSegments(template).forEach { segment ->
+        val normalizedTemplate = normalizeTemplateEscapes(template)
+        parseTemplateSegments(normalizedTemplate).forEach { segment ->
             when (segment) {
                 is TemplateSegment.Text -> {
                     segment.value.split(CHAIN_SEPARATOR).forEachIndexed { index, fragment ->
@@ -56,7 +57,11 @@ internal class LinkPreviewTemplateRenderer(
                     }
                 }
                 is TemplateSegment.Forward -> renderForwardContent(segment.value, context)
-                    ?.let { current += it }
+                    ?.let { forward ->
+                        flush()
+                        current += forward
+                        flush()
+                    }
             }
         }
         flush()
@@ -189,7 +194,13 @@ internal class LinkPreviewTemplateRenderer(
 
     internal companion object {
         fun validate(template: String) {
-            parseTemplateSegments(template)
+            parseTemplateSegments(normalizeTemplateEscapes(template))
+        }
+
+        private fun normalizeTemplateEscapes(template: String): String {
+            return WRAPPED_ESCAPE_MARKER_REGEX.replace(template) {
+                "\\${it.groupValues[1]}"
+            }
         }
 
         private fun parseTemplateSegments(template: String): List<TemplateSegment> {
@@ -234,6 +245,7 @@ internal class LinkPreviewTemplateRenderer(
         private const val LINE_BREAK: String = "\\n"
         private const val CHAIN_SEPARATOR: String = "\\r"
         private val PLACEHOLDER_REGEX: Regex = Regex("\\{([a-zA-Z0-9_]+)\\}")
+        private val WRAPPED_ESCAPE_MARKER_REGEX: Regex = Regex("""\\+[ \t]*\r?\n[ \t]*([nr])""")
     }
 }
 
