@@ -29,6 +29,8 @@ import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.data.coreJson
 import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.core.event.SubscriptionChangedEvent
+import top.colter.dynamic.core.event.SubscriptionChangeType
 import top.colter.dynamic.message.OutboundMessageService
 import top.colter.dynamic.message.RENDER_VARIANT_MANUAL_FORWARD
 import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
@@ -1031,7 +1033,8 @@ public class AdminService(
                 subscriberId = subscriberUpsert.value.id,
                 publisherId = publisherUpsert.value.id,
             ) ?: throw IllegalStateException("订阅未找到")
-            SubscriptionRepository.updatePolicy(existing.id, request.policy)
+            val updated = SubscriptionRepository.updatePolicy(existing.id, request.policy)
+            broadcastSubscriptionUpdated(updated, publisherUpsert.value, subscriberUpsert.value)
         }
         val subscription = SubscriptionRepository.findBySubscriberAndPublisher(
             subscriberId = subscriberUpsert.value.id,
@@ -1063,11 +1066,14 @@ public class AdminService(
             ?: throw NoSuchElementException("未找到消息目标：${subscription.subscriberId}")
         requireSubscriptionPolicyAllowed(subscriber, request.policy)
         val updated = SubscriptionRepository.updatePolicy(subscription.id, request.policy)
+        val publisher = PublisherRepository.findById(updated.publisherId)
+            ?: throw NoSuchElementException("未找到发布者：${updated.publisherId}")
+        broadcastSubscriptionUpdated(updated, publisher, subscriber)
         logger.info {
             "后台订阅规则已更新：subscriptionId=${updated.id}，publisherId=${updated.publisherId}，subscriberId=${updated.subscriberId}"
         }
         return updated.toDto(
-            publishers = PublisherRepository.findById(updated.publisherId)?.let { mapOf(it.id to it) }.orEmpty(),
+            publishers = mapOf(publisher.id to publisher),
             subscribers = mapOf(subscriber.id to subscriber),
             filterRules = DynamicFilterRuleRepository.findBySubscriptionId(updated.id),
         )
@@ -1315,6 +1321,22 @@ public class AdminService(
     private fun applySubscriptionMutation(result: SubscriptionMutationResult): Boolean {
         result.event?.let { eventBus.broadcast(it) }
         return result.changed
+    }
+
+    private fun broadcastSubscriptionUpdated(
+        subscription: Subscription,
+        publisher: Publisher,
+        subscriber: Subscriber,
+    ) {
+        eventBus.broadcast(
+            SubscriptionChangedEvent(
+                changeType = SubscriptionChangeType.UPDATED,
+                subscription = subscription,
+                publisher = publisher,
+                subscriber = subscriber,
+                changedAtEpochSeconds = subscription.updatedAtEpochSeconds,
+            )
+        )
     }
 
     private suspend fun tryEnsureFollowed(

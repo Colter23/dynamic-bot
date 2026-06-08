@@ -6,7 +6,7 @@ const $ = id => document.getElementById(id);
       login: ["账号连接", "动态源与消息出口状态", "/admin/pages/login.html", "/admin/pages/login.js"],
       subscriptions: ["订阅管理", "订阅策略与过滤规则", "/admin/pages/subscriptions.html", "/admin/pages/subscriptions.js"],
       entities: ["发布者与目标", "来源与消息出口", "/admin/pages/entities.html", "/admin/pages/entities.js"],
-      messages: ["消息记录", "投递结果与失败诊断", "/admin/pages/messages.html", "/admin/pages/messages.js"],
+      messages: ["消息记录", "投递结果与失败详情", "/admin/pages/messages.html", "/admin/pages/messages.js"],
       tasks: ["任务查看", "调度状态与操作", "/admin/pages/tasks.html", "/admin/pages/tasks.js"],
       logs: ["日志查看", "进程内实时日志", "/admin/pages/logs.html", "/admin/pages/logs.js"],
       configs: ["配置", "主项目与插件配置", "/admin/pages/configs.html", "/admin/pages/configs.js"],

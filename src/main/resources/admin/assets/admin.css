@@ -1127,22 +1127,22 @@
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .entity-diagnostic-button {
+    .entity-detail-button {
       border-color: #d7c3f4;
       background: #f6f1ff;
       color: #6d3bb5;
     }
-    .entity-diagnostic {
+    .entity-detail {
       display: grid;
       gap: 14px;
     }
-    .entity-diagnostic-head {
+    .entity-detail-head {
       display: flex;
       justify-content: space-between;
       align-items: center;
       gap: 10px;
     }
-    .entity-diagnostic-count {
+    .entity-detail-count {
       min-height: 22px;
       display: inline-flex;
       align-items: center;
@@ -1154,38 +1154,38 @@
       font-size: 12px;
       font-weight: 900;
     }
-    .entity-diagnostic-table-wrap {
+    .entity-detail-table-wrap {
       width: 100%;
       overflow: auto;
       border: 1px solid var(--line);
       border-radius: 8px;
       background: #fff;
     }
-    .entity-diagnostic-table {
+    .entity-detail-table {
       min-width: 820px;
       table-layout: fixed;
     }
-    .entity-diagnostic-table th,
-    .entity-diagnostic-table td {
+    .entity-detail-table th,
+    .entity-detail-table td {
       padding: 7px 8px;
       vertical-align: middle;
     }
-    .entity-diagnostic-table.cursor {
+    .entity-detail-table.cursor {
       min-width: 760px;
     }
-    .entity-diagnostic-table .mono,
-    .diagnostic-long-text {
+    .entity-detail-table .mono,
+    .detail-long-text {
       font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
       font-size: 12px;
     }
-    .diagnostic-long-text {
+    .detail-long-text {
       display: block;
       max-width: 100%;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
     }
-    .entity-diagnostic-cover {
+    .entity-detail-cover {
       width: 46px;
       height: 30px;
       display: block;
@@ -1194,10 +1194,20 @@
       object-fit: cover;
       background: var(--panel-soft);
     }
-    .entity-diagnostic-empty {
+    .entity-detail-empty {
+      display: grid;
+      gap: 4px;
       border: 1px dashed var(--line);
       border-radius: 8px;
       background: var(--panel-soft);
+    }
+    .entity-detail-empty strong {
+      color: var(--text);
+      font-size: 13px;
+    }
+    .entity-detail-empty span {
+      color: var(--muted);
+      font-size: 12px;
     }
     .cards {
       display: grid;

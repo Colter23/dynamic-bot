@@ -16,11 +16,13 @@ import io.ktor.client.statement.bodyAsText
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.testing.testApplication
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import top.colter.dynamic.LinkParseTriggerMode
@@ -49,6 +51,8 @@ import top.colter.dynamic.core.data.SubscriptionEventKind
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.event.SubscriptionChangedEvent
+import top.colter.dynamic.core.event.SubscriptionChangeType
 import top.colter.dynamic.core.plugin.PluginDescriptor
 import top.colter.dynamic.core.plugin.FollowActionResult
 import top.colter.dynamic.core.plugin.FollowActionStatus
@@ -66,6 +70,8 @@ import top.colter.dynamic.core.task.TaskSnapshot
 import top.colter.dynamic.core.task.TaskStatus
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.draw.PublisherThemeInitializer
+import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.event.Listener
 import top.colter.dynamic.plugin.PluginCapability
 import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.plugin.PluginInfo
@@ -438,6 +444,43 @@ class AdminServerTest {
         assertEquals("100", response.subscription.subscriber?.name)
         assertEquals("bilibili", response.subscription.publisher?.platformId)
         assertNotNull(SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "100")))
+    }
+
+    @Test
+    fun updateSubscriptionShouldBroadcastUpdatedEvent() = runBlocking {
+        initDb("admin-update-subscription-event")
+        val eventBus = EventBus()
+        val service = service(FakePublisherFollowPlugin(), eventBus = eventBus)
+        val created = service.createSubscription(
+            CreateSubscriptionRequest(
+                subscriberPlatform = "qq",
+                targetKind = "GROUP",
+                subscriberTargetId = "100",
+                publisherPlatform = "bilibili",
+                publisherExternalId = "123",
+            ),
+        )
+        val received = CompletableDeferred<SubscriptionChangedEvent>()
+        eventBus.subscribe(
+            object : Listener<SubscriptionChangedEvent> {
+                override suspend fun onMessage(event: SubscriptionChangedEvent) {
+                    if (event.changeType == SubscriptionChangeType.UPDATED) {
+                        received.complete(event)
+                    }
+                }
+            }
+        )
+        val policy = SubscriptionPolicy(
+            enabledEvents = setOf(SubscriptionEventKind.LIVE_STARTED, SubscriptionEventKind.LIVE_ENDED),
+        )
+
+        service.updateSubscription(created.subscription.id, UpdateSubscriptionRequest(policy))
+
+        val event = withTimeout(3_000) { received.await() }
+        assertEquals(SubscriptionChangeType.UPDATED, event.changeType)
+        assertEquals(created.subscription.id, event.subscription.id)
+        assertEquals(policy, event.subscription.policy)
+        eventBus.shutdown()
     }
 
     @Test
@@ -961,6 +1004,7 @@ class AdminServerTest {
         config: MainDynamicConfig = MainDynamicConfig(),
         followPlugin: PublisherFollowPlugin? = plugin as? PublisherFollowPlugin,
         publisherThemeInitializer: PublisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        eventBus: EventBus = EventBus(),
     ): AdminService {
         return AdminService(
             pluginProvider = { emptyList() },
@@ -983,6 +1027,7 @@ class AdminServerTest {
             publisherFollowResolver = { platformId -> followPlugin?.takeIf { platformId == it.platformId.value } },
             configProvider = { config },
             publisherThemeInitializer = publisherThemeInitializer,
+            eventBus = eventBus,
         )
     }
 

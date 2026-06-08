@@ -589,7 +589,7 @@ public object MainConfigForms {
                     label = "媒体外部访问地址",
                     type = ConfigFieldType.TEXT,
                     section = "出站媒体",
-                    description = "远程消息出口能访问到的主项目地址。\n例如 http://公网IP:2233；留空时会继续使用插件自己的兜底发送方式。",
+                    description = "此项目的访问地址。\n例如 http://内网IP:2233；留空时会继续使用插件自己的兜底发送方式。",
                 ),
                 ConfigFieldSpec(
                     path = "outboundMedia.urlTtlSeconds",

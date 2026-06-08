@@ -135,8 +135,8 @@ export async function handleAction(nextCtx, { action, id }) {
     await openEditPublisher(id);
     return true;
   }
-  if (action === "publisher-diagnostics") {
-    await openPublisherDiagnostics(id);
+  if (action === "publisher-detail") {
+    await openPublisherDetail(id);
     return true;
   }
   if (action === "create-publisher") {
@@ -149,6 +149,10 @@ export async function handleAction(nextCtx, { action, id }) {
   }
   if (action === "edit-subscriber") {
     await openEditSubscriber(id);
+    return true;
+  }
+  if (action === "subscriber-detail") {
+    await openSubscriberDetail(id);
     return true;
   }
   if (action === "delete-publisher") {
@@ -261,7 +265,7 @@ async function loadEntities(force) {
           { title: "订阅", render: p => `<span class="primary-line">${p.subscriptionCount || 0}</span>` },
           { title: "状态", render: p => entityStatePill(p.state) },
           { title: "创建时间", render: p => `<span class="sub-line">${fmtTime(p.createTime)}</span>` },
-          { title: "操作", render: p => `<div class="row-actions"><button data-action="edit-publisher" data-id="${p.id}">编辑</button><button class="entity-diagnostic-button" data-action="publisher-diagnostics" data-id="${p.id}">诊断</button><button class="danger" data-action="delete-publisher" data-id="${p.id}">删除</button></div>` }
+          { title: "操作", render: p => `<div class="row-actions"><button data-action="edit-publisher" data-id="${p.id}">编辑</button><button class="entity-detail-button" data-action="publisher-detail" data-id="${p.id}">详情</button><button class="danger" data-action="delete-publisher" data-id="${p.id}">删除</button></div>` }
         ])}
       </section>
       <section class="panel full">
@@ -274,7 +278,7 @@ async function loadEntities(force) {
           { title: "链接解析", render: s => linkParseCell(s) },
           { title: "状态", render: s => entityStatePill(s.state) },
           { title: "创建时间", render: s => `<span class="sub-line">${fmtTime(s.createTime)}</span>` },
-          { title: "操作", render: s => `<div class="row-actions"><button data-action="edit-subscriber" data-id="${s.id}">编辑</button><button class="danger" data-action="delete-subscriber" data-id="${s.id}">删除</button></div>` }
+          { title: "操作", render: s => `<div class="row-actions"><button data-action="edit-subscriber" data-id="${s.id}">编辑</button><button class="entity-detail-button" data-action="subscriber-detail" data-id="${s.id}">详情</button><button class="danger" data-action="delete-subscriber" data-id="${s.id}">删除</button></div>` }
         ])}
       </section>
     </section>`;
@@ -310,37 +314,37 @@ function entitySubscriberCell(target) {
   );
 }
 
-async function openPublisherDiagnostics(id) {
-  if (!state.cache.publishers) state.cache.publishers = await api("/publishers");
+async function openPublisherDetail(id) {
+  state.cache.publishers = await api("/publishers");
   const item = state.cache.publishers.find(row => Number(row.id) === Number(id));
   if (!item) throw new Error("发布者不存在");
   const liveStatuses = item.liveStatuses || [];
   const cursors = item.cursors || [];
-  openModal("发布者诊断", `
-    <div class="entity-diagnostic">
+  openModal("发布者详情", `
+    <div class="entity-detail">
       <div class="plugin-detail-grid">
-        ${diagnosticItem("数据库 ID", item.id)}
-        ${diagnosticItem("平台", item.platformId)}
-        ${diagnosticItem("类型", label(item.kind))}
-        ${diagnosticItem("发布者 ID", item.externalId, true)}
-        ${diagnosticItem("状态", entityStateText(item.state))}
-        ${diagnosticItem("订阅数量", item.subscriptionCount || 0)}
-        ${diagnosticItem("创建用户", item.createUser)}
-        ${diagnosticItem("创建时间", fmtTime(item.createTime))}
-        ${diagnosticItem("头像角标", item.avatarBadgeKey || "-", true)}
-        ${diagnosticItem("挂件 URI", item.pendantUri || "-", true)}
+        ${detailItem("数据库 ID", item.id)}
+        ${detailItem("平台", item.platformId)}
+        ${detailItem("类型", label(item.kind))}
+        ${detailItem("发布者 ID", item.externalId, true)}
+        ${detailItem("状态", entityStateText(item.state))}
+        ${detailItem("订阅数量", item.subscriptionCount || 0)}
+        ${detailItem("创建用户", item.createUser)}
+        ${detailItem("创建时间", fmtTime(item.createTime))}
+        ${detailItem("头像角标", item.avatarBadgeKey || "-", true)}
+        ${detailItem("挂件 URI", item.pendantUri || "-", true)}
       </div>
       <section class="plugin-detail-section">
-        <div class="entity-diagnostic-head">
+        <div class="entity-detail-head">
           <h3>直播状态</h3>
-          <span class="entity-diagnostic-count">${liveStatuses.length} 条</span>
+          <span class="entity-detail-count">${liveStatuses.length} 条</span>
         </div>
         ${renderPublisherLiveStatuses(liveStatuses, item.platformId)}
       </section>
       <section class="plugin-detail-section">
-        <div class="entity-diagnostic-head">
+        <div class="entity-detail-head">
           <h3>源游标</h3>
-          <span class="entity-diagnostic-count">${cursors.length} 条</span>
+          <span class="entity-detail-count">${cursors.length} 条</span>
         </div>
         ${renderPublisherCursors(cursors)}
       </section>
@@ -353,9 +357,12 @@ async function openPublisherDiagnostics(id) {
 }
 
 function renderPublisherLiveStatuses(rows, platformId) {
-  if (!rows.length) return `<div class="empty entity-diagnostic-empty">暂无直播状态记录</div>`;
-  return `<div class="entity-diagnostic-table-wrap">
-    <table class="entity-diagnostic-table">
+  if (!rows.length) return entityDetailEmpty(
+    "暂无直播状态记录",
+    "可能尚未启用开播/下播订阅，或插件还未完成直播检测。"
+  );
+  return `<div class="entity-detail-table-wrap">
+    <table class="entity-detail-table">
       <thead><tr><th>房间</th><th>状态</th><th>标题</th><th>分区</th><th>开播时间</th><th>最后观察</th><th>封面</th></tr></thead>
       <tbody>${rows.map(row => `<tr>
         <td><span class="mono">${esc(row.roomId || "-")}</span></td>
@@ -364,23 +371,26 @@ function renderPublisherLiveStatuses(rows, platformId) {
         <td><span class="sub-line">${esc(row.area || "-")}</span></td>
         <td><span class="sub-line">${fmtTime(row.startedAtEpochSeconds)}</span></td>
         <td><span class="sub-line">${fmtTime(row.lastObservedAtEpochSeconds)}</span></td>
-        <td>${row.coverUri ? mediaImage(row.coverUri, "entity-diagnostic-cover", platformId, "COVER") : `<span class="sub-line">-</span>`}</td>
+        <td>${row.coverUri ? mediaImage(row.coverUri, "entity-detail-cover", platformId, "COVER") : `<span class="sub-line">-</span>`}</td>
       </tr>`).join("")}</tbody>
     </table>
   </div>`;
 }
 
 function renderPublisherCursors(rows) {
-  if (!rows.length) return `<div class="empty entity-diagnostic-empty">暂无源游标记录</div>`;
-  return `<div class="entity-diagnostic-table-wrap">
-    <table class="entity-diagnostic-table cursor">
+  if (!rows.length) return entityDetailEmpty(
+    "暂无源游标记录",
+    "可能尚未启用动态订阅，或动态检测还没有建立基线。"
+  );
+  return `<div class="entity-detail-table-wrap">
+    <table class="entity-detail-table cursor">
       <thead><tr><th>来源</th><th>事件</th><th>最后动态</th><th>最近去重</th><th>最后观察</th></tr></thead>
       <tbody>${rows.map(row => {
         const recent = row.recentUpdateKeys || [];
         return `<tr>
           <td><span class="mono">${esc(row.sourceKey || "-")}</span></td>
           <td>${pill(row.eventType)}</td>
-          <td><span class="mono diagnostic-long-text">${esc(row.lastSeenUpdateKey || "-")}</span></td>
+          <td><span class="mono detail-long-text">${esc(row.lastSeenUpdateKey || "-")}</span></td>
           <td><span class="sub-line" title="${attr(recent.join("\n"))}">${recent.length} 条</span></td>
           <td><span class="sub-line">${fmtTime(row.lastSeenAtEpochSeconds)}</span></td>
         </tr>`;
@@ -389,7 +399,44 @@ function renderPublisherCursors(rows) {
   </div>`;
 }
 
-function diagnosticItem(title, value, mono = false) {
+async function openSubscriberDetail(id) {
+  if (!state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
+  const item = state.cache.subscribers.find(row => Number(row.id) === Number(id));
+  if (!item) throw new Error("消息目标不存在");
+  const linkParseSource = item.linkParseConfigSource === "CUSTOM" ? "当前目标配置" : "全局回退";
+  openModal("消息目标详情", `
+    <div class="entity-detail">
+      <div class="plugin-detail-grid">
+        ${detailItem("数据库 ID", item.id)}
+        ${detailItem("平台", item.platformId)}
+        ${detailItem("类型", label(item.targetKind))}
+        ${detailItem("目标 ID", item.externalId, true)}
+        ${detailItem("状态", entityStateText(item.state))}
+        ${detailItem("订阅数量", item.subscriptionCount || 0)}
+        ${detailItem("显示名称", item.name)}
+        ${detailItem("创建用户", item.createUser)}
+        ${detailItem("创建时间", fmtTime(item.createTime))}
+        ${detailItem("目标作用域", item.scopeId || "未指定", true)}
+        ${detailItem("线程 ID", item.threadId || "未指定", true)}
+        ${detailItem("优先账号", item.accountId || "未指定", true)}
+        ${detailItem("链接解析", linkParseModeLabel(item.effectiveLinkParseTriggerMode))}
+        ${detailItem("配置来源", linkParseSource)}
+      </div>
+    </div>
+  `, null, {
+    size: "medium",
+    cancelText: "关闭",
+  });
+}
+
+function entityDetailEmpty(title, description) {
+  return `<div class="empty entity-detail-empty">
+    <strong>${esc(title)}</strong>
+    <span>${esc(description)}</span>
+  </div>`;
+}
+
+function detailItem(title, value, mono = false) {
   return `<div class="plugin-detail-item">
     <span>${esc(title)}</span>
     <strong class="${mono ? "mono" : ""}">${esc(value ?? "-")}</strong>
