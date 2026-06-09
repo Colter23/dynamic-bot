@@ -161,13 +161,63 @@ const $ = id => document.getElementById(id);
       if (!theme || !Array.isArray(theme.backgroundColors) || theme.backgroundColors.length === 0) {
         return `<span class="sub-line">使用全局主题</span>`;
       }
-      const colors = theme.backgroundColors.filter(Boolean);
+      const cssColor = value => {
+        const text = String(value || "").trim();
+        if (/^#[0-9a-fA-F]{8}$/.test(text)) {
+          return `#${text.slice(3)}${text.slice(1, 3)}`;
+        }
+        return text;
+      };
+      const colors = theme.backgroundColors.filter(Boolean).map(cssColor);
       const mode = String(theme.mode || "").toUpperCase();
       const modeText = mode === "DARK" ? "暗色" : mode === "LIGHT" ? "亮色" : "主题";
       const modeClass = mode === "DARK" ? "dark" : "light";
       const gradient = colors.length === 1 ? colors[0] : `linear-gradient(90deg, ${colors.map(attr).join(", ")})`;
+      const card = cssColor(theme.cardColor || (mode === "DARK" ? "#13171FAD" : "#C2FFFFFF"));
+      const border = cssColor(theme.borderColor || (mode === "DARK" ? "#2EFFFFFF" : "#E0FFFFFF"));
+      const text = cssColor(theme.textColor || (mode === "DARK" ? "#FFFFFF" : "#000000"));
+      const secondary = cssColor(theme.secondaryTextColor || text);
+      const muted = cssColor(theme.mutedTextColor || secondary);
+      const primary = cssColor(theme.primaryColor || colors[0]);
+      const onPrimary = cssColor(theme.onPrimaryColor || "#FFFFFF");
+      const accent = cssColor(theme.readableAccentColor || theme.linkColor || primary);
+      const link = cssColor(theme.linkColor || accent);
+      const qr = cssColor(theme.qrPointColor || primary);
+      const tooltip = [
+        `${modeText}主题`,
+        `背景 ${theme.backgroundColors.join("; ")}`,
+        `卡片 ${theme.cardColor || "-"}`,
+        `主色 ${theme.primaryColor || "-"}`,
+        `可读强调 ${theme.readableAccentColor || theme.linkColor || "-"}`,
+        `二维码点 ${theme.qrPointColor || theme.primaryColor || "-"}`,
+      ].join("\n");
       return `<div class="theme-cell">
-        <span class="theme-swatch ${modeClass}" style="background:${gradient}" title="${attr(`${modeText} ${colors.join("; ")}`)}"></span>
+        <div class="theme-preview ${modeClass}" style="${attr([
+          `--theme-bg:${gradient}`,
+          `--theme-card:${card}`,
+          `--theme-border:${border}`,
+          `--theme-text:${text}`,
+          `--theme-secondary:${secondary}`,
+          `--theme-muted:${muted}`,
+          `--theme-primary:${primary}`,
+          `--theme-on-primary:${onPrimary}`,
+          `--theme-accent:${accent}`,
+          `--theme-link:${link}`,
+          `--theme-qr:${qr}`,
+        ].join(";"))}" title="${attr(tooltip)}" aria-label="${attr(`${modeText}主题预览`)}">
+          <div class="theme-preview-card">
+            <div class="theme-preview-main">
+              <span class="theme-preview-title"></span>
+              <span class="theme-preview-line main"></span>
+              <span class="theme-preview-line sub"></span>
+              <span class="theme-preview-link"></span>
+            </div>
+            <div class="theme-preview-side">
+              <span class="theme-preview-pill">Aa</span>
+              <span class="theme-preview-qr"></span>
+            </div>
+          </div>
+        </div>
       </div>`;
     }
     function renderTable(rows, columns) {

@@ -3,11 +3,14 @@ package top.colter.dynamic.link
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.LinkVideoDownloadConfig
@@ -58,6 +61,7 @@ public class LinkParseService(
     private val projectRootProvider: () -> File = { File(System.getProperty("user.dir")) },
 ) {
     private val videoDownloadSemaphores: MutableMap<Int, Semaphore> = ConcurrentHashMap()
+    private val videoDownloadLocks: MutableMap<String, VideoDownloadLock> = ConcurrentHashMap()
     private val templateRenderer: LinkPreviewTemplateRenderer = LinkPreviewTemplateRenderer(previewRenderer)
 
     internal suspend fun parseAndDispatch(
@@ -351,51 +355,54 @@ public class LinkParseService(
             )
         }
 
+        val directory = videoCacheDirectory(config, parsedLink.platformId.value)
+        val request = LinkVideoDownloadRequest(
+            parsedLink = parsedLink,
+            directory = directory,
+            maxBytes = config.maxFileBytes,
+            quality = config.quality,
+            ffmpegPath = resolveFfmpegPath(config),
+        )
+
         return try {
-            semaphoreFor(config).withPermit {
-                val result = withTimeoutOrNull(secondsToMillis(config.timeoutSeconds, minimumMillis = 1)) {
-                    downloader.downloadVideoLink(
-                        LinkVideoDownloadRequest(
-                            parsedLink = parsedLink,
-                            directory = videoCacheDirectory(config, parsedLink.platformId.value),
-                            maxBytes = config.maxFileBytes,
-                            quality = config.quality,
-                            ffmpegPath = resolveFfmpegPath(config),
-                        ),
-                    )
-                } ?: run {
-                    linkParseLogger.warn {
-                        "链接视频下载超时，已回退预览：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，timeoutSeconds=${config.timeoutSeconds}"
-                    }
-                    return VideoDownloadOutcome.NotSent(
-                        videoPrompt(
-                            config.prompts.timeout,
-                            preview,
-                            parsedLink,
-                            mapOf("timeout" to config.timeoutSeconds.formatSeconds()),
-                        ),
-                    )
-                }
-                if (result.fileSizeBytes > config.maxFileBytes) {
-                    linkParseLogger.warn {
-                        "链接视频下载结果超出大小限制，已回退预览：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，size=${result.fileSizeBytes}，max=${config.maxFileBytes}"
-                    }
-                    return VideoDownloadOutcome.NotSent(
-                        videoPrompt(
-                            config.prompts.fileTooLarge,
-                            preview,
-                            parsedLink,
-                            mapOf(
-                                "size" to result.fileSizeBytes.formatMegabytes(),
-                                "maxSize" to config.maxFileBytes.formatMegabytes(),
+            withVideoDownloadLock(videoDownloadLockKey(directory, parsedLink)) {
+                semaphoreFor(config).withPermit {
+                    val result = withTimeoutOrNull(secondsToMillis(config.timeoutSeconds, minimumMillis = 1)) {
+                        downloader.downloadVideoLink(request)
+                    } ?: run {
+                        linkParseLogger.warn {
+                            "链接视频下载超时，已回退预览：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，timeoutSeconds=${config.timeoutSeconds}"
+                        }
+                        return@withPermit VideoDownloadOutcome.NotSent(
+                            videoPrompt(
+                                config.prompts.timeout,
+                                preview,
+                                parsedLink,
+                                mapOf("timeout" to config.timeoutSeconds.formatSeconds()),
                             ),
-                        ),
-                    )
+                        )
+                    }
+                    if (result.fileSizeBytes > config.maxFileBytes) {
+                        linkParseLogger.warn {
+                            "链接视频下载结果超出大小限制，已回退预览：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，size=${result.fileSizeBytes}，max=${config.maxFileBytes}"
+                        }
+                        return@withPermit VideoDownloadOutcome.NotSent(
+                            videoPrompt(
+                                config.prompts.fileTooLarge,
+                                preview,
+                                parsedLink,
+                                mapOf(
+                                    "size" to result.fileSizeBytes.formatMegabytes(),
+                                    "maxSize" to config.maxFileBytes.formatMegabytes(),
+                                ),
+                            ),
+                        )
+                    }
+                    linkParseLogger.info {
+                        "链接视频下载完成：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，size=${result.fileSizeBytes}"
+                    }
+                    VideoDownloadOutcome.Downloaded(result)
                 }
-                linkParseLogger.info {
-                    "链接视频下载完成：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，size=${result.fileSizeBytes}"
-                }
-                VideoDownloadOutcome.Downloaded(result)
             }
         } catch (e: CancellationException) {
             throw e
@@ -532,8 +539,43 @@ public class LinkParseService(
         return videoDownloadSemaphores.getOrPut(permits) { Semaphore(permits) }
     }
 
+    private suspend fun <T> withVideoDownloadLock(key: String, block: suspend () -> T): T {
+        val lock = videoDownloadLocks.compute(key) { _, existing ->
+            (existing ?: VideoDownloadLock()).also { it.references.incrementAndGet() }
+        }!!
+        return try {
+            lock.mutex.withLock {
+                block()
+            }
+        } finally {
+            videoDownloadLocks.computeIfPresent(key) { _, existing ->
+                if (existing !== lock) {
+                    existing
+                } else if (existing.references.decrementAndGet() <= 0) {
+                    null
+                } else {
+                    existing
+                }
+            }
+        }
+    }
+
+    private fun videoDownloadLockKey(directory: File, parsedLink: ParsedLink): String {
+        return listOf(
+            directory.normalizedPath(),
+            parsedLink.platformId.value,
+            parsedLink.kind,
+            parsedLink.targetId,
+        ).joinToString("\u0000")
+    }
+
     private fun videoCacheDirectory(config: LinkVideoDownloadConfig, platformId: String): File {
         return File(config.cacheRoot).resolve(platformId)
+    }
+
+    private fun File.normalizedPath(): String {
+        return runCatching { canonicalFile.absolutePath }
+            .getOrElse { absoluteFile.toPath().normalize().toString() }
     }
 
     private fun resolveFfmpegPath(config: LinkVideoDownloadConfig): String {
@@ -697,6 +739,11 @@ public class LinkParseService(
         val shouldDownload: Boolean,
         val hint: String,
         val downloader: LinkVideoDownloader? = null,
+    )
+
+    private data class VideoDownloadLock(
+        val mutex: Mutex = Mutex(),
+        val references: AtomicInteger = AtomicInteger(),
     )
 
     private sealed interface VideoDownloadOutcome {

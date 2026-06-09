@@ -120,7 +120,7 @@ public data class LinkVideoDownloadConfig(
     val maxFileMegabytes: Double = 200.0,
     val quality: LinkVideoQuality = LinkVideoQuality.P720,
     val ffmpegPath: String = "",
-    val cacheRoot: String = "data/videos/link-parse",
+    val cacheRoot: String = "data/videos",
     val timeoutSeconds: Double = 600.0,
     val maxConcurrentDownloads: Int = 1,
     val cleanupMaxIdleDays: Long = 7,

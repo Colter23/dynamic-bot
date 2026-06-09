@@ -1,5 +1,6 @@
 package top.colter.dynamic.link
 
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.createDirectories
 import kotlin.io.path.writeBytes
@@ -457,6 +458,89 @@ class LinkParseServiceTest {
     }
 
     @Test
+    fun `same video link should not run duplicate downloads concurrently`() = runBlocking {
+        initDb("video-download-same-link")
+        val cacheRoot = createTempDirectory("dynamic-bot-link-video-cache")
+        val videoFile = cacheRoot.resolve("video.mp4")
+        val firstDownloadStarted = CompletableDeferred<Unit>()
+        val releaseFirstDownload = CompletableDeferred<Unit>()
+        val requestCount = AtomicInteger()
+        val activeDownloads = AtomicInteger()
+        val maxActiveDownloads = AtomicInteger()
+        var secondRequestSawCachedFile = false
+        val downloader = FakeVideoDownloader(
+            result = LinkVideoDownloadResult(
+                video = MediaRef(videoFile.toString(), MediaKind.VIDEO, mimeType = "video/mp4"),
+                fileSizeBytes = 4,
+            ),
+            onRequest = {
+                val active = activeDownloads.incrementAndGet()
+                maxActiveDownloads.updateAndGet { current -> maxOf(current, active) }
+                try {
+                    when (requestCount.incrementAndGet()) {
+                        1 -> {
+                            firstDownloadStarted.complete(Unit)
+                            releaseFirstDownload.await()
+                            videoFile.writeBytes(byteArrayOf(0, 0, 0, 1))
+                        }
+                        2 -> {
+                            secondRequestSawCachedFile = videoFile.toFile().isFile
+                        }
+                    }
+                } finally {
+                    activeDownloads.decrementAndGet()
+                }
+            },
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeVideoLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        videoDownload = LinkVideoDownloadConfig(
+                            enabled = true,
+                            maxConcurrentDownloads = 2,
+                            maxFileMegabytes = 1.0,
+                            cacheRoot = cacheRoot.toString(),
+                        ),
+                    ),
+                )
+            },
+            videoDownloadersProvider = { listOf(downloader) },
+            previewRenderer = LinkPreviewRenderer {
+                MediaRef("https://example.com/preview.png", MediaKind.IMAGE)
+            },
+        )
+
+        val first = async {
+            service.parseAndDispatch(
+                text = "https://www.bilibili.com/video/BV1xx411c7mD",
+                context = commandEvent("", targetExternalId = "100").context,
+                maxLinks = 1,
+            )
+        }
+        val second = async {
+            service.parseAndDispatch(
+                text = "https://www.bilibili.com/video/BV1xx411c7mD",
+                context = commandEvent("", targetExternalId = "200").context,
+                maxLinks = 1,
+            )
+        }
+
+        withTimeout(3_000) { firstDownloadStarted.await() }
+        delay(100)
+        assertEquals(1, requestCount.get())
+
+        releaseFirstDownload.complete(Unit)
+        first.await()
+        second.await()
+
+        assertEquals(2, requestCount.get())
+        assertEquals(1, maxActiveDownloads.get())
+        assertTrue(secondRequestSawCachedFile)
+    }
+
+    @Test
     fun `link preview should use configured text template without drawing`() = runBlocking {
         initDb("preview-template-text")
         val service = LinkParseService(
@@ -610,6 +694,7 @@ class LinkParseServiceTest {
 
     private fun commandEvent(
         rawText: String,
+        targetExternalId: String = "100",
         botAccountId: String? = null,
         mentionedAccountIds: Set<String> = emptySet(),
     ): CommandEvent {
@@ -618,7 +703,7 @@ class LinkParseServiceTest {
             context = CommandContext.of(
                 platform = "onebot",
                 kind = TargetKind.GROUP,
-                externalId = "100",
+                externalId = targetExternalId,
                 senderId = "sender",
                 botAccountId = botAccountId,
                 mentionedAccountIds = mentionedAccountIds,

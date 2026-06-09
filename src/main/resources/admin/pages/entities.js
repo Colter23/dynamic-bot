@@ -272,11 +272,11 @@ async function loadEntities(force) {
         ${renderTable(filteredPublishers, [
           { title: "平台", render: p => platformTag(p.platformId, p.platformId) },
           { title: "发布者", render: p => entityPublisherCell(p) },
-          { title: "主题色", render: p => themeSwatch(p.drawTheme) },
-          { title: "头图", render: p => p.bannerUri ? mediaImage(p.bannerUri, "header-image", p.platformId, "COVER") : `<span class="sub-line">-</span>` },
           { title: "订阅", render: p => subscriptionCountButton("publisher-subscriptions", p.id, p.subscriptionCount, "查看订阅用户") },
           { title: "直播状态", render: p => publisherLiveStatusCell(p) },
           { title: "状态", render: p => entityStatePill(p.state) },
+          { title: "主题", render: p => themeSwatch(p.drawTheme) },
+          { title: "头图", render: p => p.bannerUri ? mediaImage(p.bannerUri, "header-image", p.platformId, "COVER") : `<span class="sub-line">-</span>` },
           { title: "创建时间", render: p => `<span class="sub-line">${fmtTime(p.createTime)}</span>` },
           { title: "操作", render: p => `<div class="row-actions"><button data-action="edit-publisher" data-id="${p.id}">编辑</button><button class="entity-detail-button" data-action="publisher-detail" data-id="${p.id}">详情</button><button class="danger" data-action="delete-publisher" data-id="${p.id}">删除</button></div>` }
         ])}
