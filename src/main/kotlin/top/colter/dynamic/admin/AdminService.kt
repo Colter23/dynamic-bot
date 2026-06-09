@@ -24,6 +24,7 @@ import top.colter.dynamic.core.data.PublisherLiveStatus
 import top.colter.dynamic.core.data.SourceCursor
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.Subscription
+import top.colter.dynamic.core.data.SubscriptionEventKind
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
@@ -653,6 +654,15 @@ public class AdminService(
     public fun publishers(): List<PublisherDto> {
         val subscriptions = SubscriptionRepository.findAll()
         val subscriptionCounts = subscriptions.groupingBy { it.publisherId }.eachCount()
+        val liveSubscriptionCounts = subscriptions
+            .filter { subscription ->
+                subscription.state == EntityState.ACTIVE &&
+                    subscription.policy.enabledEvents.any { event ->
+                        event == SubscriptionEventKind.LIVE_STARTED || event == SubscriptionEventKind.LIVE_ENDED
+                    }
+            }
+            .groupingBy { it.publisherId }
+            .eachCount()
         val liveStatuses = PublisherLiveStatusRepository.findAll().groupBy { it.publisherId }
         val cursors = SourceCursorRepository.findAll().groupBy { it.publisherId }
         val drawThemes = PublisherDrawThemeRepository.findAll().associateBy { it.publisherId }
@@ -662,6 +672,7 @@ public class AdminService(
         return publishers.map { publisher ->
             publisher.toDto(
                 subscriptionCount = subscriptionCounts[publisher.id]?.toLong() ?: 0,
+                liveSubscriptionCount = liveSubscriptionCounts[publisher.id]?.toLong() ?: 0,
                 liveStatuses = liveStatuses[publisher.id].orEmpty(),
                 liveRecords = liveRecords[publisher.id].orEmpty(),
                 cursors = cursors[publisher.id].orEmpty(),
@@ -1631,6 +1642,7 @@ private fun top.colter.dynamic.core.plugin.PublisherLoginAccount.toDto(): LoginA
 
 private fun Publisher.toDto(
     subscriptionCount: Long = 0,
+    liveSubscriptionCount: Long = 0,
     liveStatuses: List<PublisherLiveStatus> = emptyList(),
     liveRecords: List<PublisherLiveRecord> = emptyList(),
     cursors: List<SourceCursor> = emptyList(),
@@ -1649,6 +1661,7 @@ private fun Publisher.toDto(
     createTime = createTime,
     createUser = createUser,
     subscriptionCount = subscriptionCount,
+    liveSubscriptionCount = liveSubscriptionCount,
     drawTheme = drawTheme?.palette?.toDto(),
     liveStatuses = liveStatuses.sortedBy { it.roomId }.map { it.toDto() },
     liveRecords = liveRecords.sortedByDescending { it.startedAtEpochSeconds }.map { it.toDto() },

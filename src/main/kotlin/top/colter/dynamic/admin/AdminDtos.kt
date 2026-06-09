@@ -247,6 +247,7 @@ public data class PublisherDto(
     val createTime: Long,
     val createUser: Int,
     val subscriptionCount: Long = 0,
+    val liveSubscriptionCount: Long = 0,
     val drawTheme: PublisherDrawThemeDto? = null,
     val liveStatuses: List<PublisherLiveStatusDto> = emptyList(),
     val liveRecords: List<PublisherLiveRecordDto> = emptyList(),

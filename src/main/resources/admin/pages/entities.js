@@ -263,6 +263,7 @@ async function loadEntities(force) {
           { title: "主题色", render: p => themeSwatch(p.drawTheme) },
           { title: "头图", render: p => p.bannerUri ? mediaImage(p.bannerUri, "header-image", p.platformId, "COVER") : `<span class="sub-line">-</span>` },
           { title: "订阅", render: p => `<span class="primary-line">${p.subscriptionCount || 0}</span>` },
+          { title: "直播状态", render: p => publisherLiveStatusCell(p) },
           { title: "状态", render: p => entityStatePill(p.state) },
           { title: "创建时间", render: p => `<span class="sub-line">${fmtTime(p.createTime)}</span>` },
           { title: "操作", render: p => `<div class="row-actions"><button data-action="edit-publisher" data-id="${p.id}">编辑</button><button class="entity-detail-button" data-action="publisher-detail" data-id="${p.id}">详情</button><button class="danger" data-action="delete-publisher" data-id="${p.id}">删除</button></div>` }
@@ -298,6 +299,19 @@ function entityPublisherCell(publisher) {
     publisher.externalId,
     { showPlatform: false },
   );
+}
+
+function publisherLiveStatusCell(publisher) {
+  const liveSubscriptionCount = Number(publisher.liveSubscriptionCount || 0);
+  if (liveSubscriptionCount <= 0) {
+    return cell("未订阅直播", "启用开播/下播订阅后显示状态");
+  }
+  const status = (publisher.liveStatuses || [])[0];
+  if (!status) {
+    return cell("等待检测", `${liveSubscriptionCount} 个直播订阅`);
+  }
+  const observed = status.lastObservedAtEpochSeconds ? `最后观察 ${fmtTime(status.lastObservedAtEpochSeconds)}` : `${liveSubscriptionCount} 个直播订阅`;
+  return `<span class="primary-line">${pill(status.status)}</span><span class="sub-line">${esc(observed)}</span>`;
 }
 
 function entitySubscriberCell(target) {
