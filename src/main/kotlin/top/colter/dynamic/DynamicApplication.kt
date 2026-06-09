@@ -436,19 +436,50 @@ public object DynamicApplication : CoroutineScope {
     public fun shutdown() {
         if (!shutdownStarted.compareAndSet(false, true)) return
         try {
-            adminServer?.stop()
+            val currentAdminServer = adminServer
             adminServer = null
-            listenerTokens.forEach { eventBus.unsubscribe(it) }
-            listenerTokens.clear()
-            runBlocking {
-                taskScheduler.shutdown()
+            shutdownStep("管理后台") {
+                currentAdminServer?.stop()
             }
-            pluginManager.shutdown()
-            eventBus.shutdown()
-            job.cancel("应用关闭")
+
+            shutdownStep("事件监听器") {
+                listenerTokens.forEach { token ->
+                    runCatching {
+                        eventBus.unsubscribe(token)
+                    }.onFailure { error ->
+                        logger.warn(error) { "事件监听器取消订阅失败，继续关闭：token=$token" }
+                    }
+                }
+                listenerTokens.clear()
+            }
+
+            shutdownStep("任务调度器") {
+                runBlocking {
+                    taskScheduler.shutdown()
+                }
+            }
+            shutdownStep("插件管理器") {
+                pluginManager.shutdown()
+            }
+            shutdownStep("事件总线") {
+                eventBus.shutdown()
+            }
+            shutdownStep("主协程") {
+                job.cancel("应用关闭")
+            }
             logger.info { "应用已关闭" }
         } finally {
-            shutdownCallback?.invoke()
+            runCatching {
+                shutdownCallback?.invoke()
+            }.onFailure { error ->
+                logger.warn(error) { "应用关闭回调执行失败" }
+            }
+        }
+    }
+
+    private fun shutdownStep(name: String, action: () -> Unit) {
+        runCatching(action).onFailure { error ->
+            logger.warn(error) { "应用关闭步骤失败，继续关闭：$name" }
         }
     }
 }

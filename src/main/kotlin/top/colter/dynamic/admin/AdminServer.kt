@@ -104,10 +104,25 @@ public class AdminServer(
     }
 
     public fun stop() {
-        engine?.stop(gracePeriodMillis = 1_000, timeoutMillis = 5_000)
+        val currentEngine = engine
         engine = null
-        loginService?.let { runBlocking { it.close() } }
+        currentEngine?.let { server ->
+            runCatching {
+                server.stop(gracePeriodMillis = 1_000, timeoutMillis = 5_000)
+            }.onFailure { error ->
+                logger.warn(error) { "管理后台停止异常，继续关闭其他服务" }
+            }
+        }
+
+        val currentLoginService = loginService
         loginService = null
+        currentLoginService?.let { service ->
+            runCatching {
+                runBlocking { service.close() }
+            }.onFailure { error ->
+                logger.warn(error) { "管理后台登录服务关闭异常，继续关闭其他服务" }
+            }
+        }
     }
 }
 
