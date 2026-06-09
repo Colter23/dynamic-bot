@@ -20,6 +20,7 @@ import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.draw.image.CachedDynamicImageLoader
 import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.dynamic.draw.image.HttpImageDownloader
+import top.colter.dynamic.draw.image.ImageDownloadException
 import top.colter.dynamic.draw.image.ImageDownloader
 import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testPublisherInfo
@@ -97,7 +98,7 @@ class CachedDynamicImageLoaderTest {
         try {
             HttpImageDownloader().download(file.toString(), timeoutMs = 1_000, maxBytes = 8)
             fail("oversized file should be rejected")
-        } catch (_: IllegalArgumentException) {
+        } catch (_: ImageDownloadException) {
         }
     }
 

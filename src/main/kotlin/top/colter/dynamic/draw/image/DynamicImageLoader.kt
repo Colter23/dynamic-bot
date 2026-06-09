@@ -1,12 +1,16 @@
 package top.colter.dynamic.draw.image
 
 import java.io.ByteArrayOutputStream
+import java.io.IOException
 import java.io.InputStream
 import java.net.URI
+import java.net.http.HttpTimeoutException
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.nio.file.Files
+import java.nio.file.InvalidPathException
+import java.nio.file.NoSuchFileException
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.time.Duration
@@ -98,8 +102,14 @@ public class CachedDynamicImageLoader(
         } catch (e: CancellationException) {
             waiter.completeExceptionally(e)
             throw e
+        } catch (e: ImageDownloadException) {
+            logger.warn {
+                "图片下载失败，使用占位图：platform=$platformId，type=${imageType.name}，uri=${image.uri}，原因=${e.message}"
+            }
+            DynamicImageCache.putPlaceholder(image)
+            waiter.complete(Unit)
         } catch (t: Throwable) {
-            logger.warn(t) { "图片下载失败，使用占位图：platform=$platformId，type=${imageType.name}，uri=${image.uri}" }
+            logger.warn(t) { "图片加载异常，使用占位图：platform=$platformId，type=${imageType.name}，uri=${image.uri}" }
             DynamicImageCache.putPlaceholder(image)
             waiter.complete(Unit)
         } finally {
@@ -112,6 +122,11 @@ public fun interface ImageDownloader {
     public suspend fun download(uri: String, timeoutMs: Long, maxBytes: Long): ByteArray
 }
 
+public class ImageDownloadException(
+    message: String,
+    cause: Throwable? = null,
+) : RuntimeException(message, cause)
+
 public class HttpImageDownloader(
     private val client: HttpClient = HttpClient.newBuilder()
         .followRedirects(HttpClient.Redirect.NORMAL)
@@ -119,11 +134,23 @@ public class HttpImageDownloader(
 ) : ImageDownloader {
     override suspend fun download(uri: String, timeoutMs: Long, maxBytes: Long): ByteArray {
         val parsed = runCatching { URI(uri) }.getOrNull()
-        return when (parsed?.scheme?.lowercase()) {
-            "http", "https" -> downloadHttp(uri, timeoutMs, maxBytes)
-            "file" -> readFileLimited(Paths.get(parsed), maxBytes)
-            null -> readFileLimited(Paths.get(uri), maxBytes)
-            else -> readLocalPathOrThrow(uri, parsed.scheme, maxBytes)
+        return try {
+            when (parsed?.scheme?.lowercase()) {
+                "http", "https" -> downloadHttp(uri, timeoutMs, maxBytes)
+                "file" -> readFileLimited(Paths.get(parsed), maxBytes)
+                null -> readFileLimited(Paths.get(uri), maxBytes)
+                else -> readLocalPathOrThrow(uri, parsed.scheme, maxBytes)
+            }
+        } catch (e: ImageDownloadException) {
+            throw e
+        } catch (e: NoSuchFileException) {
+            throw ImageDownloadException("本地图片不存在：${e.file}", e)
+        } catch (e: InvalidPathException) {
+            throw ImageDownloadException("图片地址不是有效路径：${e.input}", e)
+        } catch (e: IllegalArgumentException) {
+            throw ImageDownloadException(e.message ?: "图片地址无效", e)
+        } catch (e: IOException) {
+            throw ImageDownloadException(e.message ?: "图片读取失败", e)
         }
     }
 
@@ -134,20 +161,22 @@ public class HttpImageDownloader(
             .build()
         val response = client
             .sendAsync(request, HttpResponse.BodyHandlers.ofInputStream())
-            .await()
+            .awaitHttp(uri)
         if (response.statusCode() !in 200..299) {
             response.body().close()
-            error("图片下载失败：HTTP ${response.statusCode()}")
+            throw ImageDownloadException("HTTP ${response.statusCode()}")
         }
         response.headers().firstValueAsLong("Content-Length")
             .takeIf { it.isPresent && it.asLong > maxBytes }
-            ?.let { error("图片超过大小限制：size=${it.asLong}，maxBytes=$maxBytes") }
+            ?.let { throw ImageDownloadException("图片超过大小限制：size=${it.asLong}，maxBytes=$maxBytes") }
         return response.body().use { input -> readBytesLimited(input, maxBytes) }
     }
 
     private fun readFileLimited(path: Path, maxBytes: Long): ByteArray {
         val size = Files.size(path)
-        require(size <= maxBytes) { "图片文件超过大小限制：size=$size，maxBytes=$maxBytes" }
+        if (size > maxBytes) {
+            throw ImageDownloadException("图片文件超过大小限制：size=$size，maxBytes=$maxBytes")
+        }
         return Files.newInputStream(path).use { input -> readBytesLimited(input, maxBytes) }
     }
 
@@ -156,7 +185,7 @@ public class HttpImageDownloader(
         if (path != null && Files.isRegularFile(path)) {
             return readFileLimited(path, maxBytes)
         }
-        error("不支持的图片地址协议：$scheme")
+        throw ImageDownloadException("不支持的图片地址协议：$scheme")
     }
 
     private fun readBytesLimited(input: InputStream, maxBytes: Long): ByteArray {
@@ -168,11 +197,21 @@ public class HttpImageDownloader(
             if (read < 0) break
             total += read
             if (total > maxBytes) {
-                throw IllegalStateException("图片超过大小限制：maxBytes=$maxBytes")
+                throw ImageDownloadException("图片超过大小限制：maxBytes=$maxBytes")
             }
             output.write(buffer, 0, read)
         }
         return output.toByteArray()
+    }
+}
+
+private suspend fun <T> CompletableFuture<T>.awaitHttp(uri: String): T {
+    return try {
+        await()
+    } catch (e: HttpTimeoutException) {
+        throw ImageDownloadException("请求超时：$uri", e)
+    } catch (e: IOException) {
+        throw ImageDownloadException(e.message ?: "请求失败：$uri", e)
     }
 }
 
