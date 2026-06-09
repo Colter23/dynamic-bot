@@ -10,7 +10,8 @@ const $ = id => document.getElementById(id);
       tasks: ["任务查看", "调度状态与操作", "/admin/pages/tasks.html", "/admin/pages/tasks.js"],
       logs: ["日志查看", "进程内实时日志", "/admin/pages/logs.html", "/admin/pages/logs.js"],
       configs: ["配置", "主项目与插件配置", "/admin/pages/configs.html", "/admin/pages/configs.js"],
-      system: ["系统维护", "运行信息与维护", "/admin/pages/system.html", "/admin/pages/system.js"]
+      system: ["系统维护", "运行信息与维护", "/admin/pages/system.html", "/admin/pages/system.js"],
+      about: ["关于", "项目信息与作者", "/admin/pages/about.html", "/admin/pages/about.js"]
     };
     const state = {
       token: localStorage.getItem(tokenKey) || "",
@@ -804,7 +805,8 @@ const $ = id => document.getElementById(id);
             tasks: ["tasks"],
             logs: [],
             configs: ["configs"],
-            system: ["system"]
+            system: ["system"],
+            about: ["system", "plugins"]
           };
           invalidate(...(keysByPage[state.page] || []));
           await loadPage(state.page, true);
