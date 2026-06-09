@@ -183,7 +183,9 @@ public object DrawThemeFactory {
     }
 
     public fun parseThemeColors(value: String): List<String> {
-        val parts = value.split(';').map { it.trim() }
+        val parts = value.split(';')
+            .map { it.trim() }
+            .dropLastWhile { it.isEmpty() }
         require(parts.isNotEmpty() && parts.any { it.isNotEmpty() }) { "主题色不能为空" }
         require(parts.none { it.isEmpty() }) { "主题色列表不能包含空项" }
         require(parts.size <= MAX_THEME_COLORS) { "主题色最多支持 $MAX_THEME_COLORS 个" }

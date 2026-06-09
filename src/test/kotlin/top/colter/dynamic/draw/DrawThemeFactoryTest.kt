@@ -24,6 +24,14 @@ class DrawThemeFactoryTest {
     }
 
     @Test
+    fun trailingSemicolonShouldBeIgnoredInThemeColorText() {
+        assertEquals(
+            listOf("#FE65A6", "#BFFAFF"),
+            DrawThemeFactory.parseThemeColors("#FE65A6; #BFFAFF;"),
+        )
+    }
+
+    @Test
     fun highSaturationColorShouldBeSoftenedForBackground() {
         val theme = DrawThemeFactory.fromThemeColorText("#FF0000")
         val hsb = Color.RGBtoHSB(
@@ -127,7 +135,7 @@ class DrawThemeFactoryTest {
     fun invalidThemeColorTextShouldUseChineseMessages() {
         assertTrue(
             assertFailsWith<IllegalArgumentException> {
-                DrawThemeFactory.parseThemeColors("#FE65A6;")
+                DrawThemeFactory.parseThemeColors("#FE65A6;;#BFFAFF")
             }.message!!.contains("空项"),
         )
         assertTrue(

@@ -125,7 +125,7 @@ class MainConfigStoreTest {
     @Test
     fun validateShouldRejectInvalidThemeColorsWithChineseMessage() {
         val error = assertFailsWith<IllegalArgumentException> {
-            MainConfigForms.validate(MainDynamicConfig(draw = DrawSettings(themeColors = "#FE65A6;")))
+            MainConfigForms.validate(MainDynamicConfig(draw = DrawSettings(themeColors = "#FE65A6;;#BFFAFF")))
         }
 
         assertTrue(error.message!!.contains("主题色"))
