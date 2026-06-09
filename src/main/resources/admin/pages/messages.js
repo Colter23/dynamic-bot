@@ -126,24 +126,28 @@ function renderLayout() {
           <div id="deliveryStatus" class="message-record-status"></div>
         </div>
         <div class="entity-filter-bar message-filter-bar">
-          <span class="entity-filter-title">筛选</span>
-          <div class="entity-filter-controls">
-            <select id="deliveryFilterStatus" data-delivery-filter="status">
-              ${deliveryStatusOptions(filters.status)}
-            </select>
-            <input id="deliveryFilterPlatform" data-delivery-filter="platformId" value="${attr(filters.platformId)}" placeholder="平台 ID">
-            <select id="deliveryFilterTargetKind" data-delivery-filter="targetKind">
-              ${targetKindOptions(filters.targetKind)}
-            </select>
-            <input id="deliveryFilterKeyword" data-delivery-filter="q" value="${attr(filters.q)}" placeholder="消息 / 目标 / 错误">
-            <select id="deliveryFilterLimit" data-delivery-filter="limit">
-              ${limitOptions(filters.limit)}
-            </select>
-            <button type="button" class="entity-filter-clear" data-action="apply-delivery-filter">筛选</button>
-            <button type="button" class="choice-clear-button compact" data-action="reset-delivery-filter">清除</button>
-            <button type="button" class="choice-refresh-button compact" data-action="refresh-deliveries">刷新</button>
+          <div class="entity-filter-main">
+            <span class="entity-filter-title">筛选</span>
+            <div class="entity-filter-controls">
+              <select id="deliveryFilterStatus" data-delivery-filter="status">
+                ${deliveryStatusOptions(filters.status)}
+              </select>
+              <input id="deliveryFilterPlatform" data-delivery-filter="platformId" value="${attr(filters.platformId)}" placeholder="平台 ID">
+              <select id="deliveryFilterTargetKind" data-delivery-filter="targetKind">
+                ${targetKindOptions(filters.targetKind)}
+              </select>
+              <input id="deliveryFilterKeyword" data-delivery-filter="q" value="${attr(filters.q)}" placeholder="消息 / 目标 / 错误">
+              <select id="deliveryFilterLimit" data-delivery-filter="limit">
+                ${limitOptions(filters.limit)}
+              </select>
+              <button type="button" class="filter-apply-button compact" data-action="apply-delivery-filter">筛选</button>
+              <button type="button" class="filter-clear-button compact delivery-clear-filter-button" data-action="reset-delivery-filter">清除筛选</button>
+            </div>
+            <span id="deliveryFilterSummary" class="entity-filter-summary"></span>
           </div>
-          <span id="deliveryFilterSummary" class="entity-filter-summary"></span>
+          <div class="entity-filter-tools">
+            <button type="button" class="filter-refresh-button compact" data-action="refresh-deliveries">刷新</button>
+          </div>
         </div>
         <div class="message-table-region">
           <div id="deliveriesTable" class="messages-table-host"></div>
@@ -151,6 +155,7 @@ function renderLayout() {
       </section>
     </section>`;
   renderDeliveryStatus();
+  updateDeliveryFilterButtons();
 }
 
 function deliveryStatusOptions(selected) {
@@ -187,6 +192,7 @@ function bindDeliveryControls() {
         applyDeliveryFilter().catch(handleError);
       }
     };
+    control.oninput = updateDeliveryFilterButtons;
   });
   const status = pageQuery("#deliveryFilterStatus");
   const targetKind = pageQuery("#deliveryFilterTargetKind");
@@ -198,6 +204,7 @@ function bindDeliveryControls() {
 
 async function applyDeliveryFilter(button) {
   readDeliveryFilterControls();
+  updateDeliveryFilterButtons();
   await refreshDeliveries(button, true);
 }
 
@@ -208,6 +215,19 @@ function readDeliveryFilterControls() {
   filters.targetKind = pageQuery("#deliveryFilterTargetKind")?.value.trim() || "";
   filters.q = pageQuery("#deliveryFilterKeyword")?.value.trim() || "";
   filters.limit = pageQuery("#deliveryFilterLimit")?.value.trim() || String(DELIVERY_LIMIT);
+}
+
+function deliveryFilterActiveFromControls() {
+  const filters = deliveryFilters();
+  const status = pageQuery("#deliveryFilterStatus")?.value.trim() || "";
+  const platformId = pageQuery("#deliveryFilterPlatform")?.value.trim() || "";
+  const targetKind = pageQuery("#deliveryFilterTargetKind")?.value.trim() || "";
+  const q = pageQuery("#deliveryFilterKeyword")?.value.trim() || "";
+  const limit = pageQuery("#deliveryFilterLimit")?.value.trim() || String(DELIVERY_LIMIT);
+  return Boolean(
+    status || platformId || targetKind || q || limit !== String(DELIVERY_LIMIT) ||
+    filters.status || filters.platformId || filters.targetKind || filters.q || filters.limit !== String(DELIVERY_LIMIT)
+  );
 }
 
 function resetDeliveryFilterControls() {
@@ -256,6 +276,7 @@ async function refreshDeliveries(button, force) {
       button.disabled = false;
       if (originalText) button.textContent = originalText;
     }
+    updateDeliveryFilterButtons();
   }
 }
 
@@ -264,6 +285,7 @@ function renderDeliveries() {
   if (!target) return;
   const rows = state.deliveryRows || [];
   renderDeliverySummary(rows);
+  updateDeliveryFilterButtons();
   if (rows.length === 0) {
     target.innerHTML = `<div class="empty message-empty">暂无消息记录</div>`;
     return;
@@ -327,6 +349,11 @@ function renderDeliverySummary(rows) {
   const failed = counts.FAILED || 0;
   const pending = counts.PENDING || 0;
   summary.textContent = `显示 ${rows.length} 条 · 失败 ${failed} · 等待 ${pending}`;
+}
+
+function updateDeliveryFilterButtons() {
+  const clearButton = pageQuery(".delivery-clear-filter-button");
+  if (clearButton) clearButton.disabled = !deliveryFilterActiveFromControls();
 }
 
 function renderDeliveryStatus() {

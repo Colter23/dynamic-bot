@@ -324,6 +324,14 @@
       font-weight: 900;
       white-space: nowrap;
     }
+    .entity-filter-main {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex: 1 1 520px;
+      flex-wrap: wrap;
+    }
     .entity-filter-controls {
       min-width: 0;
       max-width: 100%;
@@ -341,6 +349,57 @@
       height: 28px;
       padding: 3px 8px;
       font-size: 13px;
+    }
+    .entity-filter-tools {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex: 0 0 auto;
+      flex-wrap: wrap;
+      margin-left: auto;
+    }
+    .filter-apply-button,
+    .filter-clear-button,
+    .filter-refresh-button,
+    .filter-pause-button {
+      min-height: 28px;
+      padding: 3px 9px;
+      font-size: 12px;
+      filter: none;
+    }
+    .filter-apply-button {
+      border-color: #b9ded8;
+      background: #eef8f6;
+      color: var(--accent);
+    }
+    .filter-clear-button {
+      border-color: #f3c5bd;
+      background: #fff3f1;
+      color: #b42318;
+    }
+    .filter-clear-button:disabled {
+      cursor: default;
+      border-color: #d9e1e8;
+      background: #f3f6f8;
+      color: #8a96a3;
+      opacity: 1;
+    }
+    .filter-refresh-button {
+      border-color: #b9ddcc;
+      background: #effaf4;
+      color: var(--green);
+    }
+    .filter-pause-button {
+      border-color: #d7c3f4;
+      background: #f6f1ff;
+      color: #6d3bb5;
+    }
+    .filter-pause-button[data-paused="true"] {
+      border-color: #f5d28f;
+      background: #fff8eb;
+      color: var(--amber);
     }
     .entity-filter-clear {
       min-height: 28px;
@@ -2987,13 +3046,18 @@
     }
     .task-hero-panel {
       display: grid;
-      gap: 10px;
+      gap: 8px;
+      padding: 10px 12px;
       background:
         linear-gradient(135deg, rgba(15, 118, 110, 0.10), rgba(37, 99, 235, 0.08)),
         var(--panel);
     }
     .task-panel-head {
       margin-bottom: 0;
+      align-items: center;
+    }
+    .task-panel-head p {
+      margin-top: 1px;
     }
     .task-record-status {
       min-height: 28px;
@@ -3010,13 +3074,15 @@
     .task-summary-grid {
       display: grid;
       grid-template-columns: repeat(4, minmax(120px, 1fr));
-      gap: 10px;
+      gap: 8px;
     }
     .task-summary-card {
       min-width: 0;
       display: grid;
-      gap: 3px;
-      padding: 11px;
+      grid-template-columns: minmax(0, 1fr) auto;
+      align-items: baseline;
+      gap: 2px 8px;
+      padding: 7px 9px;
       border: 1px solid rgba(15, 118, 110, 0.16);
       border-radius: 8px;
       background: rgba(255, 255, 255, 0.74);
@@ -3029,12 +3095,13 @@
     }
     .task-summary-card b {
       color: var(--text);
-      font-size: 22px;
+      font-size: 18px;
       line-height: 1.1;
     }
     .task-summary-card small {
+      grid-column: 1 / -1;
       color: var(--muted);
-      font-size: 12px;
+      font-size: 11px;
       overflow-wrap: anywhere;
     }
     .task-summary-card.ok {
@@ -3133,7 +3200,7 @@
     .tasks-table td:nth-child(9) { width: 170px; }
     .task-owner-cell {
       display: grid;
-      grid-template-columns: auto minmax(0, 1fr) auto;
+      grid-template-columns: auto minmax(0, 1fr);
       gap: 8px;
       align-items: center;
     }
@@ -3511,16 +3578,6 @@
       background: #f6f1ff;
       color: #6d3bb5;
     }
-    .log-jump-button {
-      border-color: #b9cffc;
-      background: #eef4ff;
-      color: #1d4ed8;
-    }
-    .log-autopin-button {
-      border-color: #f0c98d;
-      background: #fff8ea;
-      color: var(--amber);
-    }
     .log-empty {
       height: 100%;
       display: grid;
@@ -3766,6 +3823,12 @@
       .task-filter-bar .entity-filter-title {
         width: 100%;
       }
+      .message-filter-bar .entity-filter-main,
+      .log-filter-bar .entity-filter-main,
+      .task-filter-bar .entity-filter-main {
+        width: 100%;
+        flex: 1 1 100%;
+      }
       .message-filter-bar .entity-filter-controls,
       .log-filter-bar .entity-filter-controls,
       .task-filter-bar .entity-filter-controls {
@@ -3791,6 +3854,18 @@
       .message-filter-bar .entity-filter-controls button,
       .log-filter-bar .entity-filter-controls button,
       .task-filter-bar .entity-filter-controls button {
+        flex: 1 1 auto;
+      }
+      .message-filter-bar .entity-filter-tools,
+      .log-filter-bar .entity-filter-tools,
+      .task-filter-bar .entity-filter-tools {
+        width: 100%;
+        justify-content: flex-start;
+        margin-left: 0;
+      }
+      .message-filter-bar .entity-filter-tools button,
+      .log-filter-bar .entity-filter-tools button,
+      .task-filter-bar .entity-filter-tools button {
         flex: 1 1 auto;
       }
       .message-filter-bar .entity-filter-summary,

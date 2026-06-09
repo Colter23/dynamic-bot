@@ -84,6 +84,11 @@ export async function handleAction(nextCtx, { action, button, id }) {
     renderTasks();
     return true;
   }
+  if (action === "reset-task-filter") {
+    resetTaskFilterControls();
+    renderTasks();
+    return true;
+  }
   if (action === "refresh-tasks") {
     await refreshTasks(button, true);
     notify("任务状态已刷新", false);
@@ -123,7 +128,7 @@ function renderLayout() {
         <div class="panel-head task-panel-head">
           <div>
             <h2>任务查看</h2>
-            <p>观察主项目和插件注册的定时任务，必要时停止、恢复或重启已有任务。</p>
+            <p>查看主项目和插件任务，可按需停止、恢复或重启。</p>
           </div>
           <div id="taskStatus" class="task-record-status"></div>
         </div>
@@ -132,27 +137,33 @@ function renderLayout() {
 
       <section class="panel full task-table-panel">
         <div class="entity-filter-bar task-filter-bar">
-          <span class="entity-filter-title">筛选</span>
-          <div class="entity-filter-controls">
-            <select id="taskFilterOwner" data-task-filter="ownerType">
-              ${ownerOptions(filters.ownerType)}
-            </select>
-            <select id="taskFilterStatus" data-task-filter="status">
-              ${statusOptions(filters.status)}
-            </select>
-            <select id="taskFilterSchedule" data-task-filter="scheduleType">
-              ${scheduleOptions(filters.scheduleType)}
-            </select>
-            <input id="taskFilterKeyword" data-task-filter="q" value="${attr(filters.q)}" placeholder="名称 / 描述 / 插件 / 错误">
-            <button type="button" class="entity-filter-clear" data-action="apply-task-filter">筛选</button>
-            <button type="button" class="choice-refresh-button compact" data-action="refresh-tasks">刷新</button>
+          <div class="entity-filter-main">
+            <span class="entity-filter-title">筛选</span>
+            <div class="entity-filter-controls">
+              <select id="taskFilterOwner" data-task-filter="ownerType">
+                ${ownerOptions(filters.ownerType)}
+              </select>
+              <select id="taskFilterStatus" data-task-filter="status">
+                ${statusOptions(filters.status)}
+              </select>
+              <select id="taskFilterSchedule" data-task-filter="scheduleType">
+                ${scheduleOptions(filters.scheduleType)}
+              </select>
+              <input id="taskFilterKeyword" data-task-filter="q" value="${attr(filters.q)}" placeholder="名称 / 描述 / 插件 / 错误">
+              <button type="button" class="filter-apply-button compact" data-action="apply-task-filter">筛选</button>
+              <button type="button" class="filter-clear-button compact task-clear-filter-button" data-action="reset-task-filter">清除筛选</button>
+            </div>
+            <span id="taskFilterSummary" class="entity-filter-summary"></span>
           </div>
-          <span id="taskFilterSummary" class="entity-filter-summary"></span>
+          <div class="entity-filter-tools">
+            <button type="button" class="filter-refresh-button compact" data-action="refresh-tasks">刷新</button>
+          </div>
         </div>
         <div id="tasksTable" class="tasks-table-host"></div>
       </section>
     </section>`;
   renderTaskStatus();
+  updateTaskFilterButtons();
 }
 
 function ownerOptions(selected) {
@@ -191,6 +202,7 @@ function bindTaskControls() {
         renderTasks();
       }
     };
+    control.oninput = updateTaskFilterButtons;
     if (control.tagName === "SELECT") {
       control.onchange = () => {
         readTaskFilterControls();
@@ -206,6 +218,30 @@ function readTaskFilterControls() {
   filters.status = pageQuery("#taskFilterStatus")?.value.trim() || "";
   filters.scheduleType = pageQuery("#taskFilterSchedule")?.value.trim() || "";
   filters.q = pageQuery("#taskFilterKeyword")?.value.trim() || "";
+}
+
+function taskFilterActiveFromControls() {
+  const filters = taskFilters();
+  const ownerType = pageQuery("#taskFilterOwner")?.value.trim() || "";
+  const status = pageQuery("#taskFilterStatus")?.value.trim() || "";
+  const scheduleType = pageQuery("#taskFilterSchedule")?.value.trim() || "";
+  const q = pageQuery("#taskFilterKeyword")?.value.trim() || "";
+  return Boolean(
+    ownerType || status || scheduleType || q ||
+    filters.ownerType || filters.status || filters.scheduleType || filters.q
+  );
+}
+
+function resetTaskFilterControls() {
+  const filters = taskFilters();
+  filters.ownerType = "";
+  filters.status = "";
+  filters.scheduleType = "";
+  filters.q = "";
+  if (pageQuery("#taskFilterOwner")) pageQuery("#taskFilterOwner").value = "";
+  if (pageQuery("#taskFilterStatus")) pageQuery("#taskFilterStatus").value = "";
+  if (pageQuery("#taskFilterSchedule")) pageQuery("#taskFilterSchedule").value = "";
+  if (pageQuery("#taskFilterKeyword")) pageQuery("#taskFilterKeyword").value = "";
 }
 
 async function refreshTasks(button, force) {
@@ -233,6 +269,7 @@ async function refreshTasks(button, force) {
       button.disabled = false;
       if (originalText) button.textContent = originalText;
     }
+    updateTaskFilterButtons();
   }
 }
 
@@ -242,6 +279,7 @@ function renderTasks() {
   const rows = filteredTasks();
   renderTaskSummary();
   renderTaskFilterSummary(rows);
+  updateTaskFilterButtons();
   if (rows.length === 0) {
     target.innerHTML = `<div class="empty task-empty">暂无任务</div>`;
     return;
@@ -249,8 +287,8 @@ function renderTasks() {
   target.innerHTML = renderTable(rows, [
     { title: "任务", render: row => cell(row.name || row.id, taskSubLine(row)) },
     { title: "来源", render: row => ownerCell(row) },
-    { title: "调度", render: row => `<div class="task-schedule-cell"><span class="primary-line">${esc(scheduleLabel(row.scheduleType))}</span><span class="sub-line">${esc(row.scheduleText || "-")}</span></div>` },
-    { title: "状态", render: row => `<div class="task-status-cell">${pill(row.status)}<span class="sub-line">${esc(statusHint(row))}</span></div>` },
+    { title: "调度", render: row => `<div class="task-schedule-cell"><span class="primary-line">${esc(scheduleLabel(row.scheduleType))}</span><span class="sub-line">${esc(scheduleSubLine(row))}</span></div>` },
+    { title: "状态", render: row => `<div class="task-status-cell">${pill(row.status)}</div>` },
     { title: "下次运行", render: row => timeCell(row.nextRunAtMillis, true) },
     { title: "最近成功", render: row => timeCell(row.lastSuccessAtMillis, true) },
     { title: "次数", render: row => `<span class="task-run-count">${Number(row.runCount || 0)}</span>` },
@@ -274,7 +312,6 @@ function filteredTasks() {
         row.description,
         row.ownerId,
         row.ownerName,
-        row.pluginState,
         row.scheduleText,
         row.lastErrorSummary,
       ].filter(Boolean).join(" ").toLowerCase();
@@ -288,9 +325,14 @@ function taskSubLine(row) {
   const parts = [];
   parts.push(row.id);
   if (row.description) parts.push(row.description);
-  if (row.retryBackoffMillis) parts.push(`失败退避 ${formatMillis(row.retryBackoffMillis)}`);
-  if (row.lastRunAtMillis) parts.push(`最近运行 ${fmtTime(row.lastRunAtMillis, true)}`);
   return parts.join(" · ");
+}
+
+function scheduleSubLine(row) {
+  const parts = [];
+  if (row.scheduleText) parts.push(row.scheduleText);
+  if (row.retryBackoffMillis) parts.push(`失败退避 ${formatMillis(row.retryBackoffMillis)}`);
+  return parts.join(" · ") || "-";
 }
 
 function ownerCell(row) {
@@ -301,16 +343,7 @@ function ownerCell(row) {
   return `<div class="task-owner-cell">
     <span class="pill ${row.ownerType === "MAIN" ? "info" : "ok"}">${esc(ownerType)}</span>
     <div>${cell(row.ownerName, sub)}</div>
-    ${row.pluginState ? pill(row.pluginState) : ""}
   </div>`;
-}
-
-function statusHint(row) {
-  if (row.status === "RUNNING") return row.nextRunAtMillis ? `等待至 ${fmtTime(row.nextRunAtMillis, true)}` : "正在执行或等待下一轮";
-  if (row.status === "COMPLETED") return "已完成，可重新恢复执行";
-  if (row.status === "CANCELLED") return "已停止，可恢复";
-  if (row.status === "FAILED") return row.lastErrorSummary ? "有失败详情" : "异常结束";
-  return "-";
 }
 
 function timeCell(value, millis) {
@@ -404,6 +437,11 @@ function renderTaskFilterSummary(rows) {
   target.textContent = `显示 ${rows.length} / ${all.length} 个任务`;
 }
 
+function updateTaskFilterButtons() {
+  const clearButton = pageQuery(".task-clear-filter-button");
+  if (clearButton) clearButton.disabled = !taskFilterActiveFromControls();
+}
+
 function renderTaskStatus() {
   const target = pageQuery("#taskStatus");
   if (!target) return;
@@ -427,7 +465,6 @@ function openTaskDetail(key) {
         ${detailItem("来源", row.ownerType === "MAIN" ? "主项目" : "插件")}
         ${detailItem("来源 ID", row.ownerId, true)}
         ${detailItem("来源名称", row.ownerName)}
-        ${detailItem("插件状态", row.pluginState ? label(row.pluginState) : "-")}
         ${detailItem("调度类型", scheduleLabel(row.scheduleType))}
         ${detailItem("调度说明", row.scheduleText)}
         ${detailItem("状态", label(row.status))}

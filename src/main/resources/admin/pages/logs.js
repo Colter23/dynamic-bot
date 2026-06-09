@@ -38,10 +38,6 @@ function logFilters() {
   return state.logFilters;
 }
 
-function isAutoPinLatest() {
-  return state.logsAutoPinLatest !== false;
-}
-
 export async function mount(nextCtx) {
   bindContext(nextCtx);
   await loadLogsPage(ctx.force);
@@ -75,17 +71,6 @@ export async function handleAction(nextCtx, { action, button, id }) {
     updateToolbarButtons();
     return true;
   }
-  if (action === "toggle-log-autopin") {
-    state.logsAutoPinLatest = !isAutoPinLatest();
-    renderLogStatus();
-    updateToolbarButtons();
-    if (isAutoPinLatest()) scrollLogsToTop();
-    return true;
-  }
-  if (action === "jump-log-latest") {
-    scrollLogsToTop();
-    return true;
-  }
   if (action === "copy-log-message" || action === "copy-log-logger") {
     await copyLogValue(action, id);
     return true;
@@ -98,7 +83,6 @@ async function loadLogsPage(force) {
     state.logRows = [];
     state.logSince = 0;
   }
-  if (state.logsAutoPinLatest === undefined) state.logsAutoPinLatest = true;
   document.getElementById("content")?.classList.add("content-logs");
   pageRoot()?.classList.add("logs-page-host");
   renderLayout();
@@ -121,21 +105,23 @@ function renderLayout() {
           <div id="logStatus" class="log-status"></div>
         </div>
         <div class="entity-filter-bar log-filter-bar">
-          <span class="entity-filter-title">筛选</span>
-          <div class="entity-filter-controls">
-            <select id="logLevel" data-log-filter="level">
-              ${logLevelOptions(filters.level)}
-            </select>
-            <input id="logLogger" data-log-filter="logger" value="${attr(filters.logger)}" placeholder="模块 / logger">
-            <input id="logQuery" data-log-filter="q" value="${attr(filters.q)}" placeholder="关键词">
-            <button type="button" class="entity-filter-clear" data-action="apply-log-filter">筛选</button>
-            <button type="button" class="choice-clear-button compact" data-action="reset-log-filter">清除</button>
-            <button type="button" class="choice-refresh-button compact" data-action="refresh-logs">刷新</button>
-            <button type="button" class="secondary compact log-jump-button" data-action="jump-log-latest">最新</button>
-            <button type="button" class="secondary compact log-autopin-button" data-action="toggle-log-autopin"></button>
-            <button type="button" class="secondary compact log-pause-button" data-action="toggle-log-pause"></button>
+          <div class="entity-filter-main">
+            <span class="entity-filter-title">筛选</span>
+            <div class="entity-filter-controls">
+              <select id="logLevel" data-log-filter="level">
+                ${logLevelOptions(filters.level)}
+              </select>
+              <input id="logLogger" data-log-filter="logger" value="${attr(filters.logger)}" placeholder="模块 / logger">
+              <input id="logQuery" data-log-filter="q" value="${attr(filters.q)}" placeholder="关键词">
+              <button type="button" class="filter-apply-button compact" data-action="apply-log-filter">筛选</button>
+              <button type="button" class="filter-clear-button compact log-clear-filter-button" data-action="reset-log-filter">清除筛选</button>
+            </div>
+            <span id="logFilterSummary" class="entity-filter-summary"></span>
           </div>
-          <span id="logFilterSummary" class="entity-filter-summary"></span>
+          <div class="entity-filter-tools">
+            <button type="button" class="filter-refresh-button compact" data-action="refresh-logs">刷新</button>
+            <button type="button" class="filter-pause-button compact log-pause-button" data-action="toggle-log-pause"></button>
+          </div>
         </div>
         <div class="log-table-region">
           <div id="logsTable" class="logs-table-host"></div>
@@ -165,12 +151,14 @@ function bindLogControls() {
         applyLogFilter().catch(handleError);
       }
     };
+    control.oninput = updateToolbarButtons;
   });
   $("logLevel").onchange = () => applyLogFilter().catch(handleError);
 }
 
 async function applyLogFilter(button) {
   readFilterControls();
+  updateToolbarButtons();
   state.logRows = [];
   state.logSince = 0;
   await refreshLogs(true, button);
@@ -181,6 +169,14 @@ function readFilterControls() {
   filters.level = $("logLevel")?.value.trim() || "";
   filters.logger = $("logLogger")?.value.trim() || "";
   filters.q = $("logQuery")?.value.trim() || "";
+}
+
+function logFilterActiveFromControls() {
+  const filters = logFilters();
+  const level = $("logLevel")?.value.trim() || "";
+  const logger = $("logLogger")?.value.trim() || "";
+  const q = $("logQuery")?.value.trim() || "";
+  return Boolean(level || logger || q || filters.level || filters.logger || filters.q);
 }
 
 function resetLogFilterControls() {
@@ -195,7 +191,7 @@ function resetLogFilterControls() {
 
 async function refreshLogs(force, button) {
   const seq = ++logRequestSeq;
-  const scrollState = !force && !isAutoPinLatest() ? currentLogScrollState() : null;
+  const scrollState = currentLogScrollState();
   const filters = logFilters();
   const params = {
     level: filters.level,
@@ -229,9 +225,7 @@ async function refreshLogs(force, button) {
         .slice(-LOG_KEEP_LIMIT);
     }
     renderLogs();
-    if (isAutoPinLatest()) {
-      scrollLogsToTop();
-    } else if (scrollState) {
+    if (scrollState) {
       restoreLogScrollState(scrollState);
     }
   } finally {
@@ -243,6 +237,7 @@ async function refreshLogs(force, button) {
       button.disabled = false;
       if (originalText) button.textContent = originalText;
     }
+    updateToolbarButtons();
   }
 }
 
@@ -297,20 +292,17 @@ function renderLogStatus() {
   target.innerHTML = `
     ${state.logsLoading ? '<span class="loading-spinner" aria-hidden="true"></span>' : ""}
     <span class="pill ${modeTone}">${mode}</span>
-    <span class="pill ${isAutoPinLatest() ? "info" : ""}">${isAutoPinLatest() ? "最新在顶部" : "手动定位"}</span>
     <span>${state.logsLoading ? "正在读取" : `最近 ${latest ? fmtTime(latest.timestampEpochMillis, true) : "-"}`}</span>`;
 }
 
 function updateToolbarButtons() {
   const pauseButton = pageRoot().querySelector(".log-pause-button");
-  if (pauseButton) pauseButton.textContent = state.logsPaused ? "继续" : "暂停";
-  const autoPinButton = pageRoot().querySelector(".log-autopin-button");
-  if (autoPinButton) autoPinButton.textContent = isAutoPinLatest() ? "取消定位" : "固定最新";
-}
-
-function scrollLogsToTop() {
-  const wrap = pageRoot().querySelector(".logs-table-wrap");
-  if (wrap) wrap.scrollTop = 0;
+  if (pauseButton) {
+    pauseButton.textContent = state.logsPaused ? "继续" : "暂停";
+    pauseButton.dataset.paused = state.logsPaused ? "true" : "false";
+  }
+  const clearButton = pageRoot().querySelector(".log-clear-filter-button");
+  if (clearButton) clearButton.disabled = !logFilterActiveFromControls();
 }
 
 function currentLogScrollState() {
