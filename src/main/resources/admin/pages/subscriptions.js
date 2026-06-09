@@ -447,13 +447,14 @@ function openSubscriptionImportModal() {
     });
     invalidate("dashboard", "subscriptions", "publishers", "subscribers");
     await loadSubscriptions(true);
-    if (result.failed > 0 || result.warnings?.length) {
+    const warningLines = subscriptionImportWarnings(result);
+    if (result.failed > 0 || warningLines.length) {
       renderSubscriptionImportResult(result);
     }
     if (result.failed > 0) {
       throw new Error(`导入完成，但有 ${result.failed} 条失败`);
     }
-    if (result.warnings?.length) {
+    if (warningLines.length) {
       notify("导入完成，存在提示信息，请查看结果明细", false);
       return;
     }
@@ -544,7 +545,7 @@ function renderSubscriptionImportResult(result) {
   const node = $("subscriptionImportResult");
   if (!node) return;
   const failedItems = (result.items || []).filter(item => item.status === "FAILED");
-  const warningLines = (result.warnings || []).slice(0, 8);
+  const warningLines = subscriptionImportWarnings(result).slice(0, 12);
   node.hidden = false;
   node.classList.toggle("error", failedItems.length > 0);
   node.classList.toggle("success", failedItems.length === 0);
@@ -555,6 +556,16 @@ function renderSubscriptionImportResult(result) {
       ).join("")}</ul>`
       : ""
   }`;
+}
+
+function subscriptionImportWarnings(result) {
+  const warnings = [...(result.warnings || [])];
+  (result.items || []).forEach(item => {
+    (item.warnings || []).forEach(line => {
+      warnings.push(`第 ${Number(item.index) + 1} 条：${line}`);
+    });
+  });
+  return warnings;
 }
 
 async function importSubscriptionDocument(documentData) {
@@ -715,6 +726,12 @@ async function openCreateSubscription() {
     if (failures.length) {
       setCreateSubscriptionResult(`已创建 ${result.created} 个订阅，更新 ${result.updated} 个订阅，失败 ${failures.length} 个。`, failures, true);
       throw new Error(`批量订阅部分失败：失败 ${failures.length} 个`);
+    }
+    const warningLines = subscriptionImportWarnings(result);
+    if (warningLines.length) {
+      setCreateSubscriptionResult(`已创建 ${result.created} 个订阅，更新 ${result.updated} 个订阅，存在 ${warningLines.length} 条提示。`, warningLines.slice(0, 8), false);
+      notify("订阅已处理，存在提示信息", false);
+      return;
     }
     closeModal();
     notify(`订阅已处理：创建 ${result.created}，更新 ${result.updated}`, false);

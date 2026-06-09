@@ -1257,12 +1257,6 @@ public class AdminService(
             previousPolicy = existingSubscription?.policy,
         )
         replacementFilterConditions?.forEach(DynamicFilterRuleRepository::validateCondition)
-        val autoFollowOutcome = if (existingSubscription == null && configProvider().subscription.autoFollowPublisherOnSubscribe) {
-            tryEnsureFollowed(publisherPlatform, publisherExternalId)
-        } else {
-            AutoFollowOutcome(followed = false)
-        }
-        val autoFollowed = autoFollowOutcome.followed
         val previousSubscriptionCount = SubscriptionRepository.countByPublisherId(publisherUpsert.value.id)
         val subscriptionResult = SubscriptionRepository.subscribe(
             subscriberId = subscriberUpsert.value.id,
@@ -1295,6 +1289,12 @@ public class AdminService(
                 DynamicFilterRuleRepository.addRule(subscription.id, condition)
             }
         }
+        val autoFollowOutcome = if (subscriptionResult.changed && configProvider().subscription.autoFollowPublisherOnSubscribe) {
+            tryEnsureFollowed(publisherPlatform, publisherExternalId)
+        } else {
+            AutoFollowOutcome(followed = false)
+        }
+        val autoFollowed = autoFollowOutcome.followed
         val filterRules = DynamicFilterRuleRepository.findBySubscriptionId(subscription.id)
         logger.info {
             "后台订阅已${if (subscriptionResult.changed) "创建" else "更新"}：subscriptionId=${subscription.id}，publisherId=${publisherUpsert.value.id}，subscriberId=${subscriberUpsert.value.id}，autoFollowed=$autoFollowed"
