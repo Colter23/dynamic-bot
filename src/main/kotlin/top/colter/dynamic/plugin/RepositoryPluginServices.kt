@@ -39,9 +39,7 @@ public object RepositorySourceStateStore : SourceStateStore {
     }
 
     override fun findLatestLiveStatus(publisherId: Int): PublisherLiveStatus? {
-        return PublisherLiveStatusRepository
-            .findByPublisherId(publisherId)
-            .maxByOrNull { it.lastObservedAtEpochSeconds }
+        return PublisherLiveStatusRepository.findByPublisherId(publisherId)
     }
 
     override fun saveLiveStatus(state: PublisherLiveStatus): PublisherLiveStatus {

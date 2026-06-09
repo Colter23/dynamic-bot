@@ -18,6 +18,7 @@ import top.colter.dynamic.table.LinkParseTargetConfigTable
 import top.colter.dynamic.table.MessageDeliveryTable
 import top.colter.dynamic.table.MessageOutboxTable
 import top.colter.dynamic.table.PublisherDrawThemeTable
+import top.colter.dynamic.table.PublisherLiveRecordTable
 import top.colter.dynamic.table.PublisherLiveStatusTable
 import top.colter.dynamic.table.PublisherTable
 import top.colter.dynamic.table.SourceCursorTable
@@ -144,6 +145,7 @@ private val SCHEMA_TABLES: Array<Table> = arrayOf(
     PublisherTable,
     PublisherDrawThemeTable,
     PublisherLiveStatusTable,
+    PublisherLiveRecordTable,
     SubscriberTable,
     SubscriptionTable,
     SourceCursorTable,
@@ -172,6 +174,31 @@ private val DATABASE_MIGRATIONS: List<DatabaseMigration> = listOf(
                 SET ${quoteIdentifier("avatar_badge_key")} = ${quoteIdentifier("official")}
                 WHERE ${quoteIdentifier("avatar_badge_key")} IS NULL
                   AND ${quoteIdentifier("official")} IS NOT NULL
+                """.trimIndent(),
+            )
+        }
+    },
+    DatabaseMigration(
+        id = "publisher-live-status-one-row-per-publisher",
+        description = "直播状态按发布者保留单条当前快照",
+    ) {
+        if (tableExists("publisher_live_status")) {
+            exec(
+                """
+                DELETE FROM ${quoteIdentifier("publisher_live_status")}
+                WHERE ${quoteIdentifier("id")} NOT IN (
+                    SELECT ${quoteIdentifier("id")}
+                    FROM (
+                        SELECT
+                            ${quoteIdentifier("id")},
+                            ROW_NUMBER() OVER (
+                                PARTITION BY ${quoteIdentifier("publisher_id")}
+                                ORDER BY ${quoteIdentifier("last_observed_at")} DESC, ${quoteIdentifier("id")} DESC
+                            ) AS row_num
+                        FROM ${quoteIdentifier("publisher_live_status")}
+                    )
+                    WHERE row_num = 1
+                )
                 """.trimIndent(),
             )
         }

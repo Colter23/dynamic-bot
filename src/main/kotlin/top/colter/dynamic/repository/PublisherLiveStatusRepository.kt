@@ -1,7 +1,6 @@
 ﻿package top.colter.dynamic.repository
 
 import org.jetbrains.exposed.v1.core.ResultRow
-import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.dao.id.EntityID
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.jdbc.deleteWhere
@@ -14,20 +13,17 @@ import top.colter.dynamic.table.PublisherLiveStatusTable
 import top.colter.dynamic.table.PublisherTable
 
 public object PublisherLiveStatusRepository {
-    public fun findByPublisherAndRoom(publisherId: Int, roomId: String): PublisherLiveStatus? {
+    public fun findByPublisherId(publisherId: Int): PublisherLiveStatus? {
         return transaction {
             PublisherLiveStatusTable
                 .selectAll()
-                .where {
-                    (PublisherLiveStatusTable.publisherId eq EntityID(publisherId, PublisherTable)) and
-                        (PublisherLiveStatusTable.roomId eq roomId)
-                }
+                .where { PublisherLiveStatusTable.publisherId eq EntityID(publisherId, PublisherTable) }
                 .firstOrNull()
                 ?.toPublisherLiveStatus()
         }
     }
 
-    public fun findByPublisherId(publisherId: Int): List<PublisherLiveStatus> {
+    public fun findAllByPublisherId(publisherId: Int): List<PublisherLiveStatus> {
         return transaction {
             PublisherLiveStatusTable
                 .selectAll()
@@ -44,10 +40,7 @@ public object PublisherLiveStatusRepository {
         transaction {
             val existing = PublisherLiveStatusTable
                 .selectAll()
-                .where {
-                    (PublisherLiveStatusTable.publisherId eq EntityID(state.publisherId, PublisherTable)) and
-                        (PublisherLiveStatusTable.roomId eq state.roomId)
-                }
+                .where { PublisherLiveStatusTable.publisherId eq EntityID(state.publisherId, PublisherTable) }
                 .firstOrNull()
 
             if (existing == null) {
@@ -63,9 +56,9 @@ public object PublisherLiveStatusRepository {
                 }
             } else {
                 PublisherLiveStatusTable.update({
-                    (PublisherLiveStatusTable.publisherId eq EntityID(state.publisherId, PublisherTable)) and
-                        (PublisherLiveStatusTable.roomId eq state.roomId)
+                    PublisherLiveStatusTable.publisherId eq EntityID(state.publisherId, PublisherTable)
                 }) {
+                    it[roomId] = state.roomId
                     it[status] = state.status
                     it[title] = state.title
                     it[cover] = state.cover

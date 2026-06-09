@@ -16,6 +16,7 @@ class PersistenceManagerSchemaTest {
         assertTrue(SubscriptionRepository.findAll().isEmpty())
         assertTrue(DynamicFilterRuleRepository.findAll().isEmpty())
         assertTrue(PublisherLiveStatusRepository.findAll().isEmpty())
+        assertTrue(PublisherLiveRecordRepository.findAll().isEmpty())
         assertEquals(0, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
     }
 }

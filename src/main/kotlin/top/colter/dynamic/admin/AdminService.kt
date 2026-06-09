@@ -66,6 +66,8 @@ import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PublisherDrawTheme
 import top.colter.dynamic.repository.PublisherDrawThemeRepository
 import top.colter.dynamic.repository.PersistenceManager
+import top.colter.dynamic.repository.PublisherLiveRecord
+import top.colter.dynamic.repository.PublisherLiveRecordRepository
 import top.colter.dynamic.repository.PublisherLiveStatusRepository
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
@@ -654,16 +656,18 @@ public class AdminService(
         val liveStatuses = PublisherLiveStatusRepository.findAll().groupBy { it.publisherId }
         val cursors = SourceCursorRepository.findAll().groupBy { it.publisherId }
         val drawThemes = PublisherDrawThemeRepository.findAll().associateBy { it.publisherId }
-        return PublisherRepository.findAll()
+        val publishers = PublisherRepository.findAll()
             .sortedWith(compareBy<Publisher> { it.platformId.value }.thenBy { it.externalId })
-            .map { publisher ->
-                publisher.toDto(
-                    subscriptionCount = subscriptionCounts[publisher.id]?.toLong() ?: 0,
-                    liveStatuses = liveStatuses[publisher.id].orEmpty(),
-                    cursors = cursors[publisher.id].orEmpty(),
-                    drawTheme = drawThemes[publisher.id],
-                )
-            }
+        val liveRecords = PublisherLiveRecordRepository.findRecentByPublisherIds(publishers.map { it.id }, limitPerPublisher = 10)
+        return publishers.map { publisher ->
+            publisher.toDto(
+                subscriptionCount = subscriptionCounts[publisher.id]?.toLong() ?: 0,
+                liveStatuses = liveStatuses[publisher.id].orEmpty(),
+                liveRecords = liveRecords[publisher.id].orEmpty(),
+                cursors = cursors[publisher.id].orEmpty(),
+                drawTheme = drawThemes[publisher.id],
+            )
+        }
     }
 
     public fun publisherPlatforms(): List<PublisherPlatformDto> {
@@ -746,6 +750,7 @@ public class AdminService(
             }
         SourceCursorRepository.deleteByPublisherId(publisher.id)
         PublisherLiveStatusRepository.deleteByPublisherId(publisher.id)
+        PublisherLiveRecordRepository.deleteByPublisherId(publisher.id)
         PublisherDrawThemeRepository.deleteByPublisherId(publisher.id)
         val removed = PublisherRepository.deleteById(publisher.id)
         if (removed) {
@@ -1627,6 +1632,7 @@ private fun top.colter.dynamic.core.plugin.PublisherLoginAccount.toDto(): LoginA
 private fun Publisher.toDto(
     subscriptionCount: Long = 0,
     liveStatuses: List<PublisherLiveStatus> = emptyList(),
+    liveRecords: List<PublisherLiveRecord> = emptyList(),
     cursors: List<SourceCursor> = emptyList(),
     drawTheme: PublisherDrawTheme? = null,
 ): PublisherDto = PublisherDto(
@@ -1645,6 +1651,7 @@ private fun Publisher.toDto(
     subscriptionCount = subscriptionCount,
     drawTheme = drawTheme?.palette?.toDto(),
     liveStatuses = liveStatuses.sortedBy { it.roomId }.map { it.toDto() },
+    liveRecords = liveRecords.sortedByDescending { it.startedAtEpochSeconds }.map { it.toDto() },
     cursors = cursors.sortedWith(compareBy<SourceCursor> { it.sourceKey }.thenBy { it.eventType.value }).map { it.toDto() },
 )
 
@@ -1763,6 +1770,19 @@ private fun PublisherLiveStatus.toDto(): PublisherLiveStatusDto = PublisherLiveS
     coverUri = cover?.uri,
     area = area,
     startedAtEpochSeconds = startedAtEpochSeconds,
+    lastObservedAtEpochSeconds = lastObservedAtEpochSeconds,
+)
+
+private fun PublisherLiveRecord.toDto(): PublisherLiveRecordDto = PublisherLiveRecordDto(
+    id = id,
+    publisherId = publisherId,
+    roomId = roomId,
+    title = title,
+    coverUri = coverUri,
+    area = area,
+    startedAtEpochSeconds = startedAtEpochSeconds,
+    endedAtEpochSeconds = endedAtEpochSeconds,
+    durationSeconds = durationSeconds,
     lastObservedAtEpochSeconds = lastObservedAtEpochSeconds,
 )
 

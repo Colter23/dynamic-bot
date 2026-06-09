@@ -17,7 +17,7 @@ public object PublisherLiveStatusTable : IntIdTable("publisher_live_status") {
     public val lastObservedAt: Column<Long> = long(name = "last_observed_at")
 
     init {
-        uniqueIndex(publisherId, roomId)
+        uniqueIndex(publisherId)
         index(isUnique = false, status)
     }
 }

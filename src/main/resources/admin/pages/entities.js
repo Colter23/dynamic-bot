@@ -319,6 +319,7 @@ async function openPublisherDetail(id) {
   const item = state.cache.publishers.find(row => Number(row.id) === Number(id));
   if (!item) throw new Error("发布者不存在");
   const liveStatuses = item.liveStatuses || [];
+  const liveRecords = item.liveRecords || [];
   const cursors = item.cursors || [];
   openModal("发布者详情", `
     <div class="entity-detail">
@@ -340,6 +341,13 @@ async function openPublisherDetail(id) {
           <span class="entity-detail-count">${liveStatuses.length} 条</span>
         </div>
         ${renderPublisherLiveStatuses(liveStatuses, item.platformId)}
+      </section>
+      <section class="plugin-detail-section">
+        <div class="entity-detail-head">
+          <h3>直播记录</h3>
+          <span class="entity-detail-count">${liveRecords.length} 条</span>
+        </div>
+        ${renderPublisherLiveRecords(liveRecords, item.platformId)}
       </section>
       <section class="plugin-detail-section">
         <div class="entity-detail-head">
@@ -371,6 +379,27 @@ function renderPublisherLiveStatuses(rows, platformId) {
         <td><span class="sub-line">${esc(row.area || "-")}</span></td>
         <td><span class="sub-line">${fmtTime(row.startedAtEpochSeconds)}</span></td>
         <td><span class="sub-line">${fmtTime(row.lastObservedAtEpochSeconds)}</span></td>
+        <td>${row.coverUri ? mediaImage(row.coverUri, "entity-detail-cover", platformId, "COVER") : `<span class="sub-line">-</span>`}</td>
+      </tr>`).join("")}</tbody>
+    </table>
+  </div>`;
+}
+
+function renderPublisherLiveRecords(rows, platformId) {
+  if (!rows.length) return entityDetailEmpty(
+    "暂无直播历史记录",
+    "从新增记录表生效后，开播和下播事件会在这里沉淀为直播场次。"
+  );
+  return `<div class="entity-detail-table-wrap">
+    <table class="entity-detail-table">
+      <thead><tr><th>房间</th><th>标题</th><th>分区</th><th>开播时间</th><th>下播时间</th><th>时长</th><th>封面</th></tr></thead>
+      <tbody>${rows.map(row => `<tr>
+        <td><span class="mono">${esc(row.roomId || "-")}</span></td>
+        <td><span class="primary-line">${esc(row.title || "-")}</span></td>
+        <td><span class="sub-line">${esc(row.area || "-")}</span></td>
+        <td><span class="sub-line">${fmtTime(row.startedAtEpochSeconds)}</span></td>
+        <td><span class="sub-line">${fmtTime(row.endedAtEpochSeconds)}</span></td>
+        <td><span class="sub-line">${row.durationSeconds == null ? "直播中" : esc(fmtDuration(row.durationSeconds * 1000))}</span></td>
         <td>${row.coverUri ? mediaImage(row.coverUri, "entity-detail-cover", platformId, "COVER") : `<span class="sub-line">-</span>`}</td>
       </tr>`).join("")}</tbody>
     </table>

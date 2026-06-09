@@ -249,6 +249,7 @@ public data class PublisherDto(
     val subscriptionCount: Long = 0,
     val drawTheme: PublisherDrawThemeDto? = null,
     val liveStatuses: List<PublisherLiveStatusDto> = emptyList(),
+    val liveRecords: List<PublisherLiveRecordDto> = emptyList(),
     val cursors: List<SourceCursorDto> = emptyList(),
 )
 
@@ -380,6 +381,20 @@ public data class PublisherLiveStatusDto(
     val coverUri: String? = null,
     val area: String? = null,
     val startedAtEpochSeconds: Long? = null,
+    val lastObservedAtEpochSeconds: Long,
+)
+
+@Serializable
+public data class PublisherLiveRecordDto(
+    val id: Int,
+    val publisherId: Int,
+    val roomId: String,
+    val title: String,
+    val coverUri: String? = null,
+    val area: String? = null,
+    val startedAtEpochSeconds: Long,
+    val endedAtEpochSeconds: Long? = null,
+    val durationSeconds: Long? = null,
     val lastObservedAtEpochSeconds: Long,
 )
 

@@ -31,6 +31,7 @@ import top.colter.dynamic.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.draw.DynamicDrawService
 import top.colter.dynamic.repository.PersistenceManager
+import top.colter.dynamic.repository.PublisherLiveRecordRepository
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SubscriptionRepository
@@ -172,6 +173,10 @@ class SourceUpdateProcessorTest {
         )
 
         assertNull(withTimeoutOrNull(300) { received.await() })
+        val record = PublisherLiveRecordRepository.findRecentByPublisherId(publisher.id).single()
+        assertEquals("456", record.roomId)
+        assertEquals(startedAt, record.startedAtEpochSeconds)
+        assertEquals(startedAt + 60, record.endedAtEpochSeconds)
     }
 
     private fun seededSubscription(

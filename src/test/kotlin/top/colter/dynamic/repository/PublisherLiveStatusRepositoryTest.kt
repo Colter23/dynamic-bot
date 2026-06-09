@@ -11,7 +11,7 @@ import top.colter.dynamic.testPublisher
 
 class PublisherLiveStatusRepositoryTest {
     @Test
-    fun shouldPersistAndUpdateLiveStatusByPublisherAndRoom() {
+    fun shouldPersistAndUpdateSingleLiveStatusByPublisher() {
         initTestDatabase("dynamic-bot-core-live-status-db")
         PublisherRepository.create(testPublisher(id = 1))
 
@@ -30,7 +30,7 @@ class PublisherLiveStatusRepositoryTest {
         PublisherLiveStatusRepository.upsert(
             PublisherLiveStatus(
                 publisherId = 1,
-                roomId = "456",
+                roomId = "789",
                 status = LiveStatus.OPEN,
                 title = "now live",
                 cover = testMedia("https://example.com/live.png", MediaKind.COVER),
@@ -40,11 +40,13 @@ class PublisherLiveStatusRepositoryTest {
             ),
         )
 
-        val status = PublisherLiveStatusRepository.findByPublisherAndRoom(1, "456")!!
+        val status = PublisherLiveStatusRepository.findByPublisherId(1)!!
+        assertEquals("789", status.roomId)
         assertEquals(LiveStatus.OPEN, status.status)
         assertEquals("now live", status.title)
         assertEquals("https://example.com/live.png", status.cover?.uri)
         assertEquals(120, status.startedAtEpochSeconds)
+        assertEquals(1, PublisherLiveStatusRepository.findAllByPublisherId(1).size)
         assertEquals(1, PublisherLiveStatusRepository.findAll().size)
     }
 }

@@ -29,6 +29,7 @@ import top.colter.dynamic.filter.DynamicFilterEvaluator
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.MessageEnqueueResult
 import top.colter.dynamic.repository.MessageDeliveryRepository
+import top.colter.dynamic.repository.PublisherLiveRecordRepository
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.core.tools.loggerFor
@@ -104,6 +105,9 @@ public class SourceUpdateProcessor(
 
     private suspend fun handleLive(request: SourceUpdatePublishRequest, update: SourceUpdate): SourceUpdatePublishResult {
         val (normalizedUpdate, storedPublisher) = normalizePublisher(update, request.publisherPersistenceMode)
+        storedPublisher?.let { publisher ->
+            PublisherLiveRecordRepository.recordLiveEvent(publisher.id, normalizedUpdate)
+        }
         val targets = resolveTargets(request.deliveryTarget, storedPublisher)
             .filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds)
             .let { applySubscriptionRules(normalizedUpdate, it) }
