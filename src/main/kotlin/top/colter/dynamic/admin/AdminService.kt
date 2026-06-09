@@ -895,7 +895,8 @@ public class AdminService(
             accountId = request.accountId,
         )
         val existed = SubscriberRepository.findByAddress(address)
-        val targetProfile = resolveSubscriberTarget(address)
+        val targetProfile = cachedMessageTargetCandidate(address)
+            ?: resolveSubscriberTarget(address)
         val name = request.name?.trim()?.takeIf { it.isNotBlank() }
             ?: targetProfile?.name?.trim()?.takeIf { it.isNotBlank() }
             ?: existed?.name

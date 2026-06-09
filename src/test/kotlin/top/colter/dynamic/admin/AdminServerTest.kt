@@ -1239,6 +1239,31 @@ class AdminServerTest {
     }
 
     @Test
+    fun createSubscriberShouldReuseRecentlyLoadedTargetCandidate() = runBlocking {
+        initDb("admin-create-subscriber-target-cache")
+        val avatar = MediaRef("https://example.com/group-avatar.png", MediaKind.AVATAR)
+        val sink = FakeMessageSinkPlugin(
+            listOf(MessageTargetCandidate(TargetAddress.of("qq", TargetKind.GROUP, "100"), "缓存群", avatar)),
+        )
+        val service = service(plugin = FakePublisherFollowPlugin(), sink = sink)
+
+        assertEquals(1, service.subscriberTargets(platformId = "qq", type = "GROUP").size)
+
+        val created = service.createSubscriber(
+            CreateSubscriberRequest(
+                platformId = "qq",
+                targetKind = "GROUP",
+                externalId = "100",
+            ),
+        )
+
+        assertEquals("缓存群", created.name)
+        assertEquals(avatar.uri, created.avatarUri)
+        assertEquals(1, sink.listMessageTargetsCalls)
+        assertEquals(0, sink.resolveMessageTargetCalls)
+    }
+
+    @Test
     fun updateAndDeleteSubscriberShouldManageLinkParseConfig() {
         initDb("admin-update-subscriber-link-parse")
         val subscriber = SubscriberRepository.ensure(TargetAddress.of("qq", TargetKind.GROUP, "100"), "group")
