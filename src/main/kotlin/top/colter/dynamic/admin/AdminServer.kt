@@ -89,7 +89,10 @@ public class AdminServer(
                 startedAtEpochMillis = startedAtEpochMillis,
             ),
             loginService = adminLoginService,
-            mediaService = AdminMediaService(configProvider = configProvider),
+            mediaService = AdminMediaService(
+                configProvider = configProvider,
+                registeredLocalMediaLookup = DatabaseAdminRegisteredLocalMediaLookup,
+            ),
             outboundMediaService = outboundMediaService,
             drawAssetRegistry = drawAssetRegistry,
             stopRequester = stopRequester,

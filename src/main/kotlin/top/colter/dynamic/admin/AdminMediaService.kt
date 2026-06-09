@@ -29,6 +29,7 @@ public data class AdminMediaResult(
 
 public class AdminMediaService(
     private val configProvider: () -> MainDynamicConfig = { MainDynamicConfig() },
+    private val registeredLocalMediaLookup: AdminRegisteredLocalMediaLookup = EmptyAdminRegisteredLocalMediaLookup,
     private val client: HttpClient = HttpClient.newBuilder()
         .followRedirects(HttpClient.Redirect.NEVER)
         .connectTimeout(Duration.ofSeconds(10))
@@ -80,34 +81,11 @@ public class AdminMediaService(
     }
 
     private fun localPathFor(uri: String, config: ImageCacheConfig): Path? {
-        val rawPath = localRawPathFor(uri) ?: return null
-        val resolvedPath = resolveLocalPath(rawPath)
-        val checkedPath = runCatching { resolvedPath.toRealPath(LinkOption.NOFOLLOW_LINKS) }.getOrDefault(resolvedPath)
-        require(isAllowedLocalPath(checkedPath, config)) {
-            "本地图片路径必须位于运行目录或图片缓存目录内"
+        val checkedPath = AdminLocalMediaPath.fromUri(uri) ?: return null
+        require(isAllowedLocalPath(checkedPath, config) || registeredLocalMediaLookup.contains(checkedPath)) {
+            "本地图片路径必须位于运行目录、图片缓存目录内，或已登记为后台图片"
         }
         return checkedPath
-    }
-
-    private fun localRawPathFor(uri: String): Path? {
-        if (windowsAbsolutePath.matches(uri) || uri.startsWith("\\\\")) {
-            return runCatching { Paths.get(uri) }.getOrNull()
-        }
-
-        val parsed = runCatching { URI(uri) }.getOrNull()
-        val scheme = parsed?.scheme?.lowercase()
-        if (scheme == "file") return runCatching { Paths.get(parsed) }.getOrNull()
-        if (scheme != null) return null
-
-        return runCatching { Paths.get(uri) }.getOrNull()
-    }
-
-    private fun resolveLocalPath(path: Path): Path {
-        return if (path.isAbsolute) {
-            path.normalize()
-        } else {
-            runtimeRoot.resolve(path).normalize()
-        }
     }
 
     private fun isAllowedLocalPath(path: Path, config: ImageCacheConfig): Boolean {
@@ -327,7 +305,6 @@ public class AdminMediaService(
 
     private companion object {
         private val runtimeRoot: Path = Paths.get("").toAbsolutePath().normalize()
-        private val windowsAbsolutePath = Regex("""^[A-Za-z]:[\\/].+""")
         private val whitespaceBytes = setOf(' '.code.toByte(), '\n'.code.toByte(), '\r'.code.toByte(), '\t'.code.toByte())
         private const val MAX_REDIRECTS = 3
         private val OCTET_STREAM = ContentType("application", "octet-stream")

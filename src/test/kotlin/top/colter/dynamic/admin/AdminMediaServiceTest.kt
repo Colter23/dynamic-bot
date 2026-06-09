@@ -7,15 +7,20 @@ import javax.imageio.ImageIO
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.ImageCacheConfig
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.initTestDatabase
+import top.colter.dynamic.repository.PublisherRepository
+import top.colter.dynamic.testMedia
+import top.colter.dynamic.testPublisherInfo
 
 class AdminMediaServiceTest {
     @Test
-    fun imageShouldReadAbsoluteLocalImageOutsideRuntimeRoot(): Unit = runBlocking {
+    fun imageShouldRejectUnregisteredAbsoluteLocalImageOutsideRuntimeRoot(): Unit = runBlocking {
         val file = createTempDirectory("admin-media-absolute").resolve("header.png").toFile()
         file.writeBytes(pngBytes(Color.MAGENTA))
         val service = AdminMediaService(
@@ -26,7 +31,33 @@ class AdminMediaServiceTest {
             },
         )
 
-        val result = service.image(file.absolutePath, platformId = "bilibili", kind = MediaKind.IMAGE)
+        val error = assertFailsWith<IllegalArgumentException> {
+            service.image(file.absolutePath, platformId = "bilibili", kind = MediaKind.IMAGE)
+        }
+
+        assertTrue(error.message.orEmpty().contains("已登记为后台图片"))
+    }
+
+    @Test
+    fun imageShouldReadRegisteredAbsolutePublisherBannerOutsideRuntimeRoot(): Unit = runBlocking {
+        initTestDatabase("admin-media-registered-local")
+        val file = createTempDirectory("admin-media-registered").resolve("header.png").toFile()
+        file.writeBytes(pngBytes(Color.MAGENTA))
+        PublisherRepository.upsertInfo(
+            testPublisherInfo(
+                banner = testMedia(file.absolutePath, MediaKind.COVER),
+            ),
+        )
+        val service = AdminMediaService(
+            configProvider = {
+                MainDynamicConfig(
+                    imageCache = ImageCacheConfig(maxImageMegabytes = 1.0),
+                )
+            },
+            registeredLocalMediaLookup = DatabaseAdminRegisteredLocalMediaLookup,
+        )
+
+        val result = service.image(file.toURI().toString(), platformId = "bilibili", kind = MediaKind.COVER)
 
         assertEquals("image", result.contentType.contentType)
         assertEquals("png", result.contentType.contentSubtype)
