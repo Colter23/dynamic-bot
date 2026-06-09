@@ -5,7 +5,9 @@ import kotlin.math.roundToLong
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import top.colter.dynamic.DeliveryConfig
 import top.colter.dynamic.MessageRoutingConfig
@@ -40,7 +42,13 @@ public class DeliveryDispatcher(
     private val accountRouter: MessageSinkAccountRouter = MessageSinkAccountRouter(),
     private val outboundMediaService: OutboundMediaService? = null,
 ) {
-    public suspend fun dispatchDue(): DeliveryDispatchStats = coroutineScope {
+    private val dispatchMutex = Mutex()
+
+    public suspend fun dispatchDue(): DeliveryDispatchStats = dispatchMutex.withLock {
+        dispatchDueLocked()
+    }
+
+    private suspend fun dispatchDueLocked(): DeliveryDispatchStats = coroutineScope {
         val config = configProvider()
         val now = nowEpochSeconds()
         val expired = MessageDeliveryRepository.markSendingExpired(now)

@@ -103,6 +103,28 @@ class SourceUpdateDynamicTest {
     }
 
     @Test
+    fun shouldKeepQueuedResultWhenImmediateDeliveryTriggerFails() = runBlocking {
+        initDb("dynamic-listener-queued-callback-failure")
+        val eventBus = EventBus()
+        val publisher = createPublisher()
+        val subscriber = createSubscriber()
+        SubscriptionRepository.subscribe(subscriber.id, publisher.id)
+        val listener = SourceUpdateProcessor(
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "{name} {link}")),
+            eventBus = eventBus,
+            onDeliveriesQueued = { error("dispatch failed") },
+        )
+        val received = captureMessageEvent(eventBus)
+
+        val result = listener.process(SourceUpdatePublishRequest(sourcePlugin = "test", update = demoDynamic(publisher)))
+        val event = withTimeout(3_000) { received.await() }
+
+        assertEquals(SourceUpdatePublishStatus.ENQUEUED, result.status)
+        assertEquals(listOf(subscriber.address), event.message.targets)
+        assertEquals(1, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
+    }
+
+    @Test
     fun shouldCreateNewDeliveriesForRepeatedLinkParseRequests() = runBlocking {
         initDb("dynamic-listener-link-parse-repeat")
         val eventBus = EventBus()

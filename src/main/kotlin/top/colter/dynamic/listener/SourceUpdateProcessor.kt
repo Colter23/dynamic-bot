@@ -252,7 +252,12 @@ public class SourceUpdateProcessor(
                 logger.info {
                     "来源更新已创建投递任务：update=${update.key.stableValue()}，消息变体=${results.size}，新增投递=$newDeliveryCount"
                 }
-                onDeliveriesQueued()
+                runCatching { onDeliveriesQueued() }
+                    .onFailure { error ->
+                        logger.warn(error) {
+                            "来源更新已创建投递任务，但触发即时投递失败：update=${update.key.stableValue()}"
+                        }
+                    }
                 SourceUpdatePublishResult.enqueued(newDeliveryCount)
             }
             results.isNotEmpty() -> {

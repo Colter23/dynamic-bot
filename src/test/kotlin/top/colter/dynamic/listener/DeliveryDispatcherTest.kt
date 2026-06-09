@@ -4,6 +4,10 @@ import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertTrue
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.DeliveryConfig
 import top.colter.dynamic.MessageRoutingConfig
@@ -232,6 +236,29 @@ class DeliveryDispatcherTest {
         assertEquals(true, sent.batches.single().content.any { it is MessageContent.Forward })
     }
 
+    @Test
+    fun `overlapping dispatch calls should still respect configured concurrency`() = runBlocking {
+        initDb("overlapping-dispatch")
+        val sink = DelayingSink(delayMillis = 50)
+        val target = testTargetAddress(platformId = "qq", kind = TargetKind.GROUP, externalId = "10001")
+        repeat(16) { index ->
+            MessageDeliveryRepository.enqueue(testMessage("message-overlap-$index", target))
+        }
+        val dispatcher = dispatcher(
+            sink,
+            config = defaultDeliveryConfig().copy(dispatchConcurrency = 2),
+        )
+
+        val results = listOf(
+            async { dispatcher.dispatchDue() },
+            async { dispatcher.dispatchDue() },
+        ).awaitAll()
+
+        assertEquals(16, results.sumOf { it.sent })
+        assertTrue(sink.maxInFlight <= 2)
+        assertEquals(16, MessageDeliveryRepository.countByStatus(DeliveryStatus.SENT))
+    }
+
     private fun dispatcher(
         vararg sinks: MessageSinkPlugin,
         config: DeliveryConfig = defaultDeliveryConfig(),
@@ -326,6 +353,31 @@ class DeliveryDispatcherTest {
             sentMessageIds += request.message.id
             sentMessages += request.message
             return result(request)
+        }
+    }
+
+    private class DelayingSink(
+        private val delayMillis: Long,
+    ) : MessageSinkPlugin {
+        override val transportId: String = "direct"
+        override val supportedTargetPlatforms: Set<PlatformId> = setOf(PlatformId.of("qq"))
+        override val supportedTargetKinds: Set<TargetKind> = setOf(TargetKind.GROUP)
+
+        private val lock = Any()
+        private var inFlight: Int = 0
+        var maxInFlight: Int = 0
+            private set
+
+        override suspend fun sendMessage(request: MessageDeliveryRequest): MessageSendResult {
+            synchronized(lock) {
+                inFlight += 1
+                maxInFlight = maxOf(maxInFlight, inFlight)
+            }
+            delay(delayMillis)
+            synchronized(lock) {
+                inFlight -= 1
+            }
+            return MessageSendResult.sent("receipt-${request.message.id}")
         }
     }
 

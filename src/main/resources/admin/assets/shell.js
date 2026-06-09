@@ -19,6 +19,7 @@ const $ = id => document.getElementById(id);
       modalSubmit: null,
       modalCleanup: null,
       logsPaused: false,
+      logsAutoTop: true,
       logTimer: null,
       logSince: 0,
       logRows: [],

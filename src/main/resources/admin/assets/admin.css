@@ -3779,6 +3779,16 @@
       background: #f6f1ff;
       color: #6d3bb5;
     }
+    .log-auto-top-button {
+      border-color: #bdd7f5;
+      background: #eff7ff;
+      color: #2f6da8;
+    }
+    .log-auto-top-button[data-enabled="false"] {
+      border-color: #d7dde6;
+      background: #f5f7fa;
+      color: #687384;
+    }
     .log-table-region,
     .logs-table-host {
       min-width: 0;

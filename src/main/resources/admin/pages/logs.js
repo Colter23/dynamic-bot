@@ -71,6 +71,13 @@ export async function handleAction(nextCtx, { action, button, id }) {
     updateToolbarButtons();
     return true;
   }
+  if (action === "toggle-log-auto-top") {
+    state.logsAutoTop = state.logsAutoTop === false;
+    if (state.logsAutoTop) scrollLogTableToTop();
+    renderLogStatus();
+    updateToolbarButtons();
+    return true;
+  }
   if (action === "copy-log-message" || action === "copy-log-logger") {
     await copyLogValue(action, id);
     return true;
@@ -120,6 +127,7 @@ function renderLayout() {
           </div>
           <div class="entity-filter-tools">
             <button type="button" class="filter-refresh-button compact" data-action="refresh-logs">刷新</button>
+            <button type="button" class="filter-auto-top-button compact log-auto-top-button" data-action="toggle-log-auto-top"></button>
             <button type="button" class="filter-pause-button compact log-pause-button" data-action="toggle-log-pause"></button>
           </div>
         </div>
@@ -191,7 +199,8 @@ function resetLogFilterControls() {
 
 async function refreshLogs(force, button) {
   const seq = ++logRequestSeq;
-  const scrollState = currentLogScrollState();
+  const autoTop = state.logsAutoTop !== false;
+  const scrollState = autoTop ? null : currentLogScrollState();
   const filters = logFilters();
   const params = {
     level: filters.level,
@@ -225,7 +234,9 @@ async function refreshLogs(force, button) {
         .slice(-LOG_KEEP_LIMIT);
     }
     renderLogs();
-    if (scrollState) {
+    if (autoTop) {
+      scrollLogTableToTop();
+    } else if (scrollState) {
       restoreLogScrollState(scrollState);
     }
   } finally {
@@ -289,9 +300,11 @@ function renderLogStatus() {
   const latest = (state.logRows || []).at(-1);
   const mode = state.logsPaused ? "已暂停" : "实时刷新";
   const modeTone = state.logsPaused ? "warn" : "ok";
+  const autoTop = state.logsAutoTop !== false ? "自动置顶" : "自由滚动";
   target.innerHTML = `
     ${state.logsLoading ? '<span class="loading-spinner" aria-hidden="true"></span>' : ""}
     <span class="pill ${modeTone}">${mode}</span>
+    <span class="pill info">${autoTop}</span>
     <span>${state.logsLoading ? "正在读取" : `最近 ${latest ? fmtTime(latest.timestampEpochMillis, true) : "-"}`}</span>`;
 }
 
@@ -301,8 +314,19 @@ function updateToolbarButtons() {
     pauseButton.textContent = state.logsPaused ? "继续" : "暂停";
     pauseButton.dataset.paused = state.logsPaused ? "true" : "false";
   }
+  const autoTopButton = pageRoot().querySelector(".log-auto-top-button");
+  if (autoTopButton) {
+    const enabled = state.logsAutoTop !== false;
+    autoTopButton.textContent = enabled ? "自动置顶" : "自由滚动";
+    autoTopButton.dataset.enabled = enabled ? "true" : "false";
+  }
   const clearButton = pageRoot().querySelector(".log-clear-filter-button");
   if (clearButton) clearButton.disabled = !logFilterActiveFromControls();
+}
+
+function scrollLogTableToTop() {
+  const wrap = pageRoot().querySelector(".logs-table-wrap");
+  if (wrap) wrap.scrollTop = 0;
 }
 
 function currentLogScrollState() {
