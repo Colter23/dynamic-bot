@@ -41,6 +41,7 @@ import top.colter.dynamic.core.command.CommandSpec
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicBlockKind
+import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
@@ -840,6 +841,60 @@ class AdminServerTest {
     }
 
     @Test
+    fun importSubscriptionsShouldReuseRecentlyLoadedPublisherAndTargetCandidates() = runBlocking {
+        initDb("admin-subscription-import-candidate-cache")
+        PublisherRepository.upsertInfo(
+            testPublisherInfo(
+                name = "旧发布者",
+                avatar = MediaRef("https://example.com/old.png", MediaKind.AVATAR),
+                state = EntityState.DISABLED,
+            )
+        )
+        val plugin = FakePublisherFollowPlugin()
+        val sink = FakeMessageSinkPlugin(
+            listOf(
+                MessageTargetCandidate(
+                    TargetAddress.of("qq", TargetKind.GROUP, "100"),
+                    "缓存群",
+                    MediaRef("https://example.com/group.png", MediaKind.AVATAR),
+                )
+            )
+        )
+        val service = service(plugin = plugin, sink = sink)
+
+        assertEquals(1, service.searchPublishers("bilibili", "123").size)
+        assertEquals(1, service.subscriberTargets("qq", "GROUP").size)
+        assertEquals(1, plugin.fetchPublisherInfoCalls)
+        assertEquals(1, sink.listMessageTargetsCalls)
+        assertEquals(0, sink.resolveMessageTargetCalls)
+
+        val result = service.importSubscriptions(
+            SubscriptionExportDocument(
+                exportedAtEpochSeconds = 1,
+                subscriptions = listOf(
+                    SubscriptionExportItem(
+                        publisher = SubscriptionExportPublisher("bilibili", "USER", "123"),
+                        target = SubscriptionExportTarget("qq", "GROUP", "100"),
+                    ),
+                ),
+            )
+        )
+        val subscriber = SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "100"))
+        val publisher = PublisherRepository.findByKey(PublisherKey.of("bilibili", PublisherKind.USER, "123"))
+
+        assertEquals(1, result.created)
+        assertEquals(0, result.updated)
+        assertEquals(0, result.failed)
+        assertEquals(1, plugin.fetchPublisherInfoCalls)
+        assertEquals(1, sink.listMessageTargetsCalls)
+        assertEquals(0, sink.resolveMessageTargetCalls)
+        assertEquals("demo-up", publisher?.name)
+        assertEquals(EntityState.ACTIVE, publisher?.state)
+        assertEquals("https://example.com/face.png", publisher?.avatar?.uri)
+        assertEquals("缓存群", subscriber?.name)
+    }
+
+    @Test
     fun importSubscriptionsShouldUpdatePolicyAndReplaceFilterRules() = runBlocking {
         initDb("admin-subscription-import-update")
         val service = service(FakePublisherFollowPlugin())
@@ -1417,8 +1472,10 @@ class AdminServerTest {
             capabilities = setOf(PlatformCapability.PUBLISHER_SOURCE, PlatformCapability.LIVE_SOURCE),
         )
         var followed: Boolean = false
+        var fetchPublisherInfoCalls: Int = 0
 
         override suspend fun fetchPublisherInfo(userId: String): PublisherInfo? {
+            fetchPublisherInfoCalls += 1
             return PublisherInfo(
                 key = PublisherKey.of(platformId = platformId.value, externalId = userId),
                 name = "demo-up",
@@ -1452,9 +1509,18 @@ class AdminServerTest {
         override val transportId: String = "onebot"
         override val supportedTargetPlatforms: Set<PlatformId> = setOf(PlatformId.of("qq"))
         override val supportedTargetKinds: Set<TargetKind> = setOf(TargetKind.GROUP, TargetKind.USER)
+        var listMessageTargetsCalls: Int = 0
+        var resolveMessageTargetCalls: Int = 0
 
         override suspend fun listMessageTargets(kind: TargetKind?): List<MessageTargetCandidate> {
+            listMessageTargetsCalls += 1
             return targets.filter { kind == null || it.address.kind == kind }
+        }
+
+        override suspend fun resolveMessageTarget(address: TargetAddress): MessageTargetCandidate? {
+            resolveMessageTargetCalls += 1
+            if (!supportsTarget(address)) return null
+            return targets.firstOrNull { it.address.stableValue() == address.stableValue() }
         }
     }
 

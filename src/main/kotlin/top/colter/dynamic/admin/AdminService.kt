@@ -131,6 +131,10 @@ public class AdminService(
     private val publisherThemeInitializer: PublisherThemeInitializer = DefaultPublisherThemeInitializer(configProvider = configProvider),
 ) {
     private val loginStateCache: ConcurrentHashMap<String, CachedLoginState> = ConcurrentHashMap()
+    private val publisherCandidateCacheLock = Any()
+    private val publisherCandidateCache = LinkedHashMap<String, CachedPublisherCandidate>()
+    private val subscriberTargetCandidateCacheLock = Any()
+    private val subscriberTargetCandidateCache = LinkedHashMap<String, CachedMessageTargetCandidate>()
 
     public constructor(
         pluginManager: PluginManager,
@@ -715,6 +719,7 @@ public class AdminService(
             ?: throw NoSuchElementException("未找到发布者查询插件：$platform")
         val publisherInfo = plugin.fetchPublisherInfo(externalId)?.normalized() ?: return emptyList()
         val pluginInfo = handle?.info ?: fallbackPublisherPluginInfo(platform)
+        rememberPublisherCandidate(publisherInfo)
         return listOf(publisherInfo.toCandidateDto(pluginInfo))
     }
 
@@ -851,12 +856,13 @@ public class AdminService(
                 if (targetType != null && sink.supportedTargetKinds.isNotEmpty() && targetType !in sink.supportedTargetKinds) {
                     return@forEach
                 }
-                targets += sink.listMessageTargets(targetType)
+                val listedTargets = sink.listMessageTargets(targetType)
                     .filter { target ->
                         (normalizedPlatform == null || target.address.platformId.value.equals(normalizedPlatform, ignoreCase = true)) &&
                             (targetType == null || target.address.kind == targetType)
                     }
-                    .map { target -> MessageTargetWithPlugin(target, info) }
+                rememberMessageTargetCandidates(listedTargets)
+                targets += listedTargets.map { target -> MessageTargetWithPlugin(target, info) }
             }
         return targets
             .groupBy { it.candidate.address.stableValue() }
@@ -1159,20 +1165,24 @@ public class AdminService(
             val externalId = request.publisherExternalId?.trim().orEmpty()
             require(platform.isNotBlank()) { "发布者平台不能为空" }
             require(externalId.isNotBlank()) { "发布者外部 ID 不能为空" }
-
-            val lookupPlugin = publisherLookupResolver(platform)
-                ?: throw NoSuchElementException("未找到发布者查询插件：$platform")
-            val publisherInfo = lookupPlugin.fetchPublisherInfo(externalId)
-                ?: throw NoSuchElementException("未找到发布者：$platform:$externalId")
-            PublisherRepository.upsertInfo(
-                publisherInfo.normalized().copy(
-                    key = PublisherKey.of(
-                        platformId = platform,
-                        kind = publisherKind,
-                        externalId = externalId,
-                    ),
-                )
+            val publisherKey = PublisherKey.of(
+                platformId = platform,
+                kind = publisherKind,
+                externalId = externalId,
             )
+            val existedPublisher = PublisherRepository.findByKey(publisherKey)
+            if (existedPublisher != null) {
+                val cachedPublisherInfo = cachedPublisherCandidate(publisherKey)
+                if (cachedPublisherInfo != null) {
+                    PublisherRepository.upsertInfo(cachedPublisherInfo)
+                } else {
+                    UpsertResult(existedPublisher, created = false, updated = false)
+                }
+            } else {
+                val publisherInfo = cachedPublisherCandidate(publisherKey)
+                    ?: fetchPublisherInfo(platform, externalId).first.normalized().copy(key = publisherKey)
+                PublisherRepository.upsertInfo(publisherInfo)
+            }
         }
         val subscriberUpsert = if (request.subscriberId != null) {
             val subscriber = SubscriberRepository.findById(request.subscriberId)
@@ -1194,14 +1204,22 @@ public class AdminService(
                 accountId = request.subscriberAccountId,
             )
             val existedSubscriber = SubscriberRepository.findByAddress(subscriberAddress)
-            val targetProfile = resolveSubscriberTarget(subscriberAddress)
-            SubscriberRepository.upsert(
-                address = subscriberAddress,
-                name = targetProfile?.name?.trim()?.takeIf { it.isNotBlank() }
-                    ?: existedSubscriber?.name
-                    ?: subscriberAddress.externalId,
-                avatar = targetProfile?.avatar,
-            )
+            if (existedSubscriber != null) {
+                SubscriberRepository.upsert(
+                    address = subscriberAddress,
+                    name = existedSubscriber.name,
+                    avatar = existedSubscriber.avatar,
+                )
+            } else {
+                val targetProfile = cachedMessageTargetCandidate(subscriberAddress)
+                    ?: resolveSubscriberTarget(subscriberAddress)
+                SubscriberRepository.upsert(
+                    address = subscriberAddress,
+                    name = targetProfile?.name?.trim()?.takeIf { it.isNotBlank() }
+                        ?: subscriberAddress.externalId,
+                    avatar = targetProfile?.avatar,
+                )
+            }
         }
         parseLinkParseTriggerModeOrNull(request.subscriberLinkParseTriggerMode)?.let { mode ->
             LinkParseTargetConfigRepository.upsert(
@@ -1616,7 +1634,47 @@ public class AdminService(
         val publisherInfo = plugin.fetchPublisherInfo(externalId)?.normalized()
             ?: throw NoSuchElementException("未找到发布者：$platform:$externalId")
         val pluginInfo = handle?.info ?: fallbackPublisherPluginInfo(platform)
+        rememberPublisherCandidate(publisherInfo)
         return publisherInfo to pluginInfo
+    }
+
+    private fun rememberPublisherCandidate(publisherInfo: PublisherInfo) {
+        val key = publisherInfo.key.stableValue()
+        synchronized(publisherCandidateCacheLock) {
+            prunePublisherCandidateCacheLocked()
+            publisherCandidateCache.remove(key)
+            publisherCandidateCache[key] = CachedPublisherCandidate(
+                publisherInfo = publisherInfo,
+                cachedAtEpochMillis = System.currentTimeMillis(),
+            )
+            trimPublisherCandidateCacheLocked()
+        }
+    }
+
+    private fun cachedPublisherCandidate(key: PublisherKey): PublisherInfo? {
+        val cacheKey = key.stableValue()
+        return synchronized(publisherCandidateCacheLock) {
+            val cached = publisherCandidateCache[cacheKey] ?: return@synchronized null
+            if (cached.isExpired()) {
+                publisherCandidateCache.remove(cacheKey)
+                return@synchronized null
+            }
+            cached.publisherInfo.normalized().copy(key = key)
+        }
+    }
+
+    private fun prunePublisherCandidateCacheLocked() {
+        val now = System.currentTimeMillis()
+        publisherCandidateCache.entries.removeIf { (_, value) ->
+            now - value.cachedAtEpochMillis > ADMIN_CANDIDATE_CACHE_TTL_MS
+        }
+    }
+
+    private fun trimPublisherCandidateCacheLocked() {
+        while (publisherCandidateCache.size > ADMIN_PUBLISHER_CANDIDATE_CACHE_MAX_SIZE) {
+            val oldestKey = publisherCandidateCache.keys.firstOrNull() ?: return
+            publisherCandidateCache.remove(oldestKey)
+        }
     }
 
     private fun fallbackPublisherPluginInfo(platform: String): PluginInfo {
@@ -1638,9 +1696,58 @@ public class AdminService(
             val sink = handle.instance
             if (!sink.supportsTarget(address)) continue
             val candidate = sink.resolveMessageTarget(address) ?: continue
-            if (candidate.address.stableValue() == address.stableValue()) return candidate
+            if (candidate.address.stableValue() == address.stableValue()) {
+                rememberMessageTargetCandidate(candidate)
+                return candidate
+            }
         }
         return null
+    }
+
+    private fun rememberMessageTargetCandidate(candidate: MessageTargetCandidate) {
+        rememberMessageTargetCandidates(listOf(candidate))
+    }
+
+    private fun rememberMessageTargetCandidates(candidates: Collection<MessageTargetCandidate>) {
+        if (candidates.isEmpty()) return
+        val now = System.currentTimeMillis()
+        synchronized(subscriberTargetCandidateCacheLock) {
+            pruneMessageTargetCandidateCacheLocked(now)
+            candidates.forEach { candidate ->
+                val key = candidate.address.stableValue()
+                subscriberTargetCandidateCache.remove(key)
+                subscriberTargetCandidateCache[key] = CachedMessageTargetCandidate(
+                    candidate = candidate,
+                    cachedAtEpochMillis = now,
+                )
+            }
+            trimMessageTargetCandidateCacheLocked()
+        }
+    }
+
+    private fun cachedMessageTargetCandidate(address: TargetAddress): MessageTargetCandidate? {
+        val cacheKey = address.stableValue()
+        return synchronized(subscriberTargetCandidateCacheLock) {
+            val cached = subscriberTargetCandidateCache[cacheKey] ?: return@synchronized null
+            if (cached.isExpired()) {
+                subscriberTargetCandidateCache.remove(cacheKey)
+                return@synchronized null
+            }
+            cached.candidate
+        }
+    }
+
+    private fun pruneMessageTargetCandidateCacheLocked(now: Long = System.currentTimeMillis()) {
+        subscriberTargetCandidateCache.entries.removeIf { (_, value) ->
+            now - value.cachedAtEpochMillis > ADMIN_CANDIDATE_CACHE_TTL_MS
+        }
+    }
+
+    private fun trimMessageTargetCandidateCacheLocked() {
+        while (subscriberTargetCandidateCache.size > ADMIN_TARGET_CANDIDATE_CACHE_MAX_SIZE) {
+            val oldestKey = subscriberTargetCandidateCache.keys.firstOrNull() ?: return
+            subscriberTargetCandidateCache.remove(oldestKey)
+        }
     }
 
     private fun publisherPlatformLiveSupport(platformId: String): Boolean? {
@@ -2080,6 +2187,24 @@ private data class CachedLoginState(
     val checkedAtEpochMillis: Long,
 )
 
+private data class CachedPublisherCandidate(
+    val publisherInfo: PublisherInfo,
+    val cachedAtEpochMillis: Long,
+) {
+    fun isExpired(now: Long = System.currentTimeMillis()): Boolean {
+        return now - cachedAtEpochMillis > ADMIN_CANDIDATE_CACHE_TTL_MS
+    }
+}
+
+private data class CachedMessageTargetCandidate(
+    val candidate: MessageTargetCandidate,
+    val cachedAtEpochMillis: Long,
+) {
+    fun isExpired(now: Long = System.currentTimeMillis()): Boolean {
+        return now - cachedAtEpochMillis > ADMIN_CANDIDATE_CACHE_TTL_MS
+    }
+}
+
 private data class AutoFollowOutcome(
     val followed: Boolean,
     val warning: String? = null,
@@ -2251,6 +2376,9 @@ private fun PublisherInfo.normalized(): PublisherInfo = copy(
 
 private const val LOGIN_STATE_CACHE_TTL_MS: Long = 15_000
 private const val LOGIN_STATE_TIMEOUT_MS: Long = 5_000
+private const val ADMIN_CANDIDATE_CACHE_TTL_MS: Long = 5 * 60 * 1_000
+private const val ADMIN_PUBLISHER_CANDIDATE_CACHE_MAX_SIZE: Int = 256
+private const val ADMIN_TARGET_CANDIDATE_CACHE_MAX_SIZE: Int = 1_000
 private const val TASK_OWNER_MAIN: String = "MAIN"
 private const val TASK_OWNER_PLUGIN: String = "PLUGIN"
 private const val TASK_OWNER_MAIN_ID: String = "main"
