@@ -139,6 +139,14 @@ export async function handleAction(nextCtx, { action, id }) {
     await openPublisherDetail(id);
     return true;
   }
+  if (action === "publisher-subscriptions") {
+    await openPublisherSubscriptions(id);
+    return true;
+  }
+  if (action === "publisher-live") {
+    await openPublisherLive(id);
+    return true;
+  }
   if (action === "create-publisher") {
     await openCreatePublisher();
     return true;
@@ -153,6 +161,10 @@ export async function handleAction(nextCtx, { action, id }) {
   }
   if (action === "subscriber-detail") {
     await openSubscriberDetail(id);
+    return true;
+  }
+  if (action === "subscriber-subscriptions") {
+    await openSubscriberSubscriptions(id);
     return true;
   }
   if (action === "delete-publisher") {
@@ -262,7 +274,7 @@ async function loadEntities(force) {
           { title: "发布者", render: p => entityPublisherCell(p) },
           { title: "主题色", render: p => themeSwatch(p.drawTheme) },
           { title: "头图", render: p => p.bannerUri ? mediaImage(p.bannerUri, "header-image", p.platformId, "COVER") : `<span class="sub-line">-</span>` },
-          { title: "订阅", render: p => `<span class="primary-line">${p.subscriptionCount || 0}</span>` },
+          { title: "订阅", render: p => subscriptionCountButton("publisher-subscriptions", p.id, p.subscriptionCount, "查看订阅用户") },
           { title: "直播状态", render: p => publisherLiveStatusCell(p) },
           { title: "状态", render: p => entityStatePill(p.state) },
           { title: "创建时间", render: p => `<span class="sub-line">${fmtTime(p.createTime)}</span>` },
@@ -275,7 +287,7 @@ async function loadEntities(force) {
         ${renderTable(filteredSubscribers, [
           { title: "平台", render: s => platformTag(s.platformId, s.platformId) },
           { title: "目标", render: s => entitySubscriberCell(s) },
-          { title: "订阅", render: s => `<span class="primary-line">${s.subscriptionCount || 0}</span>` },
+          { title: "订阅", render: s => subscriptionCountButton("subscriber-subscriptions", s.id, s.subscriptionCount, "查看订阅发布者") },
           { title: "链接解析", render: s => linkParseCell(s) },
           { title: "状态", render: s => entityStatePill(s.state) },
           { title: "创建时间", render: s => `<span class="sub-line">${fmtTime(s.createTime)}</span>` },
@@ -301,6 +313,13 @@ function entityPublisherCell(publisher) {
   );
 }
 
+function subscriptionCountButton(action, id, count, title) {
+  const value = Number(count || 0);
+  return `<button type="button" class="entity-subscription-button" data-action="${attr(action)}" data-id="${attr(id)}" title="${attr(title)}">
+    <strong>${value}</strong><span>条</span>
+  </button>`;
+}
+
 function publisherLiveStatusCell(publisher) {
   const liveSubscriptionCount = Number(publisher.liveSubscriptionCount || 0);
   if (liveSubscriptionCount <= 0) {
@@ -308,10 +327,17 @@ function publisherLiveStatusCell(publisher) {
   }
   const status = (publisher.liveStatuses || [])[0];
   if (!status) {
-    return cell("等待检测", `${liveSubscriptionCount} 个直播订阅`);
+    return liveStatusButton(publisher.id, "等待检测", `${liveSubscriptionCount} 个直播订阅`);
   }
   const observed = status.lastObservedAtEpochSeconds ? `最后观察 ${fmtTime(status.lastObservedAtEpochSeconds)}` : `${liveSubscriptionCount} 个直播订阅`;
-  return `<span class="primary-line">${pill(status.status)}</span><span class="sub-line">${esc(observed)}</span>`;
+  return liveStatusButton(publisher.id, pill(status.status), observed);
+}
+
+function liveStatusButton(id, title, sub) {
+  return `<button type="button" class="entity-live-button" data-action="publisher-live" data-id="${attr(id)}" title="查看直播状态与记录">
+    <span class="primary-line">${typeof title === "string" && title.includes("<") ? title : esc(title)}</span>
+    <span class="sub-line">${esc(sub || "")}</span>
+  </button>`;
 }
 
 function entitySubscriberCell(target) {
@@ -332,8 +358,6 @@ async function openPublisherDetail(id) {
   state.cache.publishers = await api("/publishers");
   const item = state.cache.publishers.find(row => Number(row.id) === Number(id));
   if (!item) throw new Error("发布者不存在");
-  const liveStatuses = item.liveStatuses || [];
-  const liveRecords = item.liveRecords || [];
   const cursors = item.cursors || [];
   openModal("发布者详情", `
     <div class="entity-detail">
@@ -351,6 +375,30 @@ async function openPublisherDetail(id) {
       </div>
       <section class="plugin-detail-section">
         <div class="entity-detail-head">
+          <h3>源游标</h3>
+          <span class="entity-detail-count">${cursors.length} 条</span>
+        </div>
+        ${renderPublisherCursors(cursors)}
+      </section>
+    </div>
+  `, null, {
+    size: "wide",
+    cancelText: "关闭",
+  });
+  await hydrateMediaImages($("modalBody"));
+}
+
+async function openPublisherLive(id) {
+  state.cache.publishers = await api("/publishers");
+  const item = state.cache.publishers.find(row => Number(row.id) === Number(id));
+  if (!item) throw new Error("发布者不存在");
+  const liveStatuses = item.liveStatuses || [];
+  const liveRecords = item.liveRecords || [];
+  openModal("直播状态与记录", `
+    <div class="entity-live-modal">
+      ${liveModalSummary(item, liveStatuses.length, liveRecords.length)}
+      <section class="plugin-detail-section">
+        <div class="entity-detail-head">
           <h3>直播状态</h3>
           <span class="entity-detail-count">${liveStatuses.length} 条</span>
         </div>
@@ -363,19 +411,132 @@ async function openPublisherDetail(id) {
         </div>
         ${renderPublisherLiveRecords(liveRecords, item.platformId)}
       </section>
-      <section class="plugin-detail-section">
-        <div class="entity-detail-head">
-          <h3>源游标</h3>
-          <span class="entity-detail-count">${cursors.length} 条</span>
-        </div>
-        ${renderPublisherCursors(cursors)}
-      </section>
     </div>
   `, null, {
     size: "wide",
     cancelText: "关闭",
   });
   await hydrateMediaImages($("modalBody"));
+}
+
+async function openPublisherSubscriptions(id) {
+  if (!state.cache.publishers) state.cache.publishers = await api("/publishers");
+  const item = state.cache.publishers.find(row => Number(row.id) === Number(id));
+  if (!item) throw new Error("发布者不存在");
+  const relatedSubscriptions = (await loadEntitySubscriptions())
+    .filter(row => Number(row.publisherId) === Number(id))
+    .sort((a, b) => Number(b.updatedAtEpochSeconds || 0) - Number(a.updatedAtEpochSeconds || 0));
+  openModal("订阅用户", `
+    <div class="entity-relation-modal">
+      ${relationModalSummary(entityPublisherCell(item), relatedSubscriptions.length, "正在接收这个发布者动态或直播事件的消息目标")}
+      ${renderPublisherSubscriberRelations(relatedSubscriptions)}
+    </div>
+  `, null, {
+    size: "wide",
+    cancelText: "关闭",
+  });
+  await hydrateMediaImages($("modalBody"));
+}
+
+async function openSubscriberSubscriptions(id) {
+  if (!state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
+  const item = state.cache.subscribers.find(row => Number(row.id) === Number(id));
+  if (!item) throw new Error("消息目标不存在");
+  const relatedSubscriptions = (await loadEntitySubscriptions())
+    .filter(row => Number(row.subscriberId) === Number(id))
+    .sort((a, b) => Number(b.updatedAtEpochSeconds || 0) - Number(a.updatedAtEpochSeconds || 0));
+  openModal("订阅发布者", `
+    <div class="entity-relation-modal">
+      ${relationModalSummary(entitySubscriberCell(item), relatedSubscriptions.length, "这个消息目标当前订阅的发布者")}
+      ${renderSubscriberPublisherRelations(relatedSubscriptions)}
+    </div>
+  `, null, {
+    size: "wide",
+    cancelText: "关闭",
+  });
+  await hydrateMediaImages($("modalBody"));
+}
+
+async function loadEntitySubscriptions() {
+  if (!state.cache.subscriptions) {
+    state.cache.subscriptions = await api("/subscriptions");
+  }
+  return state.cache.subscriptions || [];
+}
+
+function relationModalSummary(entityHtml, count, description) {
+  return `<div class="entity-relation-summary">
+    <div class="entity-relation-subject">${entityHtml}</div>
+    <div class="entity-relation-count">
+      <strong>${Number(count || 0)}</strong>
+      <span>${esc(description)}</span>
+    </div>
+  </div>`;
+}
+
+function liveModalSummary(publisher, statusCount, recordCount) {
+  return `<div class="entity-live-summary">
+    <div class="entity-relation-subject">${entityPublisherCell(publisher)}</div>
+    <div class="entity-live-counts">
+      <span><strong>${Number(statusCount || 0)}</strong> 状态</span>
+      <span><strong>${Number(recordCount || 0)}</strong> 记录</span>
+      <small>${Number(publisher.liveSubscriptionCount || 0)} 个直播订阅</small>
+    </div>
+  </div>`;
+}
+
+function renderPublisherSubscriberRelations(rows) {
+  if (!rows.length) return entityDetailEmpty(
+    "暂无订阅用户",
+    "这个发布者还没有绑定任何消息目标，可以在订阅管理中添加订阅关系。"
+  );
+  return `<div class="entity-detail-table-wrap">
+    <table class="entity-detail-table subscription-relations">
+      <thead><tr><th>消息目标</th><th>接收事件</th><th>@全体</th><th>动态过滤</th><th>状态</th><th>更新时间</th></tr></thead>
+      <tbody>${rows.map(row => `<tr>
+        <td>${entitySubscriberCell(row.subscriber)}</td>
+        <td>${subscriptionEventTags(row.policy)}</td>
+        <td>${subscriptionMentionTags(row.policy)}</td>
+        <td>${subscriptionFilterCell(row)}</td>
+        <td>${entityStatePill(row.state)}</td>
+        <td><span class="sub-line">${fmtTime(row.updatedAtEpochSeconds)}</span></td>
+      </tr>`).join("")}</tbody>
+    </table>
+  </div>`;
+}
+
+function renderSubscriberPublisherRelations(rows) {
+  if (!rows.length) return entityDetailEmpty(
+    "暂无订阅发布者",
+    "这个消息目标还没有绑定任何发布者，可以在订阅管理中添加订阅关系。"
+  );
+  return `<div class="entity-detail-table-wrap">
+    <table class="entity-detail-table subscription-relations">
+      <thead><tr><th>发布者</th><th>接收事件</th><th>@全体</th><th>动态过滤</th><th>状态</th><th>更新时间</th></tr></thead>
+      <tbody>${rows.map(row => `<tr>
+        <td>${entityPublisherCell(row.publisher)}</td>
+        <td>${subscriptionEventTags(row.policy)}</td>
+        <td>${subscriptionMentionTags(row.policy)}</td>
+        <td>${subscriptionFilterCell(row)}</td>
+        <td>${entityStatePill(row.state)}</td>
+        <td><span class="sub-line">${fmtTime(row.updatedAtEpochSeconds)}</span></td>
+      </tr>`).join("")}</tbody>
+    </table>
+  </div>`;
+}
+
+function subscriptionEventTags(policy) {
+  return tags(policyEvents(policy).map(eventLabel));
+}
+
+function subscriptionMentionTags(policy) {
+  const events = mentionEvents(policy);
+  return events.length ? tags(events.map(event => `@全体 ${eventLabel(event)}`)) : `<span class="sub-line">未启用</span>`;
+}
+
+function subscriptionFilterCell(subscription) {
+  const count = Number(subscription.filterRuleCount || 0);
+  return cell(count ? `${count} 条规则` : "无过滤", count ? "命中任一规则会阻止动态" : "动态直接投递");
 }
 
 function renderPublisherLiveStatuses(rows, platformId) {

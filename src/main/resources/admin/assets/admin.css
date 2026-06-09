@@ -1244,6 +1244,56 @@
       background: #f6f1ff;
       color: #6d3bb5;
     }
+    .entity-subscription-button {
+      min-height: 28px;
+      display: inline-flex;
+      align-items: baseline;
+      gap: 3px;
+      padding: 4px 9px;
+      border-color: #c7d7ed;
+      background: #f2f7ff;
+      color: #2e5d96;
+      box-shadow: 0 4px 10px rgba(46, 93, 150, 0.08);
+      transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+    }
+    .entity-subscription-button:hover {
+      transform: translateY(-1px);
+      background: #eaf2ff;
+      box-shadow: 0 8px 16px rgba(46, 93, 150, 0.13);
+      filter: none;
+    }
+    .entity-subscription-button strong {
+      font-size: 15px;
+      line-height: 1;
+    }
+    .entity-subscription-button span {
+      font-size: 12px;
+      color: #5278a8;
+    }
+    .entity-live-button {
+      min-height: 42px;
+      width: 100%;
+      display: grid;
+      justify-items: start;
+      gap: 2px;
+      padding: 6px 9px;
+      border-color: #b9dccb;
+      background: #f0faf5;
+      color: #1f6f47;
+      text-align: left;
+      box-shadow: 0 4px 10px rgba(31, 111, 71, 0.08);
+      transition: transform 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+    }
+    .entity-live-button:hover {
+      transform: translateY(-1px);
+      background: #e7f7ef;
+      box-shadow: 0 8px 16px rgba(31, 111, 71, 0.13);
+      filter: none;
+    }
+    .entity-live-button .primary-line,
+    .entity-live-button .sub-line {
+      max-width: 100%;
+    }
     .entity-detail {
       display: grid;
       gap: 14px;
@@ -1266,6 +1316,87 @@
       font-size: 12px;
       font-weight: 900;
     }
+    .entity-relation-modal {
+      display: grid;
+      gap: 12px;
+    }
+    .entity-relation-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 12px;
+      border: 1px solid #c7d7ed;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #f7fbff, #eef6ff);
+      box-shadow: 0 8px 22px rgba(46, 93, 150, 0.08);
+    }
+    .entity-relation-subject {
+      min-width: 0;
+    }
+    .entity-relation-count {
+      min-width: 180px;
+      display: grid;
+      justify-items: end;
+      gap: 2px;
+      color: #5278a8;
+      text-align: right;
+    }
+    .entity-relation-count strong {
+      color: #2e5d96;
+      font-size: 22px;
+      line-height: 1;
+    }
+    .entity-relation-count span {
+      font-size: 12px;
+    }
+    .entity-live-modal {
+      display: grid;
+      gap: 12px;
+    }
+    .entity-live-summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 12px;
+      border: 1px solid #b9dccb;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #f7fffb, #edf9f2);
+      box-shadow: 0 8px 22px rgba(31, 111, 71, 0.08);
+    }
+    .entity-live-counts {
+      min-width: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 8px;
+      flex-wrap: wrap;
+      color: #3d7659;
+      text-align: right;
+    }
+    .entity-live-counts span {
+      display: inline-flex;
+      align-items: baseline;
+      gap: 3px;
+      min-height: 28px;
+      padding: 4px 8px;
+      border: 1px solid #b9dccb;
+      border-radius: 999px;
+      background: #f0faf5;
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .entity-live-counts strong {
+      color: #1f6f47;
+      font-size: 16px;
+      line-height: 1;
+    }
+    .entity-live-counts small {
+      width: 100%;
+      color: var(--muted);
+      font-size: 12px;
+    }
     .entity-detail-table-wrap {
       width: 100%;
       overflow: auto;
@@ -1284,6 +1415,31 @@
     }
     .entity-detail-table.cursor {
       min-width: 760px;
+    }
+    .entity-detail-table.subscription-relations {
+      min-width: 900px;
+    }
+    .entity-detail-table.subscription-relations th:first-child,
+    .entity-detail-table.subscription-relations td:first-child {
+      width: 280px;
+    }
+    .entity-relation-modal .entity-detail-table-wrap {
+      max-height: min(62vh, 620px);
+    }
+    .entity-relation-modal .entity-detail-table th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #f8fbfd;
+    }
+    .entity-live-modal .entity-detail-table-wrap {
+      max-height: min(38vh, 360px);
+    }
+    .entity-live-modal .entity-detail-table th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: #f8fbfd;
     }
     .entity-detail-table .mono,
     .detail-long-text {

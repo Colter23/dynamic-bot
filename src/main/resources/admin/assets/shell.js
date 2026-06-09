@@ -748,7 +748,7 @@ const $ = id => document.getElementById(id);
             plugins: ["plugins"],
             login: ["platformLogins", "targetPlatformAccounts"],
             subscriptions: ["subscriptions"],
-            entities: ["publishers", "subscribers"],
+            entities: ["publishers", "subscribers", "subscriptions"],
             messages: ["deliveries"],
             tasks: ["tasks"],
             logs: [],
