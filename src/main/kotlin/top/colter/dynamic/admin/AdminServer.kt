@@ -379,6 +379,14 @@ public fun Application.adminModule(context: AdminServerContext) {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.subscriptions() }
             }
+            post("/subscriptions/export") {
+                if (!call.ensureAuthorized(context)) return@post
+                call.respondApi { context.service.exportSubscriptions(call.receive()) }
+            }
+            post("/subscriptions/import") {
+                if (!call.ensureAuthorized(context)) return@post
+                call.respondApi { context.service.importSubscriptions(call.receive()) }
+            }
             post("/subscriptions") {
                 if (!call.ensureAuthorized(context)) return@post
                 call.respondApi { context.service.createSubscription(call.receive()) }

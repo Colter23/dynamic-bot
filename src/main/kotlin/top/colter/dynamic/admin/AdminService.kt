@@ -12,6 +12,7 @@ import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.EntityState
+import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageDelivery
 import top.colter.dynamic.core.data.MessageBatch
@@ -22,6 +23,7 @@ import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.PublisherKey
+import top.colter.dynamic.core.data.PublisherKind
 import top.colter.dynamic.core.data.PublisherLiveStatus
 import top.colter.dynamic.core.data.SourceCursor
 import top.colter.dynamic.core.data.Subscriber
@@ -974,13 +976,186 @@ public class AdminService(
             .map { it.toDto(publishers, subscribers, rules[it.id].orEmpty()) }
     }
 
+    public fun exportSubscriptions(request: SubscriptionExportRequest): SubscriptionExportDocument {
+        val allSubscriptions = SubscriptionRepository.findAll().sortedBy { it.id }
+        val selectedSubscriptions = request.subscriptionIds
+            ?.takeIf { it.isNotEmpty() }
+            ?.let { requestedIds ->
+                val byId = allSubscriptions.associateBy { it.id }
+                val missing = requestedIds.distinct().filterNot { it in byId }
+                require(missing.isEmpty()) { "订阅不存在：${missing.joinToString(", ")}" }
+                requestedIds.distinct().map { byId.getValue(it) }
+            }
+            ?: allSubscriptions
+
+        val publishers = PublisherRepository.findAll().associateBy { it.id }
+        val subscribers = SubscriberRepository.findAll().associateBy { it.id }
+        val rules = DynamicFilterRuleRepository.findBySubscriptionIds(selectedSubscriptions.map { it.id })
+        return SubscriptionExportDocument(
+            exportedAtEpochSeconds = System.currentTimeMillis() / 1_000,
+            subscriptions = selectedSubscriptions.map { subscription ->
+                val publisher = publishers[subscription.publisherId]
+                    ?: throw NoSuchElementException("订阅缺少发布者：subscriptionId=${subscription.id}")
+                val subscriber = subscribers[subscription.subscriberId]
+                    ?: throw NoSuchElementException("订阅缺少消息目标：subscriptionId=${subscription.id}")
+                val linkParseConfig = LinkParseTargetConfigRepository.findByAddress(subscriber.address)
+                SubscriptionExportItem(
+                    publisher = SubscriptionExportPublisher(
+                        platformId = publisher.platformId.value,
+                        kind = publisher.kind.name,
+                        externalId = publisher.externalId,
+                    ),
+                    target = SubscriptionExportTarget(
+                        platformId = subscriber.platformId.value,
+                        targetKind = subscriber.kind.name,
+                        externalId = subscriber.externalId,
+                        scopeId = subscriber.address.scopeId,
+                        threadId = subscriber.address.threadId,
+                        accountId = subscriber.address.accountId,
+                    ),
+                    policy = subscription.policy,
+                    filterRules = rules[subscription.id].orEmpty()
+                        .sortedBy { it.id }
+                        .map { SubscriptionExportFilterRule(it.condition) },
+                    linkParseTriggerMode = linkParseConfig?.triggerMode?.name,
+                )
+            },
+        )
+    }
+
+    public suspend fun importSubscriptions(document: SubscriptionExportDocument): SubscriptionImportResponse {
+        require(document.schemaVersion == 1) { "订阅导入文件版本不支持：${document.schemaVersion}" }
+
+        val warnings = mutableListOf<String>()
+        val latestByRelation = linkedMapOf<String, IndexedValue<SubscriptionExportItem>>()
+        var duplicateCount = 0
+        document.subscriptions.forEachIndexed { index, item ->
+            val key = item.relationKeyOrFallback()
+            if (latestByRelation.containsKey(key)) {
+                latestByRelation.remove(key)
+                duplicateCount += 1
+                warnings += "导入文件中存在重复订阅，已使用最后一条：$key"
+            }
+            latestByRelation[key] = IndexedValue(index, item)
+        }
+
+        var created = 0
+        var updated = 0
+        var failed = 0
+        val items = mutableListOf<SubscriptionImportItemResult>()
+        for ((index, item) in latestByRelation.values) {
+            val publisherKey = item.publisherKeyText()
+            val targetKey = item.targetKeyText()
+            try {
+                val filterConditions = item.filterRules.map { it.condition }
+                validateSubscriptionImportItemBeforeMutation(item, filterConditions)
+                val response = createSubscriptionInternal(
+                    request = item.toCreateSubscriptionRequest(),
+                    replacementFilterConditions = filterConditions,
+                )
+                val status = if (response.subscriptionCreated) "CREATED" else "UPDATED"
+                if (response.subscriptionCreated) created += 1 else updated += 1
+                items += SubscriptionImportItemResult(
+                    index = index,
+                    status = status,
+                    message = if (response.subscriptionCreated) "订阅已创建" else "订阅已更新",
+                    publisherKey = publisherKey,
+                    targetKey = targetKey,
+                    filterRuleCount = filterConditions.size,
+                    subscription = response.subscription,
+                    warnings = response.warnings,
+                )
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                failed += 1
+                items += SubscriptionImportItemResult(
+                    index = index,
+                    status = "FAILED",
+                    message = e.message ?: e.javaClass.name,
+                    publisherKey = publisherKey,
+                    targetKey = targetKey,
+                    filterRuleCount = item.filterRules.size,
+                )
+            }
+        }
+
+        logger.info {
+            "后台订阅导入完成：total=${document.subscriptions.size}，created=$created，updated=$updated，failed=$failed，duplicates=$duplicateCount"
+        }
+        return SubscriptionImportResponse(
+            total = document.subscriptions.size,
+            created = created,
+            updated = updated,
+            failed = failed,
+            skipped = duplicateCount,
+            duplicateCount = duplicateCount,
+            items = items,
+            warnings = warnings,
+        )
+    }
+
     public suspend fun createSubscription(request: CreateSubscriptionRequest): CreateSubscriptionResponse {
+        return createSubscriptionInternal(request, replacementFilterConditions = null)
+    }
+
+    private fun validateSubscriptionImportItemBeforeMutation(
+        item: SubscriptionExportItem,
+        filterConditions: List<FilterCondition>,
+    ) {
+        filterConditions.forEach(DynamicFilterRuleRepository::validateCondition)
+        parseLinkParseTriggerModeOrNull(item.linkParseTriggerMode)
+
+        val publisherKey = item.importPublisherKey()
+        val targetAddress = item.importTargetAddress()
+        val existingPublisher = PublisherRepository.findByKey(publisherKey)
+        val existingSubscriber = SubscriberRepository.findByAddress(targetAddress)
+        val existingSubscription = if (existingPublisher != null && existingSubscriber != null) {
+            SubscriptionRepository.findBySubscriberAndPublisher(
+                subscriberId = existingSubscriber.id,
+                publisherId = existingPublisher.id,
+            )
+        } else {
+            null
+        }
+        requireSubscriptionPolicyAllowed(
+            subscriber = existingSubscriber ?: Subscriber(
+                id = 0,
+                address = targetAddress,
+                name = targetAddress.externalId,
+                state = EntityState.ACTIVE,
+                createTime = 0,
+                createUser = 0,
+            ),
+            publisher = existingPublisher ?: Publisher(
+                id = 0,
+                key = publisherKey,
+                name = publisherKey.externalId,
+                avatar = MediaRef("import://placeholder", MediaKind.AVATAR),
+                createTime = 0,
+                createUser = 0,
+            ),
+            policy = item.policy,
+            liveSupport = publisherPlatformLiveSupport(publisherKey.platformId.value),
+            previousPolicy = existingSubscription?.policy,
+        )
+    }
+
+    private suspend fun createSubscriptionInternal(
+        request: CreateSubscriptionRequest,
+        replacementFilterConditions: List<FilterCondition>?,
+    ): CreateSubscriptionResponse {
         val publisherUpsert = if (request.publisherId != null) {
             val publisher = PublisherRepository.findById(request.publisherId)
                 ?: throw NoSuchElementException("发布者不存在：publisherId=${request.publisherId}")
             UpsertResult(publisher, created = false, updated = false)
         } else {
             val platform = request.publisherPlatform?.trim()?.lowercase().orEmpty()
+            val publisherKind = request.publisherKind
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+                ?.let { parseEnum<PublisherKind>(it, "publisherKind") }
+                ?: PublisherKind.USER
             val externalId = request.publisherExternalId?.trim().orEmpty()
             require(platform.isNotBlank()) { "发布者平台不能为空" }
             require(externalId.isNotBlank()) { "发布者外部 ID 不能为空" }
@@ -989,7 +1164,15 @@ public class AdminService(
                 ?: throw NoSuchElementException("未找到发布者查询插件：$platform")
             val publisherInfo = lookupPlugin.fetchPublisherInfo(externalId)
                 ?: throw NoSuchElementException("未找到发布者：$platform:$externalId")
-            PublisherRepository.upsertInfo(publisherInfo.normalized())
+            PublisherRepository.upsertInfo(
+                publisherInfo.normalized().copy(
+                    key = PublisherKey.of(
+                        platformId = platform,
+                        kind = publisherKind,
+                        externalId = externalId,
+                    ),
+                )
+            )
         }
         val subscriberUpsert = if (request.subscriberId != null) {
             val subscriber = SubscriberRepository.findById(request.subscriberId)
@@ -1029,12 +1212,18 @@ public class AdminService(
         }
         val publisherPlatform = publisherUpsert.value.key.platformId.value
         val publisherExternalId = publisherUpsert.value.key.externalId
+        val existingSubscription = SubscriptionRepository.findBySubscriberAndPublisher(
+            subscriberId = subscriberUpsert.value.id,
+            publisherId = publisherUpsert.value.id,
+        )
         requireSubscriptionPolicyAllowed(
             subscriber = subscriberUpsert.value,
             publisher = publisherUpsert.value,
             policy = request.policy,
             liveSupport = publisherPlatformLiveSupport(publisherPlatform),
+            previousPolicy = existingSubscription?.policy,
         )
+        replacementFilterConditions?.forEach(DynamicFilterRuleRepository::validateCondition)
         val autoFollowOutcome = if (configProvider().subscription.autoFollowPublisherOnSubscribe) {
             tryEnsureFollowed(publisherPlatform, publisherExternalId)
         } else {
@@ -1067,6 +1256,13 @@ public class AdminService(
             publisherId = publisherUpsert.value.id,
         ) ?: throw IllegalStateException("订阅创建失败")
 
+        if (replacementFilterConditions != null) {
+            DynamicFilterRuleRepository.clearBySubscriptionId(subscription.id)
+            replacementFilterConditions.forEach { condition ->
+                DynamicFilterRuleRepository.addRule(subscription.id, condition)
+            }
+        }
+        val filterRules = DynamicFilterRuleRepository.findBySubscriptionId(subscription.id)
         logger.info {
             "后台订阅已${if (subscriptionResult.changed) "创建" else "更新"}：subscriptionId=${subscription.id}，publisherId=${publisherUpsert.value.id}，subscriberId=${subscriberUpsert.value.id}，autoFollowed=$autoFollowed"
         }
@@ -1074,7 +1270,7 @@ public class AdminService(
             subscription = subscription.toDto(
                 mapOf(publisherUpsert.value.id to publisherUpsert.value),
                 mapOf(subscriberUpsert.value.id to subscriberUpsert.value),
-                DynamicFilterRuleRepository.findBySubscriptionId(subscription.id),
+                filterRules,
             ),
             publisherCreated = publisherUpsert.created,
             publisherUpdated = publisherUpsert.updated,
@@ -1923,6 +2119,83 @@ private fun parseLinkParseTriggerModeOrNull(value: String?): LinkParseTriggerMod
     val normalized = value?.trim()?.takeIf { it.isNotBlank() } ?: return null
     if (normalized.equals("INHERIT", ignoreCase = true)) return null
     return parseEnum<LinkParseTriggerMode>(normalized, "linkParseTriggerMode")
+}
+
+private fun SubscriptionExportItem.toCreateSubscriptionRequest(): CreateSubscriptionRequest {
+    val publisherKey = importPublisherKey()
+    val targetAddress = importTargetAddress()
+    return CreateSubscriptionRequest(
+        subscriberPlatform = targetAddress.platformId.value,
+        targetKind = targetAddress.kind.name,
+        subscriberTargetId = targetAddress.externalId,
+        subscriberScopeId = targetAddress.scopeId,
+        subscriberThreadId = targetAddress.threadId,
+        subscriberAccountId = targetAddress.accountId,
+        subscriberLinkParseTriggerMode = linkParseTriggerMode,
+        publisherPlatform = publisherKey.platformId.value,
+        publisherKind = publisherKey.kind.name,
+        publisherExternalId = publisherKey.externalId,
+        policy = policy,
+    )
+}
+
+private fun SubscriptionExportItem.importPublisherKey(): PublisherKey {
+    return PublisherKey.of(
+        platformId = publisher.platformId,
+        kind = publisher.kind
+            .trim()
+            .takeIf { it.isNotBlank() }
+            ?.let { parseEnum<PublisherKind>(it, "publisher.kind") }
+            ?: PublisherKind.USER,
+        externalId = publisher.externalId,
+    )
+}
+
+private fun SubscriptionExportItem.importTargetAddress(): TargetAddress {
+    return TargetAddress.of(
+        platformId = normalizeImportedTargetPlatformId(target.platformId),
+        kind = parseEnum<TargetKind>(target.targetKind, "target.targetKind"),
+        externalId = target.externalId,
+        scopeId = target.scopeId,
+        threadId = target.threadId,
+        accountId = target.accountId,
+    )
+}
+
+private fun SubscriptionExportItem.publisherKeyText(): String {
+    return listOf(
+        publisher.platformId.trim().lowercase(),
+        publisher.kind.trim().uppercase().ifBlank { PublisherKind.USER.name },
+        publisher.externalId.trim(),
+    ).joinToString(":")
+}
+
+private fun SubscriptionExportItem.targetKeyText(): String {
+    return listOf(
+        normalizeImportedTargetPlatformId(target.platformId),
+        target.targetKind.trim().uppercase(),
+        target.externalId.trim(),
+        target.scopeId?.trim().orEmpty(),
+        target.threadId?.trim().orEmpty(),
+        target.accountId?.trim().orEmpty(),
+    ).joinToString(":")
+}
+
+private fun SubscriptionExportItem.relationKeyOrFallback(): String {
+    return listOf(
+        publisherKeyText(),
+        normalizeImportedTargetPlatformId(target.platformId),
+        target.targetKind.trim().uppercase(),
+        target.externalId.trim(),
+        target.scopeId?.trim().orEmpty(),
+        target.threadId?.trim().orEmpty(),
+    ).joinToString(separator = "\u001F")
+}
+
+private fun normalizeImportedTargetPlatformId(platformId: String): String {
+    val normalized = platformId.trim().lowercase()
+    // 临时兼容旧数据库/旧导出文件：消息目标平台曾使用 onebot，当前统一为 qq。
+    return if (normalized == "onebot") "qq" else normalized
 }
 
 private fun requireSubscriptionPolicyAllowed(

@@ -129,7 +129,7 @@ class PluginManagerLifecycleTest {
         val result = manager.loadAllPlugins()
 
         assertTrue(result.loadedPlugins.isEmpty())
-        assertTrue(result.failedPlugins.getValue("old-api").contains("不支持的 apiVersion=2.3.0"))
+        assertTrue(result.failedPlugins.getValue("old-api").contains("不兼容的 apiVersion=2.3.0"))
     }
 
     @Test

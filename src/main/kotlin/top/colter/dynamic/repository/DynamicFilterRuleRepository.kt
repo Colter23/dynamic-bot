@@ -95,7 +95,7 @@ public object DynamicFilterRuleRepository {
         }
     }
 
-    private fun validateCondition(condition: FilterCondition) {
+    public fun validateCondition(condition: FilterCondition) {
         when (condition) {
             is FilterCondition.TextContains -> require(condition.value.isNotBlank()) {
                 "文本过滤条件不能为空"

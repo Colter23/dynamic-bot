@@ -11,10 +11,13 @@ import kotlin.test.assertTrue
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
+import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsBytes
 import io.ktor.client.statement.bodyAsText
+import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.contentType
 import io.ktor.server.testing.testApplication
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -49,6 +52,7 @@ import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.PublisherKey
+import top.colter.dynamic.core.data.PublisherKind
 import top.colter.dynamic.core.data.SubscriptionEventKind
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetAddress
@@ -728,6 +732,284 @@ class AdminServerTest {
         assertEquals(FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO), dto.filterRules.single().condition)
         assertEquals(1, publisherDto.subscriptionCount)
         assertEquals(1, subscriberDto.subscriptionCount)
+    }
+
+    @Test
+    fun exportSubscriptionsShouldIncludePolicyAddressAndFilterRules() = runBlocking {
+        initDb("admin-subscription-export")
+        val service = service(FakePublisherFollowPlugin())
+        val policy = SubscriptionPolicy(
+            enabledEvents = setOf(SubscriptionEventKind.DYNAMIC, SubscriptionEventKind.LIVE_STARTED),
+            mentionAllEvents = setOf(SubscriptionEventKind.LIVE_STARTED),
+        )
+        val created = service.createSubscription(
+            CreateSubscriptionRequest(
+                subscriberPlatform = "qq",
+                targetKind = "GROUP",
+                subscriberTargetId = "100",
+                subscriberScopeId = "scope",
+                subscriberThreadId = "thread",
+                subscriberAccountId = "account",
+                subscriberLinkParseTriggerMode = "ALWAYS",
+                publisherPlatform = "bilibili",
+                publisherExternalId = "123",
+                policy = policy,
+            ),
+        )
+        DynamicFilterRuleRepository.addRule(
+            created.subscription.id,
+            FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO),
+        )
+
+        val document = service.exportSubscriptions(SubscriptionExportRequest(listOf(created.subscription.id)))
+        val item = document.subscriptions.single()
+
+        assertEquals(1, document.schemaVersion)
+        assertEquals("bilibili", item.publisher.platformId)
+        assertEquals("USER", item.publisher.kind)
+        assertEquals("123", item.publisher.externalId)
+        assertEquals("qq", item.target.platformId)
+        assertEquals("GROUP", item.target.targetKind)
+        assertEquals("scope", item.target.scopeId)
+        assertEquals("thread", item.target.threadId)
+        assertEquals("account", item.target.accountId)
+        assertEquals(policy, item.policy)
+        assertEquals("ALWAYS", item.linkParseTriggerMode)
+        assertEquals(FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO), item.filterRules.single().condition)
+    }
+
+    @Test
+    fun importSubscriptionsShouldCreateSubscriptionAndFilterRules() = runBlocking {
+        initDb("admin-subscription-import-create")
+        val avatar = MediaRef("https://example.com/group.png", MediaKind.AVATAR)
+        val service = service(
+            plugin = FakePublisherFollowPlugin(),
+            sink = FakeMessageSinkPlugin(
+                listOf(MessageTargetCandidate(TargetAddress.of("qq", TargetKind.GROUP, "100"), "测试群", avatar)),
+            ),
+        )
+        val document = SubscriptionExportDocument(
+            exportedAtEpochSeconds = 1,
+            subscriptions = listOf(
+                SubscriptionExportItem(
+                    publisher = SubscriptionExportPublisher("bilibili", "USER", "123"),
+                    target = SubscriptionExportTarget("qq", "GROUP", "100"),
+                    policy = SubscriptionPolicy(
+                        enabledEvents = setOf(SubscriptionEventKind.DYNAMIC),
+                        mentionAllEvents = emptySet(),
+                    ),
+                    filterRules = listOf(SubscriptionExportFilterRule(FilterCondition.TextContains("广告"))),
+                    linkParseTriggerMode = "ALWAYS",
+                ),
+            ),
+        )
+
+        val result = service.importSubscriptions(document)
+        val subscription = SubscriptionRepository.findAll().single()
+        val subscriber = SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "100"))
+
+        assertEquals(1, result.created)
+        assertEquals(0, result.failed)
+        assertEquals("CREATED", result.items.single().status)
+        assertEquals("测试群", subscriber?.name)
+        assertEquals(avatar, subscriber?.avatar)
+        assertEquals(LinkParseTriggerMode.ALWAYS, LinkParseTargetConfigRepository.findByAddress(subscriber!!.address)?.triggerMode)
+        assertEquals(FilterCondition.TextContains("广告"), DynamicFilterRuleRepository.findBySubscriptionId(subscription.id).single().condition)
+    }
+
+    @Test
+    fun importSubscriptionsShouldMapLegacyOnebotTargetPlatformToQq() = runBlocking {
+        initDb("admin-subscription-import-onebot-target")
+        val service = service(FakePublisherFollowPlugin())
+        val document = SubscriptionExportDocument(
+            exportedAtEpochSeconds = 1,
+            subscriptions = listOf(
+                SubscriptionExportItem(
+                    publisher = SubscriptionExportPublisher("bilibili", "USER", "123"),
+                    target = SubscriptionExportTarget("onebot", "GROUP", "100"),
+                ),
+            ),
+        )
+
+        val result = service.importSubscriptions(document)
+
+        assertEquals(1, result.created)
+        assertEquals(0, result.failed)
+        assertNotNull(SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "100")))
+        assertNull(SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")))
+    }
+
+    @Test
+    fun importSubscriptionsShouldUpdatePolicyAndReplaceFilterRules() = runBlocking {
+        initDb("admin-subscription-import-update")
+        val service = service(FakePublisherFollowPlugin())
+        val created = service.createSubscription(
+            CreateSubscriptionRequest(
+                subscriberPlatform = "qq",
+                targetKind = "GROUP",
+                subscriberTargetId = "100",
+                publisherPlatform = "bilibili",
+                publisherExternalId = "123",
+            ),
+        )
+        DynamicFilterRuleRepository.addRule(
+            created.subscription.id,
+            FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO),
+        )
+        val nextPolicy = SubscriptionPolicy(
+            enabledEvents = setOf(SubscriptionEventKind.DYNAMIC, SubscriptionEventKind.LIVE_STARTED),
+        )
+        val document = SubscriptionExportDocument(
+            exportedAtEpochSeconds = 1,
+            subscriptions = listOf(
+                SubscriptionExportItem(
+                    publisher = SubscriptionExportPublisher("bilibili", "USER", "123"),
+                    target = SubscriptionExportTarget("qq", "GROUP", "100"),
+                    policy = nextPolicy,
+                    filterRules = listOf(SubscriptionExportFilterRule(FilterCondition.TextContains("抽奖"))),
+                ),
+            ),
+        )
+
+        val result = service.importSubscriptions(document)
+        val updated = SubscriptionRepository.findById(created.subscription.id)!!
+        val rules = DynamicFilterRuleRepository.findBySubscriptionId(created.subscription.id)
+
+        assertEquals(0, result.created)
+        assertEquals(1, result.updated)
+        assertEquals(nextPolicy, updated.policy)
+        assertEquals(listOf(FilterCondition.TextContains("抽奖")), rules.map { it.condition })
+    }
+
+    @Test
+    fun importSubscriptionsShouldKeepBatchRunningWhenSingleItemFails() = runBlocking {
+        initDb("admin-subscription-import-partial")
+        val service = service(FakePublisherFollowPlugin())
+        val mentionAllPolicy = SubscriptionPolicy(
+            enabledEvents = setOf(SubscriptionEventKind.DYNAMIC),
+            mentionAllEvents = setOf(SubscriptionEventKind.DYNAMIC),
+        )
+        val document = SubscriptionExportDocument(
+            exportedAtEpochSeconds = 1,
+            subscriptions = listOf(
+                SubscriptionExportItem(
+                    publisher = SubscriptionExportPublisher("bilibili", "USER", "123"),
+                    target = SubscriptionExportTarget("qq", "USER", "100"),
+                    policy = mentionAllPolicy,
+                ),
+                SubscriptionExportItem(
+                    publisher = SubscriptionExportPublisher("bilibili", "USER", "456"),
+                    target = SubscriptionExportTarget("qq", "GROUP", "200"),
+                    policy = SubscriptionPolicy.default(),
+                ),
+            ),
+        )
+
+        val result = service.importSubscriptions(document)
+
+        assertEquals(1, result.created)
+        assertEquals(1, result.failed)
+        assertEquals(listOf("FAILED", "CREATED"), result.items.map { it.status })
+        assertEquals(1, SubscriptionRepository.findAll().size)
+        assertNull(PublisherRepository.findByKey(PublisherKey.of("bilibili", PublisherKind.USER, "123")))
+        assertNull(SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.USER, "100")))
+    }
+
+    @Test
+    fun importSubscriptionsShouldNotClearExistingFiltersWhenReplacementIsInvalid() = runBlocking {
+        initDb("admin-subscription-import-invalid-filter")
+        val service = service(FakePublisherFollowPlugin())
+        val created = service.createSubscription(
+            CreateSubscriptionRequest(
+                subscriberPlatform = "qq",
+                targetKind = "GROUP",
+                subscriberTargetId = "100",
+                publisherPlatform = "bilibili",
+                publisherExternalId = "123",
+            ),
+        )
+        DynamicFilterRuleRepository.addRule(
+            created.subscription.id,
+            FilterCondition.TextContains("保留"),
+        )
+        val document = SubscriptionExportDocument(
+            exportedAtEpochSeconds = 1,
+            subscriptions = listOf(
+                SubscriptionExportItem(
+                    publisher = SubscriptionExportPublisher("bilibili", "USER", "123"),
+                    target = SubscriptionExportTarget("qq", "GROUP", "100"),
+                    filterRules = listOf(SubscriptionExportFilterRule(FilterCondition.TextRegex("("))),
+                ),
+            ),
+        )
+
+        val result = service.importSubscriptions(document)
+
+        assertEquals(0, result.updated)
+        assertEquals(1, result.failed)
+        assertEquals(
+            listOf(FilterCondition.TextContains("保留")),
+            DynamicFilterRuleRepository.findBySubscriptionId(created.subscription.id).map { it.condition },
+        )
+    }
+
+    @Test
+    fun importSubscriptionsShouldNotWriteEntitiesWhenPreValidationFails() = runBlocking {
+        initDb("admin-subscription-import-pre-validation")
+        val service = service(FakePublisherFollowPlugin())
+        val document = SubscriptionExportDocument(
+            exportedAtEpochSeconds = 1,
+            subscriptions = listOf(
+                SubscriptionExportItem(
+                    publisher = SubscriptionExportPublisher("bilibili", "USER", "123"),
+                    target = SubscriptionExportTarget("qq", "USER", "100"),
+                    policy = SubscriptionPolicy(
+                        enabledEvents = setOf(SubscriptionEventKind.DYNAMIC),
+                        mentionAllEvents = setOf(SubscriptionEventKind.DYNAMIC),
+                    ),
+                    linkParseTriggerMode = "ALWAYS",
+                ),
+            ),
+        )
+
+        val result = service.importSubscriptions(document)
+
+        assertEquals(0, result.created)
+        assertEquals(1, result.failed)
+        assertTrue(result.items.single().message.contains("@全体"))
+        assertNull(PublisherRepository.findByKey(PublisherKey.of("bilibili", PublisherKind.USER, "123")))
+        val targetAddress = TargetAddress.of("qq", TargetKind.USER, "100")
+        assertNull(SubscriberRepository.findByAddress(targetAddress))
+        assertNull(LinkParseTargetConfigRepository.findByAddress(targetAddress))
+    }
+
+    @Test
+    fun subscriptionImportExportRoutesShouldKeepAuthorization() = testApplication {
+        initDb("admin-subscription-import-export-auth")
+        application {
+            adminModule(staticRouteContext())
+        }
+
+        val unauthorized = client.post("/api/subscriptions/export") {
+            contentType(ContentType.Application.Json)
+            setBody("""{"subscriptionIds":[]}""")
+        }
+        val exportResponse = client.post("/api/subscriptions/export") {
+            header(HttpHeaders.Authorization, "Bearer test-token")
+            contentType(ContentType.Application.Json)
+            setBody("""{"subscriptionIds":[]}""")
+        }
+        val importResponse = client.post("/api/subscriptions/import") {
+            header(HttpHeaders.Authorization, "Bearer test-token")
+            contentType(ContentType.Application.Json)
+            setBody("""{"schemaVersion":1,"exportedAtEpochSeconds":1,"subscriptions":[]}""")
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, unauthorized.status)
+        assertEquals(HttpStatusCode.OK, exportResponse.status)
+        assertTrue(exportResponse.bodyAsText().contains("\"schemaVersion\":1"))
+        assertEquals(HttpStatusCode.OK, importResponse.status)
+        assertTrue(importResponse.bodyAsText().contains("\"total\":0"))
     }
 
     @Test

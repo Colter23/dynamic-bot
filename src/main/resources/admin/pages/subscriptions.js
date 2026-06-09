@@ -142,6 +142,14 @@ export async function handleAction(nextCtx, { action, button, id }) {
     await openCreateSubscription();
     return true;
   }
+  if (action === "export-subscriptions") {
+    await openSubscriptionExportModal();
+    return true;
+  }
+  if (action === "import-subscriptions") {
+    openSubscriptionImportModal();
+    return true;
+  }
   if (action === "subscription-detail") {
     await openSubscriptionDetail(id);
     return true;
@@ -207,7 +215,11 @@ async function loadSubscriptions(force) {
       <section class="panel full">
         <div class="panel-head">
           <h2>订阅关系</h2>
-          <button class="add-button" data-action="create-subscription">添加订阅</button>
+          <div class="row-actions">
+            <button class="secondary subscription-export-button" data-action="export-subscriptions">导出</button>
+            <button class="secondary subscription-import-button" data-action="import-subscriptions">导入/批量订阅</button>
+            <button class="add-button" data-action="create-subscription">添加订阅</button>
+          </div>
         </div>
         ${subscriptionFilterBar(rows, filteredRows)}
         <div id="subscriptionTable">${subscriptionTableHtml(filteredRows)}</div>
@@ -355,6 +367,209 @@ function subscriptionFilterActive() {
   return Object.values(subscriptionFilters).some(Boolean);
 }
 
+async function openSubscriptionExportModal() {
+  const rows = await ensureSubscriptions(false);
+  const filteredRows = filterSubscriptions(rows);
+  const filteredDisabled = filteredRows.length === 0;
+  openModal("导出订阅", `
+    <div class="subscription-transfer">
+      <section class="panel full subscription-transfer-card">
+        <div class="panel-head">
+          <div>
+            <h2>导出范围</h2>
+            <p>导出文件只包含订阅关系、订阅规则、@全体规则和动态过滤规则。</p>
+          </div>
+        </div>
+        <div class="subscription-export-options">
+          <label class="target-choice">
+            <input type="radio" name="subscriptionExportScope" value="all" checked>
+            <span class="target-choice-text">全部订阅 · ${rows.length} 条</span>
+          </label>
+          <label class="target-choice${filteredDisabled ? " disabled" : ""}">
+            <input type="radio" name="subscriptionExportScope" value="filtered"${filteredDisabled ? " disabled" : ""}>
+            <span class="target-choice-text">当前筛选结果 · ${filteredRows.length} 条</span>
+          </label>
+        </div>
+        <div class="inline-note">导出不会包含名称、头像、头图等展示缓存；再次导入时会由插件重新解析。</div>
+      </section>
+    </div>
+  `, async () => {
+    const scope = document.querySelector(`input[name="subscriptionExportScope"]:checked`)?.value || "all";
+    const ids = scope === "filtered" ? filteredRows.map(row => row.id) : null;
+    const payload = ids ? { subscriptionIds: ids } : {};
+    const documentData = await api("/subscriptions/export", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    downloadJson(
+      documentData,
+      `dynamic-bot-subscriptions-${formatDownloadTimestamp(new Date())}.json`,
+    );
+    closeModal();
+    notify(scope === "filtered" ? "当前筛选结果已导出" : "全部订阅已导出", false);
+  }, { size: "small", confirmText: "导出" });
+}
+
+function openSubscriptionImportModal() {
+  openModal("导入/批量订阅", `
+    <div class="subscription-transfer">
+      <section class="panel full subscription-transfer-card">
+        <div class="panel-head">
+          <div>
+            <h2>导入 JSON</h2>
+            <p>重复订阅会更新覆盖；导入文件里的过滤规则会替换当前过滤规则。</p>
+          </div>
+        </div>
+        <div class="form-grid single">
+          <div class="field full">
+            <label>选择文件</label>
+            <input type="file" id="subscriptionImportFile" accept="application/json,.json">
+          </div>
+          <div class="field full">
+            <label>粘贴 JSON</label>
+            <textarea id="subscriptionImportText" class="subscription-import-text" placeholder="可以粘贴导出的 dynamic-bot 订阅 JSON"></textarea>
+          </div>
+        </div>
+        <div id="subscriptionImportSummary" class="batch-result" hidden></div>
+        <div class="inline-note">导入不是全局事务：单条失败不会影响其他订阅。</div>
+      </section>
+      <div id="subscriptionImportResult" class="batch-result" hidden></div>
+    </div>
+  `, async () => {
+    const documentData = parseSubscriptionImportText();
+    const result = await api("/subscriptions/import", {
+      method: "POST",
+      body: JSON.stringify(documentData),
+    });
+    invalidate("dashboard", "subscriptions", "publishers", "subscribers");
+    await loadSubscriptions(true);
+    if (result.failed > 0 || result.warnings?.length) {
+      renderSubscriptionImportResult(result);
+    }
+    if (result.failed > 0) {
+      throw new Error(`导入完成，但有 ${result.failed} 条失败`);
+    }
+    if (result.warnings?.length) {
+      notify("导入完成，存在提示信息，请查看结果明细", false);
+      return;
+    }
+    closeModal();
+    notify(`导入完成：创建 ${result.created}，更新 ${result.updated}`, false);
+  }, { size: "subscription", confirmText: "导入" });
+
+  const fileInput = $("subscriptionImportFile");
+  const textInput = $("subscriptionImportText");
+  const refreshSummary = () => renderSubscriptionImportSummary();
+  fileInput.onchange = async () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    textInput.value = await file.text();
+    refreshSummary();
+  };
+  textInput.oninput = refreshSummary;
+}
+
+function parseSubscriptionImportText() {
+  const text = $("subscriptionImportText")?.value.trim();
+  if (!text) throw new Error("请先选择文件或粘贴 JSON");
+  let documentData;
+  try {
+    documentData = JSON.parse(text);
+  } catch (error) {
+    throw new Error("JSON 格式无效，请检查后重试");
+  }
+  if (!documentData || documentData.schemaVersion !== 1 || !Array.isArray(documentData.subscriptions)) {
+    throw new Error("订阅导入文件格式无效");
+  }
+  return documentData;
+}
+
+function renderSubscriptionImportSummary() {
+  const node = $("subscriptionImportSummary");
+  if (!node) return;
+  let documentData;
+  try {
+    documentData = parseSubscriptionImportText();
+  } catch (error) {
+    node.hidden = false;
+    node.classList.add("error");
+    node.innerHTML = `<strong>${esc(error.message || String(error))}</strong>`;
+    return;
+  }
+  const summary = summarizeSubscriptionDocument(documentData);
+  node.hidden = false;
+  node.classList.remove("error");
+  node.innerHTML = `<strong>解析成功</strong><ul>
+    <li>订阅 ${summary.subscriptionCount} 条，发布者 ${summary.publisherCount} 个，消息目标 ${summary.targetCount} 个</li>
+    <li>动态过滤规则 ${summary.filterRuleCount} 条</li>
+    <li>导入后已有订阅会更新规则，并替换对应过滤规则</li>
+  </ul>`;
+}
+
+function summarizeSubscriptionDocument(documentData) {
+  const subscriptions = Array.isArray(documentData.subscriptions) ? documentData.subscriptions : [];
+  const publishers = new Set();
+  const targets = new Set();
+  let filterRuleCount = 0;
+  subscriptions.forEach(item => {
+    const publisher = item.publisher || {};
+    const target = item.target || {};
+    publishers.add([publisher.platformId, publisher.kind || "USER", publisher.externalId].join(":"));
+    targets.add([target.platformId, target.targetKind, target.externalId, target.scopeId || "", target.threadId || ""].join(":"));
+    filterRuleCount += Array.isArray(item.filterRules) ? item.filterRules.length : 0;
+  });
+  return {
+    subscriptionCount: subscriptions.length,
+    publisherCount: publishers.size,
+    targetCount: targets.size,
+    filterRuleCount,
+  };
+}
+
+function renderSubscriptionImportResult(result) {
+  const node = $("subscriptionImportResult");
+  if (!node) return;
+  const failedItems = (result.items || []).filter(item => item.status === "FAILED");
+  const warningLines = (result.warnings || []).slice(0, 8);
+  node.hidden = false;
+  node.classList.toggle("error", failedItems.length > 0);
+  node.classList.toggle("success", failedItems.length === 0);
+  node.innerHTML = `<strong>导入结果：创建 ${result.created}，更新 ${result.updated}，失败 ${result.failed}</strong>${
+    failedItems.length || warningLines.length
+      ? `<ul>${warningLines.map(line => `<li>${esc(line)}</li>`).join("")}${failedItems.map(item =>
+        `<li>第 ${Number(item.index) + 1} 条：${esc(item.message || "导入失败")}</li>`
+      ).join("")}</ul>`
+      : ""
+  }`;
+}
+
+async function importSubscriptionDocument(documentData) {
+  const result = await api("/subscriptions/import", {
+    method: "POST",
+    body: JSON.stringify(documentData),
+  });
+  invalidate("dashboard", "subscriptions", "publishers", "subscribers");
+  await loadSubscriptions(true);
+  return result;
+}
+
+function downloadJson(data, filename) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+function formatDownloadTimestamp(date) {
+  const pad = value => String(value).padStart(2, "0");
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
+}
+
 async function openCreateSubscription() {
   const modalSeq = ++createSubscriptionModalSeq;
   let modalClosed = false;
@@ -474,43 +689,21 @@ async function openCreateSubscription() {
     const selectedPublisher = collectCreateSubscriptionPublisher(publisherCandidates);
     if (!selectedPublisher) throw new Error("请选择发布者或切换到新增发布者");
     if (selectedTargets.length === 0) throw new Error("请选择或填写消息目标");
-    const basePayload = {
-      publisherId: selectedPublisher.publisherId,
-      publisherPlatform: selectedPublisher.platformId,
-      publisherExternalId: selectedPublisher.externalId,
-      policy: collectPolicy("subPolicy")
-    };
-
-    let successCount = 0;
-    const failures = [];
-    for (const target of selectedTargets) {
-      try {
-        await api("/subscriptions", {
-          method: "POST",
-          body: JSON.stringify(Object.assign({}, basePayload, {
-            subscriberId: target.subscriberId,
-            subscriberPlatform: target.platformId,
-            targetKind: target.targetKind,
-            subscriberTargetId: target.externalId,
-            subscriberScopeId: target.scopeId,
-            subscriberThreadId: target.threadId,
-            subscriberAccountId: target.accountId,
-            subscriberLinkParseTriggerMode: target.linkParseTriggerMode,
-          }))
-        });
-        successCount += 1;
-      } catch (error) {
-        failures.push(`${target.label}: ${error.message || error}`);
-      }
-    }
-    invalidate("dashboard", "subscriptions", "publishers", "subscribers");
-    await loadSubscriptions(true);
+    const documentData = buildCreateSubscriptionImportDocument(
+      selectedPublisher,
+      selectedTargets,
+      collectPolicy("subPolicy"),
+    );
+    const result = await importSubscriptionDocument(documentData);
+    const failures = (result.items || [])
+      .filter(item => item.status === "FAILED")
+      .map(item => `第 ${Number(item.index) + 1} 个目标：${item.message || "创建失败"}`);
     if (failures.length) {
-      setCreateSubscriptionResult(`已创建 ${successCount} 个订阅，失败 ${failures.length} 个。`, failures, true);
-      throw new Error(`批量创建部分失败：已创建 ${successCount} 个，失败 ${failures.length} 个`);
+      setCreateSubscriptionResult(`已创建 ${result.created} 个订阅，更新 ${result.updated} 个订阅，失败 ${failures.length} 个。`, failures, true);
+      throw new Error(`批量订阅部分失败：失败 ${failures.length} 个`);
     }
     closeModal();
-    notify(successCount > 1 ? `已创建 ${successCount} 个订阅` : "订阅已创建", false);
+    notify(`订阅已处理：创建 ${result.created}，更新 ${result.updated}`, false);
   }, {
     size: "subscription",
     confirmText: "创建",
@@ -757,6 +950,31 @@ function setCreateSubscriptionTargetChecked(checked) {
   document.querySelectorAll(`input[name="subNewTargetCandidate"]`).forEach(input => input.checked = checked);
 }
 
+function buildCreateSubscriptionImportDocument(publisher, targets, policy) {
+  return {
+    schemaVersion: 1,
+    exportedAtEpochSeconds: Math.floor(Date.now() / 1000),
+    subscriptions: targets.map(target => ({
+      publisher: {
+        platformId: publisher.platformId,
+        kind: publisher.kind || "USER",
+        externalId: publisher.externalId,
+      },
+      target: {
+        platformId: target.platformId,
+        targetKind: target.targetKind,
+        externalId: target.externalId,
+        scopeId: target.scopeId || null,
+        threadId: target.threadId || null,
+        accountId: target.accountId || null,
+      },
+      policy,
+      filterRules: [],
+      linkParseTriggerMode: target.linkParseTriggerMode || null,
+    })),
+  };
+}
+
 function collectCreateSubscriptionTargets(candidates) {
   if (selectedSubscriptionMode("subTargetMode") === "existing") {
     const input = document.querySelector(`input[name="subExistingTarget"]:checked`);
@@ -770,6 +988,7 @@ function collectCreateSubscriptionTargets(candidates) {
       scopeId: target.scopeId,
       threadId: target.threadId,
       accountId: target.accountId,
+      linkParseTriggerMode: target.linkParseTriggerMode,
       label: target.name || target.externalId,
     }] : [];
   }
@@ -836,6 +1055,7 @@ function collectCreateSubscriptionPublisher(candidates) {
     return publisher ? {
       publisherId: publisher.id,
       platformId: publisher.platformId,
+      kind: publisher.kind || "USER",
       externalId: publisher.externalId,
       label: publisher.name || publisher.externalId,
     } : null;
@@ -849,6 +1069,7 @@ function collectCreateSubscriptionPublisher(candidates) {
   if (!platformId || !externalId) return null;
   return {
     platformId,
+    kind: candidate && candidate.kind || "USER",
     externalId,
     label: candidate && candidate.name || externalId,
   };

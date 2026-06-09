@@ -366,6 +366,73 @@ public data class DynamicFilterRuleDto(
 )
 
 @Serializable
+public data class SubscriptionExportRequest(
+    val subscriptionIds: List<Int>? = null,
+)
+
+@Serializable
+public data class SubscriptionExportDocument(
+    val schemaVersion: Int = 1,
+    val exportedAtEpochSeconds: Long,
+    val subscriptions: List<SubscriptionExportItem>,
+)
+
+@Serializable
+public data class SubscriptionExportItem(
+    val publisher: SubscriptionExportPublisher,
+    val target: SubscriptionExportTarget,
+    val policy: SubscriptionPolicy = SubscriptionPolicy.default(),
+    val filterRules: List<SubscriptionExportFilterRule> = emptyList(),
+    val linkParseTriggerMode: String? = null,
+)
+
+@Serializable
+public data class SubscriptionExportPublisher(
+    val platformId: String,
+    val kind: String = "USER",
+    val externalId: String,
+)
+
+@Serializable
+public data class SubscriptionExportTarget(
+    val platformId: String,
+    val targetKind: String,
+    val externalId: String,
+    val scopeId: String? = null,
+    val threadId: String? = null,
+    val accountId: String? = null,
+)
+
+@Serializable
+public data class SubscriptionExportFilterRule(
+    val condition: FilterCondition,
+)
+
+@Serializable
+public data class SubscriptionImportResponse(
+    val total: Int,
+    val created: Int,
+    val updated: Int,
+    val failed: Int,
+    val skipped: Int = 0,
+    val duplicateCount: Int = 0,
+    val items: List<SubscriptionImportItemResult>,
+    val warnings: List<String> = emptyList(),
+)
+
+@Serializable
+public data class SubscriptionImportItemResult(
+    val index: Int,
+    val status: String,
+    val message: String,
+    val publisherKey: String,
+    val targetKey: String,
+    val filterRuleCount: Int = 0,
+    val subscription: SubscriptionDto? = null,
+    val warnings: List<String> = emptyList(),
+)
+
+@Serializable
 public data class SourceCursorDto(
     val publisherId: Int,
     val sourceKey: String,
@@ -583,6 +650,7 @@ public data class CreateSubscriptionRequest(
     val subscriberAccountId: String? = null,
     val subscriberLinkParseTriggerMode: String? = null,
     val publisherPlatform: String? = null,
+    val publisherKind: String? = null,
     val publisherExternalId: String? = null,
     val publisherId: Int? = null,
     val policy: SubscriptionPolicy = SubscriptionPolicy.default(),

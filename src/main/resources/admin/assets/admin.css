@@ -58,6 +58,16 @@
       background: #eef4ff;
       color: #1d4ed8;
     }
+    button.subscription-export-button {
+      border-color: #c9d8e9;
+      background: #f2f7fc;
+      color: #2f5f8f;
+    }
+    button.subscription-import-button {
+      border-color: #c8dccb;
+      background: #f0f8f1;
+      color: #287240;
+    }
     input, select, textarea {
       width: 100%;
       min-height: 36px;
@@ -726,6 +736,28 @@
       display: grid;
       gap: 12px;
     }
+    .subscription-transfer {
+      display: grid;
+      gap: 12px;
+    }
+    .subscription-transfer-card {
+      border-color: #cfdff5;
+      box-shadow: 0 10px 24px rgba(52, 87, 140, 0.08);
+    }
+    .subscription-export-options {
+      display: grid;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .subscription-export-options .target-choice {
+      grid-template-columns: 18px minmax(0, 1fr);
+    }
+    .subscription-import-text {
+      min-height: 220px;
+      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.55;
+    }
     .subscription-card {
       box-shadow: none;
     }
@@ -830,6 +862,10 @@
       border-radius: 8px;
       background: #fff;
       cursor: pointer;
+    }
+    .target-choice.disabled {
+      cursor: not-allowed;
+      opacity: 0.62;
     }
     .target-choice input {
       width: 16px;
