@@ -646,6 +646,23 @@
     .rule-row .check {
       min-height: 24px;
     }
+    .rule-row-disabled {
+      opacity: 0.62;
+    }
+    .rule-note {
+      display: inline-flex;
+      margin-left: 8px;
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: #fff4d8;
+      color: #8a5c00;
+      font-size: 11px;
+      font-weight: 650;
+      vertical-align: middle;
+    }
+    .policy-live-hint {
+      margin-top: 8px;
+    }
     .subscription-create {
       display: grid;
       gap: 12px;

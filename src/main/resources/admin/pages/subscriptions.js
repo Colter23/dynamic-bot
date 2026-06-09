@@ -188,6 +188,13 @@ async function ensureSubscriptions(force) {
   return state.cache.subscriptions;
 }
 
+async function ensurePublisherPlatforms(force) {
+  if (force || !state.cache.publisherPlatforms) {
+    state.cache.publisherPlatforms = await api("/publisher-platforms").catch(() => []);
+  }
+  return state.cache.publisherPlatforms;
+}
+
 async function loadSubscriptions(force) {
   const request = beginPageRequest("subscriptions");
   releaseMediaObjectUrls();
@@ -357,11 +364,15 @@ async function openCreateSubscription() {
   if (!state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
   const targetPlatforms = await api("/subscriber-target-platforms").catch(() => []);
   const fallbackTargets = targetPlatforms.length ? targetPlatforms : [{ platformId: "qq", pluginName: "手动", supportedTypes: ["GROUP", "USER"] }];
-  const publisherPlatforms = await api("/publisher-platforms").catch(() => []);
+  const publisherPlatforms = await ensurePublisherPlatforms(false);
   const existingTargets = state.cache.subscribers || [];
   const existingPublishers = state.cache.publishers || [];
   const targetMode = existingTargets.length ? "existing" : "new";
   const publisherMode = existingPublishers.length ? "existing" : "new";
+  const initialPublisherPlatform = publisherMode === "existing"
+    ? existingPublishers[0]?.platformId
+    : publisherPlatforms[0]?.platformId;
+  const initialSupportsLive = publisherPlatformSupportsLive(initialPublisherPlatform);
   let targetCandidates = [];
   let publisherCandidates = [];
 
@@ -453,7 +464,7 @@ async function openCreateSubscription() {
             <p>选择接收动态、开播或下播；@全体仅对群目标生效。</p>
           </div>
         </div>
-        ${policyForm("subPolicy", null, "GROUP")}
+        ${policyForm("subPolicy", null, "GROUP", initialSupportsLive)}
       </section>
       <div id="subCreateResult" class="batch-result" hidden></div>
     </div>
@@ -508,9 +519,14 @@ async function openCreateSubscription() {
     },
   });
 
-  const policyUpdater = wirePolicyForm("subPolicy", currentCreateSubscriptionTargetKind);
+  const policyUpdater = wirePolicyForm(
+    "subPolicy",
+    currentCreateSubscriptionTargetKind,
+    () => publisherPlatformSupportsLive(currentCreateSubscriptionPublisherPlatform()),
+  );
   bindCreateSubscriptionMode(policyUpdater);
   document.querySelectorAll(`input[name="subExistingTarget"]`).forEach(input => input.onchange = policyUpdater);
+  document.querySelectorAll(`input[name="subExistingPublisher"]`).forEach(input => input.onchange = policyUpdater);
   const refreshTargetKinds = async () => {
     if (!isModalActive()) return;
     const platformId = $("subNewTargetPlatform").value;
@@ -615,6 +631,7 @@ async function openCreateSubscription() {
     publisherCandidates = [];
     $("subNewPublisherResultWrap").hidden = true;
     $("subNewPublisherStatus").textContent = "请输入发布者 ID 后搜索。";
+    policyUpdater();
   };
   await hydrateMediaImages($("modalBody"));
   await refreshTargetKinds();
@@ -654,6 +671,16 @@ function currentCreateSubscriptionTargetKind() {
   }
   const kindSelect = $("subNewTargetKind");
   return kindSelect && kindSelect.value || "OTHER";
+}
+
+function currentCreateSubscriptionPublisherPlatform() {
+  if (selectedSubscriptionMode("subPublisherMode") === "existing") {
+    const input = document.querySelector(`input[name="subExistingPublisher"]:checked`);
+    const publisher = input ? (state.cache.publishers || [])[Number(input.dataset.index)] : null;
+    return publisher && publisher.platformId || "";
+  }
+  const platformSelect = $("subNewPublisherPlatform");
+  return platformSelect && platformSelect.value || "";
 }
 
 function setCreateSubscriptionTargetLoading(text) {
@@ -836,33 +863,58 @@ function filterExistingSubscriptionTargets(candidates) {
   );
 }
 
-function policyForm(prefix, policy, targetKind) {
+function publisherPlatformSupportsLive(platformId) {
+  const normalized = (platformId || "").trim().toLowerCase();
+  if (!normalized) return null;
+  const platform = (state.cache.publisherPlatforms || []).find(item =>
+    String(item.platformId || "").toLowerCase() === normalized
+  );
+  if (!platform) return null;
+  return !!(platform && (platform.supportsLive || (platform.capabilities || []).includes("LIVE_SOURCE")));
+}
+
+function isLiveSubscriptionEvent(value) {
+  return value === "LIVE_STARTED" || value === "LIVE_ENDED";
+}
+
+function policyForm(prefix, policy, targetKind, supportsLive = true) {
   const selectedEvents = new Set(policyEvents(policy));
   const selectedMentions = new Set(mentionEvents(policy));
   const groupTarget = targetKind === "GROUP";
+  const liveKnownUnsupported = supportsLive === false;
   return `<div class="rule-matrix">
     ${eventTypes.map(([value, text]) => {
-      const enabled = selectedEvents.has(value);
-      const mention = selectedMentions.has(value);
-      return `<div class="rule-row">
-        <strong>${esc(text)}</strong>
-        <label class="check"><input type="checkbox" name="${prefix}-event" value="${value}"${enabled ? " checked" : ""}>接收</label>
-        <label class="check"><input type="checkbox" name="${prefix}-mention" value="${value}"${mention ? " checked" : ""}${groupTarget && enabled ? "" : " disabled"}>@全体</label>
+      const eventAllowed = !liveKnownUnsupported || !isLiveSubscriptionEvent(value);
+      const enabled = eventAllowed && selectedEvents.has(value);
+      const mention = eventAllowed && selectedMentions.has(value);
+      return `<div class="rule-row${eventAllowed ? "" : " rule-row-disabled"}">
+        <strong>${esc(text)}${eventAllowed ? "" : `<span class="rule-note">平台不支持</span>`}</strong>
+        <label class="check"><input type="checkbox" name="${prefix}-event" value="${value}"${enabled ? " checked" : ""}${eventAllowed ? "" : " disabled"}>接收</label>
+        <label class="check"><input type="checkbox" name="${prefix}-mention" value="${value}"${mention ? " checked" : ""}${groupTarget && enabled && eventAllowed ? "" : " disabled"}>@全体</label>
       </div>`;
     }).join("")}
-  </div>`;
+  </div>
+  <div class="inline-note policy-live-hint" data-policy-live-hint="${attr(prefix)}"${liveKnownUnsupported ? "" : " hidden"}>当前发布者平台不支持开播和下播订阅。</div>`;
 }
 
-function wirePolicyForm(prefix, targetKindProvider) {
+function wirePolicyForm(prefix, targetKindProvider, liveSupportProvider = () => true) {
   const update = () => {
     const groupTarget = targetKindProvider() === "GROUP";
+    const liveKnownUnsupported = liveSupportProvider() === false;
     eventTypes.forEach(([value]) => {
       const eventNode = document.querySelector(`input[name="${prefix}-event"][value="${value}"]`);
       const mentionNode = document.querySelector(`input[name="${prefix}-mention"][value="${value}"]`);
       if (!eventNode || !mentionNode) return;
-      mentionNode.disabled = !groupTarget || !eventNode.checked;
+      const eventAllowed = !liveKnownUnsupported || !isLiveSubscriptionEvent(value);
+      eventNode.disabled = !eventAllowed;
+      if (eventNode.disabled) eventNode.checked = false;
+      mentionNode.disabled = !eventAllowed || !groupTarget || !eventNode.checked;
       if (mentionNode.disabled) mentionNode.checked = false;
+      const row = eventNode.closest(".rule-row");
+      if (row) row.classList.toggle("rule-row-disabled", !eventAllowed);
     });
+    const hint = document.querySelector(`[data-policy-live-hint="${prefix}"]`);
+    if (hint) hint.hidden = !liveKnownUnsupported;
   };
   document.querySelectorAll(`input[name="${prefix}-event"]`).forEach(node => node.onchange = update);
   update();
@@ -870,7 +922,9 @@ function wirePolicyForm(prefix, targetKindProvider) {
 }
 
 function collectPolicy(prefix) {
-  const enabledEvents = Array.from(document.querySelectorAll(`input[name="${prefix}-event"]:checked`)).map(item => item.value);
+  const enabledEvents = Array.from(document.querySelectorAll(`input[name="${prefix}-event"]:checked`))
+    .filter(item => !item.disabled)
+    .map(item => item.value);
   const mentionAllEvents = Array.from(document.querySelectorAll(`input[name="${prefix}-mention"]:checked`))
     .filter(item => !item.disabled && enabledEvents.includes(item.value))
     .map(item => item.value);
@@ -880,16 +934,18 @@ function collectPolicy(prefix) {
 
 async function openSubscriptionDetail(id) {
   const subscriptions = await ensureSubscriptions(false);
+  await ensurePublisherPlatforms(false);
   const subscription = subscriptions.find(item => Number(item.id) === Number(id));
   if (!subscription) throw new Error("未找到订阅");
   const targetKind = subscription.subscriber && subscription.subscriber.targetKind || "OTHER";
+  const supportsLive = publisherPlatformSupportsLive(subscription.publisher && subscription.publisher.platformId);
   openModal("编辑订阅", `
     <div class="grid">
       <section class="panel full">
         <div class="panel-head">
           <div><h2>订阅规则</h2><p>${esc(publisherKey(subscription.publisher))} -> ${esc(targetKey(subscription.subscriber))}</p></div>
         </div>
-        ${policyForm("editPolicy", subscription.policy, targetKind)}
+        ${policyForm("editPolicy", subscription.policy, targetKind, supportsLive)}
       </section>
       <section class="panel full">
         <div class="panel-head"><h2>动态内容过滤</h2><div class="row-actions"><button data-action="add-filter" data-id="${subscription.id}">添加规则</button><button class="danger" data-action="clear-filters" data-id="${subscription.id}">清空规则</button></div></div>
@@ -903,7 +959,7 @@ async function openSubscriptionDetail(id) {
     await loadSubscriptions(true);
     notify("订阅规则已保存", false);
   }, { size: "subscription" });
-  wirePolicyForm("editPolicy", () => targetKind);
+  wirePolicyForm("editPolicy", () => targetKind, () => supportsLive);
 }
 
 function renderFilterList(subscription) {

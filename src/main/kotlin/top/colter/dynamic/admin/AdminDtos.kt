@@ -260,6 +260,8 @@ public data class PublisherPlatformDto(
     val pluginId: String,
     val pluginName: String,
     val pluginState: String,
+    val capabilities: List<String> = emptyList(),
+    val supportsLive: Boolean = false,
 )
 
 @Serializable

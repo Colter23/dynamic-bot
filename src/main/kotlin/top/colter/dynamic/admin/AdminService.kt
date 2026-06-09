@@ -17,6 +17,8 @@ import top.colter.dynamic.core.data.MessageDelivery
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
+import top.colter.dynamic.core.data.PlatformCapability
+import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.PublisherKey
@@ -686,11 +688,15 @@ public class AdminService(
             .map { handle ->
                 val info = handle.info
                 val plugin = handle.instance
+                val descriptor = plugin.platformDescriptor
+                val capabilities = descriptor.capabilities.map { it.name }.sorted()
                 PublisherPlatformDto(
                     platformId = plugin.platformId.value,
                     pluginId = info.descriptor.id,
                     pluginName = info.descriptor.name,
                     pluginState = info.state.name,
+                    capabilities = capabilities,
+                    supportsLive = PlatformCapability.LIVE_SOURCE in descriptor.capabilities,
                 )
             }
             .sortedWith(compareBy<PublisherPlatformDto> { it.platformId }.thenBy { it.pluginId })
@@ -985,15 +991,6 @@ public class AdminService(
                 ?: throw NoSuchElementException("未找到发布者：$platform:$externalId")
             PublisherRepository.upsertInfo(publisherInfo.normalized())
         }
-        val publisherPlatform = publisherUpsert.value.key.platformId.value
-        val publisherExternalId = publisherUpsert.value.key.externalId
-        val autoFollowOutcome = if (configProvider().subscription.autoFollowPublisherOnSubscribe) {
-            tryEnsureFollowed(publisherPlatform, publisherExternalId)
-        } else {
-            AutoFollowOutcome(followed = false)
-        }
-        val autoFollowed = autoFollowOutcome.followed
-
         val subscriberUpsert = if (request.subscriberId != null) {
             val subscriber = SubscriberRepository.findById(request.subscriberId)
                 ?: throw NoSuchElementException("消息目标不存在：subscriberId=${request.subscriberId}")
@@ -1030,7 +1027,20 @@ public class AdminService(
                 updatedBy = "web-admin",
             )
         }
-        requireSubscriptionPolicyAllowed(subscriberUpsert.value, request.policy)
+        val publisherPlatform = publisherUpsert.value.key.platformId.value
+        val publisherExternalId = publisherUpsert.value.key.externalId
+        requireSubscriptionPolicyAllowed(
+            subscriber = subscriberUpsert.value,
+            publisher = publisherUpsert.value,
+            policy = request.policy,
+            liveSupport = publisherPlatformLiveSupport(publisherPlatform),
+        )
+        val autoFollowOutcome = if (configProvider().subscription.autoFollowPublisherOnSubscribe) {
+            tryEnsureFollowed(publisherPlatform, publisherExternalId)
+        } else {
+            AutoFollowOutcome(followed = false)
+        }
+        val autoFollowed = autoFollowOutcome.followed
         val previousSubscriptionCount = SubscriptionRepository.countByPublisherId(publisherUpsert.value.id)
         val subscriptionResult = SubscriptionRepository.subscribe(
             subscriberId = subscriberUpsert.value.id,
@@ -1080,10 +1090,16 @@ public class AdminService(
         val subscription = SubscriptionRepository.findById(id) ?: throw NoSuchElementException("未找到订阅：$id")
         val subscriber = SubscriberRepository.findById(subscription.subscriberId)
             ?: throw NoSuchElementException("未找到消息目标：${subscription.subscriberId}")
-        requireSubscriptionPolicyAllowed(subscriber, request.policy)
+        val publisher = PublisherRepository.findById(subscription.publisherId)
+            ?: throw NoSuchElementException("未找到发布者：${subscription.publisherId}")
+        requireSubscriptionPolicyAllowed(
+            subscriber = subscriber,
+            publisher = publisher,
+            policy = request.policy,
+            liveSupport = publisherPlatformLiveSupport(publisher.platformId.value),
+            previousPolicy = subscription.policy,
+        )
         val updated = SubscriptionRepository.updatePolicy(subscription.id, request.policy)
-        val publisher = PublisherRepository.findById(updated.publisherId)
-            ?: throw NoSuchElementException("未找到发布者：${updated.publisherId}")
         broadcastSubscriptionUpdated(updated, publisher, subscriber)
         logger.info {
             "后台订阅规则已更新：subscriptionId=${updated.id}，publisherId=${updated.publisherId}，subscriberId=${updated.subscriberId}"
@@ -1429,6 +1445,17 @@ public class AdminService(
             if (candidate.address.stableValue() == address.stableValue()) return candidate
         }
         return null
+    }
+
+    private fun publisherPlatformLiveSupport(platformId: String): Boolean? {
+        val normalized = PlatformId.of(platformId)
+        val providerPlugin = publisherLookupProvider()
+            .firstOrNull { it.instance.platformId == normalized }
+            ?.instance
+        val plugin = providerPlugin ?: publisherLookupResolver(platformId)
+            ?.takeIf { it.platformId == normalized }
+            ?: return null
+        return plugin.platformDescriptor.capabilities.contains(PlatformCapability.LIVE_SOURCE)
     }
 
     private fun currentTaskDtos(): List<TaskDto> {
@@ -1898,9 +1925,31 @@ private fun parseLinkParseTriggerModeOrNull(value: String?): LinkParseTriggerMod
     return parseEnum<LinkParseTriggerMode>(normalized, "linkParseTriggerMode")
 }
 
-private fun requireSubscriptionPolicyAllowed(subscriber: Subscriber, policy: SubscriptionPolicy) {
+private fun requireSubscriptionPolicyAllowed(
+    subscriber: Subscriber,
+    publisher: Publisher,
+    policy: SubscriptionPolicy,
+    liveSupport: Boolean?,
+    previousPolicy: SubscriptionPolicy? = null,
+) {
     require(policy.enabledEvents.isNotEmpty()) {
         "订阅规则至少需要启用一个事件"
+    }
+    val liveEvents = policy.enabledEvents.filter { it.isLiveEvent() }
+    when (liveSupport) {
+        true -> Unit
+        false -> require(liveEvents.isEmpty()) {
+            val events = liveEvents.joinToString("、") { it.displayName() }
+            "发布者平台不支持${events}订阅：${publisher.platformId.value}"
+        }
+        null -> {
+            val previousLiveEvents = previousPolicy?.enabledEvents.orEmpty().filter { it.isLiveEvent() }.toSet()
+            val newLiveEvents = liveEvents.filterNot { it in previousLiveEvents }
+            require(newLiveEvents.isEmpty()) {
+                val events = newLiveEvents.joinToString("、") { it.displayName() }
+                "发布者平台能力暂不可用，不能新增${events}订阅：${publisher.platformId.value}"
+            }
+        }
     }
     require(policy.mentionAllEvents.all { it in policy.enabledEvents }) {
         "@全体事件必须先启用接收"
@@ -1908,6 +1957,18 @@ private fun requireSubscriptionPolicyAllowed(subscriber: Subscriber, policy: Sub
     if (policy.mentionAllEvents.isEmpty()) return
     require(subscriber.kind == TargetKind.GROUP) {
         "只有 GROUP 消息目标可以启用 @全体"
+    }
+}
+
+private fun SubscriptionEventKind.isLiveEvent(): Boolean {
+    return this == SubscriptionEventKind.LIVE_STARTED || this == SubscriptionEventKind.LIVE_ENDED
+}
+
+private fun SubscriptionEventKind.displayName(): String {
+    return when (this) {
+        SubscriptionEventKind.DYNAMIC -> "动态"
+        SubscriptionEventKind.LIVE_STARTED -> "开播"
+        SubscriptionEventKind.LIVE_ENDED -> "下播"
     }
 }
 

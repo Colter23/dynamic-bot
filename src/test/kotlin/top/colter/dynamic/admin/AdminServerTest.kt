@@ -44,6 +44,8 @@ import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
+import top.colter.dynamic.core.data.PlatformCapability
+import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.PublisherKey
@@ -606,6 +608,80 @@ class AdminServerTest {
     }
 
     @Test
+    fun createSubscriptionShouldRejectLiveEventsWhenPublisherPlatformDoesNotSupportLive() = runBlocking {
+        initDb("admin-create-subscription-live-unsupported")
+        val service = service(FakePublisherLookupPlugin())
+        val policy = SubscriptionPolicy(
+            enabledEvents = setOf(SubscriptionEventKind.DYNAMIC, SubscriptionEventKind.LIVE_STARTED),
+        )
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            service.createSubscription(
+                CreateSubscriptionRequest(
+                    subscriberPlatform = "qq",
+                    targetKind = "GROUP",
+                    subscriberTargetId = "100",
+                    publisherPlatform = "bilibili",
+                    publisherExternalId = "123",
+                    policy = policy,
+                ),
+            )
+        }
+
+        assertTrue(error.message.orEmpty().contains("不支持开播订阅"))
+        assertNull(SubscriptionRepository.findBySubscriberAndPublisher(1, 1))
+    }
+
+    @Test
+    fun updateSubscriptionShouldRejectLiveEventsWhenPublisherPlatformDoesNotSupportLive() = runBlocking {
+        initDb("admin-update-subscription-live-unsupported")
+        val service = service(FakePublisherLookupPlugin())
+        val created = service.createSubscription(
+            CreateSubscriptionRequest(
+                subscriberPlatform = "qq",
+                targetKind = "GROUP",
+                subscriberTargetId = "100",
+                publisherPlatform = "bilibili",
+                publisherExternalId = "123",
+            ),
+        )
+        val policy = SubscriptionPolicy(
+            enabledEvents = setOf(SubscriptionEventKind.LIVE_STARTED, SubscriptionEventKind.LIVE_ENDED),
+        )
+
+        val error = assertFailsWith<IllegalArgumentException> {
+            service.updateSubscription(created.subscription.id, UpdateSubscriptionRequest(policy))
+        }
+
+        assertTrue(error.message.orEmpty().contains("不支持开播、下播订阅"))
+    }
+
+    @Test
+    fun updateSubscriptionShouldPreserveExistingLiveEventsWhenPublisherPlatformCapabilityIsUnknown() {
+        initDb("admin-update-subscription-live-unknown")
+        val publisher = PublisherRepository.upsertInfo(testPublisherInfo()).value
+        val subscriber = SubscriberRepository.ensure(TargetAddress.of("qq", TargetKind.GROUP, "100"), "group")
+        val livePolicy = SubscriptionPolicy(enabledEvents = setOf(SubscriptionEventKind.LIVE_STARTED))
+        SubscriptionRepository.subscribe(subscriber.id, publisher.id, livePolicy)
+        val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!
+        val service = AdminService(
+            pluginProvider = { emptyList() },
+            publisherLookupResolver = { null },
+            publisherFollowResolver = { null },
+            configProvider = { MainDynamicConfig() },
+        )
+
+        val updated = service.updateSubscription(
+            subscription.id,
+            UpdateSubscriptionRequest(
+                livePolicy.copy(enabledEvents = setOf(SubscriptionEventKind.DYNAMIC, SubscriptionEventKind.LIVE_STARTED)),
+            ),
+        )
+
+        assertEquals(setOf(SubscriptionEventKind.DYNAMIC, SubscriptionEventKind.LIVE_STARTED), updated.policy.enabledEvents)
+    }
+
+    @Test
     fun updatePublisherAndCreateFilterRuleShouldUseNewDataModel() {
         initDb("admin-update-filter")
         val publisher = PublisherRepository.upsertInfo(testPublisherInfo(name = "demo-up")).value
@@ -1053,6 +1129,11 @@ class AdminServerTest {
 
     private class FakePublisherFollowPlugin : PublisherFollowPlugin {
         override val platformId: PlatformId = PlatformId.of("bilibili")
+        override val platformDescriptor: PlatformDescriptor = PlatformDescriptor.of(
+            id = "bilibili",
+            displayName = "Bilibili",
+            capabilities = setOf(PlatformCapability.PUBLISHER_SOURCE, PlatformCapability.LIVE_SOURCE),
+        )
         var followed: Boolean = false
 
         override suspend fun fetchPublisherInfo(userId: String): PublisherInfo? {
