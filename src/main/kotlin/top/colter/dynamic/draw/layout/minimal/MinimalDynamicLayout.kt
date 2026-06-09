@@ -94,7 +94,7 @@ private fun Layout.MinimalDynamicView(
     }
     val link = update.link.orEmpty()
     val qrCodeImage = if (config.settings.ornament == DrawOrnament.QRCODE && link.isNotBlank()) {
-        qrCode(link, config.theme.primaryColor.withAlpha(1f))
+        qrCode(link, config.theme.qrPointColor.withAlpha(1f))
     } else {
         null
     }
@@ -131,7 +131,7 @@ private fun Layout.MinimalDynamicView(
             name = update.publisher.name,
             time = update.occurredAtEpochSeconds.formatTime,
             badge = avatarBadgeImage,
-            accentColor = config.theme.primaryColor,
+            accentColor = config.theme.readableAccentColor,
             darkTheme = config.theme.mode == DrawThemeMode.DARK,
             style = authorStyle,
             modifier = authorModifier,
@@ -164,7 +164,7 @@ private fun Layout.MinimalLiveView(
     }
     val link = update.link.orEmpty()
     val qrCodeImage = if (config.settings.ornament == DrawOrnament.QRCODE && link.isNotBlank()) {
-        qrCode(link, config.theme.primaryColor.withAlpha(1f))
+        qrCode(link, config.theme.qrPointColor.withAlpha(1f))
     } else {
         null
     }
@@ -201,7 +201,7 @@ private fun Layout.MinimalLiveView(
             name = update.publisher.name,
             time = liveTime.formatTime,
             badge = avatarBadgeImage,
-            accentColor = config.theme.primaryColor,
+            accentColor = config.theme.readableAccentColor,
             darkTheme = config.theme.mode == DrawThemeMode.DARK,
             style = authorStyle,
             modifier = authorModifier,

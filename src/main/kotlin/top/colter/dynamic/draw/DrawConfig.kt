@@ -52,9 +52,31 @@ public enum class DrawThemeMode {
     DARK,
 }
 
+/**
+ * 绘图主题调色板。
+ *
+ * 这里的颜色按绘图语义拆分，而不是按具体组件拆分。正文相关颜色优先保证可读性；
+ * 作者名、媒体标签、二维码装饰等颜色可以更偏视觉表现，但仍需要保持基本辨识度。
+ *
+ * @property mode 主题明暗模式，用于切换卡片、文字、遮罩和二维码装饰的整体策略。
+ * @property primaryColor 装饰强调色，偏亮、偏鲜艳，用于顶部作者卡片名称、媒体标签底色、平台默认头图装饰和二维码中间 logo 色层。
+ * @property readableAccentColor 可读强调色，用于内容卡片里的强调文本，例如正文链接、转发作者名和 minimal 布局作者名。
+ * @property onPrimaryColor 绘制在 [primaryColor] 上方的文字颜色，目前用于媒体标签文字。
+ * @property qrPointColor 二维码点阵颜色，单独保证在二维码透明/浅色背景上的可识别性。
+ * @property backgroundColors 外层画布背景渐变色，默认和 minimal 动态、直播布局都会使用。
+ * @property cardColor 内容卡片底色，用于正文卡片、minimal 主卡片和媒体卡片。
+ * @property borderColor 卡片和媒体封面的边框颜色，用于在渐变背景或暗色卡片上分隔层级。
+ * @property textColor 主文本颜色，用于动态标题、正文和媒体卡片标题。
+ * @property secondaryTextColor 次级文本颜色，用于媒体卡片简介等弱一级信息。
+ * @property mutedTextColor 弱化文本颜色，用于转发作者栏时间等辅助信息。
+ * @property linkColor 正文链接色，当前和 [readableAccentColor] 一致，保留独立字段方便之后单独调正文链接。
+ */
 public data class DrawTheme(
     val mode: DrawThemeMode,
     val primaryColor: Int,
+    val readableAccentColor: Int,
+    val onPrimaryColor: Int,
+    val qrPointColor: Int,
     val backgroundColors: List<Int>,
     val cardColor: Int,
     val borderColor: Int,
@@ -66,6 +88,9 @@ public data class DrawTheme(
     public fun toPalette(): DrawThemePalette = DrawThemePalette(
         mode = mode,
         primaryColor = toHexColor(primaryColor),
+        readableAccentColor = toHexColor(readableAccentColor),
+        onPrimaryColor = toHexColor(onPrimaryColor),
+        qrPointColor = toHexColor(qrPointColor),
         backgroundColors = backgroundColors.map(::toHexColor),
         cardColor = toHexColor(cardColor),
         borderColor = toHexColor(borderColor),
@@ -87,10 +112,16 @@ public data class DrawThemePalette(
     val secondaryTextColor: String,
     val mutedTextColor: String,
     val linkColor: String,
+    val readableAccentColor: String = linkColor,
+    val onPrimaryColor: String = "#FFFFFF",
+    val qrPointColor: String = primaryColor,
 ) {
     public fun toTheme(): DrawTheme = DrawTheme(
         mode = mode,
         primaryColor = parseHexColor(primaryColor),
+        readableAccentColor = parseHexColor(readableAccentColor),
+        onPrimaryColor = parseHexColor(onPrimaryColor),
+        qrPointColor = parseHexColor(qrPointColor),
         backgroundColors = backgroundColors.map(::parseHexColor),
         cardColor = parseHexColor(cardColor),
         borderColor = parseHexColor(borderColor),
@@ -104,6 +135,11 @@ public data class DrawThemePalette(
 public object DrawThemeFactory {
     private const val MAX_THEME_COLORS: Int = 5
     private const val MIN_LINK_CONTRAST: Double = 4.5
+    private const val MIN_ACCENT_TEXT_CONTRAST: Double = 2.6
+    private const val MIN_LIGHT_QR_CONTRAST: Double = 2.4
+    private const val MIN_DARK_QR_CONTRAST: Double = 3.0
+    private const val NEUTRAL_SATURATION_THRESHOLD: Double = 0.08
+    private const val DEFAULT_THEME_HUE: Double = 335.0
 
     public fun fromSettings(settings: DrawSettings): DrawTheme {
         return fromColors(parseThemeColors(settings.themeColors))
@@ -126,18 +162,23 @@ public object DrawThemeFactory {
         }
         val cardBase = if (mode == DrawThemeMode.LIGHT) Color.WHITE else Color.makeRGB(30, 34, 42)
         val primary = primaryAccentColor(sourceColors.first(), mode)
-        val link = readableAccentColor(sourceColors.first(), mode, cardBase)
+        val readableAccent = readableAccentColor(sourceColors.first(), mode, cardBase)
+        val onPrimary = readableTextOnAccent(primary)
+        val qrPoint = qrPointColor(primary, readableAccent, mode)
 
         return DrawTheme(
             mode = mode,
             primaryColor = primary,
+            readableAccentColor = readableAccent,
+            onPrimaryColor = onPrimary,
+            qrPointColor = qrPoint,
             backgroundColors = backgroundColors,
             cardColor = if (mode == DrawThemeMode.LIGHT) Color.WHITE.withAlpha(0.76f) else Color.makeRGB(19, 23, 31).withAlpha(0.68f),
             borderColor = if (mode == DrawThemeMode.LIGHT) Color.WHITE.withAlpha(0.88f) else Color.WHITE.withAlpha(0.18f),
             textColor = if (mode == DrawThemeMode.LIGHT) Color.BLACK else Color.WHITE,
             secondaryTextColor = if (mode == DrawThemeMode.LIGHT) Color.BLACK.withAlpha(0.72f) else Color.WHITE.withAlpha(0.78f),
             mutedTextColor = if (mode == DrawThemeMode.LIGHT) Color.makeRGB(112, 118, 128) else Color.makeRGB(178, 186, 198),
-            linkColor = link,
+            linkColor = readableAccent,
         )
     }
 
@@ -162,43 +203,64 @@ public object DrawThemeFactory {
 
     private fun gradientFromSingleColor(color: Int, mode: DrawThemeMode): List<Int> {
         val hsv = color.toHsv()
-        val hues = listOf(hsv.h - 30.0, hsv.h, hsv.h + 30.0)
+        val hue = themeHue(color)
+        val hues = listOf(hue - 30.0, hue, hue + 30.0)
         if (mode == DrawThemeMode.LIGHT) {
-            return hues.map { hue -> HsvColor(hue, 0.30, 1.0).toColor() }
+            val saturation = if (hsv.s < NEUTRAL_SATURATION_THRESHOLD) 0.12 else 0.30
+            return hues.map { nextHue -> HsvColor(nextHue, saturation, 1.0).toColor() }
         }
-        val saturation = hsv.s.coerceIn(0.34, 0.52)
+        val saturation = if (hsv.s < NEUTRAL_SATURATION_THRESHOLD) {
+            0.22
+        } else {
+            hsv.s.coerceIn(0.34, 0.52)
+        }
         val brightness = (hsv.v * 0.32 + 0.16).coerceIn(0.16, 0.34)
-        return hues.map { hue -> HsvColor(hue, saturation, brightness).toColor() }
+        return hues.map { nextHue -> HsvColor(nextHue, saturation, brightness).toColor() }
     }
 
     private fun normalizeBackgroundColor(color: Int, mode: DrawThemeMode): Int {
         val hsv = color.toHsv()
+        val hue = themeHue(color)
         if (mode == DrawThemeMode.LIGHT) {
-            return HsvColor(hsv.h, 0.30, 1.0).toColor()
+            val saturation = if (hsv.s < NEUTRAL_SATURATION_THRESHOLD) 0.12 else 0.30
+            return HsvColor(hue, saturation, 1.0).toColor()
+        }
+        val saturation = if (hsv.s < NEUTRAL_SATURATION_THRESHOLD) {
+            0.22
+        } else {
+            hsv.s.coerceIn(0.34, 0.52)
         }
         return HsvColor(
-            h = hsv.h,
-            s = hsv.s.coerceIn(0.34, 0.52),
+            h = hue,
+            s = saturation,
             v = (hsv.v * 0.32 + 0.16).coerceIn(0.16, 0.34),
         ).toColor()
     }
 
     private fun primaryAccentColor(color: Int, mode: DrawThemeMode): Int {
         val hsl = color.toHsl()
+        val saturation = if (hsl.s < NEUTRAL_SATURATION_THRESHOLD) {
+            0.92
+        } else {
+            hsl.s.coerceIn(0.72, 1.0)
+        }
         return HslColor(
-            h = hsl.h,
-//            s = hsl.s.coerceIn(0.38, 0.68),
-            s = 1.0,
-//            l = if (mode == DrawThemeMode.LIGHT) 0.60 else 0.76,
+            h = themeHue(color),
+            s = saturation,
             l = if (mode == DrawThemeMode.LIGHT) 0.70 else 0.76,
         ).toColor()
     }
 
     private fun readableAccentColor(color: Int, mode: DrawThemeMode, cardBase: Int): Int {
         val hsl = color.toHsl()
+        val saturation = if (hsl.s < NEUTRAL_SATURATION_THRESHOLD) {
+            0.55
+        } else {
+            hsl.s.coerceIn(0.45, 0.72)
+        }
         val candidate = HslColor(
-            h = hsl.h,
-            s = hsl.s.coerceIn(0.45, 0.72),
+            h = themeHue(color),
+            s = saturation,
             l = if (mode == DrawThemeMode.LIGHT) 0.36 else 0.72,
         ).toColor()
         return ensureContrast(
@@ -207,6 +269,39 @@ public object DrawThemeFactory {
             minRatio = MIN_LINK_CONTRAST,
             lighten = mode == DrawThemeMode.DARK,
             fallback = if (mode == DrawThemeMode.LIGHT) Color.makeRGB(0, 93, 153) else Color.makeRGB(145, 216, 255),
+        )
+    }
+
+    private fun themeHue(color: Int): Double {
+        val hsv = color.toHsv()
+        return if (hsv.s < NEUTRAL_SATURATION_THRESHOLD) DEFAULT_THEME_HUE else hsv.h
+    }
+
+    private fun readableTextOnAccent(color: Int): Int {
+        val white = Color.WHITE
+        val black = Color.BLACK
+        val whiteContrast = contrastRatio(white, color)
+        if (whiteContrast >= MIN_ACCENT_TEXT_CONTRAST) return white
+        val blackContrast = contrastRatio(black, color)
+        if (blackContrast >= MIN_ACCENT_TEXT_CONTRAST) return black
+        return if (whiteContrast >= blackContrast) white else black
+    }
+
+    private fun qrPointColor(primary: Int, readableAccent: Int, mode: DrawThemeMode): Int {
+        val background = if (mode == DrawThemeMode.LIGHT) {
+            Color.WHITE
+        } else {
+            Color.makeRGB(19, 23, 31)
+        }
+        val minRatio = if (mode == DrawThemeMode.LIGHT) MIN_LIGHT_QR_CONTRAST else MIN_DARK_QR_CONTRAST
+        if (contrastRatio(primary, background) >= minRatio) return primary
+        if (contrastRatio(readableAccent, background) >= minRatio) return readableAccent
+        return ensureContrast(
+            color = primary,
+            background = background,
+            minRatio = minRatio,
+            lighten = mode == DrawThemeMode.DARK,
+            fallback = readableAccent,
         )
     }
 }

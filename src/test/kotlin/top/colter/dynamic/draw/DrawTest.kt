@@ -2,6 +2,7 @@ package top.colter.dynamic.draw
 
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import org.jetbrains.skia.Color
 import top.colter.dynamic.DrawOrnament
 import top.colter.dynamic.DrawSettings
 import top.colter.dynamic.core.data.DynamicBlockRole
@@ -37,15 +38,18 @@ import top.colter.dynamic.core.data.mediaReferences
 import top.colter.dynamic.core.link.LinkKinds
 import top.colter.dynamic.core.link.LinkPreview
 import top.colter.dynamic.draw.image.DynamicImageCache
+import top.colter.dynamic.loadTestImage
 import top.colter.dynamic.loadTestResource
 import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testMedia
 import top.colter.dynamic.testOutput
 import top.colter.dynamic.testPublisherInfo
 import top.colter.dynamic.testPublisherKey
-import top.colter.skiko.Dp
-import top.colter.skiko.Fonts
+import top.colter.skiko.*
+import top.colter.skiko.data.Gradient
+import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.Ratio
+import top.colter.skiko.layout.*
 
 private const val TEST_IMAGE_PREFIX = "test://image/"
 private const val TEST_EMOJI_PREFIX = "test://emoji/"
@@ -142,6 +146,49 @@ class DrawTest {
                         layout = layout,
                         ornament = preview.ornament,
                         themeColors = DARK_PREVIEW_THEME_COLORS,
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `test generated theme previews`() {
+        renderThemePalettePreviewToOutput()
+
+        val layouts = previewLayouts()
+        val update = textImagesCardDynamic()
+        themePreviewCases().forEach { themeCase ->
+            layouts.forEach { layout ->
+                renderToOutput(
+                    fileName = previewFileName(layout, "theme_${themeCase.fileName}_dynamic.png"),
+                    update = update,
+                    config = drawConfig(
+                        layout = layout,
+                        ornament = DrawOrnament.QRCODE,
+                        themeColors = themeCase.colors,
+                    ),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `test avatar generated theme previews`() {
+        val avatarCases = avatarThemePreviewCases()
+        renderAvatarThemePalettePreviewToOutput(avatarCases)
+
+        val layouts = previewLayouts()
+        avatarCases.forEach { avatarCase ->
+            val update = avatarThemeDynamic(avatarCase)
+            layouts.forEach { layout ->
+                renderToOutput(
+                    fileName = previewFileName(layout, "avatar_theme_${avatarCase.fileName}_dynamic.png"),
+                    update = update,
+                    config = drawConfig(
+                        layout = layout,
+                        ornament = DrawOrnament.QRCODE,
+                        themeColors = avatarCase.colors,
                     ),
                 )
             }
@@ -535,6 +582,36 @@ class DrawTest {
         )
     }
 
+    private fun avatarThemeDynamic(avatarCase: AvatarThemePreviewCase): SourceUpdate {
+        return testDynamicUpdate(
+            publisher = previewPublisher(
+                id = "avatar-theme-${avatarCase.fileName}",
+                name = "头像主题观察员",
+                header = "header1.png",
+                avatar = avatarCase.avatarFile,
+                withPendant = false,
+            ),
+            externalId = "avatar-theme-${avatarCase.fileName}",
+            payload = DynamicPayload(
+                title = "头像自动主题预览",
+                blocks = listOf(
+                    richTextBlock(
+                        text("这条动态使用从 ${avatarCase.avatarFile} 提取出的主题色：${avatarCase.colors}。"),
+                        emoji("[热词系列_知识增加]"),
+                        text(" 重点看作者名、正文链接、媒体标签和二维码区域是否协调。"),
+                    ),
+                    imageGrid(count = 2),
+                    articleCard(
+                        id = "avatar-theme-card-${avatarCase.fileName}",
+                        title = "自动主题色效果检查",
+                        description = "同一套动态内容搭配不同头像提取色，方便观察浅色、暗色、人物和 logo 头像的差异。",
+                        style = MediaCardStyle.SMALL,
+                    ),
+                ),
+            ),
+        )
+    }
+
     private data class DynamicPreview(
         val fileName: String,
         val update: SourceUpdate,
@@ -546,6 +623,53 @@ class DrawTest {
         val preview: LinkPreview,
         val ornament: DrawOrnament = DrawOrnament.LOGO,
     )
+
+    private data class ThemePreviewCase(
+        val fileName: String,
+        val title: String,
+        val colors: String,
+    )
+
+    private data class AvatarThemePreviewCase(
+        val fileName: String,
+        val title: String,
+        val avatarFile: String,
+        val colors: String,
+        val extracted: Boolean,
+    )
+
+    private fun themePreviewCases(): List<ThemePreviewCase> {
+        return listOf(
+            ThemePreviewCase("01_default_pink", "默认粉色", "#FE65A6"),
+            ThemePreviewCase("02_cyan", "高亮青色", "#BFFAFF"),
+            ThemePreviewCase("03_gold", "高亮金色", "#FFD700"),
+            ThemePreviewCase("04_purple", "紫色", "#8B5CF6"),
+            ThemePreviewCase("05_teal", "青绿色", "#14B8A6"),
+            ThemePreviewCase("06_neutral_gray", "低饱和灰色", "#808080"),
+            ThemePreviewCase("07_dark_mix", "暗色渐变", DARK_PREVIEW_THEME_COLORS),
+            ThemePreviewCase("08_multi_pink_cyan", "粉青双色", "#FE65A6;#BFFAFF"),
+        )
+    }
+
+    private fun avatarThemePreviewCases(): List<AvatarThemePreviewCase> {
+        val extractor = AvatarThemeExtractor { media ->
+            loadTestResource("image", media.uri.removePrefix(TEST_IMAGE_PREFIX)).readBytes()
+        }
+        return avatarThemeFiles().mapIndexed { index, avatarFile ->
+            val colors = extractor.extractColors(imageMedia(avatarFile, MediaKind.AVATAR))
+            AvatarThemePreviewCase(
+                fileName = "%02d_%s".format(index + 1, avatarFile.substringBeforeLast('.')),
+                title = "$avatarFile 自动主题",
+                avatarFile = avatarFile,
+                colors = colors?.joinToString(";") ?: "#FE65A6",
+                extracted = colors != null,
+            )
+        }
+    }
+
+    private fun avatarThemeFiles(): List<String> {
+        return listOf("avatar.jpg", "avatar1.jpg") + (3..11).map { "avatar$it.jpg" }
+    }
 
     private fun previewLayouts(): List<String> {
         val configured = System.getProperty(PREVIEW_LAYOUTS_PROPERTY)
@@ -780,6 +904,220 @@ class DrawTest {
         config: DrawConfig = drawConfig(),
     ) {
         renderToOutput(fileName = fileName, update = update, config = config)
+    }
+
+    private fun renderThemePalettePreviewToOutput() {
+        View(
+            file = testOutput.resolve("theme_palette_preview.png"),
+            modifier = Modifier()
+                .width(1200.dp)
+                .padding(22.dp)
+                .background(Color.makeRGB(246, 248, 252)),
+        ) {
+            Column(modifier = Modifier().fillMaxWidth()) {
+                Text(
+                    text = "主题色生成预览",
+                    fontSize = 40.dp,
+                    color = Color.BLACK,
+                    modifier = Modifier().margin(bottom = 8.dp),
+                )
+                Text(
+                    text = "每一行展示输入主题色生成后的背景、卡片、强调色、正文链接和二维码点色。",
+                    fontSize = 24.dp,
+                    color = Color.makeRGB(82, 88, 100),
+                    modifier = Modifier().margin(bottom = 18.dp),
+                )
+                themePreviewCases().forEach { themeCase ->
+                    drawThemePaletteCase(themeCase)
+                }
+            }
+        }
+    }
+
+    private fun renderAvatarThemePalettePreviewToOutput(avatarCases: List<AvatarThemePreviewCase>) {
+        View(
+            file = testOutput.resolve("avatar_theme_palette_preview.png"),
+            modifier = Modifier()
+                .width(1380.dp)
+                .padding(22.dp)
+                .background(Color.makeRGB(246, 248, 252)),
+        ) {
+            Column(modifier = Modifier().fillMaxWidth()) {
+                Text(
+                    text = "头像自动主题预览",
+                    fontSize = 40.dp,
+                    color = Color.BLACK,
+                    modifier = Modifier().margin(bottom = 8.dp),
+                )
+                Text(
+                    text = "每一行展示头像、提取出的主题色，以及这些颜色映射到绘图主题后的关键色块。",
+                    fontSize = 24.dp,
+                    color = Color.makeRGB(82, 88, 100),
+                    modifier = Modifier().margin(bottom = 18.dp),
+                )
+                avatarCases.forEach { avatarCase ->
+                    drawAvatarThemePaletteCase(avatarCase)
+                }
+            }
+        }
+    }
+
+    private fun Layout.drawAvatarThemePaletteCase(avatarCase: AvatarThemePreviewCase) {
+        val theme = DrawThemeFactory.fromThemeColorText(avatarCase.colors)
+        Column(
+            modifier = Modifier()
+                .fillMaxWidth()
+                .margin(bottom = 18.dp)
+                .padding(14.dp)
+                .background(
+                    gradient = Gradient(
+                        LayoutAlignment.LEFT,
+                        LayoutAlignment.RIGHT,
+                        theme.backgroundColors,
+                    ),
+                )
+                .border(2.dp, 16.dp, theme.borderColor),
+        ) {
+            Row(
+                modifier = Modifier()
+                    .fillMaxWidth()
+                    .padding(14.dp)
+                    .background(theme.cardColor)
+                    .border(2.dp, 12.dp, theme.borderColor),
+            ) {
+                Image(
+                    image = loadTestImage("image", avatarCase.avatarFile),
+                    ratio = Ratio.SQUARE,
+                    modifier = Modifier()
+                        .width(92.dp)
+                        .height(92.dp)
+                        .margin(right = 16.dp)
+                        .border(2.dp, 46.dp, theme.borderColor),
+                )
+                Column(modifier = Modifier().fillMaxWidth()) {
+                    Text(
+                        text = "${avatarCase.title}  ${avatarCase.colors}  ${theme.mode.name}" +
+                            if (avatarCase.extracted) "" else "  未提取，使用默认色预览",
+                        fontSize = 24.dp,
+                        color = theme.textColor,
+                        modifier = Modifier().fillMaxWidth().margin(bottom = 12.dp),
+                    )
+                    Row(modifier = Modifier().fillMaxWidth()) {
+                        drawThemeSwatch("媒体标签", theme.primaryColor, theme.onPrimaryColor, "primary")
+                        drawThemeSwatch("可读强调", theme.readableAccentColor, contrastTextColor(theme.readableAccentColor), "readable")
+                        drawThemeSwatch("二维码点", theme.qrPointColor, contrastTextColor(theme.qrPointColor), "qrPoint")
+                        drawThemeSwatch("卡片底色", theme.cardColor, theme.textColor, "card")
+                        drawThemeSwatch("主文本", theme.textColor, contrastTextColor(theme.textColor), "text")
+                        drawThemeSwatch("次级文本", theme.secondaryTextColor, contrastTextColor(theme.secondaryTextColor), "secondary")
+                    }
+                }
+            }
+        }
+    }
+
+    private fun Layout.drawThemePaletteCase(themeCase: ThemePreviewCase) {
+        val theme = DrawThemeFactory.fromThemeColorText(themeCase.colors)
+        Column(
+            modifier = Modifier()
+                .fillMaxWidth()
+                .margin(bottom = 18.dp)
+                .padding(14.dp)
+                .background(
+                    gradient = Gradient(
+                        LayoutAlignment.LEFT,
+                        LayoutAlignment.RIGHT,
+                        theme.backgroundColors,
+                    ),
+                )
+                .border(2.dp, 16.dp, theme.borderColor),
+        ) {
+            Column(
+                modifier = Modifier()
+                    .fillMaxWidth()
+                    .padding(14.dp)
+                    .background(theme.cardColor)
+                    .border(2.dp, 12.dp, theme.borderColor),
+            ) {
+                Row(modifier = Modifier().fillMaxWidth().margin(bottom = 12.dp)) {
+                    Text(
+                        text = "${themeCase.title}  ${themeCase.colors}  ${theme.mode.name}",
+                        fontSize = 25.dp,
+                        color = theme.textColor,
+                        modifier = Modifier().fillMaxWidth(),
+                    )
+                }
+
+                Row(modifier = Modifier().fillMaxWidth().margin(bottom = 12.dp)) {
+                    drawThemeSwatch("媒体标签", theme.primaryColor, theme.onPrimaryColor, "primary")
+                    drawThemeSwatch("可读强调", theme.readableAccentColor, contrastTextColor(theme.readableAccentColor), "readable")
+                    drawThemeSwatch("二维码点", theme.qrPointColor, contrastTextColor(theme.qrPointColor), "qrPoint")
+                    drawThemeSwatch("卡片底色", theme.cardColor, theme.textColor, "card")
+                    drawThemeSwatch("主文本", theme.textColor, contrastTextColor(theme.textColor), "text")
+                    drawThemeSwatch("次级文本", theme.secondaryTextColor, contrastTextColor(theme.secondaryTextColor), "secondary")
+                }
+
+                Row(modifier = Modifier().fillMaxWidth()) {
+                    Text(
+                        text = "正文示例：主题色用于长文本时优先保证阅读。",
+                        fontSize = 24.dp,
+                        color = theme.textColor,
+                    )
+                    Text(
+                        text = " #话题链接#",
+                        fontSize = 24.dp,
+                        color = theme.linkColor,
+                        modifier = Modifier().margin(left = 8.dp),
+                    )
+                    Text(
+                        text = "  弱化信息",
+                        fontSize = 24.dp,
+                        color = theme.mutedTextColor,
+                        modifier = Modifier().margin(left = 8.dp),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun Layout.drawThemeSwatch(
+        title: String,
+        color: Int,
+        textColor: Int,
+        fieldName: String,
+    ) {
+        Column(
+            modifier = Modifier()
+                .width(170.dp)
+                .margin(right = 10.dp),
+        ) {
+            Box(
+                alignment = LayoutAlignment.CENTER,
+                modifier = Modifier()
+                    .fillMaxWidth()
+                    .height(58.dp)
+                    .background(color)
+                    .border(1.dp, 8.dp, contrastTextColor(color).withAlpha(0.22f)),
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 20.dp,
+                    color = textColor,
+                    alignment = LayoutAlignment.CENTER,
+                    modifier = Modifier().fillMaxWidth(),
+                )
+            }
+            Text(
+                text = "$fieldName ${toHexColor(color)}",
+                fontSize = 15.dp,
+                color = Color.makeRGB(92, 98, 110),
+                maxLinesCount = 1,
+                modifier = Modifier().margin(top = 4.dp).fillMaxWidth(),
+            )
+        }
+    }
+
+    private fun contrastTextColor(color: Int): Int {
+        return if (relativeLuminance(color) > 0.46) Color.BLACK else Color.WHITE
     }
 
     private fun drawConfig(

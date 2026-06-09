@@ -55,6 +55,7 @@ class DrawThemeFactoryTest {
         listOf("#FE65A6", "#101010", "#BFFAFF").forEach { color ->
             val theme = DrawThemeFactory.fromThemeColorText(color)
 
+            assertEquals(theme.readableAccentColor, theme.linkColor)
             assertTrue(
                 actual = contrastRatio(theme.linkColor, theme.cardColor) >= 4.5,
                 message = "$color 的链接色对比度不足",
@@ -78,6 +79,47 @@ class DrawThemeFactoryTest {
         assertTrue(
             actual = contrastRatio(theme.linkColor, theme.cardColor) >= 4.5,
             message = "正文链接色仍需保持可读",
+        )
+    }
+
+    @Test
+    fun onPrimaryColorShouldKeepDecorativeBadgesReadableEnough() {
+        val pinkTheme = DrawThemeFactory.fromThemeColorText("#FE65A6")
+        val cyanTheme = DrawThemeFactory.fromThemeColorText("#BFFAFF")
+        val darkTheme = DrawThemeFactory.fromThemeColorText("#101624;#24182D;#0D2630")
+
+        assertEquals(WHITE, pinkTheme.onPrimaryColor)
+        assertEquals(BLACK, cyanTheme.onPrimaryColor)
+        assertTrue(contrastRatio(pinkTheme.onPrimaryColor, pinkTheme.primaryColor) >= 2.6)
+        assertTrue(contrastRatio(cyanTheme.onPrimaryColor, cyanTheme.primaryColor) >= 2.6)
+        assertTrue(contrastRatio(darkTheme.onPrimaryColor, darkTheme.primaryColor) >= 2.6)
+    }
+
+    @Test
+    fun qrPointColorShouldStayVisibleOnLightSurface() {
+        listOf("#FE65A6", "#BFFAFF", "#FFD700").forEach { color ->
+            val theme = DrawThemeFactory.fromThemeColorText(color)
+
+            assertTrue(
+                actual = contrastRatio(theme.qrPointColor, WHITE) >= 2.4,
+                message = "$color 的二维码点色在浅色底上不够清楚",
+            )
+        }
+    }
+
+    @Test
+    fun neutralThemeColorShouldGenerateSoftNeutralBackground() {
+        val theme = DrawThemeFactory.fromThemeColorText("#808080")
+        val hsb = Color.RGBtoHSB(
+            theme.backgroundColors.first().red(),
+            theme.backgroundColors.first().green(),
+            theme.backgroundColors.first().blue(),
+            null,
+        )
+
+        assertTrue(
+            actual = hsb[1] <= 0.13f,
+            message = "低饱和主题不应生成过强的彩色背景",
         )
     }
 
@@ -109,4 +151,9 @@ class DrawThemeFactoryTest {
     private fun Int.red(): Int = (this ushr 16) and 0xff
     private fun Int.green(): Int = (this ushr 8) and 0xff
     private fun Int.blue(): Int = this and 0xff
+
+    private companion object {
+        const val WHITE: Int = -0x1
+        const val BLACK: Int = -0x1000000
+    }
 }

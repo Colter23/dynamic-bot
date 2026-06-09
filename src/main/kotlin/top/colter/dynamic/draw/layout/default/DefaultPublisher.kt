@@ -44,7 +44,7 @@ internal fun Layout.drawPublisher(
             name = publisher.name,
             time = time,
             badge = avatarBadgeImage,
-            accentColor = config.theme.primaryColor,
+            accentColor = config.theme.readableAccentColor,
             mutedColor = config.theme.mutedTextColor,
             modifier = Modifier()
                 .fillMaxWidth()
@@ -56,7 +56,7 @@ internal fun Layout.drawPublisher(
         val platformLogoImage = platformLogo(config)
         val platformTextLogoImage = platformTextLogo(config)
         val qrCodeImage = if (config.settings.ornament == DrawOrnament.QRCODE && link.isNotBlank()) {
-            qrCode(link, config.theme.primaryColor.withAlpha(1f))
+            qrCode(link, config.theme.qrPointColor.withAlpha(1f))
         } else {
             null
         }

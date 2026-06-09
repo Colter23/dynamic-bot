@@ -3,7 +3,6 @@ package top.colter.dynamic.draw.layout.default.component
 import org.jetbrains.skia.Color
 import top.colter.dynamic.draw.DrawTheme
 import top.colter.dynamic.draw.DrawThemeMode
-import top.colter.dynamic.draw.relativeLuminance
 import top.colter.skiko.withAlpha
 
 internal data class MediaCardColors(
@@ -22,7 +21,7 @@ internal data class MediaCardColors(
 )
 
 internal fun mediaCardColors(theme: DrawTheme): MediaCardColors {
-    val badgeTextColor = readableTextColor(theme.primaryColor)
+    val badgeTextColor = theme.onPrimaryColor
     val badgeBorderColor = if (badgeTextColor == Color.WHITE) {
         Color.WHITE.withAlpha(if (theme.mode == DrawThemeMode.DARK) 0.50f else 0.62f)
     } else {
@@ -45,8 +44,4 @@ internal fun mediaCardColors(theme: DrawTheme): MediaCardColors {
         overlayPillColor = Color.BLACK.withAlpha((overlayAlpha + 0.10f).coerceAtMost(0.74f)),
         overlayTextColor = Color.WHITE,
     )
-}
-
-private fun readableTextColor(background: Int): Int {
-    return if (relativeLuminance(background) > 0.56) Color.BLACK else Color.WHITE
 }
