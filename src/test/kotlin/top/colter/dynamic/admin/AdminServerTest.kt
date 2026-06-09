@@ -425,7 +425,8 @@ class AdminServerTest {
     @Test
     fun createSubscriptionShouldPersistPublisherSubscriberAndPolicy() = runBlocking {
         initDb("admin-create-subscription")
-        val service = service(FakePublisherFollowPlugin())
+        val plugin = FakePublisherFollowPlugin()
+        val service = service(plugin)
         val policy = SubscriptionPolicy(
             enabledEvents = setOf(SubscriptionEventKind.DYNAMIC, SubscriptionEventKind.LIVE_STARTED),
             mentionAllEvents = setOf(SubscriptionEventKind.LIVE_STARTED),
@@ -451,6 +452,38 @@ class AdminServerTest {
         assertEquals("100", response.subscription.subscriber?.name)
         assertEquals("bilibili", response.subscription.publisher?.platformId)
         assertNotNull(SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "100")))
+        assertEquals(0, plugin.queryFollowStateCalls)
+        assertEquals(1, plugin.followPublisherCalls)
+    }
+
+    @Test
+    fun createSubscriptionShouldCreatePlaceholderPublisherWhenLookupIsSkipped() = runBlocking {
+        initDb("admin-create-subscription-placeholder-publisher")
+        val plugin = FakePublisherFollowPlugin()
+        val service = service(
+            plugin = plugin,
+            config = MainDynamicConfig(
+                subscription = SubscriptionConfig(autoFollowPublisherOnSubscribe = false),
+            ),
+        )
+
+        val response = service.createSubscription(
+            CreateSubscriptionRequest(
+                subscriberPlatform = "qq",
+                targetKind = "GROUP",
+                subscriberTargetId = "100",
+                publisherPlatform = "bilibili",
+                publisherExternalId = "123",
+                publisherLookupMode = "PLACEHOLDER",
+            ),
+        )
+        val publisher = PublisherRepository.findByKey(PublisherKey.of("bilibili", PublisherKind.USER, "123"))
+
+        assertEquals(0, plugin.fetchPublisherInfoCalls)
+        assertTrue(response.publisherCreated)
+        assertEquals("123", response.subscription.publisher?.name)
+        assertEquals("", publisher?.avatar?.uri)
+        assertEquals(listOf("未查询平台资料，已使用发布者 ID 创建占位发布者：bilibili:123"), response.warnings)
     }
 
     @Test
@@ -512,6 +545,47 @@ class AdminServerTest {
 
         assertEquals(publisher.id, initializedPublisherId)
         assertEquals(0L, previousSubscriptionCount)
+    }
+
+    @Test
+    fun searchPublishersShouldReturnLocalPublisherWithoutPlatformLookup() = runBlocking {
+        initDb("admin-search-publisher-local-first")
+        PublisherRepository.upsertInfo(
+            testPublisherInfo(
+                key = PublisherKey.of("bilibili", PublisherKind.USER, "123"),
+                name = "本地发布者",
+                avatar = MediaRef("https://example.com/local.png", MediaKind.AVATAR),
+            )
+        )
+        val plugin = FakePublisherFollowPlugin()
+        val service = service(plugin)
+
+        val result = service.searchPublishers("bilibili", "123")
+
+        assertEquals(1, result.size)
+        assertEquals("本地发布者", result.single().name)
+        assertEquals(0, plugin.fetchPublisherInfoCalls)
+    }
+
+    @Test
+    fun searchPublishersShouldRefreshPlaceholderPublisher() = runBlocking {
+        initDb("admin-search-publisher-placeholder-refresh")
+        PublisherRepository.upsertInfo(
+            testPublisherInfo(
+                key = PublisherKey.of("bilibili", PublisherKind.USER, "123"),
+                name = "123",
+                avatar = MediaRef("", MediaKind.AVATAR),
+            )
+        )
+        val plugin = FakePublisherFollowPlugin()
+        val service = service(plugin)
+
+        val result = service.searchPublishers("bilibili", "123")
+
+        assertEquals(1, result.size)
+        assertEquals("demo-up", result.single().name)
+        assertEquals("https://example.com/face.png", result.single().avatarUri)
+        assertEquals(1, plugin.fetchPublisherInfoCalls)
     }
 
     @Test
@@ -819,6 +893,37 @@ class AdminServerTest {
     }
 
     @Test
+    fun importSubscriptionsShouldSkipPublisherLookupWhenItemUsesPlaceholderMode() = runBlocking {
+        initDb("admin-subscription-import-placeholder-publisher")
+        val plugin = FakePublisherFollowPlugin()
+        val service = service(
+            plugin = plugin,
+            config = MainDynamicConfig(
+                subscription = SubscriptionConfig(autoFollowPublisherOnSubscribe = false),
+            ),
+        )
+        val document = SubscriptionExportDocument(
+            exportedAtEpochSeconds = 1,
+            subscriptions = listOf(
+                SubscriptionExportItem(
+                    publisher = SubscriptionExportPublisher("bilibili", "USER", "123"),
+                    target = SubscriptionExportTarget("qq", "GROUP", "100"),
+                    publisherLookupMode = "PLACEHOLDER",
+                ),
+            ),
+        )
+
+        val result = service.importSubscriptions(document)
+        val publisher = PublisherRepository.findByKey(PublisherKey.of("bilibili", PublisherKind.USER, "123"))
+
+        assertEquals(1, result.created)
+        assertEquals(0, result.failed)
+        assertEquals(0, plugin.fetchPublisherInfoCalls)
+        assertEquals("123", publisher?.name)
+        assertEquals(listOf("未查询平台资料，已使用发布者 ID 创建占位发布者：bilibili:123"), result.items.single().warnings)
+    }
+
+    @Test
     fun importSubscriptionsShouldMapLegacyOnebotTargetPlatformToQq() = runBlocking {
         initDb("admin-subscription-import-onebot-target")
         val service = service(FakePublisherFollowPlugin())
@@ -843,13 +948,6 @@ class AdminServerTest {
     @Test
     fun importSubscriptionsShouldReuseRecentlyLoadedPublisherAndTargetCandidates() = runBlocking {
         initDb("admin-subscription-import-candidate-cache")
-        PublisherRepository.upsertInfo(
-            testPublisherInfo(
-                name = "旧发布者",
-                avatar = MediaRef("https://example.com/old.png", MediaKind.AVATAR),
-                state = EntityState.DISABLED,
-            )
-        )
         val plugin = FakePublisherFollowPlugin()
         val sink = FakeMessageSinkPlugin(
             listOf(
@@ -897,7 +995,8 @@ class AdminServerTest {
     @Test
     fun importSubscriptionsShouldUpdatePolicyAndReplaceFilterRules() = runBlocking {
         initDb("admin-subscription-import-update")
-        val service = service(FakePublisherFollowPlugin())
+        val plugin = FakePublisherFollowPlugin()
+        val service = service(plugin)
         val created = service.createSubscription(
             CreateSubscriptionRequest(
                 subscriberPlatform = "qq",
@@ -934,6 +1033,7 @@ class AdminServerTest {
         assertEquals(1, result.updated)
         assertEquals(nextPolicy, updated.policy)
         assertEquals(listOf(FilterCondition.TextContains("抽奖")), rules.map { it.condition })
+        assertEquals(1, plugin.followPublisherCalls)
     }
 
     @Test
@@ -1473,6 +1573,8 @@ class AdminServerTest {
         )
         var followed: Boolean = false
         var fetchPublisherInfoCalls: Int = 0
+        var queryFollowStateCalls: Int = 0
+        var followPublisherCalls: Int = 0
 
         override suspend fun fetchPublisherInfo(userId: String): PublisherInfo? {
             fetchPublisherInfoCalls += 1
@@ -1483,9 +1585,13 @@ class AdminServerTest {
             )
         }
 
-        override suspend fun queryFollowState(userId: String): FollowState = FollowState.NOT_FOLLOWING
+        override suspend fun queryFollowState(userId: String): FollowState {
+            queryFollowStateCalls += 1
+            return FollowState.NOT_FOLLOWING
+        }
 
         override suspend fun followPublisher(userId: String): FollowActionResult {
+            followPublisherCalls += 1
             followed = true
             return FollowActionResult(FollowActionStatus.DONE)
         }

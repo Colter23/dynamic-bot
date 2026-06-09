@@ -429,6 +429,7 @@ function openSubscriptionImportModal() {
             <label>粘贴 JSON</label>
             <textarea id="subscriptionImportText" class="subscription-import-text" placeholder="可以粘贴导出的 dynamic-bot 订阅 JSON"></textarea>
           </div>
+          <label class="check"><input type="checkbox" id="subscriptionImportPlaceholderPublishers" checked>直接导入发布者 ID</label>
         </div>
         <div id="subscriptionImportSummary" class="batch-result" hidden></div>
         <div class="inline-note">导入不是全局事务：单条失败不会影响其他订阅。</div>
@@ -436,7 +437,10 @@ function openSubscriptionImportModal() {
       <div id="subscriptionImportResult" class="batch-result" hidden></div>
     </div>
   `, async () => {
-    const documentData = parseSubscriptionImportText();
+    const parsedDocument = parseSubscriptionImportText();
+    const documentData = $("subscriptionImportPlaceholderPublishers")?.checked
+      ? withPublisherLookupMode(parsedDocument, "PLACEHOLDER")
+      : parsedDocument;
     const result = await api("/subscriptions/import", {
       method: "POST",
       body: JSON.stringify(documentData),
@@ -482,6 +486,16 @@ function parseSubscriptionImportText() {
     throw new Error("订阅导入文件格式无效");
   }
   return documentData;
+}
+
+function withPublisherLookupMode(documentData, mode) {
+  return {
+    ...documentData,
+    subscriptions: (documentData.subscriptions || []).map(item => ({
+      ...item,
+      publisherLookupMode: item.publisherLookupMode || mode,
+    })),
+  };
 }
 
 function renderSubscriptionImportSummary() {
@@ -730,7 +744,18 @@ async function openCreateSubscription() {
     if (!isModalActive()) return;
     $("subNewTargetKind").innerHTML = kinds.map(kind => `<option value="${attr(kind)}">${esc(label(kind))}</option>`).join("");
     policyUpdater();
-    await refreshTargetCandidates();
+    resetTargetCandidates();
+  };
+  const resetTargetCandidates = (status = "未获取可用目标，可手动填写目标 ID") => {
+    if (!isModalActive()) return;
+    targetCandidates = [];
+    $("subNewTargetCandidateWrap").hidden = false;
+    $("subNewTargetCandidateActions").hidden = false;
+    $("subNewTargetManualWrap").hidden = false;
+    $("subNewTargetCandidateList").innerHTML = `<div class="empty">未获取可用目标</div>`;
+    $("subNewTargetSelectAll").disabled = true;
+    $("subNewTargetClearAll").disabled = true;
+    setCreateSubscriptionTargetStatus(status);
   };
   const refreshTargetCandidates = async (force = false) => {
     if (!isModalActive()) return;
@@ -738,6 +763,8 @@ async function openCreateSubscription() {
     const kind = $("subNewTargetKind").value;
     targetCandidates = [];
     setCreateSubscriptionTargetLoading(force ? "正在刷新可用目标..." : "正在获取可用目标...");
+    $("subNewTargetSelectAll").disabled = true;
+    $("subNewTargetClearAll").disabled = true;
     let allCandidates = [];
     let source = "后端";
     try {
@@ -749,9 +776,11 @@ async function openCreateSubscription() {
     } catch (error) {
       if (!isModalActive()) return;
       $("subNewTargetCandidateWrap").hidden = false;
-      $("subNewTargetCandidateActions").hidden = true;
+      $("subNewTargetCandidateActions").hidden = false;
       $("subNewTargetManualWrap").hidden = false;
       $("subNewTargetCandidateList").innerHTML = `<div class="empty">目标列表获取失败</div>`;
+      $("subNewTargetSelectAll").disabled = true;
+      $("subNewTargetClearAll").disabled = true;
       setCreateSubscriptionTargetStatus("目标列表获取失败，请手动填写目标 ID");
       return;
     }
@@ -759,6 +788,8 @@ async function openCreateSubscription() {
       $("subNewTargetCandidateWrap").hidden = false;
       $("subNewTargetCandidateActions").hidden = false;
       $("subNewTargetManualWrap").hidden = true;
+      $("subNewTargetSelectAll").disabled = false;
+      $("subNewTargetClearAll").disabled = false;
       const candidateList = $("subNewTargetCandidateList");
       if (!candidateList) return;
       candidateList.innerHTML = targetCandidates.map((target, index) => subscriptionTargetChoiceHtml(target, index, false)).join("");
@@ -768,9 +799,11 @@ async function openCreateSubscription() {
       setCreateSubscriptionTargetStatus(`${targetCandidates.length} 个可添加目标，已添加目标不显示，来自${source}`);
     } else {
       $("subNewTargetCandidateWrap").hidden = false;
-      $("subNewTargetCandidateActions").hidden = true;
+      $("subNewTargetCandidateActions").hidden = false;
       $("subNewTargetManualWrap").hidden = false;
       $("subNewTargetCandidateList").innerHTML = `<div class="empty">暂无可添加目标</div>`;
+      $("subNewTargetSelectAll").disabled = true;
+      $("subNewTargetClearAll").disabled = true;
       setCreateSubscriptionTargetStatus(allCandidates.length ? `已添加过的目标已排除，可手动填写目标 ID，来自${source}` : `未获取到目标，请手动填写目标 ID，来自${source}`);
     }
   };
@@ -800,7 +833,7 @@ async function openCreateSubscription() {
   $("subNewTargetPlatform").onchange = refreshTargetKinds;
   $("subNewTargetKind").onchange = async () => {
     policyUpdater();
-    await refreshTargetCandidates();
+    resetTargetCandidates();
   };
   $("subNewTargetRefresh").onclick = () => refreshTargetCandidates(true).catch(handleError);
   $("subNewTargetSelectAll").onclick = () => setCreateSubscriptionTargetChecked(true);
@@ -971,6 +1004,7 @@ function buildCreateSubscriptionImportDocument(publisher, targets, policy) {
       policy,
       filterRules: [],
       linkParseTriggerMode: target.linkParseTriggerMode || null,
+      publisherLookupMode: publisher.publisherLookupMode || null,
     })),
   };
 }
@@ -1058,6 +1092,7 @@ function collectCreateSubscriptionPublisher(candidates) {
       kind: publisher.kind || "USER",
       externalId: publisher.externalId,
       label: publisher.name || publisher.externalId,
+      publisherLookupMode: "VERIFY",
     } : null;
   }
   const selected = !$("subNewPublisherResultWrap").hidden
@@ -1072,6 +1107,7 @@ function collectCreateSubscriptionPublisher(candidates) {
     kind: candidate && candidate.kind || "USER",
     externalId,
     label: candidate && candidate.name || externalId,
+    publisherLookupMode: candidate ? "VERIFY" : "PLACEHOLDER",
   };
 }
 

@@ -68,6 +68,8 @@ class CommandListenerTest {
         )
         assertEquals(1, SubscriptionRepository.findPublisherIdsBySubscriberId(subscriber.id).size)
         assertEquals("123", publisher.externalId)
+        assertEquals(0, plugin.queryFollowStateCalls)
+        assertEquals(1, plugin.followPublisherCalls)
     }
 
     @Test
@@ -371,6 +373,8 @@ class CommandListenerTest {
 
     private class FakePublisherFollowPlugin : PublisherFollowPlugin {
         override val platformId: PlatformId = PlatformId.of("bilibili")
+        var queryFollowStateCalls: Int = 0
+        var followPublisherCalls: Int = 0
 
         override suspend fun fetchPublisherInfo(userId: String): PublisherInfo? {
             return testPublisherInfo(
@@ -379,9 +383,13 @@ class CommandListenerTest {
             )
         }
 
-        override suspend fun queryFollowState(userId: String): FollowState = FollowState.FOLLOWING
+        override suspend fun queryFollowState(userId: String): FollowState {
+            queryFollowStateCalls += 1
+            return FollowState.FOLLOWING
+        }
 
         override suspend fun followPublisher(userId: String): FollowActionResult {
+            followPublisherCalls += 1
             return FollowActionResult(FollowActionStatus.DONE)
         }
     }

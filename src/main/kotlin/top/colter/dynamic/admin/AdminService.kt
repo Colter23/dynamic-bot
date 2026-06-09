@@ -40,7 +40,6 @@ import top.colter.dynamic.message.OutboundMessageService
 import top.colter.dynamic.message.RENDER_VARIANT_MANUAL_FORWARD
 import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
 import top.colter.dynamic.core.plugin.FollowActionStatus
-import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.core.plugin.MessageTargetCandidate
 import top.colter.dynamic.core.plugin.MessageTargetSource
@@ -715,10 +714,19 @@ public class AdminService(
             ?: throw IllegalArgumentException("发布者 ID 不能为空")
         val handle = publisherLookupProvider()
             .firstOrNull { it.instance.platformId.value.equals(platform, ignoreCase = true) }
+        val pluginInfo = handle?.info ?: fallbackPublisherPluginInfo(platform)
+        cachedPublisherCandidate(PublisherKey.of(platform, PublisherKind.USER, externalId))?.let { cached ->
+            return listOf(cached.toCandidateDto(pluginInfo))
+        }
+        val publisherKey = PublisherKey.of(platform, PublisherKind.USER, externalId)
+        PublisherRepository.findByKey(publisherKey)
+            ?.takeUnless { it.isPlaceholderPublisher() }
+            ?.let { publisher ->
+                return listOf(publisher.toInfo().toCandidateDto(pluginInfo))
+            }
         val plugin = handle?.instance ?: publisherLookupResolver(platform)
             ?: throw NoSuchElementException("未找到发布者查询插件：$platform")
         val publisherInfo = plugin.fetchPublisherInfo(externalId)?.normalized() ?: return emptyList()
-        val pluginInfo = handle?.info ?: fallbackPublisherPluginInfo(platform)
         rememberPublisherCandidate(publisherInfo)
         return listOf(publisherInfo.toCandidateDto(pluginInfo))
     }
@@ -1151,11 +1159,13 @@ public class AdminService(
         request: CreateSubscriptionRequest,
         replacementFilterConditions: List<FilterCondition>?,
     ): CreateSubscriptionResponse {
+        val warnings = mutableListOf<String>()
         val publisherUpsert = if (request.publisherId != null) {
             val publisher = PublisherRepository.findById(request.publisherId)
                 ?: throw NoSuchElementException("发布者不存在：publisherId=${request.publisherId}")
             UpsertResult(publisher, created = false, updated = false)
         } else {
+            val publisherLookupMode = parsePublisherLookupMode(request.publisherLookupMode)
             val platform = request.publisherPlatform?.trim()?.lowercase().orEmpty()
             val publisherKind = request.publisherKind
                 ?.trim()
@@ -1180,7 +1190,12 @@ public class AdminService(
                 }
             } else {
                 val publisherInfo = cachedPublisherCandidate(publisherKey)
-                    ?: fetchPublisherInfo(platform, externalId).first.normalized().copy(key = publisherKey)
+                    ?: if (publisherLookupMode == PUBLISHER_LOOKUP_MODE_PLACEHOLDER) {
+                        warnings += "未查询平台资料，已使用发布者 ID 创建占位发布者：$platform:$externalId"
+                        placeholderPublisherInfo(publisherKey)
+                    } else {
+                        fetchPublisherInfo(platform, externalId).first.normalized().copy(key = publisherKey)
+                    }
                 PublisherRepository.upsertInfo(publisherInfo)
             }
         }
@@ -1242,7 +1257,7 @@ public class AdminService(
             previousPolicy = existingSubscription?.policy,
         )
         replacementFilterConditions?.forEach(DynamicFilterRuleRepository::validateCondition)
-        val autoFollowOutcome = if (configProvider().subscription.autoFollowPublisherOnSubscribe) {
+        val autoFollowOutcome = if (existingSubscription == null && configProvider().subscription.autoFollowPublisherOnSubscribe) {
             tryEnsureFollowed(publisherPlatform, publisherExternalId)
         } else {
             AutoFollowOutcome(followed = false)
@@ -1296,7 +1311,7 @@ public class AdminService(
             subscriberUpdated = subscriberUpsert.updated,
             subscriptionCreated = subscriptionResult.changed,
             autoFollowed = autoFollowed,
-            warnings = listOfNotNull(autoFollowOutcome.warning),
+            warnings = warnings + listOfNotNull(autoFollowOutcome.warning),
         )
     }
 
@@ -1602,26 +1617,17 @@ public class AdminService(
         platform: String,
         externalId: String,
     ): AutoFollowOutcome {
-        return when (plugin.queryFollowState(externalId)) {
-            FollowState.FOLLOWING -> AutoFollowOutcome(followed = false)
-            FollowState.NOT_FOLLOWING -> {
-                val result = plugin.followPublisher(externalId)
-                when (result.status) {
-                    FollowActionStatus.DONE -> AutoFollowOutcome(followed = true)
-                    FollowActionStatus.NOOP -> AutoFollowOutcome(followed = false)
-                    FollowActionStatus.FAILED -> AutoFollowOutcome(
-                        followed = false,
-                        warning = result.message ?: "关注发布者失败，已跳过自动关注：$platform",
-                    )
-                    FollowActionStatus.UNSUPPORTED -> AutoFollowOutcome(
-                        followed = false,
-                        warning = "平台不支持关注操作，已跳过自动关注：$platform",
-                    )
-                }
-            }
-            FollowState.UNSUPPORTED -> AutoFollowOutcome(
+        val result = plugin.followPublisher(externalId)
+        return when (result.status) {
+            FollowActionStatus.DONE -> AutoFollowOutcome(followed = true)
+            FollowActionStatus.NOOP -> AutoFollowOutcome(followed = false)
+            FollowActionStatus.FAILED -> AutoFollowOutcome(
                 followed = false,
-                warning = "平台不支持关注状态检查，已跳过自动关注：$platform",
+                warning = result.message ?: "关注发布者失败，已跳过自动关注：$platform",
+            )
+            FollowActionStatus.UNSUPPORTED -> AutoFollowOutcome(
+                followed = false,
+                warning = "平台不支持关注操作，已跳过自动关注：$platform",
             )
         }
     }
@@ -1629,11 +1635,14 @@ public class AdminService(
     private suspend fun fetchPublisherInfo(platform: String, externalId: String): Pair<PublisherInfo, PluginInfo> {
         val handle = publisherLookupProvider()
             .firstOrNull { it.instance.platformId.value.equals(platform, ignoreCase = true) }
+        val pluginInfo = handle?.info ?: fallbackPublisherPluginInfo(platform)
+        cachedPublisherCandidate(PublisherKey.of(platform, PublisherKind.USER, externalId))?.let { cached ->
+            return cached to pluginInfo
+        }
         val plugin = handle?.instance ?: publisherLookupResolver(platform)
             ?: throw NoSuchElementException("未找到发布者查询插件：$platform")
         val publisherInfo = plugin.fetchPublisherInfo(externalId)?.normalized()
             ?: throw NoSuchElementException("未找到发布者：$platform:$externalId")
-        val pluginInfo = handle?.info ?: fallbackPublisherPluginInfo(platform)
         rememberPublisherCandidate(publisherInfo)
         return publisherInfo to pluginInfo
     }
@@ -2013,8 +2022,15 @@ private fun DrawThemePalette.toDto(): PublisherDrawThemeDto = PublisherDrawTheme
     mode = mode.name,
     backgroundColors = backgroundColors,
     primaryColor = primaryColor,
+    readableAccentColor = readableAccentColor,
+    onPrimaryColor = onPrimaryColor,
+    qrPointColor = qrPointColor,
+    cardColor = cardColor,
+    borderColor = borderColor,
     linkColor = linkColor,
     textColor = textColor,
+    secondaryTextColor = secondaryTextColor,
+    mutedTextColor = mutedTextColor,
 )
 
 private fun Subscriber.toDto(
@@ -2261,7 +2277,36 @@ private fun SubscriptionExportItem.toCreateSubscriptionRequest(): CreateSubscrip
         publisherKind = publisherKey.kind.name,
         publisherExternalId = publisherKey.externalId,
         policy = policy,
+        publisherLookupMode = publisherLookupMode,
     )
+}
+
+private fun parsePublisherLookupMode(value: String?): String {
+    val normalized = value?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
+        ?: PUBLISHER_LOOKUP_MODE_VERIFY
+    return when (normalized) {
+        PUBLISHER_LOOKUP_MODE_VERIFY -> PUBLISHER_LOOKUP_MODE_VERIFY
+        PUBLISHER_LOOKUP_MODE_PLACEHOLDER, "SKIP", "LOCAL_ONLY" -> PUBLISHER_LOOKUP_MODE_PLACEHOLDER
+        else -> throw IllegalArgumentException(
+            "publisherLookupMode 无效：$value，可选值：$PUBLISHER_LOOKUP_MODE_VERIFY|$PUBLISHER_LOOKUP_MODE_PLACEHOLDER",
+        )
+    }
+}
+
+private fun placeholderPublisherInfo(key: PublisherKey): PublisherInfo {
+    return PublisherInfo(
+        key = key,
+        name = key.externalId,
+        avatar = MediaRef("", MediaKind.AVATAR),
+    )
+}
+
+private fun Publisher.isPlaceholderPublisher(): Boolean {
+    return name == externalId &&
+        avatar.uri.isBlank() &&
+        avatarBadgeKey == null &&
+        banner == null &&
+        pendant == null
 }
 
 private fun SubscriptionExportItem.importPublisherKey(): PublisherKey {
@@ -2379,6 +2424,8 @@ private const val LOGIN_STATE_TIMEOUT_MS: Long = 5_000
 private const val ADMIN_CANDIDATE_CACHE_TTL_MS: Long = 5 * 60 * 1_000
 private const val ADMIN_PUBLISHER_CANDIDATE_CACHE_MAX_SIZE: Int = 256
 private const val ADMIN_TARGET_CANDIDATE_CACHE_MAX_SIZE: Int = 1_000
+private const val PUBLISHER_LOOKUP_MODE_VERIFY: String = "VERIFY"
+private const val PUBLISHER_LOOKUP_MODE_PLACEHOLDER: String = "PLACEHOLDER"
 private const val TASK_OWNER_MAIN: String = "MAIN"
 private const val TASK_OWNER_PLUGIN: String = "PLUGIN"
 private const val TASK_OWNER_MAIN_ID: String = "main"

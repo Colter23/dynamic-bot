@@ -47,7 +47,6 @@ import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.core.plugin.FollowActionStatus
-import top.colter.dynamic.core.plugin.FollowState
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
 import top.colter.dynamic.core.plugin.PublisherLoginMethod
 import top.colter.dynamic.core.plugin.PublisherLoginProvider
@@ -735,26 +734,17 @@ private class SubscribeCommandHandler(
                 warning = "未找到发布者关注插件：$platform",
             )
         }
-        return when (followPlugin.queryFollowState(publisherUserId)) {
-            FollowState.FOLLOWING -> CommandAutoFollowOutcome(followed = false)
-            FollowState.NOT_FOLLOWING -> {
-                val followResult = followPlugin.followPublisher(publisherUserId)
-                when (followResult.status) {
-                    FollowActionStatus.DONE -> CommandAutoFollowOutcome(followed = true)
-                    FollowActionStatus.NOOP -> CommandAutoFollowOutcome(followed = false)
-                    FollowActionStatus.FAILED -> CommandAutoFollowOutcome(
-                        followed = false,
-                        warning = followResult.message ?: "关注发布者失败：$platform",
-                    )
-                    FollowActionStatus.UNSUPPORTED -> CommandAutoFollowOutcome(
-                        followed = false,
-                        warning = "$platform 不支持自动关注",
-                    )
-                }
-            }
-            FollowState.UNSUPPORTED -> CommandAutoFollowOutcome(
+        val followResult = followPlugin.followPublisher(publisherUserId)
+        return when (followResult.status) {
+            FollowActionStatus.DONE -> CommandAutoFollowOutcome(followed = true)
+            FollowActionStatus.NOOP -> CommandAutoFollowOutcome(followed = false)
+            FollowActionStatus.FAILED -> CommandAutoFollowOutcome(
                 followed = false,
-                warning = "$platform 不支持关注状态检查",
+                warning = followResult.message ?: "关注发布者失败：$platform",
+            )
+            FollowActionStatus.UNSUPPORTED -> CommandAutoFollowOutcome(
+                followed = false,
+                warning = "$platform 不支持自动关注",
             )
         }
     }

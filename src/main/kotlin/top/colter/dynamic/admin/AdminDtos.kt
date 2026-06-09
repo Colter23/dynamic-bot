@@ -281,8 +281,15 @@ public data class PublisherDrawThemeDto(
     val mode: String,
     val backgroundColors: List<String>,
     val primaryColor: String,
+    val readableAccentColor: String = primaryColor,
+    val onPrimaryColor: String = "#FFFFFF",
+    val qrPointColor: String = primaryColor,
+    val cardColor: String = "#C2FFFFFF",
+    val borderColor: String = "#E0FFFFFF",
     val linkColor: String,
     val textColor: String,
+    val secondaryTextColor: String = textColor,
+    val mutedTextColor: String = secondaryTextColor,
 )
 
 @Serializable
@@ -384,6 +391,7 @@ public data class SubscriptionExportItem(
     val policy: SubscriptionPolicy = SubscriptionPolicy.default(),
     val filterRules: List<SubscriptionExportFilterRule> = emptyList(),
     val linkParseTriggerMode: String? = null,
+    val publisherLookupMode: String? = null,
 )
 
 @Serializable
@@ -654,6 +662,7 @@ public data class CreateSubscriptionRequest(
     val publisherExternalId: String? = null,
     val publisherId: Int? = null,
     val policy: SubscriptionPolicy = SubscriptionPolicy.default(),
+    val publisherLookupMode: String? = null,
 )
 
 @Serializable
