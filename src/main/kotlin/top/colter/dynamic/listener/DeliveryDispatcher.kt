@@ -102,21 +102,23 @@ public class DeliveryDispatcher(
     }
 
     public suspend fun sendCommandResult(request: CommandResultSendRequest): MessageSendResult {
-        val rewrittenRequest = rewriteCommandResultRequest(request)
-        val target = rewrittenRequest.target.address
+        val target = request.target.address
         val routed = resolveRoutedSinks(target)
         if (routed.routedSinkIds.isNotEmpty()) {
-            val (sendRequest, candidates) = prepareRoutedCommandResultRequest(rewrittenRequest, routed.candidates)
+            val (sendRequest, candidates) = prepareRoutedCommandResultRequest(request, routed.candidates)
             return accountRouter.sendCommandResult(
                 candidates = candidates,
                 policy = routingConfigProvider().policyFor(target.platformId.value),
                 request = sendRequest,
+                prepareRequest = { candidate ->
+                    rewriteCommandResultRequest(sendRequest, candidate.route.mediaDeliveryProfileId)
+                },
             )
         }
 
         return when (val direct = resolveDirectSink(target)) {
             is DirectSinkResolveResult.Found -> runCatching {
-                direct.sink.sendCommandResult(prepareDirectCommandResultRequest(rewrittenRequest, direct.sink))
+                direct.sink.sendCommandResult(prepareDirectCommandResultRequest(request, direct.sink))
             }
                 .getOrElse { MessageSendResult.failed(it.message ?: "命令回复发送失败", retryable = true) }
             DirectSinkResolveResult.NotFound -> {
@@ -170,51 +172,53 @@ public class DeliveryDispatcher(
     }
 
     private suspend fun sendDelivery(request: MessageDeliveryRequest, config: DeliveryConfig): DeliveryOutcome {
-        val rewrittenRequest = rewriteDeliveryRequest(request)
-        val routed = resolveRoutedSinks(rewrittenRequest.target)
+        val routed = resolveRoutedSinks(request.target)
         if (routed.routedSinkIds.isNotEmpty()) {
-            val (sendRequest, candidates) = prepareRoutedDeliveryRequest(rewrittenRequest, routed.candidates)
+            val (sendRequest, candidates) = prepareRoutedDeliveryRequest(request, routed.candidates)
             return sendWithRoutes(sendRequest, candidates, config)
         }
 
-        return when (val direct = resolveDirectSink(rewrittenRequest.target)) {
+        return when (val direct = resolveDirectSink(request.target)) {
             is DirectSinkResolveResult.Found -> sendWithSink(
-                prepareDirectDeliveryRequest(rewrittenRequest, direct.sink),
+                prepareDirectDeliveryRequest(request, direct.sink),
                 direct.sink,
                 config,
             )
             DirectSinkResolveResult.NotFound -> {
                 logger.warn {
-                    "消息投递失败：未找到消息出口插件，deliveryId=${rewrittenRequest.delivery.id}，messageId=${rewrittenRequest.delivery.messageId}，target=${rewrittenRequest.target.stableValue()}"
+                    "消息投递失败：未找到消息出口插件，deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}"
                 }
                 MessageDeliveryRepository.markFailed(
-                    rewrittenRequest.delivery.id,
-                    "未找到消息出口插件：platform=${rewrittenRequest.target.platformId.value}，kind=${rewrittenRequest.target.kind.name}",
+                    request.delivery.id,
+                    "未找到消息出口插件：platform=${request.target.platformId.value}，kind=${request.target.kind.name}",
                 )
                 DeliveryOutcome.FAILED
             }
             is DirectSinkResolveResult.Ambiguous -> {
                 logger.warn {
-                    "消息投递失败：消息出口插件不唯一，deliveryId=${rewrittenRequest.delivery.id}，messageId=${rewrittenRequest.delivery.messageId}，target=${rewrittenRequest.target.stableValue()}，plugins=${direct.pluginIds}"
+                    "消息投递失败：消息出口插件不唯一，deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，plugins=${direct.pluginIds}"
                 }
                 MessageDeliveryRepository.markFailed(
-                    rewrittenRequest.delivery.id,
-                    "消息出口插件不唯一：platform=${rewrittenRequest.target.platformId.value}，kind=${rewrittenRequest.target.kind.name}，plugins=${direct.pluginIds.joinToString(",")}",
+                    request.delivery.id,
+                    "消息出口插件不唯一：platform=${request.target.platformId.value}，kind=${request.target.kind.name}，plugins=${direct.pluginIds.joinToString(",")}",
                 )
                 DeliveryOutcome.FAILED
             }
         }
     }
 
-    private fun rewriteDeliveryRequest(request: MessageDeliveryRequest): MessageDeliveryRequest {
+    private fun rewriteDeliveryRequest(request: MessageDeliveryRequest, profileId: String): MessageDeliveryRequest {
         val service = outboundMediaService ?: return request
-        val message = service.rewriteMessage(request.message)
+        val message = service.rewriteMessage(request.message, profileId)
         return if (message == request.message) request else request.copy(message = message)
     }
 
-    private fun rewriteCommandResultRequest(request: CommandResultSendRequest): CommandResultSendRequest {
+    private fun rewriteCommandResultRequest(
+        request: CommandResultSendRequest,
+        profileId: String,
+    ): CommandResultSendRequest {
         val service = outboundMediaService ?: return request
-        val chain = service.rewriteBatches(request.chain)
+        val chain = service.rewriteBatches(request.chain, profileId)
         return if (chain == request.chain) request else request.copy(chain = chain)
     }
 
@@ -252,18 +256,28 @@ public class DeliveryDispatcher(
         request: MessageDeliveryRequest,
         sink: MessageSinkPlugin,
     ): MessageDeliveryRequest {
-        if (!request.message.batches.containsMergedForward()) return request
-        if (MessageSinkFeature.MERGED_FORWARD in sink.supportedMessageFeatures) return request
-        return request.withMergedForwardFallback()
+        val prepared = if (!request.message.batches.containsMergedForward() ||
+            MessageSinkFeature.MERGED_FORWARD in sink.supportedMessageFeatures
+        ) {
+            request
+        } else {
+            request.withMergedForwardFallback()
+        }
+        return rewriteDeliveryRequest(prepared, sink.mediaDeliveryProfileId)
     }
 
     private fun prepareDirectCommandResultRequest(
         request: CommandResultSendRequest,
         sink: MessageSinkPlugin,
     ): CommandResultSendRequest {
-        if (!request.chain.containsMergedForward()) return request
-        if (MessageSinkFeature.MERGED_FORWARD in sink.supportedMessageFeatures) return request
-        return request.withMergedForwardFallback()
+        val prepared = if (!request.chain.containsMergedForward() ||
+            MessageSinkFeature.MERGED_FORWARD in sink.supportedMessageFeatures
+        ) {
+            request
+        } else {
+            request.withMergedForwardFallback()
+        }
+        return rewriteCommandResultRequest(prepared, sink.mediaDeliveryProfileId)
     }
 
     private suspend fun sendWithRoutes(
@@ -278,6 +292,9 @@ public class DeliveryDispatcher(
             candidates = candidates,
             policy = routingConfigProvider().policyFor(request.target.platformId.value),
             request = request,
+            prepareRequest = { candidate ->
+                rewriteDeliveryRequest(request, candidate.route.mediaDeliveryProfileId)
+            },
         )
         return handleSendResult(request, result, config)
     }

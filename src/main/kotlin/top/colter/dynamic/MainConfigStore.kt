@@ -51,11 +51,7 @@ public class MainConfigStore(
         } else {
             loaded
         }
-        val withSecrets = if (withToken.outboundMedia.signingSecret.isBlank()) {
-            withToken.copy(outboundMedia = withToken.outboundMedia.copy(signingSecret = secretProvider()))
-        } else {
-            withToken
-        }
+        val withSecrets = withToken.withGeneratedMediaDeliverySecrets(secretProvider)
         if (withSecrets != loaded) {
             configService.save(MainDynamicConfig.CONFIG_ID, withSecrets)
         }
@@ -96,6 +92,24 @@ public class MainConfigStore(
     public fun formSpec(): ConfigFormSpec = MainConfigForms.formSpec
 }
 
+private fun MainDynamicConfig.withGeneratedMediaDeliverySecrets(secretProvider: () -> String): MainDynamicConfig {
+    var changed = false
+    val profiles = mediaDelivery.profiles.map { profile ->
+        if (profile.signingSecret.isNotBlank()) {
+            profile
+        } else {
+            val secret = secretProvider().takeIf { it.isNotBlank() } ?: return@map profile
+            changed = true
+            profile.copy(signingSecret = secret)
+        }
+    }
+    return if (changed) {
+        copy(mediaDelivery = mediaDelivery.copy(profiles = profiles))
+    } else {
+        this
+    }
+}
+
 public object MainConfigForms {
     public val migrations: List<ConfigMigration> = listOf(
         ConfigMigration(
@@ -116,6 +130,53 @@ public object MainConfigForms {
             remove("draw.themeColor")
             remove("draw.backgroundStartColor")
             remove("draw.backgroundEndColor")
+        },
+        ConfigMigration(
+            id = "main-media-delivery-profiles",
+            description = "迁移旧出站媒体配置到媒体交付 profile",
+        ) {
+            if (!contains("mediaDelivery")) {
+                val enabled = get("outboundMedia.enabled") as? Boolean ?: true
+                val publicBaseUrl = (get("outboundMedia.publicBaseUrl") as? String).orEmpty()
+                val urlTtlSeconds = when (val value = get("outboundMedia.urlTtlSeconds")) {
+                    is Number -> value.toInt()
+                    is String -> value.toIntOrNull()
+                    else -> null
+                } ?: 1_800
+                val signingSecret = (get("outboundMedia.signingSecret") as? String).orEmpty()
+                val hasRemoteProfile = publicBaseUrl.trim().isNotBlank()
+                val defaultProfileId = if (enabled && hasRemoteProfile) "remote" else "auto"
+                val autoProfile = mapOf(
+                    "id" to "auto",
+                    "name" to "自动",
+                    "type" to MediaDeliveryType.AUTO.name,
+                    "publicBaseUrl" to "",
+                    "urlTtlSeconds" to 1_800,
+                    "signingSecret" to signingSecret,
+                    "imageBase64MaxBytes" to 5L * 1024L * 1024L,
+                    "pathMappings" to emptyList<Map<String, Any?>>(),
+                )
+                val profiles = if (hasRemoteProfile) {
+                    listOf(
+                        autoProfile,
+                        mapOf(
+                            "id" to "remote",
+                            "name" to "外部访问",
+                            "type" to MediaDeliveryType.SIGNED_URL.name,
+                            "publicBaseUrl" to publicBaseUrl,
+                            "urlTtlSeconds" to urlTtlSeconds,
+                            "signingSecret" to signingSecret,
+                            "imageBase64MaxBytes" to 5L * 1024L * 1024L,
+                            "pathMappings" to emptyList<Map<String, Any?>>(),
+                        ),
+                    )
+                } else {
+                    listOf(autoProfile)
+                }
+                set("mediaDelivery.defaultProfileId", defaultProfileId)
+                set("mediaDelivery.profiles", profiles)
+            }
+            remove("outboundMedia")
         },
     )
 
@@ -578,35 +639,29 @@ public object MainConfigForms {
                     restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
-                    path = "outboundMedia.enabled",
-                    label = "启用外部媒体链接",
-                    type = ConfigFieldType.BOOLEAN,
-                    section = "出站媒体",
-                    description = "把本地图片转换成临时访问链接。\n适合远程 OneBot 或其他消息出口拉取主项目生成的图片。",
-                ),
-                ConfigFieldSpec(
-                    path = "outboundMedia.publicBaseUrl",
-                    label = "媒体外部访问地址",
+                    path = "mediaDelivery.defaultProfileId",
+                    label = "默认媒体交付 profile",
                     type = ConfigFieldType.TEXT,
-                    section = "出站媒体",
-                    description = "此项目的访问地址。\n例如 http://内网IP:2233；留空时会继续使用插件自己的兜底发送方式。",
+                    section = "媒体交付",
+                    description = "消息出口没有单独指定时使用的媒体交付 profile ID。\nOneBot 可在插件配置或单个连接中引用这里的 profile。",
+                    required = true,
                 ),
                 ConfigFieldSpec(
-                    path = "outboundMedia.urlTtlSeconds",
-                    label = "链接有效期（秒）",
-                    type = ConfigFieldType.NUMBER,
-                    section = "出站媒体",
-                    description = "临时媒体链接多久后过期。\n投递重试时会重新生成新的链接。",
-                    min = 1,
-                    numberKind = ConfigNumberKind.INTEGER,
-                ),
-                ConfigFieldSpec(
-                    path = "outboundMedia.signingSecret",
-                    label = "媒体链接签名密钥",
-                    type = ConfigFieldType.SECRET,
-                    section = "出站媒体",
-                    description = "给临时媒体链接签名的密钥。\n留空时首次启动会自动生成；修改后旧链接会立刻失效。",
-                    secret = true,
+                    path = "mediaDelivery.profiles",
+                    label = "媒体交付 profiles",
+                    type = ConfigFieldType.JSON,
+                    section = "媒体交付",
+                    description = "统一配置本地图片、视频等媒体如何交给消息平台。\nAUTO 会优先把小图转 Base64，有外部访问地址时转临时 URL；LOCAL_FILE 会按路径映射转 file URI；SIGNED_URL 固定转临时 URL；BASE64 只把符合大小限制的图片转 Base64。",
+                    metadata = mapOf(
+                        "example" to """
+                            [
+                              {"id":"auto","name":"自动","type":"AUTO","imageBase64MaxBytes":5242880,"publicBaseUrl":"","urlTtlSeconds":1800,"signingSecret":"","pathMappings":[]},
+                              {"id":"local","name":"本机 OneBot","type":"LOCAL_FILE","pathMappings":[{"botRoot":"D:/dynamic-bot/data","clientRoot":"D:/dynamic-bot/data","enabled":true}]},
+                              {"id":"remote","name":"远程 OneBot","type":"SIGNED_URL","publicBaseUrl":"http://内网IP:2233","urlTtlSeconds":1800,"signingSecret":"自动生成的密钥"}
+                            ]
+                        """.trimIndent(),
+                    ),
+                    required = true,
                 ),
                 ConfigFieldSpec(
                     path = "notifications.enabled",
@@ -911,7 +966,7 @@ public object MainConfigForms {
             "消息模板",
             "绘图",
             "消息路由",
-            "出站媒体",
+            "媒体交付",
             "消息投递",
             "图片缓存",
             "插件目录",
@@ -976,10 +1031,8 @@ public object MainConfigForms {
             "messageRouting.defaultPolicy.primaryAccountId",
             "messageRouting.platformPolicies",
             "messageRouting.defaultPolicy.failureCooldownSeconds",
-            "outboundMedia.enabled",
-            "outboundMedia.publicBaseUrl",
-            "outboundMedia.urlTtlSeconds",
-            "outboundMedia.signingSecret",
+            "mediaDelivery.defaultProfileId",
+            "mediaDelivery.profiles",
             "delivery.maxAttempts",
             "delivery.retryDelaySeconds",
             "delivery.dispatchConcurrency",
@@ -1078,16 +1131,7 @@ public object MainConfigForms {
         require(config.imageCache.cleanupCron.isNotBlank()) { "清理任务 Cron 不能为空" }
         require(config.imageCache.sourceCleanup.maxIdleDays >= 0) { "原图最大闲置天数不能为负数" }
         require(config.imageCache.renderedCleanup.maxIdleDays >= 0) { "渲染图片最大闲置天数不能为负数" }
-        require(config.outboundMedia.urlTtlSeconds >= 1) { "出站媒体链接有效期至少为 1 秒" }
-        val outboundMediaBaseUrl = config.outboundMedia.publicBaseUrl.trim()
-        if (outboundMediaBaseUrl.isNotBlank()) {
-            require(outboundMediaBaseUrl.startsWith("http://", ignoreCase = true) ||
-                outboundMediaBaseUrl.startsWith("https://", ignoreCase = true)) {
-                "出站媒体外部访问地址必须以 http:// 或 https:// 开头"
-            }
-            require(config.webAdmin.enabled) { "配置出站媒体外部访问地址时需要启用 Web 后台服务" }
-            require(config.outboundMedia.signingSecret.isNotBlank()) { "出站媒体签名密钥不能为空" }
-        }
+        validateMediaDelivery(config)
         require(config.notifications.dedupeSeconds >= 0) { "通知去重时间不能为负数" }
         require(config.notifications.routeMonitorIntervalSeconds >= 1) { "Bot 状态检查间隔至少为 1 秒" }
         val notificationTargetKeys = config.notifications.adminTargets
@@ -1147,6 +1191,51 @@ public object MainConfigForms {
         }
         if (config.webAdmin.enabled) {
             require(config.webAdmin.token.isNotBlank()) { "启用 Web 后台时 token 不能为空" }
+        }
+    }
+
+    private fun validateMediaDelivery(config: MainDynamicConfig) {
+        val delivery = config.mediaDelivery
+        val defaultProfileId = delivery.defaultProfileId.trim()
+        require(defaultProfileId.isNotBlank()) { "默认媒体交付 profile ID 不能为空" }
+        require(delivery.profiles.isNotEmpty()) { "至少需要配置一个媒体交付 profile" }
+
+        val profileIds = delivery.profiles.map { it.id.trim() }
+        require(profileIds.none { it.isBlank() }) { "媒体交付 profile ID 不能为空" }
+        val duplicatedProfileIds = profileIds.groupingBy { it }.eachCount().filterValues { it > 1 }.keys
+        require(duplicatedProfileIds.isEmpty()) {
+            "媒体交付 profile ID 不能重复：${duplicatedProfileIds.joinToString(",")}"
+        }
+        require(defaultProfileId in profileIds) { "默认媒体交付 profile 不存在：$defaultProfileId" }
+
+        delivery.profiles.forEachIndexed { index, profile ->
+            require(profile.urlTtlSeconds >= 1) { "mediaDelivery.profiles[$index].urlTtlSeconds 至少为 1" }
+            require(profile.imageBase64MaxBytes >= 0) {
+                "mediaDelivery.profiles[$index].imageBase64MaxBytes 不能为负数"
+            }
+            val baseUrl = profile.publicBaseUrl.trim()
+            if (profile.type == MediaDeliveryType.SIGNED_URL || baseUrl.isNotBlank()) {
+                require(baseUrl.startsWith("http://", ignoreCase = true) ||
+                    baseUrl.startsWith("https://", ignoreCase = true)) {
+                    "媒体交付 profile ${profile.id} 的外部访问地址必须以 http:// 或 https:// 开头"
+                }
+                require(config.webAdmin.enabled) {
+                    "媒体交付 profile ${profile.id} 使用外部访问地址时需要启用 Web 后台服务"
+                }
+                require(profile.signingSecret.isNotBlank()) {
+                    "媒体交付 profile ${profile.id} 的签名密钥不能为空"
+                }
+            }
+            profile.pathMappings.forEachIndexed { mappingIndex, mapping ->
+                if (mapping.enabled) {
+                    require(mapping.botRoot.isNotBlank()) {
+                        "mediaDelivery.profiles[$index].pathMappings[$mappingIndex].botRoot 不能为空"
+                    }
+                    require(mapping.clientRoot.isNotBlank()) {
+                        "mediaDelivery.profiles[$index].pathMappings[$mappingIndex].clientRoot 不能为空"
+                    }
+                }
+            }
         }
     }
 

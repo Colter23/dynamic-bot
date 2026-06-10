@@ -33,6 +33,7 @@ public class MessageSinkAccountRouter(
         candidates: List<MessageSinkRouteCandidate>,
         policy: MessageSinkRoutingPolicy,
         request: MessageDeliveryRequest,
+        prepareRequest: suspend (MessageSinkRouteCandidate) -> MessageDeliveryRequest = { request },
     ): MessageSendResult {
         return sendWithRoute(
             candidates = candidates,
@@ -40,7 +41,7 @@ public class MessageSinkAccountRouter(
             policy = policy,
             actionLabel = "消息发送",
         ) { candidate ->
-            candidate.sink.sendMessage(request, candidate.route.routeId)
+            candidate.sink.sendMessage(prepareRequest(candidate), candidate.route.routeId)
         }
     }
 
@@ -48,6 +49,7 @@ public class MessageSinkAccountRouter(
         candidates: List<MessageSinkRouteCandidate>,
         policy: MessageSinkRoutingPolicy,
         request: CommandResultSendRequest,
+        prepareRequest: suspend (MessageSinkRouteCandidate) -> CommandResultSendRequest = { request },
     ): MessageSendResult {
         return sendWithRoute(
             candidates = candidates,
@@ -55,7 +57,7 @@ public class MessageSinkAccountRouter(
             policy = policy,
             actionLabel = "命令回复",
         ) { candidate ->
-            candidate.sink.sendCommandResult(request, candidate.route.routeId)
+            candidate.sink.sendCommandResult(prepareRequest(candidate), candidate.route.routeId)
         }
     }
 

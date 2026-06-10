@@ -93,6 +93,9 @@ class MainConfigStoreTest {
         assertTrue("imageCache.memoryMaxEntries" in paths)
         assertTrue("delivery.historyRetentionDays" in paths)
         assertTrue("delivery.cleanupCron" in paths)
+        assertTrue("mediaDelivery.defaultProfileId" in paths)
+        assertTrue("mediaDelivery.profiles" in paths)
+        assertFalse("outboundMedia.enabled" in paths)
 
         val error = assertFailsWith<IllegalArgumentException> {
             MainConfigForms.validate(
@@ -103,6 +106,37 @@ class MainConfigStoreTest {
         }
 
         assertTrue(error.message!!.contains("图片内存缓存"))
+    }
+
+    @Test
+    fun shouldMigrateLegacyOutboundMediaToMediaDeliveryProfile() {
+        val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-media-migration"))
+        val path = configService.resolvePath(MainDynamicConfig.CONFIG_ID)
+        path.parent.createDirectories()
+        path.writeText(
+            """
+            webAdmin:
+              enabled: true
+              token: token
+            outboundMedia:
+              enabled: true
+              publicBaseUrl: "http://example.com:2233"
+              urlTtlSeconds: 120
+              signingSecret: old-secret
+            """.trimIndent(),
+        )
+
+        val loaded = MainConfigStore(configService).loadOrCreate { "token" }
+        val rewritten = path.readText()
+
+        assertEquals("remote", loaded.mediaDelivery.defaultProfileId)
+        val remote = loaded.mediaDelivery.profiles.single { it.id == "remote" }
+        assertEquals(MediaDeliveryType.SIGNED_URL, remote.type)
+        assertEquals("http://example.com:2233", remote.publicBaseUrl)
+        assertEquals(120, remote.urlTtlSeconds)
+        assertEquals("old-secret", remote.signingSecret)
+        assertFalse(rewritten.contains("outboundMedia"))
+        assertTrue(rewritten.contains("mediaDelivery"))
     }
 
     @Test

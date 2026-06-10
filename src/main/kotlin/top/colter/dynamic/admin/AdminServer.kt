@@ -166,6 +166,7 @@ public fun Application.adminModule(context: AdminServerContext) {
         get("/media/outbound/{id}") {
             call.respondOutboundMedia {
                 context.outboundMediaService.resolve(
+                    profileId = call.request.queryParameters["profile"],
                     id = call.pathString("id"),
                     expires = call.request.queryParameters["expires"]?.toLongOrNull()
                         ?: throw IllegalArgumentException("缺少或无效的过期时间"),

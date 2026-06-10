@@ -15,7 +15,7 @@ public data class MainDynamicConfig(
     val subscription: SubscriptionConfig = SubscriptionConfig(),
     val linkParsing: LinkParsingConfig = LinkParsingConfig(),
     val imageCache: ImageCacheConfig = ImageCacheConfig(),
-    val outboundMedia: OutboundMediaConfig = OutboundMediaConfig(),
+    val mediaDelivery: MediaDeliveryConfig = MediaDeliveryConfig(),
     val notifications: NotificationConfig = NotificationConfig(),
     val messageRouting: MessageRoutingConfig = MessageRoutingConfig(),
     val delivery: DeliveryConfig = DeliveryConfig(),
@@ -167,12 +167,34 @@ public data class ImageCleanupConfig(
     val maxIdleDays: Long = 30,
 )
 
-public data class OutboundMediaConfig(
-    val enabled: Boolean = true,
+public data class MediaDeliveryConfig(
+    val defaultProfileId: String = "auto",
+    val profiles: List<MediaDeliveryProfile> = listOf(MediaDeliveryProfile()),
+)
+
+public data class MediaDeliveryProfile(
+    val id: String = "auto",
+    val name: String = "自动",
+    val type: MediaDeliveryType = MediaDeliveryType.AUTO,
     val publicBaseUrl: String = "",
     val urlTtlSeconds: Int = 1_800,
     val signingSecret: String = "",
+    val imageBase64MaxBytes: Long = 5L * 1024L * 1024L,
+    val pathMappings: List<MediaDeliveryPathMapping> = emptyList(),
 )
+
+public data class MediaDeliveryPathMapping(
+    val botRoot: String = "",
+    val clientRoot: String = "",
+    val enabled: Boolean = true,
+)
+
+public enum class MediaDeliveryType {
+    AUTO,
+    LOCAL_FILE,
+    SIGNED_URL,
+    BASE64,
+}
 
 public data class NotificationConfig(
     val enabled: Boolean = true,

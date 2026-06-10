@@ -19,7 +19,10 @@ import top.colter.dynamic.ImageCacheConfig
 import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.LinkVideoDownloadConfig
 import top.colter.dynamic.MainDynamicConfig
-import top.colter.dynamic.OutboundMediaConfig
+import top.colter.dynamic.MediaDeliveryConfig
+import top.colter.dynamic.MediaDeliveryPathMapping
+import top.colter.dynamic.MediaDeliveryProfile
+import top.colter.dynamic.MediaDeliveryType
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 
@@ -41,11 +44,7 @@ class OutboundMediaServiceTest {
                         renderedRoot = renderedRoot.toString(),
                         maxImageMegabytes = 1.0,
                     ),
-                    outboundMedia = OutboundMediaConfig(
-                        publicBaseUrl = "http://example.com:2233/",
-                        urlTtlSeconds = 60,
-                        signingSecret = "secret",
-                    ),
+                    mediaDelivery = signedUrlDelivery(),
                 )
             },
             nowEpochSeconds = { 1_000 },
@@ -56,7 +55,8 @@ class OutboundMediaServiceTest {
         assertTrue(rewritten.uri.startsWith("http://example.com:2233/media/outbound/"))
         assertFalse(rewritten.uri.contains(image.toString()))
         val parts = signedUrlParts(rewritten.uri)
-        val result = service.resolve(parts.id, parts.expires, parts.signature)
+        assertEquals("remote", parts.profile)
+        val result = service.resolve(parts.profile, parts.id, parts.expires, parts.signature)
         assertEquals(ContentType.Image.PNG, result.contentType)
         assertEquals(60, result.cacheMaxAgeSeconds)
         assertContentEquals(imageBytes, assertNotNull(result.bytes))
@@ -86,11 +86,7 @@ class OutboundMediaServiceTest {
                             maxFileMegabytes = 1.0,
                         ),
                     ),
-                    outboundMedia = OutboundMediaConfig(
-                        publicBaseUrl = "http://example.com:2233",
-                        urlTtlSeconds = 60,
-                        signingSecret = "secret",
-                    ),
+                    mediaDelivery = signedUrlDelivery(),
                 )
             },
             nowEpochSeconds = { 1_000 },
@@ -100,21 +96,84 @@ class OutboundMediaServiceTest {
 
         assertTrue(rewritten.uri.startsWith("http://example.com:2233/media/outbound/"))
         val parts = signedUrlParts(rewritten.uri)
-        val result = service.resolve(parts.id, parts.expires, parts.signature)
+        val result = service.resolve(parts.profile, parts.id, parts.expires, parts.signature)
         assertEquals(ContentType("video", "mp4"), result.contentType)
         assertEquals(video.toFile(), result.file)
         assertNull(result.bytes)
     }
 
     @Test
-    fun `keep local image when public base url is blank`() {
+    fun `rewrite local file profile with path mapping`() {
+        val renderedRoot = createTempDirectory("outbound-local-rendered")
+        val clientRoot = createTempDirectory("outbound-local-client")
+        val image = renderedRoot.resolve("bilibili").resolve("demo.png")
+        image.parent.createDirectories()
+        image.writeBytes(byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte()))
         val service = OutboundMediaService(
             configProvider = {
-                MainDynamicConfig(outboundMedia = OutboundMediaConfig(signingSecret = "secret"))
+                MainDynamicConfig(
+                    imageCache = ImageCacheConfig(renderedRoot = renderedRoot.toString()),
+                    mediaDelivery = MediaDeliveryConfig(
+                        defaultProfileId = "local",
+                        profiles = listOf(
+                            MediaDeliveryProfile(
+                                id = "local",
+                                type = MediaDeliveryType.LOCAL_FILE,
+                                pathMappings = listOf(
+                                    MediaDeliveryPathMapping(
+                                        botRoot = renderedRoot.toString(),
+                                        clientRoot = clientRoot.toString(),
+                                    ),
+                                ),
+                            ),
+                        ),
+                    ),
+                )
             },
             nowEpochSeconds = { 1_000 },
         )
-        val media = MediaRef(uri = "data/images/draw/demo.png", kind = MediaKind.IMAGE)
+
+        val rewritten = service.rewriteMedia(MediaRef(uri = image.toString(), kind = MediaKind.IMAGE))
+
+        assertEquals(clientRoot.resolve("bilibili").resolve("demo.png").toUri().toString(), rewritten.uri)
+    }
+
+    @Test
+    fun `rewrite base64 profile for small images`() {
+        val renderedRoot = createTempDirectory("outbound-base64-rendered")
+        val image = renderedRoot.resolve("demo.png")
+        image.writeBytes(byteArrayOf(1, 2, 3))
+        val service = OutboundMediaService(
+            configProvider = {
+                MainDynamicConfig(
+                    imageCache = ImageCacheConfig(renderedRoot = renderedRoot.toString()),
+                    mediaDelivery = MediaDeliveryConfig(
+                        defaultProfileId = "base64",
+                        profiles = listOf(
+                            MediaDeliveryProfile(
+                                id = "base64",
+                                type = MediaDeliveryType.BASE64,
+                                imageBase64MaxBytes = 10,
+                            ),
+                        ),
+                    ),
+                )
+            },
+            nowEpochSeconds = { 1_000 },
+        )
+
+        val rewritten = service.rewriteMedia(MediaRef(uri = image.toString(), kind = MediaKind.IMAGE))
+
+        assertEquals("base64://AQID", rewritten.uri)
+    }
+
+    @Test
+    fun `keep local media when auto profile cannot rewrite it`() {
+        val service = OutboundMediaService(
+            configProvider = { MainDynamicConfig() },
+            nowEpochSeconds = { 1_000 },
+        )
+        val media = MediaRef(uri = "data/images/draw/missing.png", kind = MediaKind.IMAGE)
 
         assertEquals(media, service.rewriteMedia(media))
     }
@@ -129,11 +188,7 @@ class OutboundMediaServiceTest {
             configProvider = {
                 MainDynamicConfig(
                     imageCache = ImageCacheConfig(renderedRoot = renderedRoot.toString()),
-                    outboundMedia = OutboundMediaConfig(
-                        publicBaseUrl = "http://example.com",
-                        urlTtlSeconds = 10,
-                        signingSecret = "secret",
-                    ),
+                    mediaDelivery = signedUrlDelivery(urlTtlSeconds = 10),
                 )
             },
             nowEpochSeconds = { now },
@@ -143,8 +198,23 @@ class OutboundMediaServiceTest {
         now = 1_011
 
         assertFailsWith<IllegalArgumentException> {
-            service.resolve(parts.id, parts.expires, parts.signature)
+            service.resolve(parts.profile, parts.id, parts.expires, parts.signature)
         }
+    }
+
+    private fun signedUrlDelivery(urlTtlSeconds: Int = 60): MediaDeliveryConfig {
+        return MediaDeliveryConfig(
+            defaultProfileId = "remote",
+            profiles = listOf(
+                MediaDeliveryProfile(
+                    id = "remote",
+                    type = MediaDeliveryType.SIGNED_URL,
+                    publicBaseUrl = "http://example.com:2233/",
+                    urlTtlSeconds = urlTtlSeconds,
+                    signingSecret = "secret",
+                ),
+            ),
+        )
     }
 
     private fun signedUrlParts(url: String): SignedUrlParts {
@@ -156,6 +226,7 @@ class OutboundMediaServiceTest {
                 key to URLDecoder.decode(value, StandardCharsets.UTF_8)
             }
         return SignedUrlParts(
+            profile = params.getValue("profile"),
             id = URLDecoder.decode(id, StandardCharsets.UTF_8),
             expires = params.getValue("expires").toLong(),
             signature = params.getValue("sig"),
@@ -163,6 +234,7 @@ class OutboundMediaServiceTest {
     }
 
     private data class SignedUrlParts(
+        val profile: String,
         val id: String,
         val expires: Long,
         val signature: String,

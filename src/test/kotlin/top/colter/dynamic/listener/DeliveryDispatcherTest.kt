@@ -1,6 +1,7 @@
 package top.colter.dynamic.listener
 
 import kotlin.io.path.createTempDirectory
+import kotlin.io.path.writeBytes
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
@@ -10,9 +11,16 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.DeliveryConfig
+import top.colter.dynamic.ImageCacheConfig
+import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.MediaDeliveryConfig
+import top.colter.dynamic.MediaDeliveryProfile
+import top.colter.dynamic.MediaDeliveryType
 import top.colter.dynamic.MessageRoutingConfig
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.ForwardNode
+import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
@@ -28,6 +36,7 @@ import top.colter.dynamic.core.plugin.MessageSinkRoute
 import top.colter.dynamic.core.plugin.MessageSinkRoutingPolicy
 import top.colter.dynamic.core.plugin.MessageSinkRoutingStrategy
 import top.colter.dynamic.core.plugin.PluginDescriptor
+import top.colter.dynamic.media.OutboundMediaService
 import top.colter.dynamic.plugin.PluginCapability
 import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.plugin.PluginInfo
@@ -199,6 +208,63 @@ class DeliveryDispatcherTest {
     }
 
     @Test
+    fun `routed sink should rewrite media for each selected route profile`() = runBlocking {
+        initDb("route-media-profile")
+        val renderedRoot = createTempDirectory("delivery-route-media-profile")
+        val image = renderedRoot.resolve("demo.png")
+        image.writeBytes(byteArrayOf(1, 2, 3))
+        val target = testTargetAddress(
+            platformId = "qq",
+            kind = TargetKind.GROUP,
+            externalId = "10001",
+            accountId = "bot-a",
+        )
+        val sink = RoutedRecordingSink(
+            accountIds = listOf("bot-a", "bot-b"),
+            routeProfileIds = mapOf("bot-a" to "base64", "bot-b" to "local"),
+            result = { accountId, request ->
+                if (accountId == "bot-a") {
+                    MessageSendResult.failed("主账号离线", retryable = true)
+                } else {
+                    MessageSendResult.sent("receipt-${request.message.id}")
+                }
+            },
+        )
+        MessageDeliveryRepository.enqueue(imageMessage("message-route-media", target, image.toString()))
+
+        val stats = dispatcher(
+            sink,
+            routing = primaryBackupRouting(),
+            outboundMediaService = OutboundMediaService(
+                configProvider = {
+                    MainDynamicConfig(
+                        imageCache = ImageCacheConfig(renderedRoot = renderedRoot.toString()),
+                        mediaDelivery = MediaDeliveryConfig(
+                            defaultProfileId = "local",
+                            profiles = listOf(
+                                MediaDeliveryProfile(
+                                    id = "base64",
+                                    type = MediaDeliveryType.BASE64,
+                                    imageBase64MaxBytes = 10,
+                                ),
+                                MediaDeliveryProfile(
+                                    id = "local",
+                                    type = MediaDeliveryType.LOCAL_FILE,
+                                ),
+                            ),
+                        ),
+                    )
+                },
+            ),
+        ).dispatchDue()
+
+        assertEquals(1, stats.sent)
+        assertEquals(listOf("bot-a:message-route-media", "bot-b:message-route-media"), sink.sent)
+        assertEquals("base64://AQID", sink.sentMessages[0].firstImageUri())
+        assertEquals(image.toUri().toString(), sink.sentMessages[1].firstImageUri())
+    }
+
+    @Test
     fun `direct sink without merged forward support should receive fallback batches`() = runBlocking {
         initDb("direct-forward-fallback")
         val sink = RecordingSink()
@@ -263,11 +329,13 @@ class DeliveryDispatcherTest {
         vararg sinks: MessageSinkPlugin,
         config: DeliveryConfig = defaultDeliveryConfig(),
         routing: MessageRoutingConfig = MessageRoutingConfig(),
+        outboundMediaService: OutboundMediaService? = null,
     ): DeliveryDispatcher {
         return DeliveryDispatcher(
             sinkProvider = { sinks.mapIndexed { index, sink -> sink.handleForTest(index) } },
             configProvider = { config },
             routingConfigProvider = { routing },
+            outboundMediaService = outboundMediaService,
         )
     }
 
@@ -300,6 +368,24 @@ class DeliveryDispatcherTest {
             time = 1L,
             targets = listOf(target),
             batches = listOf(MessageBatch(listOf(MessageContent.Text("hello")))),
+        )
+    }
+
+    private fun imageMessage(id: String, target: TargetAddress, uri: String): Message {
+        return Message(
+            id = id,
+            time = 1L,
+            targets = listOf(target),
+            batches = listOf(
+                MessageBatch(
+                    listOf(
+                        MessageContent.Image(
+                            fallbackText = "",
+                            image = MediaRef(uri, MediaKind.IMAGE),
+                        ),
+                    ),
+                ),
+            ),
         )
     }
 
@@ -384,6 +470,7 @@ class DeliveryDispatcherTest {
     private class RoutedRecordingSink(
         private val accountIds: List<String>,
         private val features: Set<MessageSinkFeature> = emptySet(),
+        private val routeProfileIds: Map<String, String> = emptyMap(),
         private val result: (String, MessageDeliveryRequest) -> MessageSendResult = { accountId, request ->
             MessageSendResult.sent("receipt-${request.message.id}", sinkAccountId = accountId)
         },
@@ -404,6 +491,7 @@ class DeliveryDispatcherTest {
                     targetPlatformId = PlatformId.of("qq"),
                     accountId = accountId,
                     accountName = accountId,
+                    mediaDeliveryProfileId = routeProfileIds[accountId].orEmpty(),
                 )
             }
         }
@@ -418,6 +506,16 @@ class DeliveryDispatcherTest {
             return result(accountId, request)
         }
     }
+}
+
+private fun Message.firstImageUri(): String {
+    return batches
+        .asSequence()
+        .flatMap { it.content.asSequence() }
+        .filterIsInstance<MessageContent.Image>()
+        .first()
+        .image
+        .uri
 }
 
 private fun MessageSinkPlugin.handleForTest(index: Int): PluginHandle<MessageSinkPlugin> {
