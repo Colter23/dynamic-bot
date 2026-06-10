@@ -9,9 +9,11 @@ import java.nio.file.Files
 import java.nio.file.LinkOption
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.nio.file.StandardOpenOption
 import java.nio.file.attribute.FileTime
 import java.security.MessageDigest
 import java.util.Base64
+import java.util.concurrent.ConcurrentHashMap
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import top.colter.dynamic.MainDynamicConfig
@@ -23,58 +25,63 @@ import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryAdvice
+import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryAdviceRequest
+import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryAdvisor
+import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryConfidence
+import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryMethod
+import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryProbeRequest
+import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryProbeStatus
+import top.colter.dynamic.core.tools.loggerFor
+
+private val logger = loggerFor<OutboundMediaService>()
 
 public class OutboundMediaService(
     private val configProvider: () -> MainDynamicConfig,
     private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
-    public fun rewriteMessage(message: Message, profileId: String? = null): Message {
-        val rewritten = rewriteBatches(message.batches, profileId)
+    private val probeCache = ConcurrentHashMap<ProbeCacheKey, CachedProbeResult>()
+    private val selectionLogCache = ConcurrentHashMap<String, Boolean>()
+
+    public suspend fun rewriteMessage(
+        message: Message,
+        profileId: String? = null,
+        routeContext: OutboundMediaRouteContext = OutboundMediaRouteContext(),
+    ): Message {
+        val session = RewriteSession(configProvider(), profileId, routeContext)
+        val rewritten = session.rewriteBatches(message.batches)
         return if (rewritten == message.batches) message else message.copy(batches = rewritten)
     }
 
-    public fun rewriteBatches(batches: List<MessageBatch>, profileId: String? = null): List<MessageBatch> {
-        val rewritten = batches.map { batch ->
-            val content = batch.content.map { rewriteContent(it, profileId) }
-            if (content == batch.content) batch else batch.copy(content = content)
-        }
-        return if (rewritten == batches) batches else rewritten
+    public suspend fun rewriteBatches(
+        batches: List<MessageBatch>,
+        profileId: String? = null,
+        routeContext: OutboundMediaRouteContext = OutboundMediaRouteContext(),
+    ): List<MessageBatch> {
+        return RewriteSession(configProvider(), profileId, routeContext).rewriteBatches(batches)
     }
 
-    public fun rewriteMedia(media: MediaRef, profileId: String? = null): MediaRef {
-        val config = configProvider()
-        val profile = config.mediaDelivery.profile(profileId) ?: return media
+    public suspend fun rewriteMedia(
+        media: MediaRef,
+        profileId: String? = null,
+        routeContext: OutboundMediaRouteContext = OutboundMediaRouteContext(),
+    ): MediaRef {
+        return RewriteSession(configProvider(), profileId, routeContext).rewriteMedia(media)
+    }
 
-        val uri = media.uri.trim()
-        if (uri.isBlank() || uri.isRemoteOrEncoded()) return media
-        val path = uri.localPath() ?: return media
-        val normalizedPath = path.toAbsolutePath().normalize()
-        if (!Files.isRegularFile(normalizedPath, LinkOption.NOFOLLOW_LINKS)) return media
-
-        val root = findAllowedRoot(normalizedPath, config) ?: return media
-        val size = runCatching { Files.size(normalizedPath) }.getOrElse { return media }
-        if (size > root.maxBytes) return media
-
-        return when (profile.type) {
-            MediaDeliveryType.AUTO -> {
-                rewriteAsBase64(media, normalizedPath, root, profile)
-                    ?: rewriteAsSignedUrl(media, normalizedPath, root, profile)
-                    ?: rewriteAsLocalFile(media, normalizedPath, profile)
-                    ?: media
-            }
-            MediaDeliveryType.BASE64 -> rewriteAsBase64(media, normalizedPath, root, profile) ?: media
-            MediaDeliveryType.LOCAL_FILE -> rewriteAsLocalFile(media, normalizedPath, profile) ?: media
-            MediaDeliveryType.SIGNED_URL -> rewriteAsSignedUrl(media, normalizedPath, root, profile) ?: media
-        }
+    public fun invalidateRoute(routeContext: OutboundMediaRouteContext) {
+        val routeKey = routeContext.routeCacheKey() ?: return
+        probeCache.keys.removeIf { it.routeKey == routeKey }
     }
 
     public fun resolve(profileId: String?, id: String, expires: Long, signature: String): OutboundMediaResult {
         val config = configProvider()
         val profile = config.mediaDelivery.resolveProfile(profileId)
             ?: throw NoSuchElementException("媒体交付 profile 不存在：${profileId.orEmpty()}")
-        require(profile.signingSecret.isNotBlank()) { "媒体交付 profile 签名密钥未配置：${profile.id}" }
+        val secret = profile.signedUrl.signingSecret
+        require(secret.isNotBlank()) { "媒体交付 profile 签名密钥未配置：${profile.id}" }
         require(expires >= nowEpochSeconds()) { "媒体链接已过期" }
-        require(secureEquals(signature, sign(profile.signingSecret, profile.id, id, expires))) { "媒体链接签名无效" }
+        require(secureEquals(signature, sign(secret, profile.id, id, expires))) { "媒体链接签名无效" }
 
         val decoded = decodeMediaId(id)
         val root = allowedRoots(config).firstOrNull { it.key == decoded.rootKey }
@@ -94,14 +101,10 @@ public class OutboundMediaService(
         val cacheMaxAgeSeconds = (expires - nowEpochSeconds()).coerceAtLeast(0)
         return when (root.type) {
             OutboundMediaRootType.IMAGE -> {
-                val bytes = Files.readAllBytes(realPath)
-                require(bytes.size.toLong() <= root.maxBytes) {
-                    "媒体文件超过大小限制：maxBytes=${root.maxBytes}"
-                }
-                val contentType = imageContentType(realPath, bytes)
+                val contentType = imageContentType(realPath, readHeader(realPath))
                     ?: throw IllegalArgumentException("不支持的媒体类型：${realPath.fileName}")
                 OutboundMediaResult(
-                    bytes = bytes,
+                    file = realPath.toFile(),
                     contentType = contentType,
                     cacheMaxAgeSeconds = cacheMaxAgeSeconds,
                 )
@@ -118,72 +121,329 @@ public class OutboundMediaService(
         }
     }
 
-    private fun rewriteContent(content: MessageContent, profileId: String?): MessageContent {
-        return when (content) {
-            is MessageContent.Image -> {
-                val rewritten = rewriteMedia(content.image, profileId)
-                if (rewritten == content.image) content else content.copy(image = rewritten)
+    public fun resolveProbe(profileId: String?, expires: Long, signature: String): OutboundMediaResult {
+        val profile = configProvider().mediaDelivery.resolveProfile(profileId)
+            ?: throw NoSuchElementException("媒体交付 profile 不存在：${profileId.orEmpty()}")
+        val secret = profile.signedUrl.signingSecret
+        require(secret.isNotBlank()) { "媒体交付 profile 签名密钥未配置：${profile.id}" }
+        require(expires >= nowEpochSeconds()) { "媒体探测链接已过期" }
+        require(secureEquals(signature, sign(secret, profile.id, PROBE_MEDIA_ID, expires))) {
+            "媒体探测链接签名无效"
+        }
+        return OutboundMediaResult(
+            bytes = PROBE_PNG,
+            contentType = ContentType.Image.PNG,
+            cacheMaxAgeSeconds = (expires - nowEpochSeconds()).coerceAtLeast(0),
+        )
+    }
+
+    private inner class RewriteSession(
+        private val config: MainDynamicConfig,
+        private val profileId: String?,
+        private val routeContext: OutboundMediaRouteContext,
+    ) {
+        private val profile: MediaDeliveryProfile? = config.mediaDelivery.profile(profileId)
+        private var adviceLoaded = false
+        private var advice: MessageSinkMediaDeliveryAdvice = MessageSinkMediaDeliveryAdvice()
+
+        suspend fun rewriteBatches(batches: List<MessageBatch>): List<MessageBatch> {
+            val rewritten = batches.map { batch ->
+                val content = batch.content.map { rewriteContent(it) }
+                if (content == batch.content) batch else batch.copy(content = content)
             }
-            is MessageContent.Video -> {
-                val rewritten = rewriteMedia(content.video, profileId)
-                if (rewritten == content.video) content else content.copy(video = rewritten)
+            return if (rewritten == batches) batches else rewritten
+        }
+
+        suspend fun rewriteMedia(media: MediaRef): MediaRef {
+            val selectedProfile = profile ?: return media
+            val uri = media.uri.trim()
+            if (uri.isBlank() || uri.isRemoteOrEncoded()) return media
+            val path = uri.localPath() ?: return media
+            val normalizedPath = path.toAbsolutePath().normalize()
+            if (!Files.isRegularFile(normalizedPath, LinkOption.NOFOLLOW_LINKS)) return media
+
+            val root = findAllowedRoot(normalizedPath, config) ?: return media
+            val size = runCatching { Files.size(normalizedPath) }.getOrElse { return media }
+            if (size > root.maxBytes) return media
+
+            val rewritten = when (selectedProfile.type) {
+                MediaDeliveryType.AUTO -> rewriteAuto(media, normalizedPath, root, size, selectedProfile)
+                MediaDeliveryType.BASE64 -> rewriteAsBase64(media, normalizedPath, root, selectedProfile)
+                MediaDeliveryType.LOCAL_FILE -> rewriteAsLocalFile(media, normalizedPath, selectedProfile, explicit = true)
+                MediaDeliveryType.SIGNED_URL -> rewriteAsSignedUrl(
+                    media = media,
+                    path = normalizedPath,
+                    root = root,
+                    profile = selectedProfile,
+                    baseUrl = selectedProfile.signedUrl.publicBaseUrl,
+                )
             }
-            is MessageContent.Audio -> {
-                val rewritten = rewriteMedia(content.audio, profileId)
-                if (rewritten == content.audio) content else content.copy(audio = rewritten)
-            }
-            is MessageContent.Forward -> {
-                val rewrittenNodes = content.nodes.map { node ->
-                    val rewrittenBatches = rewriteBatches(node.batches, profileId)
-                    if (rewrittenBatches == node.batches) node else node.copy(batches = rewrittenBatches)
+            return rewritten ?: media
+        }
+
+        private suspend fun rewriteContent(content: MessageContent): MessageContent {
+            return when (content) {
+                is MessageContent.Image -> {
+                    val rewritten = rewriteMedia(content.image)
+                    if (rewritten == content.image) content else content.copy(image = rewritten)
                 }
-                if (rewrittenNodes == content.nodes) content else content.copy(nodes = rewrittenNodes)
+                is MessageContent.Video -> {
+                    val rewritten = rewriteMedia(content.video)
+                    if (rewritten == content.video) content else content.copy(video = rewritten)
+                }
+                is MessageContent.Audio -> {
+                    val rewritten = rewriteMedia(content.audio)
+                    if (rewritten == content.audio) content else content.copy(audio = rewritten)
+                }
+                is MessageContent.Forward -> {
+                    val rewrittenNodes = content.nodes.map { node ->
+                        val rewrittenBatches = rewriteBatches(node.batches)
+                        if (rewrittenBatches == node.batches) node else node.copy(batches = rewrittenBatches)
+                    }
+                    if (rewrittenNodes == content.nodes) content else content.copy(nodes = rewrittenNodes)
+                }
+                else -> content
             }
-            else -> content
+        }
+
+        private suspend fun rewriteAuto(
+            media: MediaRef,
+            path: Path,
+            root: OutboundMediaRoot,
+            sizeBytes: Long,
+            profile: MediaDeliveryProfile,
+        ): MediaRef? {
+            rewriteAsAutoLocalFile(media, path, root, sizeBytes, profile)?.let { return it }
+            rewriteAsAutoSignedUrl(media, path, root, sizeBytes, profile)?.let { return it }
+            return rewriteAsBase64(media, path, root, profile)
+        }
+
+        private suspend fun rewriteAsAutoLocalFile(
+            media: MediaRef,
+            path: Path,
+            root: OutboundMediaRoot,
+            sizeBytes: Long,
+            profile: MediaDeliveryProfile,
+        ): MediaRef? {
+            val local = rewriteAsLocalFile(media, path, profile, explicit = false) ?: return null
+            val currentAdvice = advice()
+            if (currentAdvice.localFileConfidence == MessageSinkMediaDeliveryConfidence.UNAVAILABLE) return null
+
+            val probeUri = localFileProbeUri(root) ?: local.uri
+            val probeStatus = probe(
+                method = MessageSinkMediaDeliveryMethod.LOCAL_FILE,
+                uri = probeUri,
+                cacheTarget = root.key,
+                media = media.copy(uri = probeUri),
+                sizeBytes = if (probeUri == local.uri) sizeBytes else PROBE_PNG.size.toLong(),
+                profile = profile,
+            )
+            val usable = when (currentAdvice.localFileConfidence) {
+                MessageSinkMediaDeliveryConfidence.CONFIRMED,
+                MessageSinkMediaDeliveryConfidence.LIKELY -> probeStatus != MessageSinkMediaDeliveryProbeStatus.UNAVAILABLE
+                MessageSinkMediaDeliveryConfidence.UNKNOWN -> probeStatus == MessageSinkMediaDeliveryProbeStatus.AVAILABLE
+                MessageSinkMediaDeliveryConfidence.UNAVAILABLE -> false
+            }
+            if (!usable) return null
+            logSelection(profile, "本地文件", routeContext)
+            return local
+        }
+
+        private suspend fun rewriteAsAutoSignedUrl(
+            media: MediaRef,
+            path: Path,
+            root: OutboundMediaRoot,
+            sizeBytes: Long,
+            profile: MediaDeliveryProfile,
+        ): MediaRef? {
+            val candidates = autoBaseUrlCandidates(config, advice())
+            for (baseUrl in candidates) {
+                val probeUrl = probeSignedUrl(baseUrl, profile) ?: continue
+                val probeStatus = probe(
+                    method = MessageSinkMediaDeliveryMethod.SIGNED_URL,
+                    uri = probeUrl,
+                    cacheTarget = baseUrl,
+                    media = media,
+                    sizeBytes = sizeBytes,
+                    profile = profile,
+                )
+                if (probeStatus != MessageSinkMediaDeliveryProbeStatus.AVAILABLE) continue
+                val signed = rewriteAsSignedUrl(media, path, root, profile, baseUrl) ?: continue
+                logSelection(profile, "签名链接", routeContext)
+                return signed
+            }
+            return null
+        }
+
+        private fun rewriteAsBase64(
+            media: MediaRef,
+            path: Path,
+            root: OutboundMediaRoot,
+            profile: MediaDeliveryProfile,
+        ): MediaRef? {
+            if (root.type != OutboundMediaRootType.IMAGE) return null
+            val maxBytes = profile.base64Fallback.maxBytes
+            if (maxBytes <= 0) return null
+            val size = runCatching { Files.size(path) }.getOrElse { return null }
+            if (size > maxBytes) return null
+            val bytes = runCatching { Files.readAllBytes(path) }.getOrElse { return null }
+            logSelection(profile, "Base64 兜底", routeContext)
+            return media.copy(uri = "base64://${Base64.getEncoder().encodeToString(bytes)}")
+        }
+
+        private fun rewriteAsLocalFile(
+            media: MediaRef,
+            path: Path,
+            profile: MediaDeliveryProfile,
+            explicit: Boolean,
+        ): MediaRef? {
+            val mappedPath = if (explicit) {
+                profile.localFile.pathMappings
+                    .asSequence()
+                    .filter { it.enabled }
+                    .mapNotNull { mapping -> mapping.clientPathFor(path) }
+                    .firstOrNull()
+                    ?: path
+            } else {
+                path
+            }
+            return media.copy(uri = mappedPath.toUri().toString())
+        }
+
+        private fun rewriteAsSignedUrl(
+            media: MediaRef,
+            path: Path,
+            root: OutboundMediaRoot,
+            profile: MediaDeliveryProfile,
+            baseUrl: String,
+        ): MediaRef? {
+            val normalizedBaseUrl = baseUrl.normalizedBaseUrl() ?: return null
+            val secret = profile.signedUrl.signingSecret
+            if (secret.isBlank()) return null
+
+            val relative = root.path.relativize(path).portableString()
+            val id = mediaId(root.key, relative)
+            val expires = nowEpochSeconds() + profile.signedUrl.ttlSeconds.coerceAtLeast(1)
+            val signature = sign(secret, profile.id, id, expires)
+            val url = "$normalizedBaseUrl/media/outbound/${id.urlComponent()}" +
+                "?profile=${profile.id.urlComponent()}&expires=$expires&sig=${signature.urlComponent()}"
+            return media.copy(uri = url)
+        }
+
+        private suspend fun advice(): MessageSinkMediaDeliveryAdvice {
+            if (adviceLoaded) return advice
+            adviceLoaded = true
+            val advisor = routeContext.advisor ?: return advice
+            advice = runCatching {
+                advisor.adviseMediaDelivery(
+                    MessageSinkMediaDeliveryAdviceRequest(
+                        routeId = routeContext.routeId,
+                        accountId = routeContext.accountId,
+                        webAdminEnabled = config.webAdmin.enabled,
+                        webAdminHost = config.webAdmin.host,
+                        webAdminPort = config.webAdmin.port,
+                    )
+                )
+            }.onFailure {
+                logger.debug(it) {
+                    "媒体交付建议读取失败：route=${routeContext.routeCacheKey().orEmpty()}"
+                }
+            }.getOrDefault(MessageSinkMediaDeliveryAdvice())
+            return advice
+        }
+
+        private suspend fun probe(
+            method: MessageSinkMediaDeliveryMethod,
+            uri: String,
+            cacheTarget: String,
+            media: MediaRef,
+            sizeBytes: Long,
+            profile: MediaDeliveryProfile,
+        ): MessageSinkMediaDeliveryProbeStatus {
+            val advisor = routeContext.advisor ?: return MessageSinkMediaDeliveryProbeStatus.UNKNOWN
+            val routeKey = routeContext.routeCacheKey() ?: return MessageSinkMediaDeliveryProbeStatus.UNKNOWN
+            val key = ProbeCacheKey(
+                routeKey = routeKey,
+                profileId = profile.id,
+                method = method,
+                target = cacheTarget,
+            )
+            val now = nowEpochSeconds()
+            probeCache[key]?.takeIf { it.expiresAtEpochSeconds > now }?.let { return it.status }
+
+            val result = runCatching {
+                advisor.probeMediaDelivery(
+                    MessageSinkMediaDeliveryProbeRequest(
+                        routeId = routeContext.routeId,
+                        accountId = routeContext.accountId,
+                        method = method,
+                        uri = uri,
+                        media = media,
+                        sizeBytes = sizeBytes,
+                    )
+                )
+            }.onFailure {
+                logger.debug(it) {
+                    "媒体交付探测异常：route=$routeKey method=$method target=$cacheTarget"
+                }
+            }.getOrElse {
+                top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryProbeResult.unknown(it.message.orEmpty())
+            }
+            val ttlMinutes = when (result.status) {
+                MessageSinkMediaDeliveryProbeStatus.AVAILABLE -> profile.auto.probeCacheMinutes
+                MessageSinkMediaDeliveryProbeStatus.UNAVAILABLE,
+                MessageSinkMediaDeliveryProbeStatus.UNKNOWN -> profile.auto.failedProbeCacheMinutes
+            }.coerceAtLeast(1)
+            probeCache[key] = CachedProbeResult(
+                status = result.status,
+                reason = result.reason,
+                expiresAtEpochSeconds = now + ttlMinutes * 60L,
+            )
+            if (result.status != MessageSinkMediaDeliveryProbeStatus.AVAILABLE && result.reason.isNotBlank()) {
+                logger.debug {
+                    "媒体交付探测未通过：route=$routeKey method=$method target=$cacheTarget reason=${result.reason}"
+                }
+            }
+            return result.status
         }
     }
 
-    private fun rewriteAsBase64(
-        media: MediaRef,
-        path: Path,
-        root: OutboundMediaRoot,
-        profile: MediaDeliveryProfile,
-    ): MediaRef? {
-        if (root.type != OutboundMediaRootType.IMAGE) return null
-        val maxBytes = profile.imageBase64MaxBytes
-        if (maxBytes <= 0) return null
-        val size = runCatching { Files.size(path) }.getOrElse { return null }
-        if (size > maxBytes) return null
-        val bytes = runCatching { Files.readAllBytes(path) }.getOrElse { return null }
-        return media.copy(uri = "base64://${Base64.getEncoder().encodeToString(bytes)}")
-    }
-
-    private fun rewriteAsLocalFile(media: MediaRef, path: Path, profile: MediaDeliveryProfile): MediaRef? {
-        val mappedPath = profile.pathMappings
-            .asSequence()
-            .filter { it.enabled }
-            .mapNotNull { mapping -> mapping.clientPathFor(path) }
-            .firstOrNull()
-            ?: path
-        return media.copy(uri = mappedPath.toUri().toString())
-    }
-
-    private fun rewriteAsSignedUrl(
-        media: MediaRef,
-        path: Path,
-        root: OutboundMediaRoot,
-        profile: MediaDeliveryProfile,
-    ): MediaRef? {
-        val baseUrl = profile.publicBaseUrl.trim().trimEnd('/')
-        if (baseUrl.isBlank() || profile.signingSecret.isBlank()) return null
-
-        val relative = root.path.relativize(path).portableString()
-        val id = mediaId(root.key, relative)
-        val expires = nowEpochSeconds() + profile.urlTtlSeconds.coerceAtLeast(1)
-        val signature = sign(profile.signingSecret, profile.id, id, expires)
-        val url = "$baseUrl/media/outbound/${id.urlComponent()}" +
+    private fun probeSignedUrl(baseUrl: String, profile: MediaDeliveryProfile): String? {
+        val normalizedBaseUrl = baseUrl.normalizedBaseUrl() ?: return null
+        val secret = profile.signedUrl.signingSecret
+        if (secret.isBlank()) return null
+        val expires = nowEpochSeconds() + profile.signedUrl.ttlSeconds.coerceAtLeast(1)
+        val signature = sign(secret, profile.id, PROBE_MEDIA_ID, expires)
+        return "$normalizedBaseUrl/media/outbound-probe" +
             "?profile=${profile.id.urlComponent()}&expires=$expires&sig=${signature.urlComponent()}"
-        return media.copy(uri = url)
+    }
+
+    private fun autoBaseUrlCandidates(
+        config: MainDynamicConfig,
+        advice: MessageSinkMediaDeliveryAdvice,
+    ): List<String> {
+        if (!config.webAdmin.enabled) return emptyList()
+        val port = config.webAdmin.port
+        val configuredHost = config.webAdmin.host.trim()
+        return buildList {
+            add("http://127.0.0.1:$port")
+            add("http://localhost:$port")
+            if (configuredHost.isNotBlank() && !configuredHost.isWildcardBindAddress()) {
+                add("http://$configuredHost:$port")
+            }
+            advice.signedUrlBaseCandidates.forEach(::add)
+        }
+            .mapNotNull { it.normalizedBaseUrl() }
+            .distinct()
+    }
+
+    private fun logSelection(profile: MediaDeliveryProfile, method: String, routeContext: OutboundMediaRouteContext) {
+        val key = "${routeContext.routeCacheKey().orEmpty()}|${profile.id}|$method"
+        if (selectionLogCache.putIfAbsent(key, true) == null) {
+            logger.info {
+                "媒体交付方式已选择：route=${routeContext.routeCacheKey().orEmpty().ifBlank { "-" }}，profile=${profile.id}，方式=$method"
+            }
+        }
     }
 
     private fun MediaDeliveryPathMapping.clientPathFor(path: Path): Path? {
@@ -195,6 +455,26 @@ public class OutboundMediaService(
             ?.let { Paths.get(it).toAbsolutePath().normalize() }
             ?: return null
         return clientRootPath.resolve(botRootPath.relativize(path)).normalize()
+    }
+
+    private fun localFileProbeUri(root: OutboundMediaRoot): String? {
+        return runCatching {
+            Files.createDirectories(root.path)
+            val probePath = root.path.resolve(PROBE_FILE_NAME).normalize()
+            if (!probePath.startsWith(root.path)) return@runCatching null
+            if (Files.exists(probePath, LinkOption.NOFOLLOW_LINKS)) {
+                if (!Files.isRegularFile(probePath, LinkOption.NOFOLLOW_LINKS)) return@runCatching null
+                if (Files.size(probePath) > MAX_PROBE_FILE_BYTES) return@runCatching null
+            } else {
+                Files.write(
+                    probePath,
+                    PROBE_PNG,
+                    StandardOpenOption.CREATE_NEW,
+                    StandardOpenOption.WRITE,
+                )
+            }
+            probePath.toUri().toString()
+        }.getOrNull()
     }
 
     private fun findAllowedRoot(path: Path, config: MainDynamicConfig): OutboundMediaRoot? {
@@ -305,6 +585,14 @@ public class OutboundMediaService(
         }
     }
 
+    private fun readHeader(path: Path, maxBytes: Int = 16): ByteArray {
+        return Files.newInputStream(path).use { input ->
+            val buffer = ByteArray(maxBytes)
+            val read = input.read(buffer)
+            if (read <= 0) ByteArray(0) else buffer.copyOf(read)
+        }
+    }
+
     private fun touchAccessTime(path: Path) {
         runCatching {
             Files.setLastModifiedTime(path, FileTime.fromMillis(System.currentTimeMillis()))
@@ -370,8 +658,48 @@ public class OutboundMediaService(
         return URLEncoder.encode(this, StandardCharsets.UTF_8).replace("+", "%20")
     }
 
+    private fun String.normalizedBaseUrl(): String? {
+        val value = trim().trimEnd('/')
+        if (value.isBlank()) return null
+        if (!value.startsWith("http://", ignoreCase = true) &&
+            !value.startsWith("https://", ignoreCase = true)
+        ) {
+            return null
+        }
+        return value
+    }
+
+    private fun String.isWildcardBindAddress(): Boolean {
+        val value = trim().lowercase()
+        return value == "0.0.0.0" || value == "::" || value == "[::]"
+    }
+
+    private fun OutboundMediaRouteContext.routeCacheKey(): String? {
+        val route = routeId?.trim()?.takeIf { it.isNotBlank() }
+        val account = accountId?.trim()?.takeIf { it.isNotBlank() }
+        val transport = transportId?.trim()?.takeIf { it.isNotBlank() } ?: "sink"
+        val id = route ?: account ?: return null
+        return "$transport:$id"
+    }
+
     private val WINDOWS_ABSOLUTE_PATH: Regex = Regex("""^[a-zA-Z]:[\\/].+$""")
+
+    private companion object {
+        private const val PROBE_MEDIA_ID: String = "__probe__"
+        private const val PROBE_FILE_NAME: String = ".dynamic-bot-media-probe.png"
+        private const val MAX_PROBE_FILE_BYTES: Long = 1_024
+        private val PROBE_PNG: ByteArray = Base64.getDecoder().decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII="
+        )
+    }
 }
+
+public data class OutboundMediaRouteContext(
+    val transportId: String? = null,
+    val routeId: String? = null,
+    val accountId: String? = null,
+    val advisor: MessageSinkMediaDeliveryAdvisor? = null,
+)
 
 public data class OutboundMediaResult(
     val bytes: ByteArray? = null,
@@ -395,4 +723,17 @@ private enum class OutboundMediaRootType {
 private data class DecodedMediaId(
     val rootKey: String,
     val relativePath: String,
+)
+
+private data class ProbeCacheKey(
+    val routeKey: String,
+    val profileId: String,
+    val method: MessageSinkMediaDeliveryMethod,
+    val target: String,
+)
+
+private data class CachedProbeResult(
+    val status: MessageSinkMediaDeliveryProbeStatus,
+    val reason: String,
+    val expiresAtEpochSeconds: Long,
 )

@@ -34,12 +34,14 @@ public class MessageSinkAccountRouter(
         policy: MessageSinkRoutingPolicy,
         request: MessageDeliveryRequest,
         prepareRequest: suspend (MessageSinkRouteCandidate) -> MessageDeliveryRequest = { request },
+        onRouteFailure: (MessageSinkRouteCandidate) -> Unit = {},
     ): MessageSendResult {
         return sendWithRoute(
             candidates = candidates,
             target = request.target,
             policy = policy,
             actionLabel = "消息发送",
+            onRouteFailure = onRouteFailure,
         ) { candidate ->
             candidate.sink.sendMessage(prepareRequest(candidate), candidate.route.routeId)
         }
@@ -50,12 +52,14 @@ public class MessageSinkAccountRouter(
         policy: MessageSinkRoutingPolicy,
         request: CommandResultSendRequest,
         prepareRequest: suspend (MessageSinkRouteCandidate) -> CommandResultSendRequest = { request },
+        onRouteFailure: (MessageSinkRouteCandidate) -> Unit = {},
     ): MessageSendResult {
         return sendWithRoute(
             candidates = candidates,
             target = request.target.address,
             policy = policy,
             actionLabel = "命令回复",
+            onRouteFailure = onRouteFailure,
         ) { candidate ->
             candidate.sink.sendCommandResult(prepareRequest(candidate), candidate.route.routeId)
         }
@@ -102,6 +106,7 @@ public class MessageSinkAccountRouter(
         target: TargetAddress,
         policy: MessageSinkRoutingPolicy,
         actionLabel: String,
+        onRouteFailure: (MessageSinkRouteCandidate) -> Unit,
         action: suspend (MessageSinkRouteCandidate) -> MessageSendResult,
     ): MessageSendResult {
         val ordered = routeCandidates(candidates, target, policy, target.accountId.normalized())
@@ -124,6 +129,7 @@ public class MessageSinkAccountRouter(
                 }
                 is MessageSendResult.Failed -> {
                     markFailure(route.routeId, policy)
+                    onRouteFailure(candidate)
                     failures += "${route.routeId}=${result.reason}"
                     if (result.partialSent) {
                         accountRouterLogger.warn {

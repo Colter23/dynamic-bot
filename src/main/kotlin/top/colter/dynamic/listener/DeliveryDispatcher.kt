@@ -18,10 +18,12 @@ import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.core.plugin.MessageRecallRequest
 import top.colter.dynamic.core.plugin.MessageRecallResult
 import top.colter.dynamic.core.plugin.MessageSendResult
+import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryAdvisor
 import top.colter.dynamic.core.plugin.MessageSinkFeature
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.event.CommandResultEvent
+import top.colter.dynamic.media.OutboundMediaRouteContext
 import top.colter.dynamic.media.OutboundMediaService
 import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.repository.MessageDeliveryRepository
@@ -111,8 +113,13 @@ public class DeliveryDispatcher(
                 policy = routingConfigProvider().policyFor(target.platformId.value),
                 request = sendRequest,
                 prepareRequest = { candidate ->
-                    rewriteCommandResultRequest(sendRequest, candidate.route.mediaDeliveryProfileId)
+                    rewriteCommandResultRequest(
+                        sendRequest,
+                        candidate.route.mediaDeliveryProfileId,
+                        mediaRouteContext(candidate),
+                    )
                 },
+                onRouteFailure = { candidate -> invalidateMediaRoute(candidate) },
             )
         }
 
@@ -207,18 +214,23 @@ public class DeliveryDispatcher(
         }
     }
 
-    private fun rewriteDeliveryRequest(request: MessageDeliveryRequest, profileId: String): MessageDeliveryRequest {
+    private suspend fun rewriteDeliveryRequest(
+        request: MessageDeliveryRequest,
+        profileId: String,
+        routeContext: OutboundMediaRouteContext,
+    ): MessageDeliveryRequest {
         val service = outboundMediaService ?: return request
-        val message = service.rewriteMessage(request.message, profileId)
+        val message = service.rewriteMessage(request.message, profileId, routeContext)
         return if (message == request.message) request else request.copy(message = message)
     }
 
-    private fun rewriteCommandResultRequest(
+    private suspend fun rewriteCommandResultRequest(
         request: CommandResultSendRequest,
         profileId: String,
+        routeContext: OutboundMediaRouteContext,
     ): CommandResultSendRequest {
         val service = outboundMediaService ?: return request
-        val chain = service.rewriteBatches(request.chain, profileId)
+        val chain = service.rewriteBatches(request.chain, profileId, routeContext)
         return if (chain == request.chain) request else request.copy(chain = chain)
     }
 
@@ -252,7 +264,7 @@ public class DeliveryDispatcher(
         }
     }
 
-    private fun prepareDirectDeliveryRequest(
+    private suspend fun prepareDirectDeliveryRequest(
         request: MessageDeliveryRequest,
         sink: MessageSinkPlugin,
     ): MessageDeliveryRequest {
@@ -263,10 +275,10 @@ public class DeliveryDispatcher(
         } else {
             request.withMergedForwardFallback()
         }
-        return rewriteDeliveryRequest(prepared, sink.mediaDeliveryProfileId)
+        return rewriteDeliveryRequest(prepared, sink.mediaDeliveryProfileId, mediaRouteContext(sink))
     }
 
-    private fun prepareDirectCommandResultRequest(
+    private suspend fun prepareDirectCommandResultRequest(
         request: CommandResultSendRequest,
         sink: MessageSinkPlugin,
     ): CommandResultSendRequest {
@@ -277,7 +289,7 @@ public class DeliveryDispatcher(
         } else {
             request.withMergedForwardFallback()
         }
-        return rewriteCommandResultRequest(prepared, sink.mediaDeliveryProfileId)
+        return rewriteCommandResultRequest(prepared, sink.mediaDeliveryProfileId, mediaRouteContext(sink))
     }
 
     private suspend fun sendWithRoutes(
@@ -293,8 +305,13 @@ public class DeliveryDispatcher(
             policy = routingConfigProvider().policyFor(request.target.platformId.value),
             request = request,
             prepareRequest = { candidate ->
-                rewriteDeliveryRequest(request, candidate.route.mediaDeliveryProfileId)
+                rewriteDeliveryRequest(
+                    request,
+                    candidate.route.mediaDeliveryProfileId,
+                    mediaRouteContext(candidate),
+                )
             },
+            onRouteFailure = { candidate -> invalidateMediaRoute(candidate) },
         )
         return handleSendResult(request, result, config)
     }
@@ -309,7 +326,30 @@ public class DeliveryDispatcher(
         }
         val result = runCatching { sink.sendMessage(request) }
             .getOrElse { error -> MessageSendResult.failed(error.message ?: "消息发送失败", retryable = true) }
+        if (result is MessageSendResult.Failed) {
+            outboundMediaService?.invalidateRoute(mediaRouteContext(sink))
+        }
         return handleSendResult(request, result, config)
+    }
+
+    private fun mediaRouteContext(candidate: MessageSinkRouteCandidate): OutboundMediaRouteContext {
+        return OutboundMediaRouteContext(
+            transportId = candidate.route.transportId,
+            routeId = candidate.route.routeId,
+            accountId = candidate.route.accountId,
+            advisor = candidate.sink as? MessageSinkMediaDeliveryAdvisor,
+        )
+    }
+
+    private fun mediaRouteContext(sink: MessageSinkPlugin): OutboundMediaRouteContext {
+        return OutboundMediaRouteContext(
+            transportId = sink.transportId,
+            advisor = sink as? MessageSinkMediaDeliveryAdvisor,
+        )
+    }
+
+    private fun invalidateMediaRoute(candidate: MessageSinkRouteCandidate) {
+        outboundMediaService?.invalidateRoute(mediaRouteContext(candidate))
     }
 
     private fun handleSendResult(

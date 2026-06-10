@@ -176,11 +176,33 @@ public data class MediaDeliveryProfile(
     val id: String = "auto",
     val name: String = "自动",
     val type: MediaDeliveryType = MediaDeliveryType.AUTO,
-    val publicBaseUrl: String = "",
-    val urlTtlSeconds: Int = 1_800,
-    val signingSecret: String = "",
-    val imageBase64MaxBytes: Long = 5L * 1024L * 1024L,
+    val localFile: MediaDeliveryLocalFileConfig = MediaDeliveryLocalFileConfig(),
+    val signedUrl: MediaDeliverySignedUrlConfig = MediaDeliverySignedUrlConfig(),
+    val base64Fallback: MediaDeliveryBase64FallbackConfig = MediaDeliveryBase64FallbackConfig(),
+    val auto: MediaDeliveryAutoConfig = MediaDeliveryAutoConfig(),
+)
+
+public data class MediaDeliveryLocalFileConfig(
     val pathMappings: List<MediaDeliveryPathMapping> = emptyList(),
+)
+
+public data class MediaDeliverySignedUrlConfig(
+    val publicBaseUrl: String = "",
+    val ttlSeconds: Int = 1_800,
+    val signingSecret: String = "",
+)
+
+public data class MediaDeliveryBase64FallbackConfig(
+    val maxMegabytes: Double = 8.0,
+) {
+    @get:JsonIgnore
+    public val maxBytes: Long
+        get() = megabytesToBytes(maxMegabytes)
+}
+
+public data class MediaDeliveryAutoConfig(
+    val probeCacheMinutes: Int = 30,
+    val failedProbeCacheMinutes: Int = 5,
 )
 
 public data class MediaDeliveryPathMapping(

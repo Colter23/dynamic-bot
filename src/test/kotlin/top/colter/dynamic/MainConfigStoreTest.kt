@@ -109,6 +109,25 @@ class MainConfigStoreTest {
     }
 
     @Test
+    fun autoMediaDeliveryProfileShouldIgnoreLocalFileMappings() {
+        MainConfigForms.validate(
+            MainDynamicConfig(
+                webAdmin = WebAdminConfig(token = "token"),
+                mediaDelivery = MediaDeliveryConfig(
+                    profiles = listOf(
+                        MediaDeliveryProfile(
+                            type = MediaDeliveryType.AUTO,
+                            localFile = MediaDeliveryLocalFileConfig(
+                                pathMappings = listOf(MediaDeliveryPathMapping(enabled = true)),
+                            ),
+                        ),
+                    ),
+                ),
+            ),
+        )
+    }
+
+    @Test
     fun shouldMigrateLegacyOutboundMediaToMediaDeliveryProfile() {
         val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-media-migration"))
         val path = configService.resolvePath(MainDynamicConfig.CONFIG_ID)
@@ -132,11 +151,49 @@ class MainConfigStoreTest {
         assertEquals("remote", loaded.mediaDelivery.defaultProfileId)
         val remote = loaded.mediaDelivery.profiles.single { it.id == "remote" }
         assertEquals(MediaDeliveryType.SIGNED_URL, remote.type)
-        assertEquals("http://example.com:2233", remote.publicBaseUrl)
-        assertEquals(120, remote.urlTtlSeconds)
-        assertEquals("old-secret", remote.signingSecret)
+        assertEquals("http://example.com:2233", remote.signedUrl.publicBaseUrl)
+        assertEquals(120, remote.signedUrl.ttlSeconds)
+        assertEquals("old-secret", remote.signedUrl.signingSecret)
         assertFalse(rewritten.contains("outboundMedia"))
         assertTrue(rewritten.contains("mediaDelivery"))
+    }
+
+    @Test
+    fun shouldMigrateLegacyMediaDeliveryProfileBytesToMegabytes() {
+        assertEquals(
+            listOf("main-media-delivery-profiles"),
+            MainConfigForms.migrations.map { it.id }.filter { it.startsWith("main-media-delivery") },
+        )
+        val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-media-profile-migration"))
+        val path = configService.resolvePath(MainDynamicConfig.CONFIG_ID)
+        path.parent.createDirectories()
+        path.writeText(
+            """
+            webAdmin:
+              enabled: true
+              token: token
+            mediaDelivery:
+              defaultProfileId: auto
+              profiles:
+                - id: auto
+                  name: 自动
+                  type: AUTO
+                  imageBase64MaxBytes: 5242880
+                  publicBaseUrl: ""
+                  urlTtlSeconds: 1800
+                  signingSecret: old-secret
+                  pathMappings: []
+            """.trimIndent(),
+        )
+
+        val loaded = MainConfigStore(configService).loadOrCreate { "token" }
+        val rewritten = path.readText()
+
+        val auto = loaded.mediaDelivery.profiles.single { it.id == "auto" }
+        assertEquals(5.0, auto.base64Fallback.maxMegabytes)
+        assertEquals("old-secret", auto.signedUrl.signingSecret)
+        assertFalse(rewritten.contains("imageBase64MaxBytes"))
+        assertTrue(rewritten.contains("maxMegabytes"))
     }
 
     @Test

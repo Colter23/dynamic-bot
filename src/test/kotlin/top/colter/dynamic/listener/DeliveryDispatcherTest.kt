@@ -13,6 +13,7 @@ import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.DeliveryConfig
 import top.colter.dynamic.ImageCacheConfig
 import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.MediaDeliveryBase64FallbackConfig
 import top.colter.dynamic.MediaDeliveryConfig
 import top.colter.dynamic.MediaDeliveryProfile
 import top.colter.dynamic.MediaDeliveryType
@@ -245,7 +246,7 @@ class DeliveryDispatcherTest {
                                 MediaDeliveryProfile(
                                     id = "base64",
                                     type = MediaDeliveryType.BASE64,
-                                    imageBase64MaxBytes = 10,
+                                    base64Fallback = MediaDeliveryBase64FallbackConfig(maxMegabytes = 0.001),
                                 ),
                                 MediaDeliveryProfile(
                                     id = "local",

@@ -175,6 +175,17 @@ public fun Application.adminModule(context: AdminServerContext) {
                 )
             }
         }
+        get("/media/outbound-probe") {
+            call.respondOutboundMedia {
+                context.outboundMediaService.resolveProbe(
+                    profileId = call.request.queryParameters["profile"],
+                    expires = call.request.queryParameters["expires"]?.toLongOrNull()
+                        ?: throw IllegalArgumentException("缺少或无效的过期时间"),
+                    signature = call.request.queryParameters["sig"]
+                        ?: throw IllegalArgumentException("缺少媒体链接签名"),
+                )
+            }
+        }
 
         route("/api") {
             get("/dashboard") {

@@ -95,12 +95,12 @@ public class MainConfigStore(
 private fun MainDynamicConfig.withGeneratedMediaDeliverySecrets(secretProvider: () -> String): MainDynamicConfig {
     var changed = false
     val profiles = mediaDelivery.profiles.map { profile ->
-        if (profile.signingSecret.isNotBlank()) {
+        if (profile.signedUrl.signingSecret.isNotBlank()) {
             profile
         } else {
             val secret = secretProvider().takeIf { it.isNotBlank() } ?: return@map profile
             changed = true
-            profile.copy(signingSecret = secret)
+            profile.copy(signedUrl = profile.signedUrl.copy(signingSecret = secret))
         }
     }
     return if (changed) {
@@ -133,7 +133,7 @@ public object MainConfigForms {
         },
         ConfigMigration(
             id = "main-media-delivery-profiles",
-            description = "迁移旧出站媒体配置到媒体交付 profile",
+            description = "迁移旧出站媒体配置到媒体交付 profile，并转为分组配置",
         ) {
             if (!contains("mediaDelivery")) {
                 val enabled = get("outboundMedia.enabled") as? Boolean ?: true
@@ -150,11 +150,14 @@ public object MainConfigForms {
                     "id" to "auto",
                     "name" to "自动",
                     "type" to MediaDeliveryType.AUTO.name,
-                    "publicBaseUrl" to "",
-                    "urlTtlSeconds" to 1_800,
-                    "signingSecret" to signingSecret,
-                    "imageBase64MaxBytes" to 5L * 1024L * 1024L,
-                    "pathMappings" to emptyList<Map<String, Any?>>(),
+                    "localFile" to mapOf("pathMappings" to emptyList<Map<String, Any?>>()),
+                    "signedUrl" to mapOf(
+                        "publicBaseUrl" to "",
+                        "ttlSeconds" to 1_800,
+                        "signingSecret" to signingSecret,
+                    ),
+                    "base64Fallback" to mapOf("maxMegabytes" to 8.0),
+                    "auto" to mapOf("probeCacheMinutes" to 30, "failedProbeCacheMinutes" to 5),
                 )
                 val profiles = if (hasRemoteProfile) {
                     listOf(
@@ -163,11 +166,14 @@ public object MainConfigForms {
                             "id" to "remote",
                             "name" to "外部访问",
                             "type" to MediaDeliveryType.SIGNED_URL.name,
-                            "publicBaseUrl" to publicBaseUrl,
-                            "urlTtlSeconds" to urlTtlSeconds,
-                            "signingSecret" to signingSecret,
-                            "imageBase64MaxBytes" to 5L * 1024L * 1024L,
-                            "pathMappings" to emptyList<Map<String, Any?>>(),
+                            "localFile" to mapOf("pathMappings" to emptyList<Map<String, Any?>>()),
+                            "signedUrl" to mapOf(
+                                "publicBaseUrl" to publicBaseUrl,
+                                "ttlSeconds" to urlTtlSeconds,
+                                "signingSecret" to signingSecret,
+                            ),
+                            "base64Fallback" to mapOf("maxMegabytes" to 8.0),
+                            "auto" to mapOf("probeCacheMinutes" to 30, "failedProbeCacheMinutes" to 5),
                         ),
                     )
                 } else {
@@ -175,6 +181,53 @@ public object MainConfigForms {
                 }
                 set("mediaDelivery.defaultProfileId", defaultProfileId)
                 set("mediaDelivery.profiles", profiles)
+            }
+            val currentProfiles = get("mediaDelivery.profiles") as? List<*>
+            if (currentProfiles != null) {
+                val migrated = currentProfiles.map { rawProfile ->
+                    val profile = rawProfile as? Map<*, *> ?: return@map rawProfile
+                    val id = profile["id"] ?: "auto"
+                    val name = profile["name"] ?: "自动"
+                    val type = profile["type"] ?: MediaDeliveryType.AUTO.name
+                    val pathMappings = when (val localFile = profile["localFile"]) {
+                        is Map<*, *> -> localFile["pathMappings"] as? List<*> ?: emptyList<Any?>()
+                        else -> profile["pathMappings"] as? List<*> ?: emptyList<Any?>()
+                    }
+                    val signedUrl = profile["signedUrl"] as? Map<*, *>
+                    val publicBaseUrl = signedUrl?.get("publicBaseUrl") ?: profile["publicBaseUrl"] ?: ""
+                    val ttlSeconds = signedUrl?.get("ttlSeconds")
+                        ?: signedUrl?.get("urlTtlSeconds")
+                        ?: profile["urlTtlSeconds"]
+                        ?: 1_800
+                    val signingSecret = signedUrl?.get("signingSecret") ?: profile["signingSecret"] ?: ""
+                    val base64Fallback = profile["base64Fallback"] as? Map<*, *>
+                    val maxMegabytes = base64Fallback?.get("maxMegabytes") ?: run {
+                        val bytes = when (val value = profile["imageBase64MaxBytes"]) {
+                            is Number -> value.toDouble()
+                            is String -> value.toDoubleOrNull()
+                            else -> null
+                        }
+                        bytes?.let { it / (1024.0 * 1024.0) } ?: 8.0
+                    }
+                    val auto = profile["auto"] as? Map<*, *>
+                    mapOf(
+                        "id" to id,
+                        "name" to name,
+                        "type" to type,
+                        "localFile" to mapOf("pathMappings" to pathMappings),
+                        "signedUrl" to mapOf(
+                            "publicBaseUrl" to publicBaseUrl,
+                            "ttlSeconds" to ttlSeconds,
+                            "signingSecret" to signingSecret,
+                        ),
+                        "base64Fallback" to mapOf("maxMegabytes" to maxMegabytes),
+                        "auto" to mapOf(
+                            "probeCacheMinutes" to (auto?.get("probeCacheMinutes") ?: 30),
+                            "failedProbeCacheMinutes" to (auto?.get("failedProbeCacheMinutes") ?: 5),
+                        ),
+                    )
+                }
+                set("mediaDelivery.profiles", migrated)
             }
             remove("outboundMedia")
         },
@@ -651,13 +704,13 @@ public object MainConfigForms {
                     label = "媒体交付 profiles",
                     type = ConfigFieldType.JSON,
                     section = "媒体交付",
-                    description = "统一配置本地图片、视频等媒体如何交给消息平台。\nAUTO 会优先把小图转 Base64，有外部访问地址时转临时 URL；LOCAL_FILE 会按路径映射转 file URI；SIGNED_URL 固定转临时 URL；BASE64 只把符合大小限制的图片转 Base64。",
+                    description = "统一配置图片、视频等媒体如何交给消息平台。\nAUTO 会优先尝试本地文件，其次自动签名链接，最后才用 Base64 兜底；LOCAL_FILE、SIGNED_URL、BASE64 是高级显式模式。",
                     metadata = mapOf(
                         "example" to """
                             [
-                              {"id":"auto","name":"自动","type":"AUTO","imageBase64MaxBytes":5242880,"publicBaseUrl":"","urlTtlSeconds":1800,"signingSecret":"","pathMappings":[]},
-                              {"id":"local","name":"本机 OneBot","type":"LOCAL_FILE","pathMappings":[{"botRoot":"D:/dynamic-bot/data","clientRoot":"D:/dynamic-bot/data","enabled":true}]},
-                              {"id":"remote","name":"远程 OneBot","type":"SIGNED_URL","publicBaseUrl":"http://内网IP:2233","urlTtlSeconds":1800,"signingSecret":"自动生成的密钥"}
+                              {"id":"auto","name":"自动","type":"AUTO","base64Fallback":{"maxMegabytes":8.0},"auto":{"probeCacheMinutes":30,"failedProbeCacheMinutes":5}},
+                              {"id":"local","name":"本地路径","type":"LOCAL_FILE","localFile":{"pathMappings":[{"botRoot":"D:/dynamic-bot/data","clientRoot":"D:/dynamic-bot/data","enabled":true}]}},
+                              {"id":"remote","name":"外部访问","type":"SIGNED_URL","signedUrl":{"publicBaseUrl":"http://内网IP:2233","ttlSeconds":1800,"signingSecret":"自动生成的密钥"}}
                             ]
                         """.trimIndent(),
                     ),
@@ -1209,12 +1262,26 @@ public object MainConfigForms {
         require(defaultProfileId in profileIds) { "默认媒体交付 profile 不存在：$defaultProfileId" }
 
         delivery.profiles.forEachIndexed { index, profile ->
-            require(profile.urlTtlSeconds >= 1) { "mediaDelivery.profiles[$index].urlTtlSeconds 至少为 1" }
-            require(profile.imageBase64MaxBytes >= 0) {
-                "mediaDelivery.profiles[$index].imageBase64MaxBytes 不能为负数"
+            require(profile.signedUrl.ttlSeconds >= 1) {
+                "mediaDelivery.profiles[$index].signedUrl.ttlSeconds 至少为 1"
             }
-            val baseUrl = profile.publicBaseUrl.trim()
-            if (profile.type == MediaDeliveryType.SIGNED_URL || baseUrl.isNotBlank()) {
+            require(profile.base64Fallback.maxMegabytes.isFiniteNumber()) {
+                "mediaDelivery.profiles[$index].base64Fallback.maxMegabytes 必须是有效数字"
+            }
+            require(profile.base64Fallback.maxMegabytes >= 0.0) {
+                "mediaDelivery.profiles[$index].base64Fallback.maxMegabytes 不能为负数"
+            }
+            require(profile.auto.probeCacheMinutes >= 1) {
+                "mediaDelivery.profiles[$index].auto.probeCacheMinutes 至少为 1"
+            }
+            require(profile.auto.failedProbeCacheMinutes >= 1) {
+                "mediaDelivery.profiles[$index].auto.failedProbeCacheMinutes 至少为 1"
+            }
+            val baseUrl = profile.signedUrl.publicBaseUrl.trim()
+            if (profile.type == MediaDeliveryType.SIGNED_URL) {
+                require(baseUrl.isNotBlank()) {
+                    "媒体交付 profile ${profile.id} 使用外部访问时必须填写访问地址"
+                }
                 require(baseUrl.startsWith("http://", ignoreCase = true) ||
                     baseUrl.startsWith("https://", ignoreCase = true)) {
                     "媒体交付 profile ${profile.id} 的外部访问地址必须以 http:// 或 https:// 开头"
@@ -1222,17 +1289,19 @@ public object MainConfigForms {
                 require(config.webAdmin.enabled) {
                     "媒体交付 profile ${profile.id} 使用外部访问地址时需要启用 Web 后台服务"
                 }
-                require(profile.signingSecret.isNotBlank()) {
+                require(profile.signedUrl.signingSecret.isNotBlank()) {
                     "媒体交付 profile ${profile.id} 的签名密钥不能为空"
                 }
             }
-            profile.pathMappings.forEachIndexed { mappingIndex, mapping ->
-                if (mapping.enabled) {
-                    require(mapping.botRoot.isNotBlank()) {
-                        "mediaDelivery.profiles[$index].pathMappings[$mappingIndex].botRoot 不能为空"
-                    }
-                    require(mapping.clientRoot.isNotBlank()) {
-                        "mediaDelivery.profiles[$index].pathMappings[$mappingIndex].clientRoot 不能为空"
+            if (profile.type == MediaDeliveryType.LOCAL_FILE) {
+                profile.localFile.pathMappings.forEachIndexed { mappingIndex, mapping ->
+                    if (mapping.enabled) {
+                        require(mapping.botRoot.isNotBlank()) {
+                            "mediaDelivery.profiles[$index].localFile.pathMappings[$mappingIndex].botRoot 不能为空"
+                        }
+                        require(mapping.clientRoot.isNotBlank()) {
+                            "mediaDelivery.profiles[$index].localFile.pathMappings[$mappingIndex].clientRoot 不能为空"
+                        }
                     }
                 }
             }
