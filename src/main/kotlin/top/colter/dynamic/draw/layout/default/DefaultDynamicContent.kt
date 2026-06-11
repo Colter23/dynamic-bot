@@ -71,7 +71,7 @@ internal fun Layout.drawDynamicTitle(
         modifier = Modifier().margin(bottom = bottomSpacing),
     ) { fontSize ->
         val style = TextStyle()
-            .setColor(config.theme.textColor.withAlpha(0.85f))
+            .setColor(config.theme.textColor)
             .setFontSize(fontSize.px)
             .setFontStyle(FontStyle.BOLD)
         RichParagraphBuilder(style)
@@ -90,7 +90,7 @@ private fun buildDynamicContentParagraph(
         .setFontSize(fontSize.px)
 ).also { paragraph ->
     val style = TextStyle()
-        .setColor(config.theme.textColor.withAlpha(0.85f))
+        .setColor(config.theme.textColor)
         .setFontSize(fontSize.px)
     val linkStyle = TextStyle()
         .setColor(config.theme.linkColor)

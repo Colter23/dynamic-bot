@@ -15,10 +15,9 @@ import top.colter.dynamic.DrawOrnament
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.draw.DrawConfig
-import top.colter.dynamic.draw.DrawThemeMode
 import top.colter.dynamic.draw.layout.default.component.Author
 import top.colter.dynamic.draw.layout.default.component.AuthorSmall
-import top.colter.dynamic.draw.layout.default.component.defaultAuthorContentStyle
+import top.colter.dynamic.draw.layout.default.component.defaultAuthorCardStyle
 import top.colter.dynamic.draw.resource.qrCode
 import top.colter.skiko.Modifier
 import top.colter.skiko.dp
@@ -65,7 +64,7 @@ internal fun Layout.drawPublisher(
             DrawOrnament.QRCODE -> platformTextLogoImage ?: platformLogoImage
             DrawOrnament.NONE -> null
         }
-        val publisherHeight = defaultAuthorContentStyle(qrCodeImage != null, config.theme.primaryColor).height
+        val authorStyle = defaultAuthorCardStyle(qrCodeImage != null, config.theme)
 
         Author(
             face = config.image(publisher.avatar),
@@ -76,10 +75,7 @@ internal fun Layout.drawPublisher(
             name = publisher.name,
             time = time,
             qrCode = qrCodeImage,
-            accentColor = config.theme.primaryColor,
-            theme = config.theme,
-            darkTheme = config.theme.mode == DrawThemeMode.DARK,
-            cardHeight = publisherHeight,
+            style = authorStyle,
             modifier = Modifier().fillMaxWidth(),
         )
     }

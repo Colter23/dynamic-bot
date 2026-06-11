@@ -7,7 +7,6 @@ import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.draw.DrawConfig
-import top.colter.dynamic.draw.DrawThemeMode
 import top.colter.dynamic.draw.layout.default.DynamicRenderMode
 import top.colter.dynamic.draw.layout.default.component.AuthorContent
 import top.colter.dynamic.draw.layout.default.component.minimalAuthorContentStyle
@@ -38,12 +37,12 @@ import top.colter.skiko.width
 
 private val scenePadding: Dp = 20.dp
 private val contentSpacing: Dp = 20.dp
-private val cardPadding: Dp = 14.dp
+private val cardPadding: Dp = 20.dp
 private val cardBorderWidth: Dp = 3.dp
 private val cardRadius: Dp = 15.dp
-private val authorLogoBottomSpacing: Dp = 24.dp
-private val authorQrBottomSpacing: Dp = 12.dp
-private val authorQrTopOffset: Dp = (-10).dp
+private val authorLogoBottomSpacing: Dp = 30.dp
+private val authorQrBottomSpacing: Dp = 0.dp
+private val authorQrTopOffset: Dp = (-20).dp
 
 internal fun renderMinimalDynamic(update: SourceUpdate, config: DrawConfig): Image {
     return View(
@@ -104,7 +103,7 @@ private fun Layout.MinimalDynamicView(
             ?: config.platformAssetImage(PlatformDrawAssetKeys.PRIMARY_LOGO)
         DrawOrnament.NONE -> null
     }
-    val authorStyle = minimalAuthorContentStyle(qrCodeImage != null, config.theme.primaryColor)
+    val authorStyle = minimalAuthorContentStyle(qrCodeImage != null, config.theme)
     val authorBottomSpacing = if (qrCodeImage != null) authorQrBottomSpacing else authorLogoBottomSpacing
     val authorModifier = Modifier()
         .fillMaxWidth()
@@ -131,8 +130,6 @@ private fun Layout.MinimalDynamicView(
             name = update.publisher.name,
             time = update.occurredAtEpochSeconds.formatTime,
             badge = avatarBadgeImage,
-            accentColor = config.theme.readableAccentColor,
-            darkTheme = config.theme.mode == DrawThemeMode.DARK,
             style = authorStyle,
             modifier = authorModifier,
         )
@@ -174,7 +171,7 @@ private fun Layout.MinimalLiveView(
             ?: config.platformAssetImage(PlatformDrawAssetKeys.PRIMARY_LOGO)
         DrawOrnament.NONE -> null
     }
-    val authorStyle = minimalAuthorContentStyle(qrCodeImage != null, config.theme.primaryColor)
+    val authorStyle = minimalAuthorContentStyle(qrCodeImage != null, config.theme)
     val authorBottomSpacing = if (qrCodeImage != null) authorQrBottomSpacing else authorLogoBottomSpacing
     val authorModifier = Modifier()
         .fillMaxWidth()
@@ -201,8 +198,6 @@ private fun Layout.MinimalLiveView(
             name = update.publisher.name,
             time = liveTime.formatTime,
             badge = avatarBadgeImage,
-            accentColor = config.theme.readableAccentColor,
-            darkTheme = config.theme.mode == DrawThemeMode.DARK,
             style = authorStyle,
             modifier = authorModifier,
         )

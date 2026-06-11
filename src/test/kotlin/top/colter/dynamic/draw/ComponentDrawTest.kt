@@ -160,7 +160,6 @@ class ComponentDrawTest {
                     face = face,
                     pendant = pendant,
                     qrCode = qr,
-                    accentColor = accentColor,
                     style = contentStyle,
                     modifier = Modifier()
                         .background(
@@ -183,7 +182,6 @@ class ComponentDrawTest {
                     face = face,
                     pendant = pendant,
                     qrCode = qr,
-                    accentColor = accentColor,
                     style = contentStyle,
                     modifier = Modifier()
                         .background(
@@ -197,7 +195,6 @@ class ComponentDrawTest {
                     face = face,
                     pendant = pendant,
                     qrCode = qr,
-                    accentColor = accentColor,
                     style = contentStyle,
                     modifier = Modifier()
                         .background(
@@ -212,7 +209,6 @@ class ComponentDrawTest {
                     face = face,
                     pendant = pendant,
                     qrCode = qr,
-                    accentColor = accentColor,
                     style = contentStyle,
                     modifier = Modifier()
                         .background(
@@ -234,7 +230,6 @@ class ComponentDrawTest {
         val darkHead = loadTestImage("image", "bg1.jpg")
         val lightTheme = DrawThemeFactory.fromThemeColorText("#FE65A6")
         val darkTheme = DrawThemeFactory.fromThemeColorText("#101624;#24182D;#0D2630")
-        val contentStyle = defaultAuthorContentStyle(hasQrCode = true, lightTheme.primaryColor)
         val blur = GradientBlur(
             stops = listOf(
                 GradientBlurStop(0f, 12.dp),
@@ -258,7 +253,6 @@ class ComponentDrawTest {
                     face = face,
                     pendant = pendant,
                     theme = darkTheme,
-                    style = contentStyle,
                     blur = blur,
                 )
                 authorHeadThemePreviewSection(
@@ -267,7 +261,6 @@ class ComponentDrawTest {
                     face = face,
                     pendant = pendant,
                     theme = lightTheme,
-                    style = contentStyle,
                     blur = blur,
                 )
             }
@@ -280,10 +273,10 @@ class ComponentDrawTest {
         face: org.jetbrains.skia.Image,
         pendant: org.jetbrains.skia.Image,
         theme: DrawTheme,
-        style: AuthorContentStyle,
         blur: GradientBlur,
     ) {
         val qr = qrCode("https://space.bilibili.com/10086", theme.qrPointColor)
+        val style = defaultAuthorContentStyle(hasQrCode = true, theme)
         Text(
             text = title,
             color = Color.makeRGB(32, 42, 58),
@@ -372,8 +365,6 @@ class ComponentDrawTest {
                 name = "猫芒ベル_Official",
                 time = "2026年06月10日 20:00:01",
                 qrCode = qrCode,
-                accentColor = theme.primaryColor,
-                darkTheme = theme.mode == DrawThemeMode.DARK,
                 style = style,
                 modifier = Modifier()
                     .fillMaxWidth()
@@ -505,7 +496,6 @@ class ComponentDrawTest {
         face: org.jetbrains.skia.Image,
         pendant: org.jetbrains.skia.Image,
         qrCode: org.jetbrains.skia.Image,
-        accentColor: Int,
         style: AuthorContentStyle,
         modifier: Modifier,
     ) {
@@ -529,7 +519,6 @@ class ComponentDrawTest {
                 name = "猫芒ベル_Official",
                 time = "2026年06月10日 20:00:01",
                 qrCode = qrCode,
-                accentColor = accentColor,
                 style = style,
                 modifier = Modifier()
                     .fillMaxWidth()

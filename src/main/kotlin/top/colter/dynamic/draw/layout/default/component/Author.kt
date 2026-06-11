@@ -1,171 +1,31 @@
-﻿package top.colter.dynamic.draw.layout.default.component
+package top.colter.dynamic.draw.layout.default.component
 
-import org.jetbrains.skia.*
-import top.colter.dynamic.draw.DrawTheme
-import top.colter.dynamic.draw.DrawThemeMode
-import top.colter.skiko.*
+import org.jetbrains.skia.Image
+import top.colter.skiko.Modifier
+import top.colter.skiko.background
+import top.colter.skiko.bleed
+import top.colter.skiko.dp
+import top.colter.skiko.fillMaxHeight
+import top.colter.skiko.fillMaxWidth
+import top.colter.skiko.fillWidth
+import top.colter.skiko.height
+import top.colter.skiko.layout.Box
+import top.colter.skiko.layout.Layout
+import top.colter.skiko.layout.Row
+import top.colter.skiko.layout.Text
+import top.colter.skiko.margin
+import top.colter.skiko.offset
+import top.colter.skiko.radius
+import top.colter.skiko.shadows
+import top.colter.skiko.width
 import top.colter.skiko.data.Gradient
-import top.colter.skiko.data.GradientBlur
-import top.colter.skiko.data.GradientBlurStop
 import top.colter.skiko.data.LayoutAlignment
-import top.colter.skiko.data.Shadow
-import top.colter.skiko.data.TextShadow
 import top.colter.skiko.data.TextStroke
-import top.colter.skiko.layout.*
-import kotlin.math.roundToInt
-
-private val authorTimeShadows = listOf(
-    TextShadow(
-        offsetX = 2.dp,
-        offsetY = 2.dp,
-        blur = 2.dp,
-        color = Color.BLACK.withAlpha(0.2f),
-    ),
-)
-private val authorHeadBackgroundBlur = GradientBlur(
-    stops = listOf(
-        GradientBlurStop(0f, 5.dp),
-        GradientBlurStop(1f, 5.dp),
-    ),
-    steps = 5,
-    stripWidth = 3.dp,
-)
-private val fallbackAuthorHeadGradient = Gradient(
-    LayoutAlignment.LEFT,
-    LayoutAlignment.RIGHT,
-    listOf(
-        Color.BLACK.withAlpha(0.2f),
-        Color.BLACK.withAlpha(0.2f),
-        Color.BLACK.withAlpha(0f),
-        Color.BLACK.withAlpha(0.2f),
-    ),
-)
-
-internal data class AuthorContentStyle(
-    val height: Dp,
-    val avatarSize: Dp,
-    val avatarLeft: Dp,
-    val avatarTop: Dp,
-    val avatarTextSpacing: Dp,
-    val textTop: Dp,
-    val nameLeft: Dp,
-    val textRightSpacing: Dp,
-    val nameFontSize: Dp,
-    val timeFontSize: Dp,
-    val nameLineHeight: Dp,
-    val timeLineHeight: Dp,
-    val timeTopSpacing: Dp,
-    val nameStrokeWidth: Dp,
-    val authorNameShadows: List<TextShadow>,
-)
-
-internal fun defaultAuthorContentStyle(hasQrCode: Boolean, accentColor: Int): AuthorContentStyle {
-    val shadows = listOf(
-        TextShadow(
-            offsetX = 2.dp,
-            offsetY = 3.dp,
-            blur = 3.dp,
-            color = Color.BLACK.withAlpha(0.3f),
-        ),
-        TextShadow(
-            offsetX = 0.dp,
-            offsetY = 0.dp,
-            blur = 8.dp,
-            color = accentColor.withAlpha(0.8f),
-        ),
-    )
-
-    return if (hasQrCode) {
-        AuthorContentStyle(
-            height = 150.dp,
-            avatarSize = 112.dp,
-            avatarLeft = 30.dp,
-            avatarTop = 18.dp,
-            avatarTextSpacing = 18.dp,
-            textTop = 7.dp,
-            nameLeft = (-21).dp,
-            textRightSpacing = 12.dp,
-            nameFontSize = 48.dp,
-            timeFontSize = 34.dp,
-            nameLineHeight = 80.dp,
-            timeLineHeight = 42.dp,
-            timeTopSpacing = 5.dp,
-            nameStrokeWidth = 8.dp,
-            authorNameShadows = shadows
-        )
-    } else {
-        AuthorContentStyle(
-            height = 120.dp,
-            avatarSize = 92.dp,
-            avatarLeft = 30.dp,
-            avatarTop = 14.dp,
-            avatarTextSpacing = 18.dp,
-            textTop = (-2).dp,
-            nameLeft = (-21).dp,
-            textRightSpacing = 12.dp,
-            nameFontSize = 43.dp,
-            timeFontSize = 32.dp,
-            nameLineHeight = 68.dp,
-            timeLineHeight = 38.dp,
-            timeTopSpacing = 8.dp,
-            nameStrokeWidth = 8.dp,
-            authorNameShadows = shadows
-        )
-    }
-}
-
-internal fun minimalAuthorContentStyle(hasQrCode: Boolean, accentColor: Int): AuthorContentStyle {
-    val shadows = listOf(
-        TextShadow(
-            offsetX = 0.dp,
-            offsetY = 0.dp,
-            blur = 8.dp,
-            color = accentColor.withAlpha(0.6f),
-        ),
-    )
-
-    return if (hasQrCode) {
-        AuthorContentStyle(
-            height = 122.dp,
-            avatarSize = 92.dp,
-            avatarLeft = 15.dp,
-            avatarTop = 16.dp,
-            avatarTextSpacing = 18.dp,
-            textTop = 5.dp,
-            nameLeft = (-20).dp,
-            textRightSpacing = 12.dp,
-            nameFontSize = 46.dp,
-            timeFontSize = 32.dp,
-            nameLineHeight = 66.dp,
-            timeLineHeight = 38.dp,
-            timeTopSpacing = 5.dp,
-            nameStrokeWidth = 5.dp,
-            authorNameShadows = shadows
-        )
-    } else {
-        AuthorContentStyle(
-            height = 92.dp,
-            avatarSize = 84.dp,
-            avatarLeft = 15.dp,
-            avatarTop = 8.dp,
-            avatarTextSpacing = 18.dp,
-            textTop = (-5).dp,
-            nameLeft = (-20).dp,
-            textRightSpacing = 12.dp,
-            nameFontSize = 43.dp,
-            timeFontSize = 30.dp,
-            nameLineHeight = 58.dp,
-            timeLineHeight = 36.dp,
-            timeTopSpacing = 8.dp,
-            nameStrokeWidth = 5.dp,
-            authorNameShadows = shadows
-        )
-    }
-}
-
 
 /**
- * 作者组件
+ * 作者组件。
+ *
+ * default 布局使用完整卡片；minimal 布局直接复用 [AuthorContent]。
  */
 internal fun Layout.Author(
     face: Image,
@@ -176,24 +36,20 @@ internal fun Layout.Author(
     ornament: Image? = null,
     badge: Image? = null,
     qrCode: Image? = null,
-    accentColor: Int = Color.makeRGB(251, 114, 153),
-    theme: DrawTheme? = null,
-    darkTheme: Boolean = false,
-    cardHeight: Dp = defaultAuthorContentStyle(qrCode != null, accentColor).height,
+    style: AuthorCardStyle = defaultAuthorCardStyle(qrCode != null),
     alignment: LayoutAlignment = LayoutAlignment.CENTER,
-    modifier: Modifier
-) = Box (
+    modifier: Modifier,
+) = Box(
     alignment = alignment,
     modifier = modifier
-        .height(cardHeight)
+        .height(style.height)
         .fillMaxWidth()
-        .radius(15.dp)
-        .shadows(Shadow.ELEVATION_3)
+        .radius(style.radius)
+        .shadows(style.shadows),
 ) {
-    //require(modifier.height.isNotNull()) { "必须指定高度" }
     AuthorHeadBackground(
         head = head,
-        theme = theme,
+        style = style.headBackground,
     )
 
     AuthorContent(
@@ -204,9 +60,7 @@ internal fun Layout.Author(
         ornament = ornament,
         badge = badge,
         qrCode = qrCode,
-        accentColor = accentColor,
-        darkTheme = theme?.let { it.mode == DrawThemeMode.DARK } ?: darkTheme,
-        style = defaultAuthorContentStyle(qrCode != null, accentColor),
+        style = style.content,
         modifier = Modifier()
             .fillMaxWidth()
             .fillMaxHeight(),
@@ -215,14 +69,18 @@ internal fun Layout.Author(
 
 private fun Layout.AuthorHeadBackground(
     head: Image?,
-    theme: DrawTheme?,
+    style: AuthorHeadBackgroundStyle,
 ) {
-    if (theme == null) {
-        FallbackAuthorHeadBackground(head)
-        return
+    when (style) {
+        is AuthorFallbackHeadBackgroundStyle -> FallbackAuthorHeadBackground(head, style)
+        is AuthorThemedHeadBackgroundStyle -> ThemedAuthorHeadBackground(head, style)
     }
+}
 
-    val darkTheme = theme.mode == DrawThemeMode.DARK
+private fun Layout.ThemedAuthorHeadBackground(
+    head: Image?,
+    style: AuthorThemedHeadBackgroundStyle,
+) {
     Box(
         modifier = Modifier()
             .fillMaxWidth()
@@ -231,10 +89,10 @@ private fun Layout.AuthorHeadBackground(
                 gradient = Gradient(
                     LayoutAlignment.LEFT,
                     LayoutAlignment.RIGHT,
-                    theme.backgroundColors,
+                    style.baseGradientColors,
                 ),
             )
-            .radius(15.dp),
+            .radius(style.radius),
     )
 
     if (head != null) {
@@ -244,10 +102,10 @@ private fun Layout.AuthorHeadBackground(
                 .fillMaxHeight()
                 .background(
                     image = head,
-                    imageAlpha = if (darkTheme) 0.50f else 0.40f,
-                    imageGradientBlur = authorHeadBackgroundBlur,
+                    imageAlpha = style.blurredImageAlpha,
+                    imageBlur = style.blur,
                 )
-                .radius(15.dp),
+                .radius(style.radius),
         )
         Box(
             modifier = Modifier()
@@ -255,9 +113,9 @@ private fun Layout.AuthorHeadBackground(
                 .fillMaxHeight()
                 .background(
                     image = head,
-                    imageAlpha = if (darkTheme) 0.12f else 0.08f,
+                    imageAlpha = style.originalImageAlpha,
                 )
-                .radius(15.dp),
+                .radius(style.radius),
         )
     }
 
@@ -269,41 +127,34 @@ private fun Layout.AuthorHeadBackground(
                 gradient = Gradient(
                     LayoutAlignment.LEFT,
                     LayoutAlignment.RIGHT,
-                    listOf(
-                        theme.primaryColor.withAlpha(if (darkTheme) 0.16f else 0.09f),
-                        theme.readableAccentColor.withAlpha(if (darkTheme) 0.09f else 0.07f),
-                        theme.primaryColor.withAlpha(if (darkTheme) 0.10f else 0.07f),
-                    ),
+                    style.tintGradientColors,
                 ),
             )
-            .radius(15.dp),
+            .radius(style.radius),
     )
     Box(
         modifier = Modifier()
             .fillMaxWidth()
             .fillMaxHeight()
-            .background(
-                if (darkTheme) {
-                    Color.makeRGB(8, 12, 22).withAlpha(0.18f)
-                } else {
-                    Color.WHITE.withAlpha(0.22f)
-                },
-            )
-            .radius(15.dp),
+            .background(style.washColor)
+            .radius(style.radius),
     )
 }
 
-private fun Layout.FallbackAuthorHeadBackground(head: Image?) {
+private fun Layout.FallbackAuthorHeadBackground(
+    head: Image?,
+    style: AuthorFallbackHeadBackgroundStyle,
+) {
     Box(
         modifier = Modifier()
             .fillMaxWidth()
             .fillMaxHeight()
             .background(
                 image = head,
-                imageAlpha = 0.85f,
-                gradient = fallbackAuthorHeadGradient,
+                imageAlpha = style.imageAlpha,
+                gradient = style.gradient,
             )
-            .radius(15.dp),
+            .radius(style.radius),
     )
 }
 
@@ -318,18 +169,19 @@ internal fun Layout.AuthorContent(
     ornament: Image? = null,
     badge: Image? = null,
     qrCode: Image? = null,
-    accentColor: Int = Color.makeRGB(251, 114, 153),
-    darkTheme: Boolean = false,
-    style: AuthorContentStyle = defaultAuthorContentStyle(qrCode != null, accentColor),
+    style: AuthorContentStyle = defaultAuthorContentStyle(qrCode != null),
     modifier: Modifier,
 ) = Row(
     modifier = modifier,
 ) {
-    if (style.avatarLeft > 0.dp) {
+    val avatarStyle = style.avatar
+    val textStyle = style.text
+
+    if (avatarStyle.left > 0.dp) {
         Box(
             modifier = Modifier()
-                .width(style.avatarLeft)
-                .fillMaxHeight()
+                .width(avatarStyle.left)
+                .fillMaxHeight(),
         )
     }
 
@@ -338,18 +190,19 @@ internal fun Layout.AuthorContent(
         pendant = pendant,
         badge = badge,
         modifier = Modifier()
-            .width(style.avatarSize)
-            .height(style.avatarSize)
-            .margin(
-                top = style.avatarTop,
-            )
+            .width(avatarStyle.size)
+            .height(avatarStyle.size)
+            .offset(y = avatarStyle.top)
+//            .margin(
+//                top = avatarStyle.top,
+//            ),
     )
 
-    if (style.avatarTextSpacing > 0.dp) {
+    if (avatarStyle.textSpacing > 0.dp) {
         Box(
             modifier = Modifier()
-                .width(style.avatarTextSpacing)
-                .fillMaxHeight()
+                .width(avatarStyle.textSpacing)
+                .fillMaxHeight(),
         )
     }
 
@@ -357,75 +210,51 @@ internal fun Layout.AuthorContent(
         modifier = Modifier()
             .fillWidth()
             .fillMaxHeight()
-            .margin(right = style.textRightSpacing)
+            .margin(right = textStyle.rightSpacing),
     ) {
+        val nameStyle = textStyle.name
         Text(
             text = name,
-            color = Color.WHITE.withAlpha(0.9f),
-            fontSize = style.nameFontSize,
+            color = nameStyle.color,
+            fontSize = nameStyle.fontSize,
             maxLinesCount = 1,
             stroke = TextStroke(
-                width = style.nameStrokeWidth,
-                color = accentColor,
-//                color = authorNameStrokeColor(accentColor, darkTheme),
+                width = nameStyle.strokeWidth,
+                color = nameStyle.strokeColor,
             ),
-            textShadows = style.authorNameShadows,
-//            textShadows = authorNameTextShadows(accentColor, darkTheme),
+            textShadows = nameStyle.shadows,
             alignment = LayoutAlignment.LEFT_TOP,
             modifier = Modifier()
                 .fillMaxWidth()
-                .height(style.nameLineHeight)
-                .offset(y = style.textTop, x = style.nameLeft)
-                .bleed(vertical = 14.dp)
+                .height(nameStyle.lineHeight)
+                .offset(y = textStyle.nameTop, x = nameStyle.left)
+                .bleed(vertical = nameStyle.bleedVertical),
         )
+
+        val timeStyle = textStyle.time
         Text(
             text = time,
-            color = Color.WHITE.withAlpha(0.8f),
-            fontSize = style.timeFontSize,
+            color = timeStyle.color,
+            fontSize = timeStyle.fontSize,
             maxLinesCount = 1,
-            textShadows = authorTimeShadows,
+            textShadows = timeStyle.shadows,
             stroke = TextStroke(
-                width = 5.dp,
-                color = accentColor.withAlpha(0.6f),
+                width = timeStyle.strokeWidth,
+                color = timeStyle.strokeColor,
             ),
             alignment = LayoutAlignment.LEFT_TOP,
             modifier = Modifier()
                 .fillMaxWidth()
-                .height(style.timeLineHeight)
-                .offset(y = style.textTop + style.nameLineHeight + style.timeTopSpacing)
-                .bleed(vertical = 8.dp)
+                .height(timeStyle.lineHeight)
+                .offset(y = textStyle.timeTop, x = timeStyle.left)
+                .bleed(vertical = timeStyle.bleedVertical),
         )
     }
 
     Decorate(
         image = ornament,
         qrCode = qrCode,
-        accentColor = accentColor,
-        darkTheme = darkTheme,
-        modifier = Modifier().fillMaxHeight()
+        style = style.decorate,
+        modifier = Modifier().fillMaxHeight(),
     )
 }
-
-private fun authorNameStrokeColor(accentColor: Int, darkTheme: Boolean): Int {
-    return if (darkTheme) {
-        Color.BLACK.withAlpha(0.48f)
-    } else {
-        mixColor(accentColor, Color.BLACK, 0.34f).withAlpha(0.66f)
-    }
-}
-
-
-
-private fun mixColor(color: Int, target: Int, amount: Float): Int {
-    val ratio = amount.coerceIn(0f, 1f)
-    val keep = 1f - ratio
-    return Color.makeRGB(
-        (color.red() * keep + target.red() * ratio).roundToInt().coerceIn(0, 255),
-        (color.green() * keep + target.green() * ratio).roundToInt().coerceIn(0, 255),
-        (color.blue() * keep + target.blue() * ratio).roundToInt().coerceIn(0, 255),
-    )
-}
-
-private fun Int.red(): Int = (this ushr 16) and 0xff
-private fun Int.green(): Int = (this ushr 8) and 0xff
-private fun Int.blue(): Int = this and 0xff
