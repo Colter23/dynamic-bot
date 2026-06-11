@@ -1230,17 +1230,10 @@ function mediaDeliveryProfilesFieldHtml(detail, field) {
     ${configFieldTitleHtml(field, "cfg-media-delivery-profiles")}
     ${configFieldDescriptionHtml(field)}
     <input id="cfg-media-delivery-profiles" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(profiles))}">
-    <div class="media-delivery-summary">
-      <div>
-        <span>当前方式</span>
-        <strong id="mediaDeliveryModeSummary">${esc(mediaDeliveryTypeLabel(profile.type))}</strong>
-      </div>
-      <p id="mediaDeliveryModeDescription">${esc(mediaDeliveryTypeDescription(profile.type))}</p>
-    </div>
     ${readOnly ? readOnlyTableNoteHtml(field) : `<details class="config-advanced media-delivery-advanced"${advancedOpen}>
       <summary>
         <span>高级媒体发送</span>
-        <small>本地路径 / 外部访问 / Base64</small>
+        <small id="mediaDeliveryModeSummary">${esc(mediaDeliveryTypeLabel(profile.type))}</small>
       </summary>
       <div class="form-grid config-advanced-grid">
         <div class="field">
@@ -1352,10 +1345,8 @@ function refreshMediaDeliveryUi() {
   const profile = mediaDeliveryDefaultProfile(profiles, mediaDeliveryDefaultProfileIdFromDom(profiles));
   const type = mediaDeliveryTypeValue(profile.type);
   const summary = $("mediaDeliveryModeSummary");
-  const description = $("mediaDeliveryModeDescription");
   const hint = $("mediaDeliveryTypeHint");
   if (summary) summary.textContent = mediaDeliveryTypeLabel(type);
-  if (description) description.textContent = mediaDeliveryTypeDescription(type);
   if (hint) hint.textContent = mediaDeliveryTypeDescription(type);
   pageRoot().querySelectorAll("[data-media-delivery-local]").forEach(item => {
     item.hidden = type !== "LOCAL_FILE";
@@ -1455,8 +1446,8 @@ function mediaDeliveryTypeLabel(type) {
   switch (mediaDeliveryKnownType(type)) {
     case "LOCAL_FILE": return "本地路径";
     case "SIGNED_URL": return "外部访问地址";
-    case "BASE64": return "Base64";
-    default: return "自动（推荐）";
+    case "BASE64": return "Base64（不推荐）";
+    default: return "自动";
   }
 }
 

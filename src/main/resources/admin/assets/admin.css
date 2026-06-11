@@ -721,11 +721,6 @@
       border-color: var(--line);
     }
 
-    [data-theme="dark"] .media-delivery-summary {
-      background: var(--panel-soft);
-      border-color: var(--line);
-    }
-
     [data-theme="dark"] .image-preview {
       background: var(--panel-soft);
       border-color: var(--line);
@@ -4078,8 +4073,7 @@
       min-height: 34px;
       display: flex;
       align-items: center;
-      justify-content: space-between;
-      gap: 12px;
+      gap: 8px;
       padding: 9px 2px 6px;
       color: var(--text);
       font-size: 13px;
@@ -4087,11 +4081,36 @@
       cursor: pointer;
       user-select: none;
       outline-offset: 3px;
+      list-style: none;
+    }
+    .config-advanced > summary::-webkit-details-marker {
+      display: none;
+    }
+    .config-advanced > summary::before {
+      content: ">";
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 16px;
+      height: 16px;
+      color: var(--muted);
+      font-size: 13px;
+      transition: transform 0.16s ease;
+    }
+    .config-advanced[open] > summary::before {
+      transform: rotate(90deg);
     }
     .config-advanced > summary small {
+      margin-left: auto;
       color: var(--muted);
       font-size: 12px;
       font-weight: 800;
+    }
+    .config-advanced > summary small::before {
+      content: "展开 · ";
+    }
+    .config-advanced[open] > summary small::before {
+      content: "收起 · ";
     }
     .config-advanced-grid {
       margin-top: 10px;
@@ -4293,37 +4312,6 @@
     .notification-target-field,
     .media-delivery-field {
       gap: 10px;
-    }
-    .media-delivery-summary {
-      min-width: 0;
-      display: grid;
-      gap: 5px;
-      padding: 10px 12px;
-      border: 1px solid var(--line);
-      border-radius: 7px;
-      background: var(--panel-soft);
-    }
-    .media-delivery-summary div {
-      min-width: 0;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-    .media-delivery-summary span {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 850;
-    }
-    .media-delivery-summary strong {
-      color: var(--accent);
-      font-size: 14px;
-    }
-    .media-delivery-summary p {
-      margin: 0;
-      color: var(--muted);
-      line-height: 1.45;
     }
     .media-delivery-advanced {
       margin-top: 0;
