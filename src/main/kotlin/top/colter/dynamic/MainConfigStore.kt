@@ -128,7 +128,7 @@ public object MainConfigForms {
                 set("draw.themeColors", legacyColors.joinToString(";"))
             }
             if (!contains("draw.outputFormat")) {
-                set("draw.outputFormat", DrawOutputFormat.WEBP.name)
+                set("draw.outputFormat", DrawOutputFormat.PNG.name)
             }
             remove("draw.themeColor")
             remove("draw.backgroundStartColor")

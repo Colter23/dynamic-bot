@@ -29,8 +29,8 @@ import top.colter.dynamic.core.data.MediaCardStyle
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MediaReference
-import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.PlatformDescriptor
+import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.RepostBlock
 import top.colter.dynamic.core.data.SourceUpdate
@@ -41,8 +41,6 @@ import top.colter.dynamic.core.link.LinkPreview
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.dynamic.draw.resource.PlatformDrawAssetResolver
-import top.colter.dynamic.draw.resource.loadSVG
-import top.colter.dynamic.draw.resource.makeImage
 import top.colter.dynamic.loadTestImage
 import top.colter.dynamic.loadTestResource
 import top.colter.dynamic.testDynamicUpdate
@@ -50,20 +48,38 @@ import top.colter.dynamic.testMedia
 import top.colter.dynamic.testOutput
 import top.colter.dynamic.testPublisherInfo
 import top.colter.dynamic.testPublisherKey
-import top.colter.skiko.*
+import top.colter.skiko.Dp
+import top.colter.skiko.Fonts
+import top.colter.skiko.Modifier
+import top.colter.skiko.background
+import top.colter.skiko.border
+import top.colter.skiko.dp
+import top.colter.skiko.fillMaxWidth
+import top.colter.skiko.height
+import top.colter.skiko.margin
+import top.colter.skiko.padding
+import top.colter.skiko.withAlpha
+import top.colter.skiko.width
 import top.colter.skiko.data.Gradient
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.Ratio
-import top.colter.skiko.layout.*
+import top.colter.skiko.layout.Box
+import top.colter.skiko.layout.Column
+import top.colter.skiko.layout.Image
+import top.colter.skiko.layout.Layout
+import top.colter.skiko.layout.Row
+import top.colter.skiko.layout.Text
+import top.colter.skiko.layout.View
 
 private const val TEST_IMAGE_PREFIX = "test://image/"
 private const val TEST_EMOJI_PREFIX = "test://emoji/"
 private const val PREVIEW_LAYOUTS_PROPERTY = "dynamic.draw.preview.layouts"
 private const val PREVIEW_LAYOUTS_ENV = "DYNAMIC_DRAW_PREVIEW_LAYOUTS"
-private const val DARK_PREVIEW_THEME_COLORS = "#101624;#24182D;#0D2630"
-private val defaultPreviewLayouts = listOf("default", "minimal")
+private const val DEFAULT_THEME_COLORS = "#FE65A6"
+private const val DARK_THEME_COLORS = "#101624;#24182D;#0D2630"
 
 class DrawTest {
+
     @BeforeTest
     fun init() {
         Dp.factor = 1f
@@ -72,232 +88,302 @@ class DrawTest {
     }
 
     @Test
-    fun `test common dynamic previews`() {
-        val layouts = previewLayouts()
-        commonDynamicPreviews().forEach { preview ->
-            layouts.forEach { layout ->
-                renderToOutput(
-                    fileName = previewFileName(layout, preview.fileName),
-                    update = preview.update,
-                    config = drawConfig(layout = layout, ornament = preview.ornament),
-                )
-            }
-        }
+    fun `test dynamic previews`() {
+        dynamicPreviews().forEach(::renderPreview)
     }
 
     @Test
-    fun `test link preview draw previews`() {
-        val layouts = previewLayouts()
-        linkPreviewPreviews().forEach { preview ->
-            layouts.forEach { layout ->
-                renderLinkPreviewToOutput(
-                    fileName = previewFileName(layout, preview.fileName),
-                    preview = preview.preview,
-                    config = drawConfig(layout = layout, ornament = preview.ornament),
-                )
-            }
-        }
+    fun `test link and live previews`() {
+        linkAndLivePreviews().forEach(::renderPreview)
     }
 
     @Test
-    fun `test live open draw previews`() {
-        val layouts = previewLayouts()
-        liveOpenPreviews().forEach { preview ->
-            layouts.forEach { layout ->
-                renderLiveToOutput(
-                    fileName = previewFileName(layout, preview.fileName),
-                    update = preview.update,
-                    config = drawConfig(layout = layout, ornament = preview.ornament),
-                )
-            }
-        }
+    fun `test theme previews`() {
+        renderThemeOverviewToOutput()
+        themeDynamicPreviews().forEach(::renderPreview)
     }
 
-    @Test
-    fun `test dark theme draw previews`() {
-        val layouts = previewLayouts()
-        commonDynamicPreviews().forEach { preview ->
-            layouts.forEach { layout ->
-                renderToOutput(
-                    fileName = previewFileName("dark_$layout", preview.fileName),
-                    update = preview.update,
-                    config = drawConfig(
-                        layout = layout,
-                        ornament = preview.ornament,
-                        themeColors = DARK_PREVIEW_THEME_COLORS,
-                    ),
-                )
-            }
-        }
-        linkPreviewPreviews().forEach { preview ->
-            layouts.forEach { layout ->
-                renderLinkPreviewToOutput(
-                    fileName = previewFileName("dark_$layout", preview.fileName),
-                    preview = preview.preview,
-                    config = drawConfig(
-                        layout = layout,
-                        ornament = preview.ornament,
-                        themeColors = DARK_PREVIEW_THEME_COLORS,
-                    ),
-                )
-            }
-        }
-        liveOpenPreviews().forEach { preview ->
-            layouts.forEach { layout ->
-                renderLiveToOutput(
-                    fileName = previewFileName("dark_$layout", preview.fileName),
-                    update = preview.update,
-                    config = drawConfig(
-                        layout = layout,
-                        ornament = preview.ornament,
-                        themeColors = DARK_PREVIEW_THEME_COLORS,
-                    ),
-                )
-            }
-        }
-    }
-
-    @Test
-    fun `test generated theme previews`() {
-        renderThemePalettePreviewToOutput()
-
-        val layouts = previewLayouts()
-        val update = textImagesCardDynamic()
-        themePreviewCases().forEach { themeCase ->
-            layouts.forEach { layout ->
-                renderToOutput(
-                    fileName = previewFileName(layout, "theme_${themeCase.fileName}_dynamic.png"),
-                    update = update,
-                    config = drawConfig(
-                        layout = layout,
-                        ornament = DrawOrnament.QRCODE,
-                        themeColors = themeCase.colors,
-                    ),
-                )
-            }
-        }
-    }
-
-    @Test
-    fun `test avatar generated theme previews`() {
-        val avatarCases = avatarThemePreviewCases()
-        renderAvatarThemePalettePreviewToOutput(avatarCases)
-
-        val layouts = previewLayouts()
-        avatarCases.forEach { avatarCase ->
-            val update = avatarThemeDynamic(avatarCase)
-            layouts.forEach { layout ->
-                renderToOutput(
-                    fileName = previewFileName(layout, "avatar_theme_${avatarCase.fileName}_dynamic.png"),
-                    update = update,
-                    config = drawConfig(
-                        layout = layout,
-                        ornament = DrawOrnament.QRCODE,
-                        themeColors = avatarCase.colors,
-                    ),
-                )
-            }
-        }
-    }
-
-    @Test
-    fun `test author head theme dynamic previews`() {
-        renderToOutput(
-            fileName = "default_author_head_theme_bright_head_dark_theme.png",
-            update = authorHeadThemeDynamic(
-                id = "author-head-theme-bright-dark",
-                name = "亮头图观察员",
-                header = "bg1.jpg",
-                avatar = "avatar.jpg",
-                title = "亮色头图配深色主题",
+    private fun dynamicPreviews(): List<PreviewCase> {
+        return listOf(
+            PreviewCase(
+                fileName = "dynamic_01_title_short_text.png",
+                update = titleShortTextDynamic(),
+                layout = "default",
+                ornament = DrawOrnament.LOGO,
             ),
-            config = drawConfig(
+            PreviewCase(
+                fileName = "dynamic_02_text_images_small_card.png",
+                update = textImagesSmallCardDynamic(),
+                layout = "minimal",
+                ornament = DrawOrnament.LOGO,
+            ),
+            PreviewCase(
+                fileName = "dynamic_03_title_images_large_card.png",
+                update = titleImagesLargeCardDynamic(),
                 layout = "default",
                 ornament = DrawOrnament.QRCODE,
-                themeColors = DARK_PREVIEW_THEME_COLORS,
+            ),
+            PreviewCase(
+                fileName = "dynamic_04_text_video_extra_card.png",
+                update = textVideoExtraCardDynamic(),
+                layout = "minimal",
+                ornament = DrawOrnament.QRCODE,
+            ),
+            PreviewCase(
+                fileName = "dynamic_05_repost.png",
+                update = repostDynamic(),
+                layout = "default",
+                ornament = DrawOrnament.LOGO,
+            ),
+            PreviewCase(
+                fileName = "dynamic_06_long_text_images_dark.png",
+                update = longTextImagesDynamic(),
+                layout = "minimal",
+                ornament = DrawOrnament.QRCODE,
+                themeColors = DARK_THEME_COLORS,
             ),
         )
-        renderToOutput(
-            fileName = "default_author_head_theme_dark_head_light_theme.png",
-            update = authorHeadThemeDynamic(
-                id = "author-head-theme-dark-light",
-                name = "深色头图观察员",
+    }
+
+    private fun linkAndLivePreviews(): List<PreviewCase> {
+        return listOf(
+            PreviewCase(
+                fileName = "link_01_video.png",
+                update = linkPreviewUpdate(videoLinkPreview()),
+                layout = "default",
+                ornament = DrawOrnament.LOGO,
+            ),
+            PreviewCase(
+                fileName = "link_02_live_room.png",
+                update = linkPreviewUpdate(liveLinkPreview()),
+                layout = "minimal",
+                ornament = DrawOrnament.QRCODE,
+            ),
+            PreviewCase(
+                fileName = "link_03_user_banner.png",
+                update = linkPreviewUpdate(userLinkPreview()),
+                layout = "default",
+                ornament = DrawOrnament.LOGO,
+            ),
+            PreviewCase(
+                fileName = "link_04_long_no_cover.png",
+                update = linkPreviewUpdate(longNoCoverLinkPreview()),
+                layout = "default",
+                ornament = DrawOrnament.QRCODE,
+            ),
+            PreviewCase(
+                fileName = "live_01_open.png",
+                update = liveOpenUpdate(),
+                layout = "default",
+                ornament = DrawOrnament.QRCODE,
+            ),
+        )
+    }
+
+    private fun themeDynamicPreviews(): List<PreviewCase> {
+        return listOf(
+            PreviewCase(
+                fileName = "theme_01_default_pink.png",
+                update = themeDynamic("theme-default", "默认粉色主题", "avatar.jpg", "header2.png"),
+                layout = "default",
+                ornament = DrawOrnament.QRCODE,
+                themeColors = DEFAULT_THEME_COLORS,
+            ),
+            PreviewCase(
+                fileName = "theme_02_bright_cyan.png",
+                update = themeDynamic("theme-cyan", "亮青色主题", "avatar1.jpg", "header1.png"),
+                layout = "default",
+                ornament = DrawOrnament.QRCODE,
+                themeColors = "#BFFAFF",
+            ),
+            PreviewCase(
+                fileName = "theme_03_dark_head.png",
+                update = themeDynamic("theme-dark", "深色主题和亮头图", "avatar8.jpg", "bg1.jpg"),
+                layout = "default",
+                ornament = DrawOrnament.QRCODE,
+                themeColors = DARK_THEME_COLORS,
+            ),
+            avatarThemePreview("avatar_theme_01_extracted.png", "avatar4.jpg"),
+        )
+    }
+
+    private fun titleShortTextDynamic(): SourceUpdate {
+        return dynamicUpdate(
+            id = "preview-title-short-text",
+            publisher = previewPublisher(
+                id = "short-text-up",
+                name = "可可萝优妮-KokoroUni",
+                header = "header2.png",
+            ),
+            payload = DynamicPayload(
+                title = "今晚八点开播",
+                blocks = listOf(
+                    richTextBlock(
+                        text("准备了新的动态绘制效果预览，今晚一起看成片。"),
+                        emoji("[热词系列_知识增加]"),
+                        text(" 记得带上小零食。"),
+                    ),
+                ),
+            ),
+        )
+    }
+
+    private fun textImagesSmallCardDynamic(): SourceUpdate {
+        return dynamicUpdate(
+            id = "preview-text-images-small-card",
+            publisher = previewPublisher(
+                id = "images-card-up",
+                name = "云边观察员",
+                header = "header2.png",
+                avatar = "avatar1.jpg",
+            ),
+            payload = DynamicPayload(
+                blocks = listOf(
+                    richTextBlock(
+                        text("今天整理了一组绘图模块的组合预览，主要看正文、图片和附加卡片放在一起时的节奏。"),
+                        emoji("[阿库娅_不关我事]"),
+                        topic("绘图预览"),
+                    ),
+                    imageGrid(count = 3),
+                    articleCard(
+                        id = "small-card",
+                        title = "动态转发工具排版记录",
+                        description = "记录默认布局、minimal 布局、主题色和媒体卡片联动效果。",
+                        style = MediaCardStyle.SMALL,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    private fun titleImagesLargeCardDynamic(): SourceUpdate {
+        return dynamicUpdate(
+            id = "preview-title-images-large-card",
+            publisher = previewPublisher(
+                id = "large-card-up",
+                name = "栗子工坊",
+                header = "header1.png",
+            ),
+            payload = DynamicPayload(
+                title = "四月绘图更新说明",
+                blocks = listOf(
+                    richTextBlock(
+                        text("这次把标题、正文、图文内容和大媒体卡片放到同一张动态里检查。"),
+                        emoji("[热词系列_大展宏兔]"),
+                        link("查看完整记录"),
+                    ),
+                    imageGrid(count = 4),
+                    articleCard(
+                        id = "large-card",
+                        title = "默认布局视觉调整汇总",
+                        description = "包含作者卡片、转发动态、二维码区域、媒体卡片和正文自适应字号。",
+                        style = MediaCardStyle.LARGE,
+                    ),
+                ),
+            ),
+        )
+    }
+
+    private fun textVideoExtraCardDynamic(): SourceUpdate {
+        return dynamicUpdate(
+            id = "preview-text-video-extra-card",
+            publisher = previewPublisher(
+                id = "video-card-up",
+                name = "薄荷放映室",
+                header = "header2.png",
+                avatar = "avatar1.jpg",
+            ),
+            payload = DynamicPayload(
+                blocks = listOf(
+                    richTextBlock(
+                        text("新视频已经上传啦，封面、大媒体卡片和迷你附加卡片一起看看效果。"),
+                        emoji("[阿库娅_生气]"),
+                    ),
+                    videoCard(
+                        id = "preview-video",
+                        title = "默认布局从零打磨到能看的全过程",
+                        description = "聊聊绘图模块的设计取舍，以及为什么边距和字号会影响转发动态的阅读体验。",
+                        badge = "视频",
+                    ),
+                    musicCard(
+                        id = "preview-music",
+                        title = "夜间调试用背景音乐",
+                        description = "音乐 · 轻快 · 循环播放",
+                    ),
+                ),
+            ),
+        )
+    }
+
+    private fun repostDynamic(): SourceUpdate {
+        val origin = dynamicUpdate(
+            id = "preview-origin-dynamic",
+            publisher = previewPublisher(
+                id = "origin-up",
+                name = "原图发布者",
                 header = "header1.png",
                 avatar = "avatar1.jpg",
-                title = "深色头图配亮色主题",
+                withPendant = false,
             ),
-            config = drawConfig(
-                layout = "default",
-                ornament = DrawOrnament.QRCODE,
-                themeColors = "#FE65A6",
+            payload = DynamicPayload(
+                title = "原动态的完整内容",
+                blocks = listOf(
+                    richTextBlock(
+                        text("这是被转发的原始动态，里面有正文、表情和一个小卡片。"),
+                        emoji("[热词系列_知识增加]"),
+                    ),
+                    articleCard(
+                        id = "origin-card",
+                        title = "原动态里的附加说明",
+                        description = "检查嵌套卡片里的作者栏、正文和附加内容是否协调。",
+                        style = MediaCardStyle.SMALL,
+                    ),
+                ),
+            ),
+        )
+
+        return dynamicUpdate(
+            id = "preview-repost-dynamic",
+            publisher = previewPublisher(
+                id = "repost-up",
+                name = "转发观察员",
+                header = "header2.png",
+            ),
+            payload = DynamicPayload(
+                blocks = listOf(
+                    richTextBlock(
+                        text("转发一下这个版本的效果，重点看原动态作者栏和正文之间的距离。"),
+                        emoji("[阿库娅_不关我事]"),
+                        mention("原图发布者"),
+                    ),
+                    RepostBlock(
+                        referenceKind = DynamicReferenceKind.ORIGIN,
+                        key = origin.key,
+                        link = origin.link,
+                        embedded = origin,
+                    ),
+                ),
             ),
         )
     }
 
-    private fun commonDynamicPreviews(): List<DynamicPreview> {
-        return listOf(
-            DynamicPreview(
-                fileName = "preview_01_title_short_text.png",
-                update = titleShortTextDynamic(),
+    private fun longTextImagesDynamic(): SourceUpdate {
+        return dynamicUpdate(
+            id = "preview-long-text-images",
+            publisher = previewPublisher(
+                id = "long-text-up",
+                name = "长文记录本",
+                header = "header1.png",
             ),
-            DynamicPreview(
-                fileName = "preview_02_text_images_card.png",
-                update = textImagesCardDynamic(),
-                ornament = DrawOrnament.QRCODE,
-            ),
-            DynamicPreview(
-                fileName = "preview_03_title_text_images_card.png",
-                update = titleTextImagesCardDynamic(),
-            ),
-            DynamicPreview(
-                fileName = "preview_04_text_video_card.png",
-                update = textVideoCardDynamic(),
-                ornament = DrawOrnament.QRCODE,
-            ),
-            DynamicPreview(
-                fileName = "preview_05_repost_dynamic.png",
-                update = repostDynamic(),
-            ),
-            DynamicPreview(
-                fileName = "preview_06_title_long_images.png",
-                update = titleLongTextImagesDynamic(),
-            ),
-        )
-    }
-
-    private fun liveOpenPreviews(): List<DynamicPreview> {
-        return listOf(
-            DynamicPreview(
-                fileName = "live_preview_01_open.png",
-                update = liveOpenUpdate(),
-                ornament = DrawOrnament.QRCODE,
-            ),
-        )
-    }
-
-    private fun linkPreviewPreviews(): List<LinkPreviewCase> {
-        return listOf(
-            LinkPreviewCase(
-                fileName = "link_preview_01_video_cover.png",
-                preview = videoLinkPreview(),
-            ),
-            LinkPreviewCase(
-                fileName = "link_preview_02_live_qrcode.png",
-                preview = liveLinkPreview(),
-                ornament = DrawOrnament.QRCODE,
-            ),
-            LinkPreviewCase(
-                fileName = "link_preview_03_user_banner.png",
-                preview = userLinkPreview(),
-            ),
-            LinkPreviewCase(
-                fileName = "link_preview_04_long_no_cover.png",
-                preview = longNoCoverLinkPreview(),
-                ornament = DrawOrnament.QRCODE,
-            ),
-            LinkPreviewCase(
-                fileName = "link_preview_05_article_cover.png",
-                preview = articleLinkPreview(),
+            payload = DynamicPayload(
+                title = "长文字和多图的阅读密度观察",
+                blocks = listOf(
+                    richTextBlock(
+                        text("看到这个评论就想简单讲一下，其实也没啥特别的技巧，毛坯买的是一米三玉米须万用，为了还原立绘那种长发。做法就是前面的头发再烫一遍很蓬松的玉米须，只有烫蓬松了才能做出来层次感。\n"),
+                        text("然后分区开始做刘海，先分三大块最后再做层次细分。我比较喜欢保留一点毛流感，所以需要两侧刘海要打薄，这样做出来有层次感。边做边喷一点水，过会再喷发胶，还没干的时候用手掐用尖尾梳弄出一点纹理来都可以。"),
+                    ),
+                    imageGrid(count = 9),
+                ),
             ),
         )
     }
@@ -378,7 +464,7 @@ class DrawTest {
             id = "cv-preview-long",
             url = "https://www.bilibili.com/read/cv-preview-long",
             title = "一篇关于动态转发绘图的长说明",
-            description = "这条链接没有封面，所以测试会把标题提到动态标题位置，并把较长的简介作为正文绘制。这样可以观察链接解析结果在没有封面时是否仍然有完整的信息层级：先看到标题，再读到正文，最后通过一个紧凑的小卡片知道它来自哪个页面。这里故意写得稍长一些，避免小媒体卡片把正文裁得过碎。",
+            description = "这条链接没有封面，所以测试会把标题提到动态标题位置，并把较长的简介作为正文绘制。这样可以观察链接解析结果在没有封面时是否仍然有完整的信息层级：先看到标题，再读到正文，最后通过一个紧凑的小卡片知道它来自哪个页面。",
             badge = "专栏",
             publisher = previewPublisher(
                 id = "link-article-up",
@@ -393,293 +479,60 @@ class DrawTest {
         )
     }
 
-    private fun articleLinkPreview(): LinkPreview {
-        return LinkPreview(
-            platformId = PlatformId.of("bilibili"),
-            kind = "article",
-            id = "cv-preview-cover",
-            url = "https://www.bilibili.com/read/cv-preview-cover",
-            title = "默认布局边距调整记录",
-            description = "整理作者卡片、二维码区域、媒体卡片和转发动态卡片的最新视觉调整。",
-            badge = "专栏",
-            cover = imageMedia("bg1.jpg", MediaKind.COVER),
-            publisher = previewPublisher(
-                id = "link-cover-up",
-                name = "排版备忘录",
-                header = "header2.png",
-            ),
-            metrics = listOf(
-                DynamicMetric(key = "like", raw = 18000, display = "1.8万"),
-                DynamicMetric(key = "favorite", raw = 8200, display = "8200"),
-            ),
-        )
-    }
-
     private fun liveOpenUpdate(): SourceUpdate {
-        return testDynamicUpdate(
+        return dynamicUpdate(
+            id = "preview-live-open",
             publisher = previewPublisher(
-                id = "preview-live-open",
+                id = "live-open-up",
                 name = "星河直播间",
                 header = "header1.png",
                 avatar = "avatar1.jpg",
                 withPendant = false,
             ),
-            externalId = "preview-live-open",
             payload = LivePayload(
                 roomId = "23058",
                 title = "今晚八点一起看动态绘图效果",
                 area = "绘图 / 开发杂谈",
                 cover = imageMedia("bg1.jpg", MediaKind.COVER),
                 status = LiveStatus.OPEN,
+                statusText = "直播中",
                 startedAtEpochSeconds = 1L,
+                metrics = listOf(
+                    DynamicMetric(key = "online", raw = 53000, display = "5.3万"),
+                    DynamicMetric(key = "follow", raw = 1280000, display = "128万"),
+                ),
             ),
-        ).copy(link = "https://live.bilibili.com/23058")
+        )
     }
 
-    private fun authorHeadThemeDynamic(
+    private fun themeDynamic(
         id: String,
-        name: String,
-        header: String,
-        avatar: String,
         title: String,
+        avatar: String,
+        header: String,
     ): SourceUpdate {
-        return testDynamicUpdate(
+        return dynamicUpdate(
+            id = id,
             publisher = previewPublisher(
                 id = id,
-                name = name,
+                name = "主题观察员",
                 header = header,
                 avatar = avatar,
+                withPendant = false,
             ),
-            externalId = id,
             payload = DynamicPayload(
                 title = title,
                 blocks = listOf(
                     richTextBlock(
-                        text("这条动态用来观察作者头图在完整动态卡片里的主题调和效果。"),
+                        text("这条动态用来观察主题色映射后的作者名、正文、链接、媒体标签和二维码区域。"),
                         emoji("[热词系列_知识增加]"),
-                        text(" 重点看顶部作者卡片和下面正文卡片放在一起时，明暗是否舒服、头图是否抢眼。"),
-                        topic("主题调和"),
-                    ),
-                    imageGrid(count = 3),
-                    articleCard(
-                        id = "$id-card",
-                        title = "动态绘图主题调和记录",
-                        description = "把头图当作背景氛围而不是完整底图，观察它和主题色、正文卡片、媒体卡片之间的协调程度。",
-                        style = MediaCardStyle.SMALL,
-                    ),
-                ),
-            ),
-        )
-    }
-
-    private fun titleShortTextDynamic(): SourceUpdate {
-        return testDynamicUpdate(
-            publisher = previewPublisher(
-                id = "preview-short",
-                name = "可可萝优妮-KokoroUni",
-                header = "header2.png",
-            ),
-            externalId = "preview-title-short-text",
-            payload = DynamicPayload(
-                title = "今晚八点开播",
-                blocks = listOf(
-                    richTextBlock(
-                        text("准备了新的动态绘制效果预览，今晚一起看成片。"),
-                        emoji("[热词系列_知识增加]"),
-                        text(" 记得带上小零食。"),
-                    ),
-                ),
-            ),
-        )
-    }
-
-    private fun textImagesCardDynamic(): SourceUpdate {
-        return testDynamicUpdate(
-            publisher = previewPublisher(
-                id = "preview-images-card",
-                name = "云边观察员",
-                header = "header2.png",
-                avatar = "avatar1.jpg",
-            ),
-            externalId = "preview-text-images-card",
-            payload = DynamicPayload(
-                blocks = listOf(
-                    richTextBlock(
-                        text("今天整理了一组绘图模块的组合预览，主要看正文、图片和附加卡片放在一起时的节奏。"),
-                        emoji("[阿库娅_不关我事]"),
-                        text(" 图片之间的间距、正文和卡片之间的留白都需要一起观察，单独看某个组件反而不容易发现问题。"),
-                        topic("绘图预览"),
-                    ),
-                    imageGrid(count = 3),
-                    articleCard(
-                        id = "preview-extra-article-small",
-                        title = "动态转发工具排版记录",
-                        description = "记录这次默认布局的边距、字号、主题色和媒体卡片联动效果。",
-                        style = MediaCardStyle.SMALL,
-                    ),
-                ),
-            ),
-        )
-    }
-
-    private fun titleTextImagesCardDynamic(): SourceUpdate {
-        return testDynamicUpdate(
-            publisher = previewPublisher(
-                id = "preview-title-images-card",
-                name = "栗子工坊",
-                header = "header1.png",
-            ),
-            externalId = "preview-title-text-images-card",
-            payload = DynamicPayload(
-                title = "四月绘图更新说明",
-                blocks = listOf(
-                    richTextBlock(
-                        text("这次更新把标题、正文、图文内容和卡片放到同一张动态里检查。"),
-                        emoji("[热词系列_大展宏兔]"),
-                        text(" 如果标题字号变大后仍然舒服，说明正文缩放区间大致是稳的。"),
-                        link("查看完整记录"),
-                    ),
-                    imageGrid(count = 4),
-                    articleCard(
-                        id = "preview-extra-article-large",
-                        title = "默认布局视觉调整汇总",
-                        description = "包含作者卡片、转发动态、二维码区域、媒体卡片和正文自适应字号。",
-                        style = MediaCardStyle.LARGE,
-                    ),
-                ),
-            ),
-        )
-    }
-
-    private fun textVideoCardDynamic(): SourceUpdate {
-        return testDynamicUpdate(
-            publisher = previewPublisher(
-                id = "preview-video-card",
-                name = "薄荷放映室",
-                header = "header2.png",
-                avatar = "avatar1.jpg",
-            ),
-            externalId = "preview-text-video-card",
-            payload = DynamicPayload(
-                blocks = listOf(
-                    richTextBlock(
-                        text("新视频已经上传啦，封面和附加卡片一起看看效果。"),
-                        emoji("[阿库娅_生气]"),
-                    ),
-                    videoCard(
-                        id = "preview-video",
-                        title = "默认布局从零打磨到能看的全过程",
-                        description = "这一期主要聊绘图模块的设计取舍，以及为什么边距和字号会影响转发动态的阅读体验。",
-                        badge = "视频",
-                        style = MediaCardStyle.LARGE,
-                    ),
-                    musicCard(
-                        id = "preview-extra-music",
-                        title = "夜间调试用背景音乐",
-                        description = "音乐 · 轻快 · 循环播放",
-                    ),
-                ),
-            ),
-        )
-    }
-
-    private fun repostDynamic(): SourceUpdate {
-        val origin = testDynamicUpdate(
-            publisher = previewPublisher(
-                id = "preview-origin",
-                name = "原图发布者",
-                header = "header1.png",
-                avatar = "avatar1.jpg",
-                withPendant = false,
-            ),
-            externalId = "preview-origin-dynamic",
-            payload = DynamicPayload(
-                title = "原动态的完整内容",
-                blocks = listOf(
-                    richTextBlock(
-                        text("这是被转发的原始动态，里面有正文、表情和一个小卡片。"),
-                        emoji("[热词系列_知识增加]"),
-                        text(" 用它来观察转发卡片里的作者栏、正文和附加内容是否协调。"),
-                    ),
-                    articleCard(
-                        id = "preview-origin-card",
-                        title = "原动态里的附加说明",
-                        description = "这里模拟原作者附带的专栏卡片，用来检查嵌套卡片的空间感。",
-                        style = MediaCardStyle.SMALL,
-                    ),
-                ),
-            ),
-        )
-
-        return testDynamicUpdate(
-            publisher = previewPublisher(
-                id = "preview-repost",
-                name = "转发观察员",
-                header = "header2.png",
-            ),
-            externalId = "preview-repost-dynamic",
-            payload = DynamicPayload(
-                blocks = listOf(
-                    richTextBlock(
-                        text("转发一下这个版本的效果，重点看原动态作者栏和正文之间的距离。"),
-                        emoji("[阿库娅_不关我事]"),
-                        mention("原图发布者"),
-                    ),
-                    RepostBlock(
-                        referenceKind = DynamicReferenceKind.ORIGIN,
-                        key = origin.key,
-                        link = origin.link,
-                        embedded = origin,
-                    ),
-                ),
-            ),
-        )
-    }
-
-    private fun titleLongTextImagesDynamic(): SourceUpdate {
-        return testDynamicUpdate(
-            publisher = previewPublisher(
-                id = "preview-long-images",
-                name = "长文记录本",
-                header = "header1.png",
-            ),
-            externalId = "preview-title-long-images",
-            payload = DynamicPayload(
-                title = "长文字和多图的阅读密度观察",
-                blocks = listOf(
-                    richTextBlock(
-                        text("看到这个评论就想简单讲一下，其实也没啥特别的技巧，毛坯买的是一米三玉米须万用，为了还原立绘那种长发。做法就是前面的头发再烫一遍很蓬松的玉米须，只有烫蓬松了才能做出来层次感。\n" +
-                                "然后分区开始做刘海，先分三大块最后再做层次细分。我比较喜欢保留一点毛流感，所以需要两侧刘海要打薄，这样做出来有层次感。其实原图没这么层次感，只是做毛的时候喜欢加一点自己理解进去。做中间这一缕，要想有层次就要从这这块最底下这层发排取一部分作为侧面刘海收进去（其实我中间刘海发量取多了有点挡脸，而且鬓角做多了，其实不用那么多。）边做边喷一点水，过会再喷发胶，还没干的时候用手掐用尖尾梳弄出一点纹理来都可以。后面头发做了一点防炸，但是拍到后面也炸了。。还得再研究下防炸方法。当然我也没什么技巧，纯属为了省钱自学的，可能有些方法并不是很主流"),
-                    ),
-                    imageGrid(count = 9),
-                ),
-            ),
-        )
-    }
-
-    private fun avatarThemeDynamic(avatarCase: AvatarThemePreviewCase): SourceUpdate {
-        return testDynamicUpdate(
-            publisher = previewPublisher(
-                id = "avatar-theme-${avatarCase.fileName}",
-                name = "头像主题观察员",
-                header = "header1.png",
-                avatar = avatarCase.avatarFile,
-                withPendant = false,
-            ),
-            externalId = "avatar-theme-${avatarCase.fileName}",
-            payload = DynamicPayload(
-                title = "头像自动主题预览",
-                blocks = listOf(
-                    richTextBlock(
-                        text("这条动态使用从 ${avatarCase.avatarFile} 提取出的主题色：${avatarCase.colors}。"),
-                        emoji("[热词系列_知识增加]"),
-                        text(" 重点看作者名、正文链接、媒体标签和二维码区域是否协调。"),
+                        topic("主题预览"),
                     ),
                     imageGrid(count = 2),
                     articleCard(
-                        id = "avatar-theme-card-${avatarCase.fileName}",
-                        title = "自动主题色效果检查",
-                        description = "同一套动态内容搭配不同头像提取色，方便观察浅色、暗色、人物和 logo 头像的差异。",
+                        id = "$id-card",
+                        title = "主题色效果检查",
+                        description = "同一套动态内容搭配不同主题，方便看整体协调度和文字可读性。",
                         style = MediaCardStyle.SMALL,
                     ),
                 ),
@@ -687,79 +540,153 @@ class DrawTest {
         )
     }
 
-    private data class DynamicPreview(
-        val fileName: String,
-        val update: SourceUpdate,
-        val ornament: DrawOrnament = DrawOrnament.LOGO,
-    )
+    private fun avatarThemePreview(fileName: String, avatarFile: String): PreviewCase {
+        val colors = AvatarThemeExtractor { media ->
+            loadTestResource("image", media.uri.removePrefix(TEST_IMAGE_PREFIX)).readBytes()
+        }.extractColors(imageMedia(avatarFile, MediaKind.AVATAR))?.joinToString(";") ?: DEFAULT_THEME_COLORS
 
-    private data class LinkPreviewCase(
-        val fileName: String,
-        val preview: LinkPreview,
-        val ornament: DrawOrnament = DrawOrnament.LOGO,
-    )
-
-    private data class ThemePreviewCase(
-        val fileName: String,
-        val title: String,
-        val colors: String,
-    )
-
-    private data class AvatarThemePreviewCase(
-        val fileName: String,
-        val title: String,
-        val avatarFile: String,
-        val colors: String,
-        val extracted: Boolean,
-    )
-
-    private fun themePreviewCases(): List<ThemePreviewCase> {
-        return listOf(
-            ThemePreviewCase("01_default_pink", "默认粉色", "#FE65A6"),
-            ThemePreviewCase("02_cyan", "高亮青色", "#BFFAFF"),
-            ThemePreviewCase("03_gold", "高亮金色", "#FFD700"),
-            ThemePreviewCase("04_purple", "紫色", "#8B5CF6"),
-            ThemePreviewCase("05_teal", "青绿色", "#14B8A6"),
-            ThemePreviewCase("06_neutral_gray", "低饱和灰色", "#808080"),
-            ThemePreviewCase("07_dark_mix", "暗色渐变", DARK_PREVIEW_THEME_COLORS),
-            ThemePreviewCase("08_multi_pink_cyan", "粉青双色", "#FE65A6;#BFFAFF"),
+        return PreviewCase(
+            fileName = fileName,
+            update = themeDynamic(
+                id = "avatar-theme-${avatarFile.substringBeforeLast('.')}",
+                title = "头像自动主题预览",
+                avatar = avatarFile,
+                header = "header1.png",
+            ),
+            layout = "minimal",
+            ornament = DrawOrnament.QRCODE,
+            themeColors = colors,
         )
     }
 
-    private fun avatarThemePreviewCases(): List<AvatarThemePreviewCase> {
-        val extractor = AvatarThemeExtractor { media ->
-            loadTestResource("image", media.uri.removePrefix(TEST_IMAGE_PREFIX)).readBytes()
+    private fun renderThemeOverviewToOutput() {
+        val cases = listOf(
+            ThemeOverviewCase("默认粉色", DEFAULT_THEME_COLORS, null),
+            ThemeOverviewCase("亮青色", "#BFFAFF", null),
+            ThemeOverviewCase("暗色渐变", DARK_THEME_COLORS, null),
+            ThemeOverviewCase("头像 avatar4", avatarThemeColors("avatar4.jpg"), "avatar4.jpg"),
+            ThemeOverviewCase("头像 avatar8", avatarThemeColors("avatar8.jpg"), "avatar8.jpg"),
+            ThemeOverviewCase("头像 avatar10", avatarThemeColors("avatar10.jpg"), "avatar10.jpg"),
+        )
+
+        View(
+            file = testOutput.resolve("theme_overview.png"),
+            modifier = Modifier()
+                .width(1220.dp)
+                .padding(22.dp)
+                .background(Color.makeRGB(246, 248, 252)),
+        ) {
+            Column(modifier = Modifier().fillMaxWidth()) {
+                Text(
+                    text = "主题效果总览",
+                    fontSize = 40.dp,
+                    color = Color.BLACK,
+                    modifier = Modifier().margin(bottom = 8.dp),
+                )
+                Text(
+                    text = "固定主题和头像提取主题的关键颜色。真实动态效果见 theme_* 输出。",
+                    fontSize = 24.dp,
+                    color = Color.makeRGB(82, 88, 100),
+                    modifier = Modifier().margin(bottom = 18.dp),
+                )
+                cases.forEach { drawThemeOverviewCase(it) }
+            }
         }
-        return avatarThemeFiles().mapIndexed { index, avatarFile ->
-            val colors = extractor.extractColors(imageMedia(avatarFile, MediaKind.AVATAR))
-            AvatarThemePreviewCase(
-                fileName = "%02d_%s".format(index + 1, avatarFile.substringBeforeLast('.')),
-                title = "$avatarFile 自动主题",
-                avatarFile = avatarFile,
-                colors = colors?.joinToString(";") ?: "#FE65A6",
-                extracted = colors != null,
+    }
+
+    private fun Layout.drawThemeOverviewCase(case: ThemeOverviewCase) {
+        val theme = DrawThemeFactory.fromThemeColorText(case.colors)
+        Row(
+            modifier = Modifier()
+                .fillMaxWidth()
+                .margin(bottom = 14.dp)
+                .padding(12.dp)
+                .background(
+                    gradient = Gradient(
+                        LayoutAlignment.LEFT,
+                        LayoutAlignment.RIGHT,
+                        theme.backgroundColors,
+                    ),
+                )
+                .border(2.dp, 14.dp, theme.borderColor),
+        ) {
+            if (case.avatarFile != null) {
+                Image(
+                    image = loadTestImage("image", case.avatarFile),
+                    ratio = Ratio.SQUARE,
+                    modifier = Modifier()
+                        .width(78.dp)
+                        .height(78.dp)
+                        .margin(right = 12.dp)
+                        .border(2.dp, 39.dp, theme.borderColor),
+                )
+            }
+            Column(
+                modifier = Modifier()
+                    .fillMaxWidth()
+                    .padding(12.dp)
+                    .background(theme.cardColor)
+                    .border(2.dp, 10.dp, theme.borderColor),
+            ) {
+                Text(
+                    text = "${case.title}  ${case.colors}  ${theme.mode.name}",
+                    fontSize = 24.dp,
+                    color = theme.textColor,
+                    modifier = Modifier().fillMaxWidth().margin(bottom = 10.dp),
+                )
+                Row(modifier = Modifier().fillMaxWidth()) {
+                    drawThemeSwatch("媒体标签", theme.primaryColor, theme.onPrimaryColor, "primary")
+                    drawThemeSwatch("可读强调", theme.readableAccentColor, contrastTextColor(theme.readableAccentColor), "readable")
+                    drawThemeSwatch("二维码点", theme.qrPointColor, contrastTextColor(theme.qrPointColor), "qrPoint")
+                    drawThemeSwatch("卡片底色", theme.cardColor, theme.textColor, "card")
+                    drawThemeSwatch("正文", theme.textColor, contrastTextColor(theme.textColor), "text")
+                    drawThemeSwatch("次级", theme.secondaryTextColor, contrastTextColor(theme.secondaryTextColor), "secondary")
+                }
+            }
+        }
+    }
+
+    private fun Layout.drawThemeSwatch(
+        title: String,
+        color: Int,
+        textColor: Int,
+        fieldName: String,
+    ) {
+        Column(
+            modifier = Modifier()
+                .width(162.dp)
+                .margin(right = 8.dp),
+        ) {
+            Box(
+                alignment = LayoutAlignment.CENTER,
+                modifier = Modifier()
+                    .fillMaxWidth()
+                    .height(54.dp)
+                    .background(color)
+                    .border(1.dp, 8.dp, contrastTextColor(color).withAlpha(0.22f)),
+            ) {
+                Text(
+                    text = title,
+                    fontSize = 19.dp,
+                    color = textColor,
+                    alignment = LayoutAlignment.CENTER,
+                    modifier = Modifier().fillMaxWidth(),
+                )
+            }
+            Text(
+                text = "$fieldName ${toHexColor(color)}",
+                fontSize = 14.dp,
+                color = Color.makeRGB(92, 98, 110),
+                maxLinesCount = 1,
+                modifier = Modifier().margin(top = 4.dp).fillMaxWidth(),
             )
         }
     }
 
-    private fun avatarThemeFiles(): List<String> {
-        return listOf("avatar.jpg", "avatar1.jpg") + (3..11).map { "avatar$it.jpg" }
-    }
-
-    private fun previewLayouts(): List<String> {
-        val configured = System.getProperty(PREVIEW_LAYOUTS_PROPERTY)
-            ?: System.getenv(PREVIEW_LAYOUTS_ENV)
-            ?: return defaultPreviewLayouts
-        return configured
-            .split(',', ';')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .ifEmpty { defaultPreviewLayouts }
-    }
-
-    private fun previewFileName(layout: String, fileName: String): String {
-        val safeLayout = layout.replace(Regex("[^A-Za-z0-9_-]"), "_")
-        return "${safeLayout}_$fileName"
+    private fun avatarThemeColors(avatarFile: String): String {
+        return AvatarThemeExtractor { media ->
+            loadTestResource("image", media.uri.removePrefix(TEST_IMAGE_PREFIX)).readBytes()
+        }.extractColors(imageMedia(avatarFile, MediaKind.AVATAR))?.joinToString(";") ?: DEFAULT_THEME_COLORS
     }
 
     private fun richTextBlock(vararg nodes: DynamicContentNode): TextBlock {
@@ -821,7 +748,6 @@ class DrawTest {
         title: String,
         description: String,
         style: MediaCardStyle,
-        role: DynamicBlockRole = DynamicBlockRole.ADDITIONAL,
     ): MediaCardBlock {
         return cardBlock(
             id = id,
@@ -833,7 +759,7 @@ class DrawTest {
             cover = imageMedia("bg1.jpg", MediaKind.COVER),
             coverRatio = Ratio.BANNER,
             style = style,
-            role = role,
+            role = DynamicBlockRole.ADDITIONAL,
         )
     }
 
@@ -842,7 +768,6 @@ class DrawTest {
         title: String,
         description: String,
         badge: String,
-        style: MediaCardStyle,
     ): MediaCardBlock {
         return cardBlock(
             id = id,
@@ -857,7 +782,7 @@ class DrawTest {
                 DynamicMetric(key = "play", raw = 12600, display = "一万二"),
                 DynamicMetric(key = "danmaku", raw = 358, display = "三百五十八"),
             ),
-            style = style,
+            style = MediaCardStyle.LARGE,
         )
     }
 
@@ -912,6 +837,18 @@ class DrawTest {
         )
     }
 
+    private fun dynamicUpdate(
+        id: String,
+        publisher: PublisherInfo,
+        payload: top.colter.dynamic.core.data.SourcePayload,
+    ): SourceUpdate {
+        return testDynamicUpdate(
+            publisher = publisher,
+            externalId = id,
+            payload = payload,
+        )
+    }
+
     private fun previewPublisher(
         id: String,
         name: String,
@@ -945,260 +882,60 @@ class DrawTest {
         )
     }
 
-    private fun renderToOutput(
-        fileName: String,
-        update: SourceUpdate,
-        config: DrawConfig = drawConfig(),
-    ) {
-        cacheMedia(update)
-        val img = when (update.payload) {
-            is DynamicPayload -> renderDynamicImage(update = update, config = config)
-            is LivePayload -> renderLiveImage(update = update, config = config)
-        }
-        testOutput.resolve(fileName).writeBytes(img.encodeToData()!!.bytes)
-    }
-
-    private fun renderLinkPreviewToOutput(
-        fileName: String,
-        preview: LinkPreview,
-        config: DrawConfig = drawConfig(),
-    ) {
-        renderToOutput(
-            fileName = fileName,
-            update = buildLinkPreviewSourceUpdate(
-                preview = preview,
-                occurredAtEpochSeconds = 1L,
-            ),
-            config = config,
+    private fun linkPreviewUpdate(preview: LinkPreview): SourceUpdate {
+        return buildLinkPreviewSourceUpdate(
+            preview = preview,
+            occurredAtEpochSeconds = 1L,
         )
     }
 
-    private fun renderLiveToOutput(
-        fileName: String,
-        update: SourceUpdate,
-        config: DrawConfig = drawConfig(),
-    ) {
-        renderToOutput(fileName = fileName, update = update, config = config)
-    }
-
-    private fun renderThemePalettePreviewToOutput() {
-        View(
-            file = testOutput.resolve("theme_palette_preview.png"),
-            modifier = Modifier()
-                .width(1200.dp)
-                .padding(22.dp)
-                .background(Color.makeRGB(246, 248, 252)),
-        ) {
-            Column(modifier = Modifier().fillMaxWidth()) {
-                Text(
-                    text = "主题色生成预览",
-                    fontSize = 40.dp,
-                    color = Color.BLACK,
-                    modifier = Modifier().margin(bottom = 8.dp),
-                )
-                Text(
-                    text = "每一行展示输入主题色生成后的背景、卡片、强调色、正文链接和二维码点色。",
-                    fontSize = 24.dp,
-                    color = Color.makeRGB(82, 88, 100),
-                    modifier = Modifier().margin(bottom = 18.dp),
-                )
-                themePreviewCases().forEach { themeCase ->
-                    drawThemePaletteCase(themeCase)
-                }
-            }
-        }
-    }
-
-    private fun renderAvatarThemePalettePreviewToOutput(avatarCases: List<AvatarThemePreviewCase>) {
-        View(
-            file = testOutput.resolve("avatar_theme_palette_preview.png"),
-            modifier = Modifier()
-                .width(1380.dp)
-                .padding(22.dp)
-                .background(Color.makeRGB(246, 248, 252)),
-        ) {
-            Column(modifier = Modifier().fillMaxWidth()) {
-                Text(
-                    text = "头像自动主题预览",
-                    fontSize = 40.dp,
-                    color = Color.BLACK,
-                    modifier = Modifier().margin(bottom = 8.dp),
-                )
-                Text(
-                    text = "每一行展示头像、提取出的主题色，以及这些颜色映射到绘图主题后的关键色块。",
-                    fontSize = 24.dp,
-                    color = Color.makeRGB(82, 88, 100),
-                    modifier = Modifier().margin(bottom = 18.dp),
-                )
-                avatarCases.forEach { avatarCase ->
-                    drawAvatarThemePaletteCase(avatarCase)
-                }
-            }
-        }
-    }
-
-    private fun Layout.drawAvatarThemePaletteCase(avatarCase: AvatarThemePreviewCase) {
-        val theme = DrawThemeFactory.fromThemeColorText(avatarCase.colors)
-        Column(
-            modifier = Modifier()
-                .fillMaxWidth()
-                .margin(bottom = 18.dp)
-                .padding(14.dp)
-                .background(
-                    gradient = Gradient(
-                        LayoutAlignment.LEFT,
-                        LayoutAlignment.RIGHT,
-                        theme.backgroundColors,
-                    ),
-                )
-                .border(2.dp, 16.dp, theme.borderColor),
-        ) {
-            Row(
-                modifier = Modifier()
-                    .fillMaxWidth()
-                    .padding(14.dp)
-                    .background(theme.cardColor)
-                    .border(2.dp, 12.dp, theme.borderColor),
-            ) {
-                Image(
-                    image = loadTestImage("image", avatarCase.avatarFile),
-                    ratio = Ratio.SQUARE,
-                    modifier = Modifier()
-                        .width(92.dp)
-                        .height(92.dp)
-                        .margin(right = 16.dp)
-                        .border(2.dp, 46.dp, theme.borderColor),
-                )
-                Column(modifier = Modifier().fillMaxWidth()) {
-                    Text(
-                        text = "${avatarCase.title}  ${avatarCase.colors}  ${theme.mode.name}" +
-                            if (avatarCase.extracted) "" else "  未提取，使用默认色预览",
-                        fontSize = 24.dp,
-                        color = theme.textColor,
-                        modifier = Modifier().fillMaxWidth().margin(bottom = 12.dp),
-                    )
-                    Row(modifier = Modifier().fillMaxWidth()) {
-                        drawThemeSwatch("媒体标签", theme.primaryColor, theme.onPrimaryColor, "primary")
-                        drawThemeSwatch("可读强调", theme.readableAccentColor, contrastTextColor(theme.readableAccentColor), "readable")
-                        drawThemeSwatch("二维码点", theme.qrPointColor, contrastTextColor(theme.qrPointColor), "qrPoint")
-                        drawThemeSwatch("卡片底色", theme.cardColor, theme.textColor, "card")
-                        drawThemeSwatch("主文本", theme.textColor, contrastTextColor(theme.textColor), "text")
-                        drawThemeSwatch("次级文本", theme.secondaryTextColor, contrastTextColor(theme.secondaryTextColor), "secondary")
-                    }
-                }
-            }
-        }
-    }
-
-    private fun Layout.drawThemePaletteCase(themeCase: ThemePreviewCase) {
-        val theme = DrawThemeFactory.fromThemeColorText(themeCase.colors)
-        Column(
-            modifier = Modifier()
-                .fillMaxWidth()
-                .margin(bottom = 18.dp)
-                .padding(14.dp)
-                .background(
-                    gradient = Gradient(
-                        LayoutAlignment.LEFT,
-                        LayoutAlignment.RIGHT,
-                        theme.backgroundColors,
-                    ),
-                )
-                .border(2.dp, 16.dp, theme.borderColor),
-        ) {
-            Column(
-                modifier = Modifier()
-                    .fillMaxWidth()
-                    .padding(14.dp)
-                    .background(theme.cardColor)
-                    .border(2.dp, 12.dp, theme.borderColor),
-            ) {
-                Row(modifier = Modifier().fillMaxWidth().margin(bottom = 12.dp)) {
-                    Text(
-                        text = "${themeCase.title}  ${themeCase.colors}  ${theme.mode.name}",
-                        fontSize = 25.dp,
-                        color = theme.textColor,
-                        modifier = Modifier().fillMaxWidth(),
-                    )
-                }
-
-                Row(modifier = Modifier().fillMaxWidth().margin(bottom = 12.dp)) {
-                    drawThemeSwatch("媒体标签", theme.primaryColor, theme.onPrimaryColor, "primary")
-                    drawThemeSwatch("可读强调", theme.readableAccentColor, contrastTextColor(theme.readableAccentColor), "readable")
-                    drawThemeSwatch("二维码点", theme.qrPointColor, contrastTextColor(theme.qrPointColor), "qrPoint")
-                    drawThemeSwatch("卡片底色", theme.cardColor, theme.textColor, "card")
-                    drawThemeSwatch("主文本", theme.textColor, contrastTextColor(theme.textColor), "text")
-                    drawThemeSwatch("次级文本", theme.secondaryTextColor, contrastTextColor(theme.secondaryTextColor), "secondary")
-                }
-
-                Row(modifier = Modifier().fillMaxWidth()) {
-                    Text(
-                        text = "正文示例：主题色用于长文本时优先保证阅读。",
-                        fontSize = 24.dp,
-                        color = theme.textColor,
-                    )
-                    Text(
-                        text = " #话题链接#",
-                        fontSize = 24.dp,
-                        color = theme.linkColor,
-                        modifier = Modifier().margin(left = 8.dp),
-                    )
-                    Text(
-                        text = "  弱化信息",
-                        fontSize = 24.dp,
-                        color = theme.mutedTextColor,
-                        modifier = Modifier().margin(left = 8.dp),
-                    )
-                }
-            }
-        }
-    }
-
-    private fun Layout.drawThemeSwatch(
-        title: String,
-        color: Int,
-        textColor: Int,
-        fieldName: String,
-    ) {
-        Column(
-            modifier = Modifier()
-                .width(170.dp)
-                .margin(right = 10.dp),
-        ) {
-            Box(
-                alignment = LayoutAlignment.CENTER,
-                modifier = Modifier()
-                    .fillMaxWidth()
-                    .height(58.dp)
-                    .background(color)
-                    .border(1.dp, 8.dp, contrastTextColor(color).withAlpha(0.22f)),
-            ) {
-                Text(
-                    text = title,
-                    fontSize = 20.dp,
-                    color = textColor,
-                    alignment = LayoutAlignment.CENTER,
-                    modifier = Modifier().fillMaxWidth(),
-                )
-            }
-            Text(
-                text = "$fieldName ${toHexColor(color)}",
-                fontSize = 15.dp,
-                color = Color.makeRGB(92, 98, 110),
-                maxLinesCount = 1,
-                modifier = Modifier().margin(top = 4.dp).fillMaxWidth(),
+    private fun renderPreview(preview: PreviewCase) {
+        previewLayouts(preview.layout).forEach { layout ->
+            renderToOutput(
+                fileName = previewFileName(layout, preview.fileName),
+                update = preview.update,
+                config = drawConfig(
+                    layout = layout,
+                    ornament = preview.ornament,
+                    themeColors = preview.themeColors,
+                ),
             )
         }
     }
 
-    private fun contrastTextColor(color: Int): Int {
-        return if (relativeLuminance(color) > 0.46) Color.BLACK else Color.WHITE
+    private fun renderToOutput(
+        fileName: String,
+        update: SourceUpdate,
+        config: DrawConfig,
+    ) {
+        cacheMedia(update)
+        val image = when (update.payload) {
+            is DynamicPayload -> renderDynamicImage(update = update, config = config)
+            is LivePayload -> renderLiveImage(update = update, config = config)
+        }
+        testOutput.resolve(fileName).writeBytes(image.encodeToData()!!.bytes)
+    }
+
+    private fun previewLayouts(defaultLayout: String): List<String> {
+        val configured = System.getProperty(PREVIEW_LAYOUTS_PROPERTY)
+            ?: System.getenv(PREVIEW_LAYOUTS_ENV)
+            ?: return listOf(defaultLayout)
+        return configured
+            .split(',', ';')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .ifEmpty { listOf(defaultLayout) }
+    }
+
+    private fun previewFileName(layout: String, fileName: String): String {
+        val safeLayout = layout.replace(Regex("[^A-Za-z0-9_-]"), "_")
+        return "${safeLayout}_$fileName"
     }
 
     private fun drawConfig(
-        layout: String = "default",
-        ornament: DrawOrnament = DrawOrnament.LOGO,
-        themeColors: String = "#FE65A6",
+        layout: String,
+        ornament: DrawOrnament,
+        themeColors: String,
     ): DrawConfig {
         return DrawConfig(
             platform = PlatformDescriptor.of("bilibili", "哔哩哔哩"),
@@ -1230,13 +967,31 @@ class DrawTest {
         return loadTestResource(resource.first, resource.second).readBytes()
     }
 
+    private fun contrastTextColor(color: Int): Int {
+        return if (relativeLuminance(color) > 0.46) Color.BLACK else Color.WHITE
+    }
+
+    private data class PreviewCase(
+        val fileName: String,
+        val update: SourceUpdate,
+        val layout: String,
+        val ornament: DrawOrnament,
+        val themeColors: String = DEFAULT_THEME_COLORS,
+    )
+
+    private data class ThemeOverviewCase(
+        val title: String,
+        val colors: String,
+        val avatarFile: String?,
+    )
+
     private object TestPlatformDrawAssetResolver : PlatformDrawAssetResolver {
         private val imageCache: MutableMap<String, Image> = mutableMapOf()
 
         override fun image(platformId: PlatformId, key: String, width: Int?, height: Int?): Image? {
             val fileName = when (key) {
-                PlatformDrawAssetKeys.PRIMARY_LOGO -> platformId.value + "_logo_primary.png"
-                PlatformDrawAssetKeys.TEXT_LOGO -> platformId.value + "_logo_wordmark.png"
+                PlatformDrawAssetKeys.PRIMARY_LOGO -> "${platformId.value}_logo_primary.png"
+                PlatformDrawAssetKeys.TEXT_LOGO -> "${platformId.value}_logo_wordmark.png"
                 else -> return null
             }
             return imageCache.getOrPut(fileName) {
