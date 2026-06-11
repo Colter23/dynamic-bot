@@ -19,29 +19,11 @@ import top.colter.dynamic.testDynamicUpdate
 
 class DynamicDrawServiceTest {
     @Test
-    fun `default render output is webp image`() = runTest {
-        val renderedRoot = createTempDirectory("dynamic-draw-webp")
+    fun `default render output is png image`() = runTest {
+        val renderedRoot = createTempDirectory("dynamic-draw-png")
         val service = drawService(renderedRoot = renderedRoot)
 
-        val media = service.render(testDynamicUpdate(externalId = "webp-default"), storedPublisher = null)
-        val path = Paths.get(media.uri)
-        val bytes = path.readBytes()
-
-        assertEquals(MediaKind.IMAGE, media.kind)
-        assertTrue(path.fileName.toString().endsWith(".webp"))
-        assertTrue(Files.isRegularFile(path))
-        assertTrue(bytes.isWebP())
-    }
-
-    @Test
-    fun `png render output remains available for compatibility`() = runTest {
-        val renderedRoot = createTempDirectory("dynamic-draw-png")
-        val service = drawService(
-            renderedRoot = renderedRoot,
-            outputFormat = DrawOutputFormat.PNG,
-        )
-
-        val media = service.render(testDynamicUpdate(externalId = "png-fallback"), storedPublisher = null)
+        val media = service.render(testDynamicUpdate(externalId = "png-default"), storedPublisher = null)
         val path = Paths.get(media.uri)
         val bytes = path.readBytes()
 
@@ -51,9 +33,27 @@ class DynamicDrawServiceTest {
         assertTrue(bytes.isPng())
     }
 
+    @Test
+    fun `webp render output remains available when configured`() = runTest {
+        val renderedRoot = createTempDirectory("dynamic-draw-webp")
+        val service = drawService(
+            renderedRoot = renderedRoot,
+            outputFormat = DrawOutputFormat.WEBP,
+        )
+
+        val media = service.render(testDynamicUpdate(externalId = "webp-configured"), storedPublisher = null)
+        val path = Paths.get(media.uri)
+        val bytes = path.readBytes()
+
+        assertEquals(MediaKind.IMAGE, media.kind)
+        assertTrue(path.fileName.toString().endsWith(".webp"))
+        assertTrue(Files.isRegularFile(path))
+        assertTrue(bytes.isWebP())
+    }
+
     private fun drawService(
         renderedRoot: java.nio.file.Path,
-        outputFormat: DrawOutputFormat = DrawOutputFormat.WEBP,
+        outputFormat: DrawOutputFormat = DrawOutputFormat.PNG,
     ): DefaultDynamicDrawService {
         val sourceRoot = createTempDirectory("dynamic-draw-source")
         return DefaultDynamicDrawService(

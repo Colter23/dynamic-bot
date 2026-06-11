@@ -314,12 +314,13 @@ async function renderConfigDetail(id, request = beginPageRequest("configs")) {
               </div>
               <span class="config-section-count">${esc(`${fields.length} 个配置项`)}</span>
             </div>
-            <div class="form-grid" data-config-section-body>${fields.map(field => configFieldHtml(detail, field)).join("")}</div>
+            <div class="form-grid" data-config-section-body>${configSectionFieldsHtml(detail, fields)}</div>
           </section>`).join("")}
       </div>
     </div>`;
   wireConfigRestartWatcher(detail);
   wireConfigFieldVisibility(detail);
+  wireMediaDeliveryField(detail);
   applyConfigSectionTabs(activeSection);
   updateConfigDirtyState(detail);
 }
@@ -331,6 +332,30 @@ function configSections(detail) {
     (sections[section] = sections[section] || []).push(field);
   });
   return sections;
+}
+
+function configSectionFieldsHtml(detail, fields) {
+  const hiddenFields = fields.filter(isHiddenConfigField);
+  const visibleFields = fields.filter(field => !isHiddenConfigField(field));
+  const hiddenHtml = hiddenFields.map(field => configFieldHtml(detail, field)).join("");
+  const normalFields = visibleFields.filter(field => !field.advanced);
+  const advancedFields = visibleFields.filter(field => field.advanced);
+  const normalHtml = normalFields.map(field => configFieldHtml(detail, field)).join("");
+  if (!advancedFields.length) return `${hiddenHtml}${normalHtml}`;
+  return `${hiddenHtml}${normalHtml}
+    <details class="config-advanced" data-config-advanced>
+      <summary>
+        <span>高级配置</span>
+        <small>${esc(`${advancedFields.length} 项`)}</small>
+      </summary>
+      <div class="form-grid config-advanced-grid">
+        ${advancedFields.map(field => configFieldHtml(detail, field)).join("")}
+      </div>
+    </details>`;
+}
+
+function isHiddenConfigField(field) {
+  return field.component === "HIDDEN";
 }
 
 function configHasRestartFields(detail) {
@@ -350,6 +375,7 @@ function configComparableValue(detail, field) {
   if (field.component === "ONEBOT_CONNECTION_TABLE") return normalizeOneBotConnections(normalizeConfigJsonValue(raw));
   if (field.component === "COMMAND_PERMISSION_TABLE") return normalizeCommandPermissionRules(normalizeConfigJsonValue(raw));
   if (field.component === "NOTIFICATION_TARGET_TABLE") return normalizeNotificationTargets(normalizeConfigJsonValue(raw));
+  if (field.component === "MEDIA_DELIVERY_PROFILES") return normalizeMediaDeliveryProfiles(normalizeConfigJsonValue(raw));
   if (field.type === "JSON") return normalizeConfigJsonValue(raw);
   return displayConfigValue(raw);
 }
@@ -371,6 +397,7 @@ function currentConfigComparableValue(field) {
   if (field.component === "ONEBOT_CONNECTION_TABLE") return normalizeOneBotConnections(normalizeConfigJsonValue(node.value));
   if (field.component === "COMMAND_PERMISSION_TABLE") return normalizeCommandPermissionRules(normalizeConfigJsonValue(node.value));
   if (field.component === "NOTIFICATION_TARGET_TABLE") return normalizeNotificationTargets(normalizeConfigJsonValue(node.value));
+  if (field.component === "MEDIA_DELIVERY_PROFILES") return normalizeMediaDeliveryProfiles(normalizeConfigJsonValue(node.value));
   if (field.type === "JSON") return normalizeConfigJsonValue(node.value);
   return node.value;
 }
@@ -649,11 +676,13 @@ async function toggleConfigSecret(button) {
 }
 
 function configFieldHtml(detail, field) {
+  if (field.component === "HIDDEN") return hiddenConfigFieldHtml(detail, field);
   if (field.component === "MESSAGE_TEMPLATE_EDITOR") return messageTemplateFieldHtml(detail, field);
   if (field.component === "MESSAGE_ROUTING_POLICY_TABLE") return messageRoutingPlatformPoliciesFieldHtml(detail, field);
   if (field.component === "ONEBOT_CONNECTION_TABLE") return oneBotConnectionsFieldHtml(detail, field);
   if (field.component === "COMMAND_PERMISSION_TABLE") return commandPermissionsFieldHtml(detail, field);
   if (field.component === "NOTIFICATION_TARGET_TABLE") return notificationTargetsFieldHtml(detail, field);
+  if (field.component === "MEDIA_DELIVERY_PROFILES") return mediaDeliveryProfilesFieldHtml(detail, field);
   const raw = detail.values[field.path];
   const value = displayConfigValue(raw);
   const fieldLabel = configFieldLabelHtml(field);
@@ -677,8 +706,17 @@ function configFieldHtml(detail, field) {
   return `<div class="${configFieldClass(field)}" data-config-field-path="${attr(field.path)}">${labelHtml}<input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="${inputType}"${numberAttrs}${readOnlyInputAttrs(field)} value="${attr(value)}">${descriptionHtml}</div>`;
 }
 
+function hiddenConfigFieldHtml(detail, field) {
+  const value = displayConfigValue(detail.values[field.path]);
+  return `<input id="${attr(configHiddenDomId(field.path))}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="hidden" value="${attr(value)}">`;
+}
+
+function configHiddenDomId(path) {
+  return `cfg-hidden-${String(path || "").replace(/[^a-zA-Z0-9_-]+/g, "-")}`;
+}
+
 function configFieldClass(field, extra = "") {
-  return ["field", extra, field.readOnly ? "readonly-field" : ""].filter(Boolean).join(" ");
+  return ["field", extra, field.advanced ? "advanced-field" : "", field.readOnly ? "readonly-field" : ""].filter(Boolean).join(" ");
 }
 
 function configFieldTitleHtml(field, id) {
@@ -1179,6 +1217,266 @@ function messageTemplateSampleValues(kind) {
     link: "https://t.bilibili.com/987654321",
     links: "https://example.com/post\nhttps://example.com/detail",
   };
+}
+
+function mediaDeliveryProfilesFieldHtml(detail, field) {
+  const profiles = normalizeMediaDeliveryProfiles(detail.values[field.path]);
+  const defaultProfileId = mediaDeliveryDefaultProfileId(detail, profiles);
+  const profile = mediaDeliveryDefaultProfile(profiles, defaultProfileId);
+  const mapping = mediaDeliveryPrimaryMapping(profile);
+  const readOnly = !!field.readOnly;
+  const advancedOpen = profile.type === "AUTO" ? "" : " open";
+  return `<div class="${configFieldClass(field, "media-delivery-field full")}" data-config-field-path="${attr(field.path)}" data-media-delivery-field>
+    ${configFieldTitleHtml(field, "cfg-media-delivery-profiles")}
+    ${configFieldDescriptionHtml(field)}
+    <input id="cfg-media-delivery-profiles" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(profiles))}">
+    <div class="media-delivery-summary">
+      <div>
+        <span>当前方式</span>
+        <strong id="mediaDeliveryModeSummary">${esc(mediaDeliveryTypeLabel(profile.type))}</strong>
+      </div>
+      <p id="mediaDeliveryModeDescription">${esc(mediaDeliveryTypeDescription(profile.type))}</p>
+    </div>
+    ${readOnly ? readOnlyTableNoteHtml(field) : `<details class="config-advanced media-delivery-advanced"${advancedOpen}>
+      <summary>
+        <span>高级媒体发送</span>
+        <small>本地路径 / 外部访问 / Base64</small>
+      </summary>
+      <div class="form-grid config-advanced-grid">
+        <div class="field">
+          <label for="mediaDeliveryType">发送方式</label>
+          <select id="mediaDeliveryType">${mediaDeliveryTypeOptionsHtml(profile.type)}</select>
+        </div>
+        <div class="field full">
+          <span id="mediaDeliveryTypeHint" class="inline-note">${esc(mediaDeliveryTypeDescription(profile.type))}</span>
+        </div>
+        <div class="field" data-media-delivery-local>
+          <label for="mediaDeliveryLocalBotRoot">项目文件路径前缀</label>
+          <input id="mediaDeliveryLocalBotRoot" value="${attr(mapping.botRoot)}" placeholder="留空表示直接使用项目生成的本地路径">
+        </div>
+        <div class="field" data-media-delivery-local>
+          <label for="mediaDeliveryLocalClientRoot">OneBot 可访问路径前缀</label>
+          <input id="mediaDeliveryLocalClientRoot" value="${attr(mapping.clientRoot)}" placeholder="同机同路径时可以留空">
+        </div>
+        <div class="field full" data-media-delivery-signed>
+          <label for="mediaDeliveryPublicBaseUrl">外部访问地址</label>
+          <input id="mediaDeliveryPublicBaseUrl" value="${attr(profile.signedUrl.publicBaseUrl)}" placeholder="例如 http://192.168.1.10:2233">
+        </div>
+        <div class="field" data-media-delivery-base64>
+          <label for="mediaDeliveryBase64MaxMegabytes">Base64 兜底上限（MB）</label>
+          <input id="mediaDeliveryBase64MaxMegabytes" type="number" step="any" min="0" value="${attr(profile.base64Fallback.maxMegabytes)}">
+        </div>
+      </div>
+    </details>`}
+  </div>`;
+}
+
+function wireMediaDeliveryField(detail) {
+  const root = pageRoot().querySelector("[data-media-delivery-field]");
+  if (!root) return;
+  const defaultNode = configInputFor({ path: "mediaDelivery.defaultProfileId" });
+  const profiles = mediaDeliveryProfiles();
+  if (defaultNode && !profiles.some(profile => profile.id === defaultNode.value.trim())) {
+    defaultNode.value = profiles[0]?.id || "auto";
+  }
+  refreshMediaDeliveryUi();
+  [
+    "mediaDeliveryType",
+    "mediaDeliveryLocalBotRoot",
+    "mediaDeliveryLocalClientRoot",
+    "mediaDeliveryPublicBaseUrl",
+    "mediaDeliveryBase64MaxMegabytes",
+  ].forEach(id => {
+    const node = $(id);
+    if (!node) return;
+    const refresh = () => updateMediaDeliveryProfilesFromControls(detail);
+    node.addEventListener("input", refresh);
+    node.addEventListener("change", refresh);
+  });
+}
+
+function mediaDeliveryProfiles() {
+  const node = $("cfg-media-delivery-profiles");
+  if (!node || !node.value.trim()) return [normalizeMediaDeliveryProfile({})];
+  try {
+    return normalizeMediaDeliveryProfiles(JSON.parse(node.value));
+  } catch (_) {
+    return [normalizeMediaDeliveryProfile({})];
+  }
+}
+
+function updateMediaDeliveryProfilesFromControls(detail) {
+  const node = $("cfg-media-delivery-profiles");
+  if (!node || !$("mediaDeliveryType")) return;
+  const profiles = mediaDeliveryProfiles();
+  const defaultNode = configInputFor({ path: "mediaDelivery.defaultProfileId" });
+  const defaultId = mediaDeliveryDefaultProfileIdFromDom(profiles);
+  const index = profiles.findIndex(profile => profile.id === defaultId);
+  const profileIndex = index >= 0 ? index : 0;
+  profiles[profileIndex] = mediaDeliveryProfileFromControls(profiles[profileIndex] || normalizeMediaDeliveryProfile({}));
+  node.value = JSON.stringify(profiles);
+  if (defaultNode && !defaultNode.value.trim()) defaultNode.value = profiles[profileIndex].id;
+  refreshMediaDeliveryUi();
+  updateConfigRestartButton(detail);
+  updateConfigDirtyState(detail);
+}
+
+function mediaDeliveryProfileFromControls(current) {
+  const type = mediaDeliveryTypeValue();
+  const existingMappings = Array.isArray(current.localFile.pathMappings) ? current.localFile.pathMappings : [];
+  const botRoot = $("mediaDeliveryLocalBotRoot")?.value.trim() || "";
+  const clientRoot = $("mediaDeliveryLocalClientRoot")?.value.trim() || "";
+  const explicitMapping = botRoot || clientRoot
+    ? [{ botRoot, clientRoot, enabled: true }]
+    : [];
+  const maxMegabytes = mediaDeliveryNumberValue(
+    "mediaDeliveryBase64MaxMegabytes",
+    current.base64Fallback.maxMegabytes,
+  );
+  return Object.assign({}, current, {
+    type,
+    localFile: Object.assign({}, current.localFile, {
+      pathMappings: explicitMapping.concat(existingMappings.slice(1)),
+    }),
+    signedUrl: Object.assign({}, current.signedUrl, {
+      publicBaseUrl: $("mediaDeliveryPublicBaseUrl")?.value.trim() || "",
+    }),
+    base64Fallback: Object.assign({}, current.base64Fallback, {
+      maxMegabytes,
+    }),
+  });
+}
+
+function refreshMediaDeliveryUi() {
+  const profiles = mediaDeliveryProfiles();
+  const profile = mediaDeliveryDefaultProfile(profiles, mediaDeliveryDefaultProfileIdFromDom(profiles));
+  const type = mediaDeliveryTypeValue(profile.type);
+  const summary = $("mediaDeliveryModeSummary");
+  const description = $("mediaDeliveryModeDescription");
+  const hint = $("mediaDeliveryTypeHint");
+  if (summary) summary.textContent = mediaDeliveryTypeLabel(type);
+  if (description) description.textContent = mediaDeliveryTypeDescription(type);
+  if (hint) hint.textContent = mediaDeliveryTypeDescription(type);
+  pageRoot().querySelectorAll("[data-media-delivery-local]").forEach(item => {
+    item.hidden = type !== "LOCAL_FILE";
+  });
+  pageRoot().querySelectorAll("[data-media-delivery-signed]").forEach(item => {
+    item.hidden = type !== "SIGNED_URL";
+  });
+  pageRoot().querySelectorAll("[data-media-delivery-base64]").forEach(item => {
+    item.hidden = !(type === "AUTO" || type === "BASE64");
+  });
+}
+
+function normalizeMediaDeliveryProfiles(value) {
+  const rows = Array.isArray(value) ? value : [];
+  const profiles = rows.map(normalizeMediaDeliveryProfile);
+  return profiles.length ? profiles : [normalizeMediaDeliveryProfile({})];
+}
+
+function normalizeMediaDeliveryProfile(profile) {
+  const source = profile || {};
+  const type = mediaDeliveryKnownType(source.type || "AUTO");
+  const localFile = source.localFile || {};
+  const signedUrl = source.signedUrl || {};
+  const base64Fallback = source.base64Fallback || {};
+  const auto = source.auto || {};
+  return Object.assign({}, source, {
+    id: String(source.id || "auto").trim() || "auto",
+    name: String(source.name || mediaDeliveryTypeLabel(type)).trim() || mediaDeliveryTypeLabel(type),
+    type,
+    localFile: Object.assign({}, localFile, {
+      pathMappings: normalizeMediaDeliveryPathMappings(localFile.pathMappings || source.pathMappings),
+    }),
+    signedUrl: Object.assign({}, signedUrl, {
+      publicBaseUrl: String(signedUrl.publicBaseUrl || source.publicBaseUrl || "").trim(),
+      ttlSeconds: mediaDeliveryFiniteNumber(signedUrl.ttlSeconds ?? signedUrl.urlTtlSeconds ?? source.urlTtlSeconds, 1800),
+      signingSecret: String(signedUrl.signingSecret || source.signingSecret || ""),
+    }),
+    base64Fallback: Object.assign({}, base64Fallback, {
+      maxMegabytes: mediaDeliveryFiniteNumber(base64Fallback.maxMegabytes, 8.0),
+    }),
+    auto: Object.assign({}, auto, {
+      probeCacheMinutes: mediaDeliveryFiniteNumber(auto.probeCacheMinutes, 30),
+      failedProbeCacheMinutes: mediaDeliveryFiniteNumber(auto.failedProbeCacheMinutes, 5),
+    }),
+  });
+}
+
+function normalizeMediaDeliveryPathMappings(value) {
+  const rows = Array.isArray(value) ? value : [];
+  return rows.map(mapping => ({
+    botRoot: String(mapping?.botRoot || "").trim(),
+    clientRoot: String(mapping?.clientRoot || "").trim(),
+    enabled: mapping?.enabled !== false,
+  }));
+}
+
+function mediaDeliveryPrimaryMapping(profile) {
+  const mappings = normalizeMediaDeliveryPathMappings(profile.localFile?.pathMappings);
+  return mappings.find(mapping => mapping.enabled) || mappings[0] || { botRoot: "", clientRoot: "", enabled: true };
+}
+
+function mediaDeliveryDefaultProfileId(detail, profiles) {
+  const raw = detail.values["mediaDelivery.defaultProfileId"];
+  const id = String(raw || "").trim();
+  if (profiles.some(profile => profile.id === id)) return id;
+  return profiles[0]?.id || "auto";
+}
+
+function mediaDeliveryDefaultProfileIdFromDom(profiles) {
+  const node = configInputFor({ path: "mediaDelivery.defaultProfileId" });
+  const id = String(node?.value || "").trim();
+  if (profiles.some(profile => profile.id === id)) return id;
+  return profiles[0]?.id || "auto";
+}
+
+function mediaDeliveryDefaultProfile(profiles, defaultProfileId) {
+  return profiles.find(profile => profile.id === defaultProfileId) || profiles[0] || normalizeMediaDeliveryProfile({});
+}
+
+function mediaDeliveryTypeOptionsHtml(selected) {
+  const current = mediaDeliveryKnownType(selected);
+  return ["AUTO", "LOCAL_FILE", "SIGNED_URL", "BASE64"]
+    .map(type => `<option value="${type}"${type === current ? " selected" : ""}>${esc(mediaDeliveryTypeLabel(type))}</option>`)
+    .join("");
+}
+
+function mediaDeliveryTypeValue(fallback = "AUTO") {
+  return mediaDeliveryKnownType($("mediaDeliveryType")?.value || fallback);
+}
+
+function mediaDeliveryKnownType(value) {
+  const type = String(value || "AUTO").trim().toUpperCase();
+  return ["AUTO", "LOCAL_FILE", "SIGNED_URL", "BASE64"].includes(type) ? type : "AUTO";
+}
+
+function mediaDeliveryTypeLabel(type) {
+  switch (mediaDeliveryKnownType(type)) {
+    case "LOCAL_FILE": return "本地路径";
+    case "SIGNED_URL": return "外部访问地址";
+    case "BASE64": return "Base64";
+    default: return "自动（推荐）";
+  }
+}
+
+function mediaDeliveryTypeDescription(type) {
+  switch (mediaDeliveryKnownType(type)) {
+    case "LOCAL_FILE": return "直接把本地文件路径交给目标平台，适合同机部署或文件系统互通。路径前缀留空时会直接使用项目生成的文件路径。";
+    case "SIGNED_URL": return "通过 Web 后台生成带签名的临时链接，适合 OneBot 客户端不在同一台机器但能访问主项目地址。";
+    case "BASE64": return "把图片编码进消息里，只建议作为最后兜底；大量图片会增加网络、内存和日志压力。";
+    default: return "自动按本地路径、签名链接、Base64 的顺序尝试，普通部署建议保持这个选项。";
+  }
+}
+
+function mediaDeliveryFiniteNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
+}
+
+function mediaDeliveryNumberValue(id, fallback) {
+  const node = $(id);
+  return mediaDeliveryFiniteNumber(node?.value, fallback);
 }
 
 function oneBotConnectionsFieldHtml(detail, field) {

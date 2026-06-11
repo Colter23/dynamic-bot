@@ -31,7 +31,7 @@ class MainConfigStoreTest {
     fun drawConfigFormShouldExposeThemeColorsAndAutoTheme() {
         val paths = MainConfigForms.formSpec.fields.map { it.path }
 
-        assertEquals(DrawOutputFormat.WEBP, MainDynamicConfig().draw.outputFormat)
+        assertEquals(DrawOutputFormat.PNG, MainDynamicConfig().draw.outputFormat)
         assertTrue("draw.outputFormat" in paths)
         assertTrue("draw.themeColors" in paths)
         assertTrue("draw.autoTheme" in paths)
@@ -61,7 +61,7 @@ class MainConfigStoreTest {
         val rewritten = path.readText()
 
         assertEquals("#111111;#222222;#333333", loaded.draw.themeColors)
-        assertEquals(DrawOutputFormat.WEBP, loaded.draw.outputFormat)
+        assertEquals(DrawOutputFormat.PNG, loaded.draw.outputFormat)
         assertTrue(rewritten.contains("outputFormat:"))
         assertTrue(rewritten.contains("themeColors:"))
         assertFalse(rewritten.contains("themeColor:"))
@@ -224,5 +224,30 @@ class MainConfigStoreTest {
         }
 
         assertTrue(error.message!!.contains("主题色"))
+    }
+
+    @Test
+    fun mainConfigFormShouldGroupFieldsAndCollapseAdvancedOptions() {
+        val fields = MainConfigForms.formSpec.fields
+        val byPath = fields.associateBy { it.path }
+
+        assertEquals(
+            listOf("基础设置", "推送内容", "链接解析", "发送与媒体", "系统维护"),
+            fields.map { it.section }.distinct(),
+        )
+        assertEquals("基础设置", byPath.getValue("command.prefix").section)
+        assertFalse(byPath.getValue("command.prefix").advanced)
+        assertEquals("推送内容", byPath.getValue("draw.outputFormat").section)
+        assertFalse(byPath.getValue("draw.outputFormat").advanced)
+        assertEquals("链接解析", byPath.getValue("linkParsing.videoDownload.enabled").section)
+        assertFalse(byPath.getValue("linkParsing.videoDownload.enabled").advanced)
+        assertEquals("发送与媒体", byPath.getValue("mediaDelivery.profiles").section)
+        assertFalse(byPath.getValue("mediaDelivery.profiles").advanced)
+        assertEquals("MEDIA_DELIVERY_PROFILES", byPath.getValue("mediaDelivery.profiles").component)
+        assertEquals("HIDDEN", byPath.getValue("mediaDelivery.defaultProfileId").component)
+        assertTrue(byPath.getValue("delivery.lockTtlSeconds").advanced)
+        assertEquals("系统维护", byPath.getValue("imageCache.memoryMaxEntries").section)
+        assertTrue(byPath.getValue("imageCache.memoryMaxEntries").advanced)
+        assertTrue(byPath.getValue("pluginCatalog.url").advanced)
     }
 }

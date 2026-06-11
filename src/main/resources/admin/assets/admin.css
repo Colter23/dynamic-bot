@@ -2960,6 +2960,34 @@
       font-weight: 850;
       white-space: nowrap;
     }
+    .config-advanced {
+      grid-column: 1 / -1;
+      min-width: 0;
+      margin-top: 2px;
+      border-top: 1px solid var(--line);
+    }
+    .config-advanced > summary {
+      min-height: 34px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 9px 2px 6px;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 850;
+      cursor: pointer;
+      user-select: none;
+      outline-offset: 3px;
+    }
+    .config-advanced > summary small {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+    .config-advanced-grid {
+      margin-top: 10px;
+    }
     .config-dirty-badge {
       min-height: 28px;
       display: inline-flex;
@@ -3148,13 +3176,49 @@
     .message-routing-policy-field,
     .onebot-connection-field,
     .command-permission-field,
-    .notification-target-field {
+    .notification-target-field,
+    .media-delivery-field {
       grid-column: 1 / -1;
     }
     .message-routing-policy-field,
     .onebot-connection-field,
-    .notification-target-field {
+    .notification-target-field,
+    .media-delivery-field {
       gap: 10px;
+    }
+    .media-delivery-summary {
+      min-width: 0;
+      display: grid;
+      gap: 5px;
+      padding: 10px 12px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-soft);
+    }
+    .media-delivery-summary div {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .media-delivery-summary span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
+    }
+    .media-delivery-summary strong {
+      color: var(--accent);
+      font-size: 14px;
+    }
+    .media-delivery-summary p {
+      margin: 0;
+      color: var(--muted);
+      line-height: 1.45;
+    }
+    .media-delivery-advanced {
+      margin-top: 0;
     }
     .command-permission-toolbar {
       display: flex;
