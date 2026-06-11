@@ -13,8 +13,10 @@ const $ = id => document.getElementById(id);
       system: ["系统维护", "运行信息与维护", "/admin/pages/system.html", "/admin/pages/system.js"],
       about: ["关于", "项目信息与作者", "/admin/pages/about.html", "/admin/pages/about.js"]
     };
+    const themeKey = "dynamicBotAdminTheme";
     const state = {
       token: localStorage.getItem(tokenKey) || "",
+      theme: localStorage.getItem(themeKey) || "light",
       page: "dashboard",
       cache: {},
       modalSubmit: null,
@@ -34,6 +36,23 @@ const $ = id => document.getElementById(id);
       pageRequestSeq: {},
       restoringHash: false
     };
+
+    function applyTheme(theme) {
+      const root = document.documentElement;
+      if (theme === "dark") {
+        root.setAttribute("data-theme", "dark");
+      } else {
+        root.removeAttribute("data-theme");
+      }
+      state.theme = theme;
+      localStorage.setItem(themeKey, theme);
+    }
+
+    function toggleTheme() {
+      const newTheme = state.theme === "dark" ? "light" : "dark";
+      applyTheme(newTheme);
+      notify(newTheme === "dark" ? "已切换到暗色模式" : "已切换到亮色模式", false);
+    }
     const pageModuleCache = {};
     const targetCandidateCacheTtlMillis = 180 * 1000;
 
@@ -860,6 +879,7 @@ const $ = id => document.getElementById(id);
       invalidate();
       await loadPage(state.page, true).catch(handleError);
     };
+    $("toggleTheme").onclick = toggleTheme;
     $("mobileMenu").onclick = () => document.body.classList.toggle("sidebar-open");
     $("modalClose").onclick = closeModal;
     $("modalCancel").onclick = closeModal;
@@ -871,6 +891,8 @@ const $ = id => document.getElementById(id);
       }
     });
     $("stopApplication").onclick = stopApplication;
+
+    applyTheme(state.theme);
 
     if (state.token) {
       api("/dashboard").then(showApp).catch(() => showLogin("已保存的 token 无效", true));

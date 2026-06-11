@@ -3,22 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>动态Bot后台</title>
+  <title>动态Bot后台 - 本地管理控制台</title>
+  <meta name="description" content="动态Bot本地管理后台，用于管理动态转发、订阅配置和系统监控">
   <link rel="stylesheet" href="/admin/assets/admin.css">
 </head>
 <body>
   <section id="loginView" class="login-shell">
     <div class="login-panel">
-      <div class="brand-mark">动</div>
-      <div>
-        <h1>动态Bot后台</h1>
-        <p class="sub-line">本地管理入口</p>
+      <div class="login-header">
+        <div class="brand-mark">动</div>
+        <div class="login-title">
+          <h1>动态Bot后台</h1>
+          <p class="sub-line">本地管理入口</p>
+        </div>
       </div>
       <form id="loginForm" class="login-form">
-        <input id="loginToken" type="password" placeholder="管理 Token" autocomplete="current-password" autofocus>
-        <button id="loginButton" type="submit">登录</button>
+        <div class="form-field">
+          <label for="loginToken">管理 Token</label>
+          <input id="loginToken" type="password" placeholder="请输入管理 Token" autocomplete="current-password" autofocus>
+        </div>
+        <button id="loginButton" type="submit">
+          <span>登录</span>
+        </button>
         <div id="loginMessage" class="message"></div>
       </form>
+      <div class="login-footer">
+        <p class="login-hint">请输入在配置文件中设置的管理 Token</p>
+      </div>
     </div>
   </section>
 
@@ -26,35 +37,104 @@
     <aside class="sidebar" id="sidebar">
       <div class="brand">
         <div class="brand-mark">动</div>
-        <strong>动态Bot后台</strong>
-        <span>控制台</span>
+        <div class="brand-text">
+          <strong>动态Bot后台</strong>
+          <span>管理控制台</span>
+        </div>
       </div>
       <nav class="nav" aria-label="运维台导航">
-        <button data-nav="dashboard" class="active">仪表盘</button>
-        <button data-nav="plugins">插件管理</button>
-        <button data-nav="login">账号连接</button>
-        <button data-nav="subscriptions">订阅管理</button>
-        <button data-nav="entities">发布者与目标</button>
-        <button data-nav="messages">消息记录</button>
-        <button data-nav="tasks">任务查看</button>
-        <button data-nav="logs">日志查看</button>
-        <button data-nav="configs">配置</button>
-        <button data-nav="system">系统维护</button>
-        <button data-nav="about">关于</button>
+        <div class="nav-group">
+          <span class="nav-group-title">概览</span>
+          <button data-nav="dashboard" class="active">
+            <span class="nav-icon">📊</span>
+            <span>仪表盘</span>
+          </button>
+        </div>
+        <div class="nav-group">
+          <span class="nav-group-title">内容管理</span>
+          <button data-nav="subscriptions">
+            <span class="nav-icon">📮</span>
+            <span>订阅管理</span>
+          </button>
+          <button data-nav="entities">
+            <span class="nav-icon">👥</span>
+            <span>发布者和目标</span>
+          </button>
+          <button data-nav="login">
+            <span class="nav-icon">🔗</span>
+            <span>平台账号</span>
+          </button>
+        </div>
+        <div class="nav-group">
+          <span class="nav-group-title">运行记录</span>
+          <button data-nav="messages">
+            <span class="nav-icon">💬</span>
+            <span>消息投递</span>
+          </button>
+          <button data-nav="tasks">
+            <span class="nav-icon">📋</span>
+            <span>任务管理</span>
+          </button>
+          <button data-nav="logs">
+            <span class="nav-icon">📝</span>
+            <span>日志查看</span>
+          </button>
+        </div>
+        <div class="nav-group">
+          <span class="nav-group-title">系统设置</span>
+          <button data-nav="plugins">
+            <span class="nav-icon">🧩</span>
+            <span>插件管理</span>
+          </button>
+          <button data-nav="configs">
+            <span class="nav-icon">⚙️</span>
+            <span>配置中心</span>
+          </button>
+          <button data-nav="system">
+            <span class="nav-icon">🔧</span>
+            <span>系统维护</span>
+          </button>
+        </div>
+        <div class="nav-group">
+          <button data-nav="about">
+            <span class="nav-icon">ℹ️</span>
+            <span>关于</span>
+          </button>
+        </div>
       </nav>
       <div class="sidebar-footer">
-        <button class="secondary" id="refreshPage">刷新</button>
-        <button class="danger sidebar-danger" id="stopApplication">停止主项目</button>
-        <button class="secondary" id="logout">退出登录</button>
+        <div class="sidebar-status">
+          <span class="status-indicator online"></span>
+          <span class="status-text">运行中</span>
+        </div>
       </div>
     </aside>
 
     <div class="workspace">
       <header class="topbar">
-        <button class="secondary menu-button" id="mobileMenu">菜单</button>
+        <button class="secondary menu-button" id="mobileMenu" aria-label="打开菜单">
+          <span>☰</span>
+        </button>
         <div class="topbar-title">
           <h1 id="pageTitle">仪表盘</h1>
           <span id="pageSubtitle">运行状态</span>
+        </div>
+        <div class="topbar-actions">
+          <button class="secondary compact" id="refreshPage" title="刷新当前页面">
+            <span class="button-icon">🔄</span>
+          </button>
+          <button class="secondary compact" id="toggleTheme" title="切换主题">
+            <span class="button-icon theme-icon">🌓</span>
+          </button>
+          <div class="topbar-divider"></div>
+          <button class="danger compact" id="stopApplication" title="停止主项目">
+            <span class="button-icon">⏹️</span>
+            <span>停止项目</span>
+          </button>
+          <button class="secondary compact" id="logout" title="退出登录">
+            <span class="button-icon">🚪</span>
+            <span>退出</span>
+          </button>
         </div>
       </header>
       <main id="content"></main>
@@ -65,7 +145,9 @@
     <div id="modalBox" class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
       <div class="modal-head">
         <h2 id="modalTitle"></h2>
-        <button class="ghost" id="modalClose" title="关闭">×</button>
+        <button class="ghost modal-close-button" id="modalClose" title="关闭" aria-label="关闭对话框">
+          <span>×</span>
+        </button>
       </div>
       <div id="modalBody" class="modal-body"></div>
       <div class="modal-actions">

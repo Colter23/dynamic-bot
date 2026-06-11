@@ -273,24 +273,36 @@ function subscriptionEntityCell(name, image, mediaPlatform, mediaKind, platformI
 
 function subscriptionFilterBar(rows, filteredRows) {
   const active = subscriptionFilterActive();
-  return `<div class="subscription-filter-bar">
-    <span class="entity-filter-title">筛选</span>
-    <div class="subscription-filter-groups">
-      <div class="subscription-filter-group">
-        <span class="subscription-filter-group-title">发布者</span>
-        <select data-subscription-filter="publisherPlatform">${filterOptions("全部平台", uniqueValues(rows, row => row.publisher && row.publisher.platformId), subscriptionFilters.publisherPlatform)}</select>
-        <select data-subscription-filter="publisherKind">${filterOptions("全部类型", uniqueValues(rows, row => row.publisher && row.publisher.kind), subscriptionFilters.publisherKind, label)}</select>
-        <input data-subscription-filter="publisherId" value="${attr(subscriptionFilters.publisherId)}" placeholder="发布者 ID / 名称">
-      </div>
-      <div class="subscription-filter-group">
-        <span class="subscription-filter-group-title">消息目标</span>
-        <select data-subscription-filter="subscriberPlatform">${filterOptions("全部平台", uniqueValues(rows, row => row.subscriber && row.subscriber.platformId), subscriptionFilters.subscriberPlatform)}</select>
-        <select data-subscription-filter="subscriberKind">${filterOptions("全部类型", uniqueValues(rows, row => row.subscriber && row.subscriber.targetKind), subscriptionFilters.subscriberKind, label)}</select>
-        <input data-subscription-filter="subscriberId" value="${attr(subscriptionFilters.subscriberId)}" placeholder="目标 ID / 名称">
-      </div>
+  const publisherPlatforms = uniqueValues(rows, row => row.publisher && row.publisher.platformId);
+  const publisherKinds = uniqueValues(rows, row => row.publisher && row.publisher.kind);
+  const subscriberPlatforms = uniqueValues(rows, row => row.subscriber && row.subscriber.platformId);
+  const subscriberKinds = uniqueValues(rows, row => row.subscriber && row.subscriber.targetKind);
+
+  return `<div class="subscription-filter-toolbar">
+    <div class="subscription-filter-toolbar-left">
+      <span class="filter-toolbar-label">筛选：</span>
+      <select class="filter-toolbar-select" data-subscription-filter="publisherPlatform">
+        ${filterOptions("发布者平台", publisherPlatforms, subscriptionFilters.publisherPlatform)}
+      </select>
+      <select class="filter-toolbar-select" data-subscription-filter="publisherKind">
+        ${filterOptions("发布者类型", publisherKinds, subscriptionFilters.publisherKind, label)}
+      </select>
+      <input class="filter-toolbar-input" data-subscription-filter="publisherId" value="${attr(subscriptionFilters.publisherId)}" placeholder="发布者搜索">
+      <div class="filter-toolbar-divider"></div>
+      <select class="filter-toolbar-select" data-subscription-filter="subscriberPlatform">
+        ${filterOptions("目标平台", subscriberPlatforms, subscriptionFilters.subscriberPlatform)}
+      </select>
+      <select class="filter-toolbar-select" data-subscription-filter="subscriberKind">
+        ${filterOptions("目标类型", subscriberKinds, subscriptionFilters.subscriberKind, label)}
+      </select>
+      <input class="filter-toolbar-input" data-subscription-filter="subscriberId" value="${attr(subscriptionFilters.subscriberId)}" placeholder="目标搜索">
     </div>
-    <button type="button" class="entity-filter-clear" data-subscription-filter-reset${active ? "" : " disabled"}>清除</button>
-    <span class="entity-filter-summary" data-subscription-filter-summary>显示 ${filteredRows.length} / ${rows.length}</span>
+    <div class="subscription-filter-toolbar-right">
+      <span class="filter-toolbar-count">${filteredRows.length} / ${rows.length}</span>
+      <button type="button" class="secondary compact filter-toolbar-clear" data-subscription-filter-reset${active ? "" : " disabled"}>
+        <span>清除</span>
+      </button>
+    </div>
   </div>`;
 }
 
@@ -333,8 +345,8 @@ function refreshSubscriptionTable() {
     table.innerHTML = subscriptionTableHtml(filteredRows);
     hydrateMediaImages(table).catch(handleError);
   }
-  const summary = pageRoot().querySelector("[data-subscription-filter-summary]");
-  if (summary) summary.textContent = `显示 ${filteredRows.length} / ${rows.length}`;
+  const summary = pageRoot().querySelector(".filter-toolbar-count");
+  if (summary) summary.textContent = `${filteredRows.length} / ${rows.length}`;
   const reset = pageRoot().querySelector("[data-subscription-filter-reset]");
   if (reset) reset.disabled = !subscriptionFilterActive();
 }
