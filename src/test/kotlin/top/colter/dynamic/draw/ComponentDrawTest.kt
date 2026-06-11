@@ -3,11 +3,18 @@ import kotlinx.coroutines.runBlocking
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Paint
 import org.jetbrains.skia.Surface
+import top.colter.dynamic.draw.DrawTheme
+import top.colter.dynamic.draw.DrawThemeFactory
+import top.colter.dynamic.draw.DrawThemeMode
 import top.colter.dynamic.draw.layout.default.component.*
+import top.colter.dynamic.draw.resource.qrCode
 import top.colter.dynamic.loadTestImage
 import top.colter.dynamic.loadTestResource
 import top.colter.dynamic.testOutput
 import top.colter.skiko.*
+import top.colter.skiko.data.Gradient
+import top.colter.skiko.data.GradientBlur
+import top.colter.skiko.data.GradientBlurStop
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.Ratio
 import top.colter.skiko.data.Shadow
@@ -111,6 +118,423 @@ class ComponentDrawTest {
                 )
             }
 
+        }
+    }
+
+    @Test
+    fun `test author head blur background`(): Unit = runBlocking {
+
+        val face = loadTestImage("image", "avatar.jpg")
+        val pendant = loadTestImage("image", "pendant.png")
+        val head = loadTestImage("image", "header1.png")
+        val qr = qrCode("https://space.bilibili.com/10086", Color.makeRGB(254, 101, 166).withAlpha(1f))
+        val accentColor = Color.makeRGB(254, 101, 166)
+        val contentStyle = defaultAuthorContentStyle(hasQrCode = true, accentColor)
+        val blur = GradientBlur.edge(
+            maxBlur = 10.dp,
+            angle = 0f,
+            clearStart = 0.46f,
+            clearEnd = 0.68f,
+            steps = 8,
+            stripWidth = 3.dp,
+        )
+        val fullBlur = GradientBlur(
+            stops = listOf(
+                GradientBlurStop(0f, 12.dp),
+                GradientBlurStop(1f, 12.dp),
+            ),
+            steps = 6,
+            stripWidth = 3.dp,
+        )
+
+        View(
+            file = testOutput.resolve("author_head_blur_background.png"),
+            modifier = Modifier()
+                .width(980.dp)
+                .padding(24.dp)
+                .background(Color.makeRGB(236, 241, 248)),
+        ) {
+            Column(Modifier().fillMaxWidth()) {
+                authorHeadBlurPreviewCard(
+                    title = "当前：头图 + 黑色渐变遮罩",
+                    face = face,
+                    pendant = pendant,
+                    qrCode = qr,
+                    accentColor = accentColor,
+                    style = contentStyle,
+                    modifier = Modifier()
+                        .background(
+                            image = head,
+                            imageAlpha = 0.85f,
+                            gradient = Gradient(
+                                LayoutAlignment.LEFT,
+                                LayoutAlignment.RIGHT,
+                                listOf(
+                                    Color.BLACK.withAlpha(0.2f),
+                                    Color.BLACK.withAlpha(0.2f),
+                                    Color.BLACK.withAlpha(0f),
+                                    Color.BLACK.withAlpha(0.2f),
+                                ),
+                            ),
+                        ),
+                )
+                authorHeadBlurPreviewCard(
+                    title = "方案 A：渐变模糊头图，无黑色遮罩",
+                    face = face,
+                    pendant = pendant,
+                    qrCode = qr,
+                    accentColor = accentColor,
+                    style = contentStyle,
+                    modifier = Modifier()
+                        .background(
+                            image = head,
+                            imageAlpha = 0.95f,
+                            imageGradientBlur = blur,
+                        ),
+                )
+                authorHeadBlurPreviewCard(
+                    title = "方案 B：渐变模糊头图 + 轻暗化层",
+                    face = face,
+                    pendant = pendant,
+                    qrCode = qr,
+                    accentColor = accentColor,
+                    style = contentStyle,
+                    modifier = Modifier()
+                        .background(
+                            image = head,
+                            imageAlpha = 0.95f,
+                            imageGradientBlur = blur,
+                            color = Color.BLACK.withAlpha(0.10f),
+                        ),
+                )
+                authorHeadBlurPreviewCard(
+                    title = "方案 C：全图模糊头图，无黑色遮罩",
+                    face = face,
+                    pendant = pendant,
+                    qrCode = qr,
+                    accentColor = accentColor,
+                    style = contentStyle,
+                    modifier = Modifier()
+                        .background(
+                            image = head,
+                            imageAlpha = 0.95f,
+                            imageGradientBlur = fullBlur,
+                        ),
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `test author head theme background preview`(): Unit = runBlocking {
+
+        val face = loadTestImage("image", "avatar.jpg")
+        val pendant = loadTestImage("image", "pendant.png")
+        val brightHead = loadTestImage("image", "header1.png")
+        val darkHead = loadTestImage("image", "bg1.jpg")
+        val lightTheme = DrawThemeFactory.fromThemeColorText("#FE65A6")
+        val darkTheme = DrawThemeFactory.fromThemeColorText("#101624;#24182D;#0D2630")
+        val contentStyle = defaultAuthorContentStyle(hasQrCode = true, lightTheme.primaryColor)
+        val blur = GradientBlur(
+            stops = listOf(
+                GradientBlurStop(0f, 12.dp),
+                GradientBlurStop(1f, 12.dp),
+            ),
+            steps = 6,
+            stripWidth = 3.dp,
+        )
+
+        View(
+            file = testOutput.resolve("author_head_theme_background_preview.png"),
+            modifier = Modifier()
+                .width(1040.dp)
+                .padding(24.dp)
+                .background(Color.makeRGB(236, 241, 248)),
+        ) {
+            Column(Modifier().fillMaxWidth()) {
+                authorHeadThemePreviewSection(
+                    title = "亮头图 + 深色主题",
+                    head = brightHead,
+                    face = face,
+                    pendant = pendant,
+                    theme = darkTheme,
+                    style = contentStyle,
+                    blur = blur,
+                )
+                authorHeadThemePreviewSection(
+                    title = "深色头图 + 亮色主题",
+                    head = darkHead,
+                    face = face,
+                    pendant = pendant,
+                    theme = lightTheme,
+                    style = contentStyle,
+                    blur = blur,
+                )
+            }
+        }
+    }
+
+    private fun Layout.authorHeadThemePreviewSection(
+        title: String,
+        head: org.jetbrains.skia.Image,
+        face: org.jetbrains.skia.Image,
+        pendant: org.jetbrains.skia.Image,
+        theme: DrawTheme,
+        style: AuthorContentStyle,
+        blur: GradientBlur,
+    ) {
+        val qr = qrCode("https://space.bilibili.com/10086", theme.qrPointColor)
+        Text(
+            text = title,
+            color = Color.makeRGB(32, 42, 58),
+            fontSize = 30.dp,
+            modifier = Modifier().margin(top = 10.dp, bottom = 10.dp),
+        )
+        authorHeadThemePreviewCard(
+            title = "当前：原图 + 固定黑色渐变",
+            face = face,
+            pendant = pendant,
+            qrCode = qr,
+            theme = theme,
+            style = style,
+        ) {
+            currentAuthorHeadBackground(head)
+        }
+        authorHeadThemePreviewCard(
+            title = "全图模糊：弱化细节，但仍受原图明暗影响",
+            face = face,
+            pendant = pendant,
+            qrCode = qr,
+            theme = theme,
+            style = style,
+        ) {
+            Box(
+                modifier = Modifier()
+                    .fillMaxWidth()
+                    .fillMaxHeight()
+                    .background(
+                        image = head,
+                        imageAlpha = 0.95f,
+                        imageGradientBlur = blur,
+                    )
+                    .radius(15.dp),
+            )
+        }
+        authorHeadThemePreviewCard(
+            title = "主题基底 + 模糊头图",
+            face = face,
+            pendant = pendant,
+            qrCode = qr,
+            theme = theme,
+            style = style,
+        ) {
+            themedAuthorHeadBackground(head, theme, blur)
+        }
+        authorHeadThemePreviewCard(
+            title = "主题调和：基底 + 模糊 + 主题染色 + 少量原图",
+            face = face,
+            pendant = pendant,
+            qrCode = qr,
+            theme = theme,
+            style = style,
+        ) {
+            harmonizedAuthorHeadBackground(head, theme, blur)
+        }
+    }
+
+    private fun Layout.authorHeadThemePreviewCard(
+        title: String,
+        face: org.jetbrains.skia.Image,
+        pendant: org.jetbrains.skia.Image,
+        qrCode: org.jetbrains.skia.Image,
+        theme: DrawTheme,
+        style: AuthorContentStyle,
+        background: Layout.() -> Unit,
+    ) {
+        Text(
+            text = title,
+            color = Color.makeRGB(51, 61, 78),
+            fontSize = 23.dp,
+            modifier = Modifier().margin(bottom = 8.dp),
+        )
+        Box(
+            modifier = Modifier()
+                .fillMaxWidth()
+                .height(style.height)
+                .margin(bottom = 20.dp)
+                .radius(15.dp)
+                .shadows(Shadow.ELEVATION_3),
+        ) {
+            background()
+            AuthorContent(
+                face = face,
+                pendant = pendant,
+                name = "猫芒ベル_Official",
+                time = "2026年06月10日 20:00:01",
+                qrCode = qrCode,
+                accentColor = theme.primaryColor,
+                darkTheme = theme.mode == DrawThemeMode.DARK,
+                style = style,
+                modifier = Modifier()
+                    .fillMaxWidth()
+                    .fillMaxHeight(),
+            )
+        }
+    }
+
+    private fun Layout.currentAuthorHeadBackground(head: org.jetbrains.skia.Image) {
+        Box(
+            modifier = Modifier()
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .background(
+                    image = head,
+                    imageAlpha = 0.85f,
+                    gradient = Gradient(
+                        LayoutAlignment.LEFT,
+                        LayoutAlignment.RIGHT,
+                        listOf(
+                            Color.BLACK.withAlpha(0.2f),
+                            Color.BLACK.withAlpha(0.2f),
+                            Color.BLACK.withAlpha(0f),
+                            Color.BLACK.withAlpha(0.2f),
+                        ),
+                    ),
+                )
+                .radius(15.dp),
+        )
+    }
+
+    private fun Layout.themedAuthorHeadBackground(
+        head: org.jetbrains.skia.Image,
+        theme: DrawTheme,
+        blur: GradientBlur,
+    ) {
+        authorHeadThemeBase(theme)
+        Box(
+            modifier = Modifier()
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .background(
+                    image = head,
+                    imageAlpha = if (theme.mode == DrawThemeMode.DARK) 0.46f else 0.38f,
+                    imageGradientBlur = blur,
+                )
+                .radius(15.dp),
+        )
+    }
+
+    private fun Layout.harmonizedAuthorHeadBackground(
+        head: org.jetbrains.skia.Image,
+        theme: DrawTheme,
+        blur: GradientBlur,
+    ) {
+        val darkTheme = theme.mode == DrawThemeMode.DARK
+        authorHeadThemeBase(theme)
+        Box(
+            modifier = Modifier()
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .background(
+                    image = head,
+                    imageAlpha = if (darkTheme) 0.50f else 0.40f,
+                    imageGradientBlur = blur,
+                )
+                .radius(15.dp),
+        )
+        Box(
+            modifier = Modifier()
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .background(
+                    image = head,
+                    imageAlpha = if (darkTheme) 0.12f else 0.08f,
+                )
+                .radius(15.dp),
+        )
+        Box(
+            modifier = Modifier()
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .background(
+                    gradient = Gradient(
+                        LayoutAlignment.LEFT,
+                        LayoutAlignment.RIGHT,
+                        listOf(
+                            theme.primaryColor.withAlpha(if (darkTheme) 0.16f else 0.09f),
+                            theme.readableAccentColor.withAlpha(if (darkTheme) 0.09f else 0.07f),
+                            theme.primaryColor.withAlpha(if (darkTheme) 0.10f else 0.07f),
+                        ),
+                    ),
+                )
+                .radius(15.dp),
+        )
+        Box(
+            modifier = Modifier()
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .background(
+                    if (darkTheme) {
+                        Color.makeRGB(8, 12, 22).withAlpha(0.18f)
+                    } else {
+                        Color.WHITE.withAlpha(0.22f)
+                    },
+                )
+                .radius(15.dp),
+        )
+    }
+
+    private fun Layout.authorHeadThemeBase(theme: DrawTheme) {
+        Box(
+            modifier = Modifier()
+                .fillMaxWidth()
+                .fillMaxHeight()
+                .background(
+                    gradient = Gradient(
+                        LayoutAlignment.LEFT,
+                        LayoutAlignment.RIGHT,
+                        theme.backgroundColors,
+                    ),
+                )
+                .radius(15.dp),
+        )
+    }
+
+    private fun Layout.authorHeadBlurPreviewCard(
+        title: String,
+        face: org.jetbrains.skia.Image,
+        pendant: org.jetbrains.skia.Image,
+        qrCode: org.jetbrains.skia.Image,
+        accentColor: Int,
+        style: AuthorContentStyle,
+        modifier: Modifier,
+    ) {
+        Text(
+            text = title,
+            color = Color.makeRGB(51, 61, 78),
+            fontSize = 24.dp,
+            modifier = Modifier().margin(bottom = 8.dp),
+        )
+        Box(
+            modifier = modifier
+                .fillMaxWidth()
+                .height(style.height)
+                .margin(bottom = 22.dp)
+                .radius(15.dp)
+                .shadows(Shadow.ELEVATION_3),
+        ) {
+            AuthorContent(
+                face = face,
+                pendant = pendant,
+                name = "猫芒ベル_Official",
+                time = "2026年06月10日 20:00:01",
+                qrCode = qrCode,
+                accentColor = accentColor,
+                style = style,
+                modifier = Modifier()
+                    .fillMaxWidth()
+                    .fillMaxHeight(),
+            )
         }
     }
 

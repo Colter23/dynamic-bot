@@ -104,7 +104,7 @@ private fun Layout.MinimalDynamicView(
             ?: config.platformAssetImage(PlatformDrawAssetKeys.PRIMARY_LOGO)
         DrawOrnament.NONE -> null
     }
-    val authorStyle = minimalAuthorContentStyle(qrCodeImage != null)
+    val authorStyle = minimalAuthorContentStyle(qrCodeImage != null, config.theme.primaryColor)
     val authorBottomSpacing = if (qrCodeImage != null) authorQrBottomSpacing else authorLogoBottomSpacing
     val authorModifier = Modifier()
         .fillMaxWidth()
@@ -174,7 +174,7 @@ private fun Layout.MinimalLiveView(
             ?: config.platformAssetImage(PlatformDrawAssetKeys.PRIMARY_LOGO)
         DrawOrnament.NONE -> null
     }
-    val authorStyle = minimalAuthorContentStyle(qrCodeImage != null)
+    val authorStyle = minimalAuthorContentStyle(qrCodeImage != null, config.theme.primaryColor)
     val authorBottomSpacing = if (qrCodeImage != null) authorQrBottomSpacing else authorLogoBottomSpacing
     val authorModifier = Modifier()
         .fillMaxWidth()

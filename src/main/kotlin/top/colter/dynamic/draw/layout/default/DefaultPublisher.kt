@@ -65,7 +65,7 @@ internal fun Layout.drawPublisher(
             DrawOrnament.QRCODE -> platformTextLogoImage ?: platformLogoImage
             DrawOrnament.NONE -> null
         }
-        val publisherHeight = defaultAuthorContentStyle(qrCodeImage != null).height
+        val publisherHeight = defaultAuthorContentStyle(qrCodeImage != null, config.theme.primaryColor).height
 
         Author(
             face = config.image(publisher.avatar),
@@ -77,6 +77,7 @@ internal fun Layout.drawPublisher(
             time = time,
             qrCode = qrCodeImage,
             accentColor = config.theme.primaryColor,
+            theme = config.theme,
             darkTheme = config.theme.mode == DrawThemeMode.DARK,
             cardHeight = publisherHeight,
             modifier = Modifier().fillMaxWidth(),

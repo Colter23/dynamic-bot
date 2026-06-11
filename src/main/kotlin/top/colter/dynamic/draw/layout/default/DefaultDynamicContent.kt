@@ -23,6 +23,7 @@ import top.colter.skiko.layout.AutoSizeRichText
 import top.colter.skiko.layout.Layout
 import top.colter.skiko.margin
 import top.colter.skiko.px
+import top.colter.skiko.withAlpha
 
 private const val SHORT_CONTENT_CHARS = 16
 private const val NORMAL_CONTENT_CHARS = 120
@@ -70,7 +71,7 @@ internal fun Layout.drawDynamicTitle(
         modifier = Modifier().margin(bottom = bottomSpacing),
     ) { fontSize ->
         val style = TextStyle()
-            .setColor(config.theme.textColor)
+            .setColor(config.theme.textColor.withAlpha(0.85f))
             .setFontSize(fontSize.px)
             .setFontStyle(FontStyle.BOLD)
         RichParagraphBuilder(style)
@@ -89,7 +90,7 @@ private fun buildDynamicContentParagraph(
         .setFontSize(fontSize.px)
 ).also { paragraph ->
     val style = TextStyle()
-        .setColor(config.theme.textColor)
+        .setColor(config.theme.textColor.withAlpha(0.85f))
         .setFontSize(fontSize.px)
     val linkStyle = TextStyle()
         .setColor(config.theme.linkColor)

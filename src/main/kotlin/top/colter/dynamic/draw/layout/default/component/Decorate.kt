@@ -76,7 +76,7 @@ internal fun Layout.Decorate(
                             .width(qrLogoSize)
                             .height(qrLogoSize)
                             .padding(qrLogoPadding)
-                            .background(color = Color.WHITE)
+                            .background(color = if (darkTheme) Color.BLACK else Color.WHITE)
                             .radius(qrLogoRadius)
                     ) {
                         Box(

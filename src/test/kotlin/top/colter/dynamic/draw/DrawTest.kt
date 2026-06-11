@@ -3,6 +3,7 @@ package top.colter.dynamic.draw
 import kotlin.test.BeforeTest
 import kotlin.test.Test
 import org.jetbrains.skia.Color
+import org.jetbrains.skia.Image
 import top.colter.dynamic.DrawOrnament
 import top.colter.dynamic.DrawSettings
 import top.colter.dynamic.core.data.DynamicBlockRole
@@ -37,7 +38,11 @@ import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.core.data.mediaReferences
 import top.colter.dynamic.core.link.LinkKinds
 import top.colter.dynamic.core.link.LinkPreview
+import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.draw.image.DynamicImageCache
+import top.colter.dynamic.draw.resource.PlatformDrawAssetResolver
+import top.colter.dynamic.draw.resource.loadSVG
+import top.colter.dynamic.draw.resource.makeImage
 import top.colter.dynamic.loadTestImage
 import top.colter.dynamic.loadTestResource
 import top.colter.dynamic.testDynamicUpdate
@@ -193,6 +198,40 @@ class DrawTest {
                 )
             }
         }
+    }
+
+    @Test
+    fun `test author head theme dynamic previews`() {
+        renderToOutput(
+            fileName = "default_author_head_theme_bright_head_dark_theme.png",
+            update = authorHeadThemeDynamic(
+                id = "author-head-theme-bright-dark",
+                name = "亮头图观察员",
+                header = "bg1.jpg",
+                avatar = "avatar.jpg",
+                title = "亮色头图配深色主题",
+            ),
+            config = drawConfig(
+                layout = "default",
+                ornament = DrawOrnament.QRCODE,
+                themeColors = DARK_PREVIEW_THEME_COLORS,
+            ),
+        )
+        renderToOutput(
+            fileName = "default_author_head_theme_dark_head_light_theme.png",
+            update = authorHeadThemeDynamic(
+                id = "author-head-theme-dark-light",
+                name = "深色头图观察员",
+                header = "header1.png",
+                avatar = "avatar1.jpg",
+                title = "深色头图配亮色主题",
+            ),
+            config = drawConfig(
+                layout = "default",
+                ornament = DrawOrnament.QRCODE,
+                themeColors = "#FE65A6",
+            ),
+        )
     }
 
     private fun commonDynamicPreviews(): List<DynamicPreview> {
@@ -395,6 +434,42 @@ class DrawTest {
                 startedAtEpochSeconds = 1L,
             ),
         ).copy(link = "https://live.bilibili.com/23058")
+    }
+
+    private fun authorHeadThemeDynamic(
+        id: String,
+        name: String,
+        header: String,
+        avatar: String,
+        title: String,
+    ): SourceUpdate {
+        return testDynamicUpdate(
+            publisher = previewPublisher(
+                id = id,
+                name = name,
+                header = header,
+                avatar = avatar,
+            ),
+            externalId = id,
+            payload = DynamicPayload(
+                title = title,
+                blocks = listOf(
+                    richTextBlock(
+                        text("这条动态用来观察作者头图在完整动态卡片里的主题调和效果。"),
+                        emoji("[热词系列_知识增加]"),
+                        text(" 重点看顶部作者卡片和下面正文卡片放在一起时，明暗是否舒服、头图是否抢眼。"),
+                        topic("主题调和"),
+                    ),
+                    imageGrid(count = 3),
+                    articleCard(
+                        id = "$id-card",
+                        title = "动态绘图主题调和记录",
+                        description = "把头图当作背景氛围而不是完整底图，观察它和主题色、正文卡片、媒体卡片之间的协调程度。",
+                        style = MediaCardStyle.SMALL,
+                    ),
+                ),
+            ),
+        )
     }
 
     private fun titleShortTextDynamic(): SourceUpdate {
@@ -1132,6 +1207,7 @@ class DrawTest {
                 ornament = ornament,
                 themeColors = themeColors,
             ),
+            assetResolver = TestPlatformDrawAssetResolver,
         )
     }
 
@@ -1152,5 +1228,20 @@ class DrawTest {
             else -> "image" to "bg1.jpg"
         }
         return loadTestResource(resource.first, resource.second).readBytes()
+    }
+
+    private object TestPlatformDrawAssetResolver : PlatformDrawAssetResolver {
+        private val imageCache: MutableMap<String, Image> = mutableMapOf()
+
+        override fun image(platformId: PlatformId, key: String, width: Int?, height: Int?): Image? {
+            val fileName = when (key) {
+                PlatformDrawAssetKeys.PRIMARY_LOGO -> platformId.value + "_logo_primary.png"
+                PlatformDrawAssetKeys.TEXT_LOGO -> platformId.value + "_logo_wordmark.png"
+                else -> return null
+            }
+            return imageCache.getOrPut(fileName) {
+                loadTestImage("image", fileName)
+            }
+        }
     }
 }
