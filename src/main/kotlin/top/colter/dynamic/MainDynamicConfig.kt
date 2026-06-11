@@ -266,6 +266,7 @@ public data class MessagePlatformRoutingPolicy(
 
 public data class DrawSettings(
     val layout: String = "default",
+    val outputFormat: DrawOutputFormat = DrawOutputFormat.WEBP,
     val themeColors: String = "#FE65A6",
     val autoTheme: Boolean = true,
     val ornament: DrawOrnament = DrawOrnament.LOGO,
@@ -277,6 +278,11 @@ public data class DrawFontSettings(
     val text: String = "",
     val emoji: String = "",
 )
+
+public enum class DrawOutputFormat {
+    WEBP,
+    PNG,
+}
 
 public enum class DrawOrnament {
     LOGO,

@@ -4,6 +4,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import org.jetbrains.skia.EncodedImageFormat
+import top.colter.dynamic.DrawOutputFormat
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.LivePayload
@@ -57,6 +58,7 @@ public class DefaultDynamicDrawService(
             .resolve(update.publisher.externalId.ifBlank { "unknown" })
         Files.createDirectories(outputDir)
 
+        val output = config.draw.outputFormat.toRenderedImageOutput()
         val data = renderImage(
             update = update,
             config = DrawConfig(
@@ -68,11 +70,11 @@ public class DefaultDynamicDrawService(
                 theme = theme,
                 assetResolver = assetResolver,
             ),
-        ).encodeToData(EncodedImageFormat.PNG, 100)
+        ).encodeToData(output.format, output.quality)
             ?: error("动态图片编码失败")
 
         val outputPath = outputDir
-            .resolve(safeFileName(update.key.externalId) + ".png")
+            .resolve(safeFileName(update.key.externalId) + ".${output.extension}")
             .toAbsolutePath()
             .normalize()
         Files.write(outputPath, data.bytes)
@@ -88,5 +90,31 @@ public class DefaultDynamicDrawService(
 
     private fun safeFileName(value: String): String {
         return value.replace(Regex("[^a-zA-Z0-9._-]+"), "_").trim('_').ifBlank { "dynamic" }
+    }
+
+    private fun DrawOutputFormat.toRenderedImageOutput(): RenderedImageOutput {
+        return when (this) {
+            DrawOutputFormat.WEBP -> RenderedImageOutput(
+                format = EncodedImageFormat.WEBP,
+                quality = WEBP_QUALITY,
+                extension = "webp",
+            )
+            DrawOutputFormat.PNG -> RenderedImageOutput(
+                format = EncodedImageFormat.PNG,
+                quality = PNG_QUALITY,
+                extension = "png",
+            )
+        }
+    }
+
+    private data class RenderedImageOutput(
+        val format: EncodedImageFormat,
+        val quality: Int,
+        val extension: String,
+    )
+
+    private companion object {
+        private const val WEBP_QUALITY: Int = 90
+        private const val PNG_QUALITY: Int = 100
     }
 }

@@ -31,6 +31,8 @@ class MainConfigStoreTest {
     fun drawConfigFormShouldExposeThemeColorsAndAutoTheme() {
         val paths = MainConfigForms.formSpec.fields.map { it.path }
 
+        assertEquals(DrawOutputFormat.WEBP, MainDynamicConfig().draw.outputFormat)
+        assertTrue("draw.outputFormat" in paths)
         assertTrue("draw.themeColors" in paths)
         assertTrue("draw.autoTheme" in paths)
         assertFalse("draw.themeColor" in paths)
@@ -52,13 +54,15 @@ class MainConfigStoreTest {
             currentYaml.replace(
                 Regex("""themeColors:.*"""),
                 "themeColor: \"#111111\"\n  backgroundStartColor: \"#222222\"\n  backgroundEndColor: \"#333333\"",
-            ),
+            ).replace(Regex("""\n  outputFormat:.*"""), ""),
         )
 
         val loaded = MainConfigStore(configService).loadOrCreate { "token" }
         val rewritten = path.readText()
 
         assertEquals("#111111;#222222;#333333", loaded.draw.themeColors)
+        assertEquals(DrawOutputFormat.WEBP, loaded.draw.outputFormat)
+        assertTrue(rewritten.contains("outputFormat:"))
         assertTrue(rewritten.contains("themeColors:"))
         assertFalse(rewritten.contains("themeColor:"))
         assertFalse(rewritten.contains("backgroundStartColor"))

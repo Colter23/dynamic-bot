@@ -75,6 +75,37 @@ class OutboundMediaServiceTest {
     }
 
     @Test
+    fun `resolve signed webp rendered image as webp content type`() = runTest {
+        val renderedRoot = createTempDirectory("outbound-rendered-webp")
+        val sourceRoot = createTempDirectory("outbound-source-webp")
+        val image = renderedRoot.resolve("bilibili").resolve("demo.webp")
+        image.parent.createDirectories()
+        image.writeBytes(webpBytes())
+
+        val service = OutboundMediaService(
+            configProvider = {
+                MainDynamicConfig(
+                    imageCache = ImageCacheConfig(
+                        sourceRoot = sourceRoot.toString(),
+                        renderedRoot = renderedRoot.toString(),
+                        maxImageMegabytes = 1.0,
+                    ),
+                    mediaDelivery = signedUrlDelivery(),
+                )
+            },
+            nowEpochSeconds = { 1_000 },
+        )
+
+        val rewritten = service.rewriteMedia(MediaRef(uri = image.toString(), kind = MediaKind.IMAGE))
+        val parts = signedUrlParts(rewritten.uri)
+        val result = service.resolve(parts.profile, parts.id, parts.expires, parts.signature)
+
+        assertEquals(ContentType("image", "webp"), result.contentType)
+        assertEquals(image.toFile(), result.file)
+        assertNull(result.bytes)
+    }
+
+    @Test
     fun `rewrite local link video to signed public url and resolve it as file`() = runTest {
         val renderedRoot = createTempDirectory("outbound-rendered-video")
         val sourceRoot = createTempDirectory("outbound-source-video")
@@ -117,9 +148,9 @@ class OutboundMediaServiceTest {
     fun `rewrite local file profile with path mapping`() = runTest {
         val renderedRoot = createTempDirectory("outbound-local-rendered")
         val clientRoot = createTempDirectory("outbound-local-client")
-        val image = renderedRoot.resolve("bilibili").resolve("demo.png")
+        val image = renderedRoot.resolve("bilibili").resolve("demo.webp")
         image.parent.createDirectories()
-        image.writeBytes(byteArrayOf(0x89.toByte(), 'P'.code.toByte(), 'N'.code.toByte(), 'G'.code.toByte()))
+        image.writeBytes(webpBytes())
         val service = OutboundMediaService(
             configProvider = {
                 MainDynamicConfig(
@@ -148,13 +179,13 @@ class OutboundMediaServiceTest {
 
         val rewritten = service.rewriteMedia(MediaRef(uri = image.toString(), kind = MediaKind.IMAGE))
 
-        assertEquals(clientRoot.resolve("bilibili").resolve("demo.png").toUri().toString(), rewritten.uri)
+        assertEquals(clientRoot.resolve("bilibili").resolve("demo.webp").toUri().toString(), rewritten.uri)
     }
 
     @Test
     fun `rewrite base64 profile for small images using megabytes threshold`() = runTest {
         val renderedRoot = createTempDirectory("outbound-base64-rendered")
-        val image = renderedRoot.resolve("demo.png")
+        val image = renderedRoot.resolve("demo.webp")
         image.writeBytes(byteArrayOf(1, 2, 3))
         val service = OutboundMediaService(
             configProvider = {
@@ -380,6 +411,26 @@ class OutboundMediaServiceTest {
             id = URLDecoder.decode(id, StandardCharsets.UTF_8),
             expires = params.getValue("expires").toLong(),
             signature = params.getValue("sig"),
+        )
+    }
+
+    private fun webpBytes(): ByteArray {
+        return byteArrayOf(
+            'R'.code.toByte(),
+            'I'.code.toByte(),
+            'F'.code.toByte(),
+            'F'.code.toByte(),
+            0,
+            0,
+            0,
+            0,
+            'W'.code.toByte(),
+            'E'.code.toByte(),
+            'B'.code.toByte(),
+            'P'.code.toByte(),
+            1,
+            2,
+            3,
         )
     }
 

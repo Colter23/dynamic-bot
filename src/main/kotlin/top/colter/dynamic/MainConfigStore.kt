@@ -127,6 +127,9 @@ public object MainConfigForms {
             if (!contains("draw.themeColors") && legacyColors.isNotEmpty()) {
                 set("draw.themeColors", legacyColors.joinToString(";"))
             }
+            if (!contains("draw.outputFormat")) {
+                set("draw.outputFormat", DrawOutputFormat.WEBP.name)
+            }
             remove("draw.themeColor")
             remove("draw.backgroundStartColor")
             remove("draw.backgroundEndColor")
@@ -875,6 +878,18 @@ public object MainConfigForms {
                     required = true,
                 ),
                 ConfigFieldSpec(
+                    path = "draw.outputFormat",
+                    label = "渲染图片格式",
+                    type = ConfigFieldType.SELECT,
+                    section = "绘图",
+                    description = "默认使用 WebP，可明显减少图片大小。\n如果目标平台或客户端无法发送 WebP，可以切回 PNG。",
+                    options = listOf(
+                        ConfigFieldOption(DrawOutputFormat.WEBP.name, "WebP（推荐）"),
+                        ConfigFieldOption(DrawOutputFormat.PNG.name, "PNG（兼容）"),
+                    ),
+                    required = true,
+                ),
+                ConfigFieldSpec(
                     path = "draw.themeColors",
                     label = "全局主题色",
                     type = ConfigFieldType.TEXT,
@@ -1074,6 +1089,7 @@ public object MainConfigForms {
             "templates.liveStarted",
             "templates.liveEnded",
             "draw.layout",
+            "draw.outputFormat",
             "draw.themeColors",
             "draw.autoTheme",
             "draw.ornament",
