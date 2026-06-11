@@ -6,6 +6,7 @@ import kotlin.io.path.createDirectories
 import kotlin.io.path.writeBytes
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -13,6 +14,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.LinkParseProgressReplyConfig
 import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.LinkParseTemplates
@@ -233,6 +235,78 @@ class LinkParseServiceTest {
         listener.onMessage(commandEvent("https://example.com/not-supported"))
 
         assertEquals(emptyList(), messenger.sentTexts)
+        assertEquals(0, resolver.parseCalls)
+        assertEquals(0, resolver.resolveCalls)
+    }
+
+    @Test
+    fun `auto parser should not reply failure for plain text without links`() = runBlocking {
+        initDb("auto-failure-reply-plain-text")
+        val eventBus = EventBus()
+        val reply = CompletableDeferred<CommandResultEvent>()
+        eventBus.subscribe(
+            object : Listener<CommandResultEvent> {
+                override suspend fun onMessage(event: CommandResultEvent) {
+                    reply.complete(event)
+                }
+            },
+        )
+        val resolver = FakeLinkResolver()
+        val listener = LinkAutoParseListener(
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        fallbackTriggerMode = LinkParseTriggerMode.ALWAYS,
+                        replyOnFailure = true,
+                    ),
+                )
+            },
+            linkParseService = LinkParseService(
+                resolversProvider = { listOf(resolver) },
+            ),
+            eventBus = eventBus,
+        )
+
+        listener.onMessage(commandEvent("今天也正常聊天"))
+
+        assertNull(withTimeoutOrNull(300) { reply.await() })
+        assertEquals(0, resolver.parseCalls)
+        assertEquals(0, resolver.resolveCalls)
+    }
+
+    @Test
+    fun `auto parser should reply failure for unsupported url when enabled`() = runBlocking {
+        initDb("auto-failure-reply-unsupported-url")
+        val eventBus = EventBus()
+        val reply = CompletableDeferred<CommandResultEvent>()
+        eventBus.subscribe(
+            object : Listener<CommandResultEvent> {
+                override suspend fun onMessage(event: CommandResultEvent) {
+                    reply.complete(event)
+                }
+            },
+        )
+        val resolver = FakeLinkResolver()
+        val listener = LinkAutoParseListener(
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        fallbackTriggerMode = LinkParseTriggerMode.ALWAYS,
+                        replyOnFailure = true,
+                    ),
+                )
+            },
+            linkParseService = LinkParseService(
+                resolversProvider = { listOf(resolver) },
+            ),
+            eventBus = eventBus,
+        )
+
+        listener.onMessage(commandEvent("https://example.com/not-supported"))
+        val result = withTimeout(3_000) { reply.await() }
+
+        assertEquals(CommandStatus.FAILED, result.status)
+        assertEquals("未找到支持的链接", renderMessage(result))
         assertEquals(0, resolver.parseCalls)
         assertEquals(0, resolver.resolveCalls)
     }

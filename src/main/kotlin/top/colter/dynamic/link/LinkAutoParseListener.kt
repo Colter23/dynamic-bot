@@ -55,6 +55,7 @@ internal class LinkAutoParseListener(
             event.rawText,
             linkParsing.maxLinksPerMessage,
         )
+        val hasUrlCandidate = hasSupportedCandidate || LinkUrlExtractor.extract(event.rawText).isNotEmpty()
         val finalResult = try {
             if (hasSupportedCandidate) {
                 sendProgressOnce()
@@ -79,7 +80,7 @@ internal class LinkAutoParseListener(
             }
         }
 
-        val shouldReplyFailure = linkParsing.replyOnFailure ||
+        val shouldReplyFailure = (linkParsing.replyOnFailure && hasUrlCandidate) ||
             (hasSupportedCandidate && !finalResult.hasSupportedLinks) ||
             (finalResult.hasSupportedLinks && !finalResult.hasForwarded && finalResult.failures.isNotEmpty())
         if (shouldReplyFailure) {
