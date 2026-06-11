@@ -89,9 +89,12 @@ public class OutboundMediaService(
         val path = root.path.resolve(decoded.relativePath).normalize()
         require(path.startsWith(root.path)) { "媒体路径无效" }
         val realRoot = root.path.realPathOrSelf()
+            ?: throw IllegalArgumentException("媒体根目录无法解析真实路径")
         val realPath = path.realPathOrSelf()
+            ?: throw IllegalArgumentException("媒体路径无法解析真实路径")
         require(realPath.startsWith(realRoot)) { "媒体路径不在允许目录内" }
         require(Files.isRegularFile(realPath, LinkOption.NOFOLLOW_LINKS)) { "媒体文件不存在" }
+        require(!Files.isSymbolicLink(realPath)) { "不允许访问符号链接" }
 
         val size = Files.size(realPath)
         require(size <= root.maxBytes) {
@@ -285,7 +288,9 @@ public class OutboundMediaService(
             val maxBytes = profile.base64Fallback.maxBytes
             if (maxBytes <= 0) return null
             val size = runCatching { Files.size(path) }.getOrElse { return null }
-            if (size > maxBytes) return null
+            // Base64 编码会膨胀约 33%，检查编码后的大小
+            val encodedSize = (size * 4 + 2) / 3  // 向上取整
+            if (encodedSize > maxBytes) return null
             val bytes = runCatching { Files.readAllBytes(path) }.getOrElse { return null }
             logSelection(profile, "Base64 兜底", routeContext)
             return media.copy(uri = "base64://${Base64.getEncoder().encodeToString(bytes)}")
@@ -466,12 +471,21 @@ public class OutboundMediaService(
                 if (!Files.isRegularFile(probePath, LinkOption.NOFOLLOW_LINKS)) return@runCatching null
                 if (Files.size(probePath) > MAX_PROBE_FILE_BYTES) return@runCatching null
             } else {
-                Files.write(
-                    probePath,
-                    PROBE_PNG,
-                    StandardOpenOption.CREATE_NEW,
-                    StandardOpenOption.WRITE,
-                )
+                // 使用 CREATE 而非 CREATE_NEW 以容忍并发创建
+                try {
+                    Files.write(
+                        probePath,
+                        PROBE_PNG,
+                        StandardOpenOption.CREATE,
+                        StandardOpenOption.WRITE,
+                        StandardOpenOption.TRUNCATE_EXISTING,
+                    )
+                } catch (e: Exception) {
+                    // 并发创建失败不影响使用已存在的探测文件
+                    if (!Files.isRegularFile(probePath, LinkOption.NOFOLLOW_LINKS)) {
+                        return@runCatching null
+                    }
+                }
             }
             probePath.toUri().toString()
         }.getOrNull()
@@ -645,9 +659,8 @@ public class OutboundMediaService(
         }
     }
 
-    private fun Path.realPathOrSelf(): Path {
-        return runCatching { toRealPath(LinkOption.NOFOLLOW_LINKS) }
-            .getOrElse { toAbsolutePath().normalize() }
+    private fun Path.realPathOrSelf(): Path? {
+        return runCatching { toRealPath(LinkOption.NOFOLLOW_LINKS) }.getOrNull()
     }
 
     private fun Path.portableString(): String {
