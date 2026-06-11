@@ -234,6 +234,16 @@ public object MainConfigForms {
             }
             remove("outboundMedia")
         },
+        ConfigMigration(
+            id = "main-link-parse-simplified-replies",
+            description = "删除链接解析失败回复开关和解析中提示开关，改为固定失败回复与空提示文字关闭",
+        ) {
+            if (get("linkParsing.progressReply.enabled") == false) {
+                set("linkParsing.progressReply.text", "")
+            }
+            remove("linkParsing.replyOnFailure")
+            remove("linkParsing.progressReply.enabled")
+        },
     )
 
     public val formSpec: ConfigFormSpec
@@ -347,13 +357,6 @@ public object MainConfigForms {
                     numberKind = ConfigNumberKind.INTEGER,
                 ),
                 ConfigFieldSpec(
-                    path = "linkParsing.replyOnFailure",
-                    label = "解析失败时自动回复",
-                    type = ConfigFieldType.BOOLEAN,
-                    section = "链接解析",
-                    description = "解析失败时是否回复原因。\n开启后用户能看到失败提示；关闭后失败只写入日志。",
-                ),
-                ConfigFieldSpec(
                     path = "linkParsing.autoDedupeTtlSeconds",
                     label = "链接去重时间（秒）",
                     type = ConfigFieldType.NUMBER,
@@ -362,19 +365,11 @@ public object MainConfigForms {
                     min = 0,
                 ),
                 ConfigFieldSpec(
-                    path = "linkParsing.progressReply.enabled",
-                    label = "解析中提示",
-                    type = ConfigFieldType.BOOLEAN,
-                    section = "链接解析",
-                    description = "解析耗时时先发一条提示。\n适合视频下载等慢操作，让用户知道 Bot 已经开始处理。",
-                ),
-                ConfigFieldSpec(
                     path = "linkParsing.progressReply.text",
                     label = "解析中提示文字",
                     type = ConfigFieldType.TEXT,
                     section = "链接解析",
-                    description = "解析中提示的文字内容。\n只有开启“解析中提示”后才会发送。",
-                    required = true,
+                    description = "解析耗时时先发一条提示。\n留空表示不发送解析中提示。",
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.progressReply.recallOnComplete",
@@ -1033,9 +1028,7 @@ public object MainConfigForms {
         "linkParsing.templates.fallback",
         "linkParsing.templates.videoFile",
         "linkParsing.maxLinksPerMessage",
-        "linkParsing.replyOnFailure",
         "linkParsing.autoDedupeTtlSeconds",
-        "linkParsing.progressReply.enabled",
         "linkParsing.progressReply.text",
         "linkParsing.progressReply.recallOnComplete",
         "linkParsing.videoDownload.quality",
@@ -1143,9 +1136,7 @@ public object MainConfigForms {
             "linkParsing.fallbackTriggerMode",
             "linkParsing.videoDownload.enabled",
             "linkParsing.maxLinksPerMessage",
-            "linkParsing.replyOnFailure",
             "linkParsing.autoDedupeTtlSeconds",
-            "linkParsing.progressReply.enabled",
             "linkParsing.progressReply.text",
             "linkParsing.progressReply.recallOnComplete",
             "linkParsing.videoDownload.quality",
@@ -1239,9 +1230,6 @@ public object MainConfigForms {
         }
         require(config.linkParsing.maxLinksPerMessage >= 1) { "单条消息最大解析链接数至少为 1" }
         require(config.linkParsing.autoDedupeTtlSeconds >= 0.0) { "自动去重时间窗口不能为负数" }
-        if (config.linkParsing.progressReply.enabled) {
-            require(config.linkParsing.progressReply.text.isNotBlank()) { "解析中提示文字不能为空" }
-        }
         require(config.linkParsing.templates.video.isNotBlank()) { "视频链接模板不能为空" }
         require(config.linkParsing.templates.live.isNotBlank()) { "直播链接模板不能为空" }
         require(config.linkParsing.templates.user.isNotBlank()) { "用户页链接模板不能为空" }

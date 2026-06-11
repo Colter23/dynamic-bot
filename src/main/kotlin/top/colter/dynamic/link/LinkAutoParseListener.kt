@@ -46,7 +46,7 @@ internal class LinkAutoParseListener(
         var progressReceipt: LinkParseProgressReceipt? = null
         var result: LinkParseBatchResult? = null
         suspend fun sendProgressOnce() {
-            if (progressReceipt == null) {
+            if (progressReceipt == null && linkParsing.progressReply.text.isNotBlank()) {
                 progressReceipt = progressMessenger.send(event, linkParsing.progressReply)
             }
         }
@@ -55,7 +55,6 @@ internal class LinkAutoParseListener(
             event.rawText,
             linkParsing.maxLinksPerMessage,
         )
-        val hasUrlCandidate = hasSupportedCandidate || LinkUrlExtractor.extract(event.rawText).isNotEmpty()
         val finalResult = try {
             if (hasSupportedCandidate) {
                 sendProgressOnce()
@@ -80,9 +79,9 @@ internal class LinkAutoParseListener(
             }
         }
 
-        val shouldReplyFailure = (linkParsing.replyOnFailure && hasUrlCandidate) ||
-            (hasSupportedCandidate && !finalResult.hasSupportedLinks) ||
-            (finalResult.hasSupportedLinks && !finalResult.hasForwarded && finalResult.failures.isNotEmpty())
+        val hasFailedSupportedLink = (hasSupportedCandidate && !finalResult.hasSupportedLinks) ||
+            finalResult.failures.isNotEmpty()
+        val shouldReplyFailure = hasFailedSupportedLink
         if (shouldReplyFailure) {
             when {
                 finalResult.disabledReason != null -> reply(event, "链接解析失败：${finalResult.disabledReason}", CommandStatus.FAILED)

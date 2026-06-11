@@ -211,6 +211,44 @@ class LinkParseServiceTest {
     }
 
     @Test
+    fun `auto parser should not send progress when progress text is blank`() = runBlocking {
+        initDb("auto-progress-blank-text")
+        val resolver = BlockingLinkResolver()
+        val sourceUpdates = RecordingSourceUpdatePublisher()
+        val messenger = RecordingProgressMessenger()
+        val listener = LinkAutoParseListener(
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        fallbackTriggerMode = LinkParseTriggerMode.ALWAYS,
+                        progressReply = LinkParseProgressReplyConfig(text = ""),
+                    ),
+                )
+            },
+            linkParseService = LinkParseService(
+                resolversProvider = { listOf(resolver) },
+                sourceUpdatePublisher = sourceUpdates,
+            ),
+            progressMessenger = messenger,
+        )
+
+        val job = async {
+            listener.onMessage(commandEvent("https://slow.example/1"))
+        }
+        withTimeout(3_000) { resolver.parseStarted.await() }
+
+        assertEquals(emptyList(), messenger.sentTexts)
+
+        resolver.continueParsing.complete(Unit)
+        val request = withTimeout(3_000) { sourceUpdates.receive() }
+        job.await()
+
+        assertEquals("1", request.update.key.externalId)
+        assertEquals(1, resolver.resolveCalls)
+        assertEquals(emptyList(), messenger.recalledIds)
+    }
+
+    @Test
     fun `auto parser should not send progress for unsupported urls`() = runBlocking {
         initDb("auto-progress-unsupported")
         val resolver = FakeLinkResolver()
@@ -257,7 +295,6 @@ class LinkParseServiceTest {
                 MainDynamicConfig(
                     linkParsing = LinkParsingConfig(
                         fallbackTriggerMode = LinkParseTriggerMode.ALWAYS,
-                        replyOnFailure = true,
                     ),
                 )
             },
@@ -275,8 +312,8 @@ class LinkParseServiceTest {
     }
 
     @Test
-    fun `auto parser should reply failure for unsupported url when enabled`() = runBlocking {
-        initDb("auto-failure-reply-unsupported-url")
+    fun `auto parser should not reply failure for unsupported url`() = runBlocking {
+        initDb("auto-failure-no-reply-unsupported-url")
         val eventBus = EventBus()
         val reply = CompletableDeferred<CommandResultEvent>()
         eventBus.subscribe(
@@ -292,7 +329,6 @@ class LinkParseServiceTest {
                 MainDynamicConfig(
                     linkParsing = LinkParsingConfig(
                         fallbackTriggerMode = LinkParseTriggerMode.ALWAYS,
-                        replyOnFailure = true,
                     ),
                 )
             },
@@ -303,10 +339,8 @@ class LinkParseServiceTest {
         )
 
         listener.onMessage(commandEvent("https://example.com/not-supported"))
-        val result = withTimeout(3_000) { reply.await() }
 
-        assertEquals(CommandStatus.FAILED, result.status)
-        assertEquals("未找到支持的链接", renderMessage(result))
+        assertNull(withTimeoutOrNull(300) { reply.await() })
         assertEquals(0, resolver.parseCalls)
         assertEquals(0, resolver.resolveCalls)
     }

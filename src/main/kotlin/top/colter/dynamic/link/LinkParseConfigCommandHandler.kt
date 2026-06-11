@@ -43,8 +43,7 @@ private class LinkParseStatusCommandHandler(
             "自动链接解析：${enabledText(config.autoParseEnabled)}",
             "当前会话触发方式：${activeMode.label()}（$source）",
             "全局回退触发方式：${config.fallbackTriggerMode.label()}",
-            "解析中提示：${enabledText(progress.enabled)}",
-            "解析中提示文字：${progress.text}",
+            "解析中提示：${progress.text.ifBlank { "关闭" }}",
             "完成后撤回提示：${enabledText(progress.recallOnComplete)}",
             "当前会话目标：${invocation.context.target.stableValue()}",
         )

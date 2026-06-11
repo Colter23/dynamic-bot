@@ -201,6 +201,36 @@ class MainConfigStoreTest {
     }
 
     @Test
+    fun shouldMigrateRemovedLinkParseReplyFields() {
+        val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-link-parse-migration"))
+        val path = configService.resolvePath(MainDynamicConfig.CONFIG_ID)
+        path.parent.createDirectories()
+        path.writeText(
+            """
+            webAdmin:
+              enabled: true
+              token: token
+            linkParsing:
+              replyOnFailure: false
+              progressReply:
+                enabled: false
+                text: "链接解析中，请稍候..."
+                recallOnComplete: true
+            """.trimIndent(),
+        )
+
+        val loaded = MainConfigStore(configService).loadOrCreate { "token" }
+        val rewritten = path.readText()
+        val progressReplyBlock = rewritten
+            .substringAfter("progressReply:", "")
+            .substringBefore("templates:", "")
+
+        assertEquals("", loaded.linkParsing.progressReply.text)
+        assertFalse(rewritten.contains("replyOnFailure"))
+        assertFalse(progressReplyBlock.contains("enabled:"))
+    }
+
+    @Test
     fun webAdminConfigShouldExposeLogBufferCapacity() {
         val paths = MainConfigForms.formSpec.fields.map { it.path }
 
@@ -241,6 +271,8 @@ class MainConfigStoreTest {
         assertFalse(byPath.getValue("draw.outputFormat").advanced)
         assertEquals("链接解析", byPath.getValue("linkParsing.videoDownload.enabled").section)
         assertFalse(byPath.getValue("linkParsing.videoDownload.enabled").advanced)
+        assertFalse("linkParsing.replyOnFailure" in byPath)
+        assertFalse("linkParsing.progressReply.enabled" in byPath)
         assertEquals("发送与媒体", byPath.getValue("mediaDelivery.profiles").section)
         assertFalse(byPath.getValue("mediaDelivery.profiles").advanced)
         assertEquals("MEDIA_DELIVERY_PROFILES", byPath.getValue("mediaDelivery.profiles").component)

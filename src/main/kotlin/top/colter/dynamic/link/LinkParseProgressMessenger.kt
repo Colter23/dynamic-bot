@@ -38,7 +38,6 @@ internal class DeliveryLinkParseProgressMessenger(
     private val recallMessage: suspend (TargetAddress, String, String?, String?) -> MessageRecallResult,
 ) : LinkParseProgressMessenger {
     override suspend fun send(event: CommandEvent, config: LinkParseProgressReplyConfig): LinkParseProgressReceipt? {
-        if (!config.enabled) return null
         val text = config.text.trim().takeIf { it.isNotBlank() } ?: return null
         val result = sendCommandResult(
             CommandResultSendRequest(
