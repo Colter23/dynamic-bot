@@ -1,0 +1,23 @@
+# Docker 相关文件
+data/
+config/
+plugins/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# 构建产物
+build/
+.gradle/
+out/
+
+# 日志
+*.log
+
+# 临时文件
+*.tmp
+*.bak
+*.swp
+*~
