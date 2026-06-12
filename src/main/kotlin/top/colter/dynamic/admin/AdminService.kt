@@ -132,6 +132,8 @@ public class AdminService(
     private val loginStateCache: ConcurrentHashMap<String, CachedLoginState> = ConcurrentHashMap()
     private val publisherCandidateCacheLock = Any()
     private val publisherCandidateCache = LinkedHashMap<String, CachedPublisherCandidate>()
+    private val publisherSearchCacheLock = Any()
+    private val publisherSearchCache = LinkedHashMap<String, CachedPublisherSearchCandidates>()
     private val subscriberTargetCandidateCacheLock = Any()
     private val subscriberTargetCandidateCache = LinkedHashMap<String, CachedMessageTargetCandidate>()
 
@@ -710,25 +712,52 @@ public class AdminService(
     public suspend fun searchPublishers(platformId: String?, query: String?): List<PublisherCandidateDto> {
         val platform = platformId?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
             ?: throw IllegalArgumentException("发布者平台不能为空")
-        val externalId = query?.trim()?.takeIf { it.isNotBlank() }
-            ?: throw IllegalArgumentException("发布者 ID 不能为空")
+        val searchText = query?.trim()?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("发布者关键词不能为空")
         val handle = publisherLookupProvider()
             .firstOrNull { it.instance.platformId.value.equals(platform, ignoreCase = true) }
         val pluginInfo = handle?.info ?: fallbackPublisherPluginInfo(platform)
-        cachedPublisherCandidate(PublisherKey.of(platform, PublisherKind.USER, externalId))?.let { cached ->
+
+        cachedPublisherCandidate(PublisherKey.of(platform, PublisherKind.USER, searchText))?.let { cached ->
             return listOf(cached.toCandidateDto(pluginInfo))
         }
-        val publisherKey = PublisherKey.of(platform, PublisherKind.USER, externalId)
-        PublisherRepository.findByKey(publisherKey)
-            ?.takeUnless { it.isPlaceholderPublisher() }
-            ?.let { publisher ->
-                return listOf(publisher.toInfo().toCandidateDto(pluginInfo))
-            }
+        val publisherKey = PublisherKey.of(platform, PublisherKind.USER, searchText)
+        val exactPublisher = PublisherRepository.findByKey(publisherKey)
+        if (exactPublisher != null && !exactPublisher.isPlaceholderPublisher()) {
+            return listOf(exactPublisher.toInfo().toCandidateDto(pluginInfo))
+        }
+        if (searchText.toLongOrNull() == null) {
+            localPublisherCandidates(platform, searchText)
+                .takeIf { it.isNotEmpty() }
+                ?.let { publishers ->
+                    return publishers
+                        .take(ADMIN_PUBLISHER_SEARCH_LIMIT)
+                        .map { it.toInfo().toCandidateDto(pluginInfo) }
+                }
+        }
+        cachedPublisherSearchCandidates(platform, searchText)?.let { cached ->
+            return cached.map { it.toCandidateDto(pluginInfo) }
+        }
+
         val plugin = handle?.instance ?: publisherLookupResolver(platform)
             ?: throw NoSuchElementException("未找到发布者查询插件：$platform")
-        val publisherInfo = plugin.fetchPublisherInfo(externalId)?.normalized() ?: return emptyList()
-        rememberPublisherCandidate(publisherInfo)
-        return listOf(publisherInfo.toCandidateDto(pluginInfo))
+        val publisherInfos = if (searchText.toLongOrNull() != null) {
+            listOfNotNull(plugin.fetchPublisherInfo(searchText)?.normalized())
+        } else {
+            plugin.searchPublisherInfo(searchText, ADMIN_PUBLISHER_SEARCH_LIMIT)
+                .map { it.normalized() }
+        }
+        val filteredPublisherInfos = publisherInfos
+            .filter {
+                it.platformId.value.equals(platform, ignoreCase = true) &&
+                    it.kind == PublisherKind.USER &&
+                    it.externalId.isNotBlank()
+            }
+            .distinctBy { it.key.stableValue() }
+            .take(ADMIN_PUBLISHER_SEARCH_LIMIT)
+        rememberPublisherCandidates(filteredPublisherInfos)
+        rememberPublisherSearchCandidates(platform, searchText, filteredPublisherInfos)
+        return filteredPublisherInfos.map { it.toCandidateDto(pluginInfo) }
     }
 
     public suspend fun createPublisher(request: CreatePublisherRequest): PublisherDto {
@@ -738,7 +767,7 @@ public class AdminService(
         val externalId = request.externalId.trim().also {
             require(it.isNotBlank()) { "发布者 ID 不能为空" }
         }
-        val (publisherInfo, _) = fetchPublisherInfo(platform, externalId)
+        val (publisherInfo, _) = fetchPublisherInfo(platform, externalId, useCache = false)
         val upsert = PublisherRepository.upsertInfo(publisherInfo.normalized())
         val publisher = upsert.value
         publisherThemeInitializer.initializeAfterPublisherUpsert(publisher)
@@ -1633,32 +1662,103 @@ public class AdminService(
         }
     }
 
-    private suspend fun fetchPublisherInfo(platform: String, externalId: String): Pair<PublisherInfo, PluginInfo> {
+    private suspend fun fetchPublisherInfo(
+        platform: String,
+        externalId: String,
+        useCache: Boolean = true,
+    ): Pair<PublisherInfo, PluginInfo> {
         val handle = publisherLookupProvider()
             .firstOrNull { it.instance.platformId.value.equals(platform, ignoreCase = true) }
         val pluginInfo = handle?.info ?: fallbackPublisherPluginInfo(platform)
-        cachedPublisherCandidate(PublisherKey.of(platform, PublisherKind.USER, externalId))?.let { cached ->
+        val cached = cachedPublisherCandidate(PublisherKey.of(platform, PublisherKind.USER, externalId))
+        if (useCache && cached != null) {
             return cached to pluginInfo
         }
         val plugin = handle?.instance ?: publisherLookupResolver(platform)
             ?: throw NoSuchElementException("未找到发布者查询插件：$platform")
         val publisherInfo = plugin.fetchPublisherInfo(externalId)?.normalized()
+            ?: cached
             ?: throw NoSuchElementException("未找到发布者：$platform:$externalId")
         rememberPublisherCandidate(publisherInfo)
         return publisherInfo to pluginInfo
     }
 
     private fun rememberPublisherCandidate(publisherInfo: PublisherInfo) {
-        val key = publisherInfo.key.stableValue()
+        rememberPublisherCandidates(listOf(publisherInfo))
+    }
+
+    private fun rememberPublisherCandidates(publisherInfos: Collection<PublisherInfo>) {
+        if (publisherInfos.isEmpty()) return
+        val now = System.currentTimeMillis()
         synchronized(publisherCandidateCacheLock) {
             prunePublisherCandidateCacheLocked()
-            publisherCandidateCache.remove(key)
-            publisherCandidateCache[key] = CachedPublisherCandidate(
-                publisherInfo = publisherInfo,
-                cachedAtEpochMillis = System.currentTimeMillis(),
-            )
+            publisherInfos.forEach { publisherInfo ->
+                val key = publisherInfo.key.stableValue()
+                publisherCandidateCache.remove(key)
+                publisherCandidateCache[key] = CachedPublisherCandidate(
+                    publisherInfo = publisherInfo,
+                    cachedAtEpochMillis = now,
+                )
+            }
             trimPublisherCandidateCacheLocked()
         }
+    }
+
+    private fun localPublisherCandidates(platform: String, searchText: String): List<Publisher> {
+        val needle = searchText.lowercase()
+        return PublisherRepository.findAll()
+            .asSequence()
+            .filter { it.platformId.value.equals(platform, ignoreCase = true) }
+            .filter { it.kind == PublisherKind.USER }
+            .filterNot { it.isPlaceholderPublisher() }
+            .filter {
+                it.externalId.equals(searchText, ignoreCase = true) ||
+                    it.name.equals(searchText, ignoreCase = true) ||
+                    it.externalId.lowercase().contains(needle) ||
+                    it.name.lowercase().contains(needle)
+            }
+            .sortedWith(
+                compareByDescending<Publisher> { it.externalId.equals(searchText, ignoreCase = true) }
+                    .thenByDescending { it.name.equals(searchText, ignoreCase = true) }
+                    .thenBy { it.name.length }
+                    .thenBy { it.name }
+                    .thenBy { it.externalId }
+            )
+            .toList()
+    }
+
+    private fun rememberPublisherSearchCandidates(
+        platform: String,
+        searchText: String,
+        publisherInfos: List<PublisherInfo>,
+    ) {
+        val key = publisherSearchCacheKey(platform, searchText)
+        val now = System.currentTimeMillis()
+        synchronized(publisherSearchCacheLock) {
+            prunePublisherSearchCacheLocked(now)
+            publisherSearchCache.remove(key)
+            publisherSearchCache[key] = CachedPublisherSearchCandidates(
+                publisherInfos = publisherInfos,
+                cachedAtEpochMillis = now,
+            )
+            trimPublisherSearchCacheLocked()
+        }
+    }
+
+    private fun cachedPublisherSearchCandidates(platform: String, searchText: String): List<PublisherInfo>? {
+        val key = publisherSearchCacheKey(platform, searchText)
+        return synchronized(publisherSearchCacheLock) {
+            val cached = publisherSearchCache[key] ?: return@synchronized null
+            if (cached.isExpired()) {
+                publisherSearchCache.remove(key)
+                return@synchronized null
+            }
+            cached.publisherInfos
+        }
+    }
+
+    private fun publisherSearchCacheKey(platform: String, searchText: String): String {
+        return "${platform.lowercase()}\u001F${searchText.lowercase()}"
     }
 
     private fun cachedPublisherCandidate(key: PublisherKey): PublisherInfo? {
@@ -1670,6 +1770,19 @@ public class AdminService(
                 return@synchronized null
             }
             cached.publisherInfo.normalized().copy(key = key)
+        }
+    }
+
+    private fun prunePublisherSearchCacheLocked(now: Long = System.currentTimeMillis()) {
+        publisherSearchCache.entries.removeIf { (_, value) ->
+            now - value.cachedAtEpochMillis > ADMIN_CANDIDATE_CACHE_TTL_MS
+        }
+    }
+
+    private fun trimPublisherSearchCacheLocked() {
+        while (publisherSearchCache.size > ADMIN_PUBLISHER_SEARCH_CACHE_MAX_SIZE) {
+            val oldestKey = publisherSearchCache.keys.firstOrNull() ?: return
+            publisherSearchCache.remove(oldestKey)
         }
     }
 
@@ -2213,6 +2326,15 @@ private data class CachedPublisherCandidate(
     }
 }
 
+private data class CachedPublisherSearchCandidates(
+    val publisherInfos: List<PublisherInfo>,
+    val cachedAtEpochMillis: Long,
+) {
+    fun isExpired(now: Long = System.currentTimeMillis()): Boolean {
+        return now - cachedAtEpochMillis > ADMIN_CANDIDATE_CACHE_TTL_MS
+    }
+}
+
 private data class CachedMessageTargetCandidate(
     val candidate: MessageTargetCandidate,
     val cachedAtEpochMillis: Long,
@@ -2423,6 +2545,8 @@ private fun PublisherInfo.normalized(): PublisherInfo = copy(
 private const val LOGIN_STATE_CACHE_TTL_MS: Long = 15_000
 private const val LOGIN_STATE_TIMEOUT_MS: Long = 5_000
 private const val ADMIN_CANDIDATE_CACHE_TTL_MS: Long = 5 * 60 * 1_000
+private const val ADMIN_PUBLISHER_SEARCH_LIMIT: Int = 10
+private const val ADMIN_PUBLISHER_SEARCH_CACHE_MAX_SIZE: Int = 128
 private const val ADMIN_PUBLISHER_CANDIDATE_CACHE_MAX_SIZE: Int = 256
 private const val ADMIN_TARGET_CANDIDATE_CACHE_MAX_SIZE: Int = 1_000
 private const val PUBLISHER_LOOKUP_MODE_VERIFY: String = "VERIFY"

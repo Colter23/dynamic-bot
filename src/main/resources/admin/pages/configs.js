@@ -118,6 +118,11 @@ export async function handleAction(nextCtx, { action, button, id }) {
     await withButtonLoading(button, "保存中...", saveCurrentConfig);
     return true;
   }
+  if (action === "reset-all-config") {
+    if (!(await confirmDanger("重置所有修改", "确定要放弃所有未保存的修改吗？此操作不可恢复。", { confirmText: "重置" }))) return true;
+    await withButtonLoading(button, "重置中...", () => resetAllConfig());
+    return true;
+  }
   if (action === "select-config-section") {
     selectConfigSection(button);
     return true;
@@ -264,31 +269,6 @@ async function renderConfigDetail(id, request = beginPageRequest("configs")) {
   const target = $("configDetail");
   if (!target) return;
   target.innerHTML = `
-    <div id="configFloatingActions" class="config-floating-actions" hidden>
-      <span id="configFloatingHint">有未保存修改</span>
-      ${detail.pluginId ? `<button type="button" class="secondary config-floating-restart" id="floatingRestartConfigPlugin" data-action="restart-config-plugin" hidden>重启插件</button>` : ""}
-      <button type="button" class="config-floating-save" id="floatingSaveConfigButton" data-action="save-config" disabled>保存配置</button>
-    </div>
-    <section class="panel config-hero">
-      <div class="config-hero-main">
-        <div class="config-hero-title">
-          <div class="config-title-line">
-            <span class="config-kind-pill">${detail.pluginId ? "插件配置" : "主配置"}</span>
-            <h2>${esc(detail.name)}</h2>
-            <span class="config-source-path">${esc(detail.sourcePath)}</span>
-          </div>
-          <div class="config-description-line">
-            <p>${esc(configDescription)}</p>
-            ${hasRestartFields ? `<span class="restart-note">⚠️ 标记项保存后需要重启才会生效</span>` : ""}
-          </div>
-        </div>
-        <div class="config-hero-meta">
-          <span>${esc(`${sectionEntries.length} 个分组`)}</span>
-          <span>${esc(`${totalFields} 个配置项`)}</span>
-          ${detail.pluginId ? `<span>${esc(detail.pluginId)}</span>` : ""}
-        </div>
-      </div>
-    </section>
     <div class="config-workbench">
       <aside class="panel config-tab-panel">
         <div class="config-tab-panel-head">
@@ -305,6 +285,41 @@ async function renderConfigDetail(id, request = beginPageRequest("configs")) {
         </div>
       </aside>
       <div class="config-tab-stage">
+        <section class="panel config-hero" id="configHeroPanel">
+          <div class="config-hero-main">
+            <div class="config-hero-title">
+              <div class="config-title-line">
+                <span class="config-kind-pill">${detail.pluginId ? "插件配置" : "主配置"}</span>
+                <h2>${esc(detail.name)}</h2>
+                <span class="config-source-path">${esc(detail.sourcePath)}</span>
+              </div>
+              <div class="config-description-line">
+                <p>${esc(configDescription)}</p>
+                ${hasRestartFields ? `<span class="restart-note">⚠️ 标记项保存后需要重启才会生效</span>` : ""}
+              </div>
+            </div>
+            <div class="config-hero-side">
+              <div class="config-hero-meta">
+                <span>${esc(`${sectionEntries.length} 个分组`)}</span>
+                <span>${esc(`${totalFields} 个配置项`)}</span>
+                ${detail.pluginId ? `<span>${esc(detail.pluginId)}</span>` : ""}
+              </div>
+              <div id="configActionBar" class="config-hero-actions" hidden>
+                <div class="config-action-buttons">
+                  <button type="button" class="secondary compact" id="resetAllConfigButton" data-action="reset-all-config" hidden>
+                    <span>重置所有</span>
+                  </button>
+                  ${detail.pluginId ? `<button type="button" class="secondary compact config-action-restart" id="actionBarRestartPlugin" data-action="restart-config-plugin" hidden>
+                    <span>⚠️ 重启插件</span>
+                  </button>` : ""}
+                  <button type="button" class="primary" id="actionBarSaveButton" data-action="save-config" hidden>
+                    <span>保存配置</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
         ${sectionEntries.map(([name, fields], index) => `
           <section id="config-section-${index}" class="panel config-section" data-config-section data-section-name="${attr(name)}" data-config-section-available="true"${name === activeSection ? "" : " hidden"}>
             <div class="config-section-head">
@@ -439,7 +454,7 @@ function updateConfigDirtyState(detail) {
   const dirty = configDirtyChanged(detail);
   state.currentConfigDirty = dirty;
   updateConfigTabState(detail);
-  updateConfigFloatingActions(detail, dirty);
+  updateConfigActionBar(detail, dirty);
 }
 
 function configActiveSections() {
@@ -499,11 +514,19 @@ function updateConfigTabState(detail) {
     const sectionFields = fields.filter(field => (field.section || "常规") === sectionName);
     const changed = sectionFields.some(field => configFieldChanged(detail, field));
     const restartChanged = sectionFields.some(field => field.restartRequired && configFieldChanged(detail, field));
+    const changedCount = sectionFields.filter(field => configFieldChanged(detail, field)).length;
+
     tab.classList.toggle("changed", changed);
     tab.classList.toggle("restart-changed", restartChanged);
+
     const stateNode = tab.querySelector("[data-config-tab-state]");
     if (stateNode) {
-      stateNode.textContent = changed ? (restartChanged ? "需重启" : "已修改") : `${sectionFields.length} 项`;
+      if (changed) {
+        const badge = changedCount > 0 ? ` (${changedCount})` : "";
+        stateNode.textContent = restartChanged ? `⚠️ 需重启${badge}` : `✏️ 已修改${badge}`;
+      } else {
+        stateNode.textContent = `${sectionFields.length} 项`;
+      }
     }
   });
 }
@@ -531,7 +554,7 @@ function refreshConfigSectionAvailability(detail) {
 
 function updateConfigRestartButton(detail) {
   const showRestart = configShouldShowRestart(detail);
-  updateConfigFloatingActions(detail, undefined, showRestart);
+  updateConfigActionBar(detail, undefined, showRestart);
 }
 
 function configShouldShowRestart(detail) {
@@ -539,21 +562,27 @@ function configShouldShowRestart(detail) {
   return !!state.pendingConfigRestarts[detail.pluginId] || configRestartChanged(detail);
 }
 
-function updateConfigFloatingActions(detail, dirty = undefined, showRestart = undefined) {
-  const bar = $("configFloatingActions");
+function updateConfigActionBar(detail, dirty = undefined, showRestart = undefined) {
+  const bar = $("configActionBar");
   if (!bar || !detail) return;
   const isDirty = dirty === undefined ? configDirtyChanged(detail) : dirty;
   const restartVisible = showRestart === undefined ? configShouldShowRestart(detail) : showRestart;
-  const saveButton = $("floatingSaveConfigButton");
-  if (saveButton) saveButton.disabled = !isDirty;
-  const restartButton = $("floatingRestartConfigPlugin");
-  if (restartButton) restartButton.hidden = !restartVisible;
-  const hint = $("configFloatingHint");
-  if (hint) {
-    hint.textContent = isDirty
-      ? (restartVisible ? "有未保存修改，保存后需重启" : "有未保存修改")
-      : "配置已保存，等待重启生效";
+
+  const saveButton = $("actionBarSaveButton");
+  if (saveButton) {
+    saveButton.hidden = !isDirty;
+    saveButton.disabled = !isDirty;
   }
+
+  const resetButton = $("resetAllConfigButton");
+  if (resetButton) {
+    resetButton.hidden = !isDirty;
+    resetButton.disabled = !isDirty;
+  }
+
+  const restartButton = $("actionBarRestartPlugin");
+  if (restartButton) restartButton.hidden = !restartVisible;
+
   bar.hidden = !(isDirty || restartVisible);
 }
 
@@ -634,6 +663,13 @@ async function restartCurrentConfigPlugin() {
   state.selectedConfigId = detail.id;
   await loadConfigs(true);
   notify(result.message || "插件已重启", false);
+}
+
+async function resetAllConfig() {
+  const detail = state.currentConfigDetail;
+  if (!detail) throw new Error("请选择配置文件");
+  await loadConfigs(true);
+  notify("已重置所有修改", false);
 }
 
 async function loadConfigSecret(button) {

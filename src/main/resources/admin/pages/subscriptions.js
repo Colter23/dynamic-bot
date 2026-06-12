@@ -663,7 +663,7 @@ async function openCreateSubscription() {
         <div class="panel-head">
           <div>
             <h2>发布者</h2>
-            <p>可直接选择已有发布者，也可以按平台和 ID 搜索后添加订阅。</p>
+            <p>可直接选择已有发布者，也可以按平台和 UID / 用户名搜索后添加订阅。</p>
           </div>
         </div>
         ${subscriptionModeSwitch("subPublisherMode", [
@@ -683,9 +683,9 @@ async function openCreateSubscription() {
             ? publisherPlatforms.map(p => `<option value="${attr(p.platformId)}">${esc(p.platformId)} · ${esc(p.pluginName || p.pluginId || "")}</option>`).join("")
             : `<option value="">无可用发布者平台</option>`}</select></div>
           <div class="field">
-            <label>发布者 ID<span class="required-mark">*</span></label>
+            <label>发布者 UID / 用户名<span class="required-mark">*</span></label>
             <div class="publisher-search-row">
-              <input id="subNewPublisherId" placeholder="当前支持 UID 搜索">
+              <input id="subNewPublisherId" placeholder="填写 UID 可直接添加；填写用户名需搜索选择">
               <button type="button" class="publisher-search-button" id="subNewPublisherSearch">搜索</button>
             </div>
           </div>
@@ -693,7 +693,7 @@ async function openCreateSubscription() {
             <div class="field-head"><label>搜索结果</label></div>
             <div id="subNewPublisherResultList" class="target-choice-list"></div>
           </div>
-          <div class="field full"><span id="subNewPublisherStatus" class="inline-note">请输入发布者 ID 后搜索。</span></div>
+          <div class="field full"><span id="subNewPublisherStatus" class="inline-note">可填写 UID 手动添加；用户名搜索成功后请选择结果。</span></div>
         </div>
       </section>
 
@@ -712,7 +712,7 @@ async function openCreateSubscription() {
     setCreateSubscriptionResult("");
     const selectedTargets = collectCreateSubscriptionTargets(targetCandidates);
     const selectedPublisher = collectCreateSubscriptionPublisher(publisherCandidates);
-    if (!selectedPublisher) throw new Error("请选择发布者或切换到新增发布者");
+    if (!selectedPublisher) throw new Error("请选择发布者；如果填写的是用户名，请先搜索并选择结果");
     if (selectedTargets.length === 0) throw new Error("请选择或填写消息目标");
     const documentData = buildCreateSubscriptionImportDocument(
       selectedPublisher,
@@ -829,7 +829,7 @@ async function openCreateSubscription() {
     const platformId = $("subNewPublisherPlatform").value.trim();
     const queryText = $("subNewPublisherId").value.trim();
     if (!platformId) throw new Error("没有可用的发布者平台");
-    if (!queryText) throw new Error("请填写发布者 ID");
+    if (!queryText) throw new Error("请填写发布者 UID 或用户名");
     publisherCandidates = [];
     setCreateSubscriptionPublisherLoading("正在搜索发布者...");
     const result = await api(`/publisher-search?platformId=${encodeURIComponent(platformId)}&q=${encodeURIComponent(queryText)}`);
@@ -844,7 +844,7 @@ async function openCreateSubscription() {
     } else {
       $("subNewPublisherResultWrap").hidden = false;
       $("subNewPublisherResultList").innerHTML = `<div class="empty">未找到发布者</div>`;
-      $("subNewPublisherStatus").textContent = "未找到发布者，请确认平台和 UID";
+      $("subNewPublisherStatus").textContent = "未找到发布者；如果填写的是 UID，可以直接添加";
     }
   };
   $("subNewTargetPlatform").onchange = refreshTargetKinds;
@@ -869,11 +869,16 @@ async function openCreateSubscription() {
       $("subNewPublisherStatus").textContent = error.message || String(error);
     });
   };
+  $("subNewPublisherId").oninput = () => {
+    publisherCandidates = [];
+    $("subNewPublisherResultWrap").hidden = true;
+    $("subNewPublisherStatus").textContent = "可填写 UID 手动添加；用户名搜索成功后请选择结果。";
+  };
   $("subNewPublisherPlatform").onchange = () => {
     if (!isModalActive()) return;
     publisherCandidates = [];
     $("subNewPublisherResultWrap").hidden = true;
-    $("subNewPublisherStatus").textContent = "请输入发布者 ID 后搜索。";
+    $("subNewPublisherStatus").textContent = "可填写 UID 手动添加；用户名搜索成功后请选择结果。";
     policyUpdater();
   };
   await hydrateMediaImages($("modalBody"));
@@ -1117,7 +1122,11 @@ function collectCreateSubscriptionPublisher(candidates) {
     : null;
   const candidate = selected ? candidates[Number(selected.dataset.index)] : null;
   const platformId = $("subNewPublisherPlatform").value.trim();
-  const externalId = candidate ? candidate.externalId : $("subNewPublisherId").value.trim();
+  const inputExternalId = $("subNewPublisherId").value.trim();
+  if (!candidate && inputExternalId && !isLikelyPublisherUid(inputExternalId)) {
+    return null;
+  }
+  const externalId = candidate ? candidate.externalId : inputExternalId;
   if (!platformId || !externalId) return null;
   return {
     platformId,
@@ -1126,6 +1135,10 @@ function collectCreateSubscriptionPublisher(candidates) {
     label: candidate && candidate.name || externalId,
     publisherLookupMode: candidate ? "VERIFY" : "PLACEHOLDER",
   };
+}
+
+function isLikelyPublisherUid(value) {
+  return /^\d+$/.test((value || "").trim());
 }
 
 function filterExistingSubscriptionTargets(candidates) {

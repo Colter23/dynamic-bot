@@ -548,6 +548,34 @@ class AdminServerTest {
     }
 
     @Test
+    fun createPublisherShouldRefreshFullProfileAfterSearchCandidate() = runBlocking {
+        initDb("admin-create-publisher-after-search")
+        val plugin = FakePublisherFollowPlugin().apply {
+            searchResultsByQuery["demo"] = listOf(
+                PublisherInfo(
+                    key = PublisherKey.of(platformId = "bilibili", externalId = "123"),
+                    name = "search-only-name",
+                    avatar = MediaRef("https://example.com/search-face.png", MediaKind.AVATAR),
+                ),
+            )
+        }
+        val service = service(plugin)
+
+        val candidate = service.searchPublishers("bilibili", "demo").single()
+        val publisher = service.createPublisher(
+            CreatePublisherRequest(
+                platformId = candidate.platformId,
+                externalId = candidate.externalId,
+            ),
+        )
+
+        assertEquals("demo-up", publisher.name)
+        assertEquals("https://example.com/header.png", publisher.bannerUri)
+        assertEquals(1, plugin.searchPublisherInfoCalls)
+        assertEquals(1, plugin.fetchPublisherInfoCalls)
+    }
+
+    @Test
     fun searchPublishersShouldReturnLocalPublisherWithoutPlatformLookup() = runBlocking {
         initDb("admin-search-publisher-local-first")
         PublisherRepository.upsertInfo(
@@ -586,6 +614,120 @@ class AdminServerTest {
         assertEquals("demo-up", result.single().name)
         assertEquals("https://example.com/face.png", result.single().avatarUri)
         assertEquals(1, plugin.fetchPublisherInfoCalls)
+    }
+
+    @Test
+    fun searchPublishersShouldKeepNumericQueryExact() = runBlocking {
+        initDb("admin-search-publisher-numeric-exact")
+        PublisherRepository.upsertInfo(
+            testPublisherInfo(
+                key = PublisherKey.of("bilibili", PublisherKind.USER, "1234"),
+                name = "本地 1234",
+                avatar = MediaRef("https://example.com/1234.png", MediaKind.AVATAR),
+            )
+        )
+        val plugin = FakePublisherFollowPlugin()
+        val service = service(plugin)
+
+        val result = service.searchPublishers("bilibili", "123")
+
+        assertEquals(1, result.size)
+        assertEquals("123", result.single().externalId)
+        assertEquals("demo-up", result.single().name)
+        assertEquals(1, plugin.fetchPublisherInfoCalls)
+        assertEquals(0, plugin.searchPublisherInfoCalls)
+    }
+
+    @Test
+    fun searchPublishersShouldSearchKeywordThroughPlugin() = runBlocking {
+        initDb("admin-search-publisher-keyword")
+        val plugin = FakePublisherFollowPlugin().apply {
+            searchResultsByQuery["demo"] = listOf(
+                PublisherInfo(
+                    key = PublisherKey.of(platformId = "bilibili", externalId = "456"),
+                    name = "demo-up-1",
+                    avatar = MediaRef("https://example.com/456.png", MediaKind.AVATAR),
+                ),
+                PublisherInfo(
+                    key = PublisherKey.of(platformId = "bilibili", externalId = "789"),
+                    name = "demo-up-2",
+                    avatar = MediaRef("https://example.com/789.png", MediaKind.AVATAR),
+                ),
+            )
+        }
+        val service = service(plugin)
+
+        val result = service.searchPublishers("bilibili", "demo")
+        val cachedResult = service.searchPublishers("bilibili", "demo")
+
+        assertEquals(listOf("456", "789"), result.map { it.externalId })
+        assertEquals(listOf("demo-up-1", "demo-up-2"), result.map { it.name })
+        assertEquals(result, cachedResult)
+        assertEquals(1, plugin.searchPublisherInfoCalls)
+        assertEquals(0, plugin.fetchPublisherInfoCalls)
+    }
+
+    @Test
+    fun searchPublishersShouldNotFallbackKeywordToFetchWithoutSearchSupport() = runBlocking {
+        initDb("admin-search-publisher-no-keyword-fallback")
+        val plugin = FakePublisherLookupPlugin()
+        val service = service(plugin)
+
+        val result = service.searchPublishers("bilibili", "demo")
+
+        assertTrue(result.isEmpty())
+        assertEquals(0, plugin.fetchPublisherInfoCalls)
+    }
+
+    @Test
+    fun searchPublishersShouldFetchNumericQueryWithoutSearchSupport() = runBlocking {
+        initDb("admin-search-publisher-numeric-default")
+        val plugin = FakePublisherLookupPlugin()
+        val service = service(plugin)
+
+        val result = service.searchPublishers("bilibili", "123")
+
+        assertEquals(1, result.size)
+        assertEquals("123", result.single().externalId)
+        assertEquals("demo-up", result.single().name)
+        assertEquals(1, plugin.fetchPublisherInfoCalls)
+    }
+
+    @Test
+    fun createSubscriptionShouldReusePublisherSearchCandidate() = runBlocking {
+        initDb("admin-create-subscription-from-search-candidate")
+        val plugin = FakePublisherFollowPlugin().apply {
+            searchResultsByQuery["demo"] = listOf(
+                PublisherInfo(
+                    key = PublisherKey.of(platformId = "bilibili", externalId = "456"),
+                    name = "demo-up-from-search",
+                    avatar = MediaRef("https://example.com/search.png", MediaKind.AVATAR),
+                ),
+            )
+        }
+        val service = service(
+            plugin = plugin,
+            config = MainDynamicConfig(
+                subscription = SubscriptionConfig(autoFollowPublisherOnSubscribe = false),
+            ),
+        )
+
+        val candidates = service.searchPublishers("bilibili", "demo")
+        val response = service.createSubscription(
+            CreateSubscriptionRequest(
+                subscriberPlatform = "qq",
+                targetKind = "GROUP",
+                subscriberTargetId = "100",
+                publisherPlatform = "bilibili",
+                publisherExternalId = candidates.single().externalId,
+                publisherLookupMode = "VERIFY",
+            ),
+        )
+
+        assertEquals("456", response.subscription.publisher?.externalId)
+        assertEquals("demo-up-from-search", response.subscription.publisher?.name)
+        assertEquals(1, plugin.searchPublisherInfoCalls)
+        assertEquals(0, plugin.fetchPublisherInfoCalls)
     }
 
     @Test
@@ -1598,8 +1740,10 @@ class AdminServerTest {
         )
         var followed: Boolean = false
         var fetchPublisherInfoCalls: Int = 0
+        var searchPublisherInfoCalls: Int = 0
         var queryFollowStateCalls: Int = 0
         var followPublisherCalls: Int = 0
+        val searchResultsByQuery: MutableMap<String, List<PublisherInfo>> = linkedMapOf()
 
         override suspend fun fetchPublisherInfo(userId: String): PublisherInfo? {
             fetchPublisherInfoCalls += 1
@@ -1607,7 +1751,15 @@ class AdminServerTest {
                 key = PublisherKey.of(platformId = platformId.value, externalId = userId),
                 name = "demo-up",
                 avatar = MediaRef("https://example.com/face.png", MediaKind.AVATAR),
+                banner = MediaRef("https://example.com/header.png", MediaKind.COVER),
             )
+        }
+
+        override suspend fun searchPublisherInfo(query: String, limit: Int): List<PublisherInfo> {
+            searchPublisherInfoCalls += 1
+            return searchResultsByQuery[query]
+                ?.take(limit)
+                ?: fetchPublisherInfo(query)?.let(::listOf).orEmpty()
         }
 
         override suspend fun queryFollowState(userId: String): FollowState {
@@ -1624,8 +1776,10 @@ class AdminServerTest {
 
     private class FakePublisherLookupPlugin : PublisherLookupPlugin {
         override val platformId: PlatformId = PlatformId.of("bilibili")
+        var fetchPublisherInfoCalls: Int = 0
 
         override suspend fun fetchPublisherInfo(userId: String): PublisherInfo {
+            fetchPublisherInfoCalls += 1
             return PublisherInfo(
                 key = PublisherKey.of(platformId = platformId.value, externalId = userId),
                 name = "demo-up",
