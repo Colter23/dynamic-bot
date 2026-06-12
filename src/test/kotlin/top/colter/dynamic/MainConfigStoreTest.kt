@@ -75,9 +75,9 @@ class MainConfigStoreTest {
         val paths = MainConfigForms.formSpec.fields.map { it.path }
 
         assertTrue("pluginCatalog.url" in paths)
-        assertTrue("pluginCatalog.cacheSeconds" in paths)
         assertTrue("pluginCatalog.downloadTimeoutSeconds" in paths)
-        assertTrue("pluginCatalog.maxDownloadMegabytes" in paths)
+        assertFalse("pluginCatalog.cacheSeconds" in paths)
+        assertFalse("pluginCatalog.maxDownloadMegabytes" in paths)
 
         val error = assertFailsWith<IllegalArgumentException> {
             MainConfigForms.validate(
@@ -94,8 +94,8 @@ class MainConfigStoreTest {
     fun imageCacheAndDeliveryRetentionConfigShouldBeExposedAndValidated() {
         val paths = MainConfigForms.formSpec.fields.map { it.path }
 
-        assertTrue("imageCache.memoryMaxMegabytes" in paths)
-        assertTrue("imageCache.memoryMaxEntries" in paths)
+        assertFalse("imageCache.memoryMaxMegabytes" in paths)
+        assertFalse("imageCache.memoryMaxEntries" in paths)
         assertTrue("delivery.historyRetentionDays" in paths)
         assertTrue("delivery.cleanupCron" in paths)
         assertTrue("mediaDelivery.defaultProfileId" in paths)
@@ -269,10 +269,10 @@ class MainConfigStoreTest {
     }
 
     @Test
-    fun webAdminConfigShouldExposeLogBufferCapacity() {
+    fun webAdminConfigShouldHideLogBufferCapacityButStillValidate() {
         val paths = MainConfigForms.formSpec.fields.map { it.path }
 
-        assertTrue("webAdmin.logBufferCapacity" in paths)
+        assertFalse("webAdmin.logBufferCapacity" in paths)
 
         val error = assertFailsWith<IllegalArgumentException> {
             MainConfigForms.validate(
@@ -321,8 +321,10 @@ class MainConfigStoreTest {
         assertEquals("MEDIA_DELIVERY_PROFILES", byPath.getValue("mediaDelivery.profiles").component)
         assertEquals("HIDDEN", byPath.getValue("mediaDelivery.defaultProfileId").component)
         assertTrue(byPath.getValue("delivery.lockTtlSeconds").advanced)
-        assertEquals("系统维护", byPath.getValue("imageCache.memoryMaxEntries").section)
-        assertTrue(byPath.getValue("imageCache.memoryMaxEntries").advanced)
         assertTrue(byPath.getValue("pluginCatalog.url").advanced)
+        assertFalse("imageCache.memoryMaxEntries" in byPath)
+        assertFalse("webAdmin.logBufferCapacity" in byPath)
+        assertFalse("pluginCatalog.cacheSeconds" in byPath)
+        assertFalse("pluginCatalog.maxDownloadMegabytes" in byPath)
     }
 }

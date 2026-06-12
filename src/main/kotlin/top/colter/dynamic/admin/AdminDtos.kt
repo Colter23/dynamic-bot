@@ -429,6 +429,11 @@ public data class SubscriptionImportResponse(
 )
 
 @Serializable
+public data class LegacyDynamicSubscriptionImportRequest(
+    val content: String,
+)
+
+@Serializable
 public data class SubscriptionImportItemResult(
     val index: Int,
     val status: String,

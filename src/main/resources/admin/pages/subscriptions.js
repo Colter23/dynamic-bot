@@ -416,35 +416,35 @@ function openSubscriptionImportModal() {
       <section class="panel full subscription-transfer-card">
         <div class="panel-head">
           <div>
-            <h2>导入 JSON</h2>
-            <p>重复订阅会更新覆盖；导入文件里的过滤规则会替换当前过滤规则。</p>
+            <h2>导入订阅</h2>
+            <p>支持当前 dynamic-bot JSON，也支持旧项目订阅 YAML 的 dynamic 数据。</p>
           </div>
         </div>
         <div class="form-grid single">
           <div class="field full">
-            <label>选择文件</label>
-            <input type="file" id="subscriptionImportFile" accept="application/json,.json">
+            <label>导入格式</label>
+            <select id="subscriptionImportFormat">
+              <option value="JSON">dynamic-bot JSON</option>
+              <option value="LEGACY_DYNAMIC_YAML">旧版订阅 YAML</option>
+            </select>
           </div>
           <div class="field full">
-            <label>粘贴 JSON</label>
+            <label>选择文件</label>
+            <input type="file" id="subscriptionImportFile" accept="application/json,.json,.yml,.yaml">
+          </div>
+          <div class="field full">
+            <label id="subscriptionImportTextLabel">粘贴 JSON</label>
             <textarea id="subscriptionImportText" class="subscription-import-text" placeholder="可以粘贴导出的 dynamic-bot 订阅 JSON"></textarea>
           </div>
-          <label class="check"><input type="checkbox" id="subscriptionImportPlaceholderPublishers" checked>直接导入发布者 ID</label>
+          <label class="check" id="subscriptionImportPlaceholderWrap"><input type="checkbox" id="subscriptionImportPlaceholderPublishers" checked>直接导入发布者 ID</label>
         </div>
         <div id="subscriptionImportSummary" class="batch-result" hidden></div>
-        <div class="inline-note">导入不是全局事务：单条失败不会影响其他订阅。</div>
+        <div id="subscriptionImportNote" class="inline-note">导入不是全局事务：单条失败不会影响其他订阅。</div>
       </section>
       <div id="subscriptionImportResult" class="batch-result" hidden></div>
     </div>
   `, async () => {
-    const parsedDocument = parseSubscriptionImportText();
-    const documentData = $("subscriptionImportPlaceholderPublishers")?.checked
-      ? withPublisherLookupMode(parsedDocument, "PLACEHOLDER")
-      : parsedDocument;
-    const result = await api("/subscriptions/import", {
-      method: "POST",
-      body: JSON.stringify(documentData),
-    });
+    const result = await submitSubscriptionImport();
     invalidate("dashboard", "subscriptions", "publishers", "subscribers");
     await loadSubscriptions(true);
     const warningLines = subscriptionImportWarnings(result);
@@ -464,6 +464,7 @@ function openSubscriptionImportModal() {
 
   const fileInput = $("subscriptionImportFile");
   const textInput = $("subscriptionImportText");
+  const formatSelect = $("subscriptionImportFormat");
   const refreshSummary = () => renderSubscriptionImportSummary();
   fileInput.onchange = async () => {
     const file = fileInput.files && fileInput.files[0];
@@ -471,12 +472,61 @@ function openSubscriptionImportModal() {
     textInput.value = await file.text();
     refreshSummary();
   };
+  formatSelect.onchange = () => {
+    refreshSubscriptionImportFormatUi();
+    refreshSummary();
+  };
   textInput.oninput = refreshSummary;
+  refreshSubscriptionImportFormatUi();
+}
+
+async function submitSubscriptionImport() {
+  const format = subscriptionImportFormat();
+  if (format === "LEGACY_DYNAMIC_YAML") {
+    const content = subscriptionImportRawText();
+    return api("/subscriptions/import/legacy-dynamic-yaml", {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    });
+  }
+  const parsedDocument = parseSubscriptionImportText();
+  const documentData = $("subscriptionImportPlaceholderPublishers")?.checked
+    ? withPublisherLookupMode(parsedDocument, "PLACEHOLDER")
+    : parsedDocument;
+  return api("/subscriptions/import", {
+    method: "POST",
+    body: JSON.stringify(documentData),
+  });
+}
+
+function subscriptionImportFormat() {
+  return $("subscriptionImportFormat")?.value || "JSON";
+}
+
+function subscriptionImportRawText() {
+  const text = $("subscriptionImportText")?.value.trim();
+  if (!text) throw new Error("请先选择文件或粘贴导入内容");
+  return text;
+}
+
+function refreshSubscriptionImportFormatUi() {
+  const legacy = subscriptionImportFormat() === "LEGACY_DYNAMIC_YAML";
+  const labelNode = $("subscriptionImportTextLabel");
+  const input = $("subscriptionImportText");
+  const placeholderWrap = $("subscriptionImportPlaceholderWrap");
+  const note = $("subscriptionImportNote");
+  if (labelNode) labelNode.textContent = legacy ? "粘贴旧版 YAML" : "粘贴 JSON";
+  if (input) input.placeholder = legacy
+    ? "粘贴旧项目的订阅 YAML，只会导入 dynamic 数据"
+    : "可以粘贴导出的 dynamic-bot 订阅 JSON";
+  if (placeholderWrap) placeholderWrap.hidden = legacy;
+  if (note) note.textContent = legacy
+    ? "旧版 YAML 只解析 dynamic 字段，跳过 0；负数 QQ 号导入为群，正数导入为好友，不会请求 B 站接口。"
+    : "导入不是全局事务：单条失败不会影响其他订阅。";
 }
 
 function parseSubscriptionImportText() {
-  const text = $("subscriptionImportText")?.value.trim();
-  if (!text) throw new Error("请先选择文件或粘贴 JSON");
+  const text = subscriptionImportRawText();
   let documentData;
   try {
     documentData = JSON.parse(text);
@@ -502,6 +552,25 @@ function withPublisherLookupMode(documentData, mode) {
 function renderSubscriptionImportSummary() {
   const node = $("subscriptionImportSummary");
   if (!node) return;
+  if (subscriptionImportFormat() === "LEGACY_DYNAMIC_YAML") {
+    const text = $("subscriptionImportText")?.value.trim();
+    if (!text) {
+      node.hidden = true;
+      node.innerHTML = "";
+      node.classList.remove("error");
+      return;
+    }
+    const summary = summarizeLegacyDynamicYamlText(text);
+    node.hidden = false;
+    node.classList.toggle("error", !!summary.error);
+    node.innerHTML = summary.error
+      ? `<strong>${esc(summary.error)}</strong>`
+      : `<strong>旧版 YAML 待导入</strong><ul>
+          <li>预计订阅 ${summary.subscriptionCount} 条，发布者 ${summary.publisherCount} 个，QQ 群 ${summary.groupCount} 个，QQ 好友 ${summary.userCount} 个</li>
+          <li>导入时会跳过 dynamic.0，并使用发布者 UID 创建占位发布者</li>
+        </ul>`;
+    return;
+  }
   let documentData;
   try {
     documentData = parseSubscriptionImportText();
@@ -519,6 +588,61 @@ function renderSubscriptionImportSummary() {
     <li>动态过滤规则 ${summary.filterRuleCount} 条</li>
     <li>导入后已有订阅会更新规则，并替换对应过滤规则</li>
   </ul>`;
+}
+
+function summarizeLegacyDynamicYamlText(text) {
+  const lines = String(text || "").split(/\r?\n/);
+  let inDynamic = false;
+  let currentUid = "";
+  let inContacts = false;
+  const publisherIds = new Set();
+  const groupIds = new Set();
+  const userIds = new Set();
+  let subscriptionCount = 0;
+  for (const line of lines) {
+    if (/^dynamic\s*:\s*$/.test(line)) {
+      inDynamic = true;
+      currentUid = "";
+      inContacts = false;
+      continue;
+    }
+    if (!inDynamic) continue;
+    const topLevel = /^([^\s#][^:]*):\s*$/.exec(line);
+    if (topLevel && topLevel[1] !== "dynamic") break;
+    const uidMatch = /^\s{2}([0-9]+)\s*:\s*$/.exec(line);
+    if (uidMatch) {
+      currentUid = uidMatch[1];
+      inContacts = false;
+      if (currentUid !== "0") publisherIds.add(currentUid);
+      continue;
+    }
+    if (!currentUid || currentUid === "0") continue;
+    if (/^\s{4}contacts\s*:\s*$/.test(line)) {
+      inContacts = true;
+      continue;
+    }
+    if (inContacts) {
+      const contactMatch = /^\s{6}-\s*['"]?(-?\d+)['"]?\s*$/.exec(line);
+      if (contactMatch) {
+        const contact = contactMatch[1];
+        const targetId = contact.replace(/^-/, "");
+        if (!targetId) continue;
+        subscriptionCount += 1;
+        if (contact.startsWith("-")) groupIds.add(targetId); else userIds.add(targetId);
+      } else if (/^\s{4}\S/.test(line)) {
+        inContacts = false;
+      }
+    }
+  }
+  if (!publisherIds.size && !subscriptionCount) {
+    return { error: "没有识别到可导入的 dynamic 订阅" };
+  }
+  return {
+    subscriptionCount,
+    publisherCount: publisherIds.size,
+    groupCount: groupIds.size,
+    userCount: userIds.size,
+  };
 }
 
 function summarizeSubscriptionDocument(documentData) {

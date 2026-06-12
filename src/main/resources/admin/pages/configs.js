@@ -329,7 +329,7 @@ async function renderConfigDetail(id, request = beginPageRequest("configs")) {
               </div>
               <span class="config-section-count">${esc(`${fields.length} 个配置项`)}</span>
             </div>
-            <div class="form-grid" data-config-section-body>${configSectionFieldsHtml(detail, fields)}</div>
+            <div class="config-field-list" data-config-section-body>${configSectionFieldsHtml(detail, fields)}</div>
           </section>`).join("")}
       </div>
     </div>`;
@@ -363,7 +363,7 @@ function configSectionFieldsHtml(detail, fields) {
         <span>高级配置</span>
         <small>${esc(`${advancedFields.length} 项`)}</small>
       </summary>
-      <div class="form-grid config-advanced-grid">
+      <div class="config-field-list config-advanced-grid">
         ${advancedFields.map(field => configFieldHtml(detail, field)).join("")}
       </div>
     </details>`;
@@ -721,25 +721,36 @@ function configFieldHtml(detail, field) {
   if (field.component === "MEDIA_DELIVERY_PROFILES") return mediaDeliveryProfilesFieldHtml(detail, field);
   const raw = detail.values[field.path];
   const value = displayConfigValue(raw);
-  const fieldLabel = configFieldLabelHtml(field);
-  const labelHtml = configFieldTitleHtml(field, `cfg-${field.path}`);
-  const descriptionHtml = configFieldDescriptionHtml(field);
+  const id = `cfg-${field.path}`;
   if (field.type === "BOOLEAN") {
-    return `<div class="${configFieldClass(field)}" data-config-field-path="${attr(field.path)}"><div class="config-field-title"><label class="check"><input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="checkbox"${raw === true ? " checked" : ""}${readOnlyDisabledAttrs(field)}>${fieldLabel}</label>${configFieldHelpButtonHtml(field)}</div>${descriptionHtml}</div>`;
+    return configToggleFieldHtml(field, id, raw === true);
   }
   if (field.type === "SELECT") {
-    return `<div class="${configFieldClass(field)}" data-config-field-path="${attr(field.path)}">${labelHtml}<select id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}"${readOnlyDisabledAttrs(field)}>${(field.options || []).map(opt => `<option value="${attr(opt.value)}"${String(raw) === String(opt.value) ? " selected" : ""}>${esc(opt.label)}</option>`).join("")}</select>${descriptionHtml}</div>`;
+    return configControlFieldHtml(
+      field,
+      id,
+      `<select id="${attr(id)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}"${readOnlyDisabledAttrs(field)}>${(field.options || []).map(opt => `<option value="${attr(opt.value)}"${String(raw) === String(opt.value) ? " selected" : ""}>${esc(opt.label)}</option>`).join("")}</select>`,
+    );
   }
   if (field.type === "TEXTAREA" || field.type === "JSON") {
-    return `<div class="${configFieldClass(field, "full")}" data-config-field-path="${attr(field.path)}">${labelHtml}<textarea id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}"${readOnlyInputAttrs(field)}>${esc(value)}</textarea>${descriptionHtml}</div>`;
+    return configControlFieldHtml(
+      field,
+      id,
+      `<textarea id="${attr(id)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}"${readOnlyInputAttrs(field)}>${esc(value)}</textarea>`,
+      "config-textarea-field",
+    );
   }
   if (field.type === "SECRET") {
-    return secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml);
+    return secretConfigFieldHtml(detail, field);
   }
   const inputType = field.type === "NUMBER" ? "number" : "text";
   const step = field.numberKind === "INTEGER" ? "1" : "any";
   const numberAttrs = field.type === "NUMBER" ? ` step="${step}"${field.numberKind === "INTEGER" ? ' inputmode="numeric"' : ""}${field.min !== undefined && field.min !== null ? ` min="${attr(field.min)}"` : ""}${field.max !== undefined && field.max !== null ? ` max="${attr(field.max)}"` : ""}` : "";
-  return `<div class="${configFieldClass(field)}" data-config-field-path="${attr(field.path)}">${labelHtml}<input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="${inputType}"${numberAttrs}${readOnlyInputAttrs(field)} value="${attr(value)}">${descriptionHtml}</div>`;
+  return configControlFieldHtml(
+    field,
+    id,
+    `<input id="${attr(id)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="${inputType}"${numberAttrs}${readOnlyInputAttrs(field)} value="${attr(value)}">`,
+  );
 }
 
 function hiddenConfigFieldHtml(detail, field) {
@@ -752,16 +763,61 @@ function configHiddenDomId(path) {
 }
 
 function configFieldClass(field, extra = "") {
-  return ["field", extra, field.advanced ? "advanced-field" : "", field.readOnly ? "readonly-field" : ""].filter(Boolean).join(" ");
+  return ["config-field-card", extra, field.advanced ? "advanced-field" : "", field.readOnly ? "readonly-field" : ""].filter(Boolean).join(" ");
 }
 
 function configFieldTitleHtml(field, id) {
   return `<div class="config-field-title"><label for="${attr(id)}">${configFieldLabelHtml(field)}</label>${configFieldHelpButtonHtml(field)}</div>`;
 }
 
+function configFieldMetaHtml(field, id, options = {}) {
+  const title = id
+    ? `<label for="${attr(id)}">${configFieldLabelHtml(field)}</label>`
+    : `<span>${configFieldLabelHtml(field)}</span>`;
+  const summary = configFieldSummary(field);
+  return `<div class="config-field-meta">
+    <div class="config-field-title">${title}${configFieldHelpButtonHtml(field)}</div>
+    ${summary && options.summary !== false ? `<p class="config-field-summary">${esc(summary)}</p>` : ""}
+  </div>`;
+}
+
+function configControlFieldHtml(field, id, controlHtml, extra = "") {
+  return `<div class="${configFieldClass(field, extra)}" data-config-field-path="${attr(field.path)}">
+    <div class="config-field-main">
+      ${configFieldMetaHtml(field, id)}
+      <div class="config-field-control">${controlHtml}</div>
+    </div>
+    ${configFieldDescriptionHtml(field)}
+  </div>`;
+}
+
+function configToggleFieldHtml(field, id, checked) {
+  return `<div class="${configFieldClass(field, "config-toggle-field")}" data-config-field-path="${attr(field.path)}">
+    <div class="config-field-main">
+      ${configFieldMetaHtml(field, id)}
+      <label class="config-switch-control" for="${attr(id)}">
+        <input id="${attr(id)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="checkbox"${checked ? " checked" : ""}${readOnlyDisabledAttrs(field)}>
+        <span class="config-switch-track" aria-hidden="true"><span class="config-switch-thumb"></span></span>
+      </label>
+    </div>
+    ${configFieldDescriptionHtml(field)}
+  </div>`;
+}
+
+function configCompositeFieldHtml(field, titleId, toolbarHtml, bodyHtml, extra = "", attrsHtml = "") {
+  return `<div class="${configFieldClass(field, `config-composite-field ${extra}`)}" data-config-field-path="${attr(field.path)}"${attrsHtml}>
+    <div class="config-composite-head">
+      ${configFieldMetaHtml(field, titleId)}
+      ${toolbarHtml ? `<div class="config-composite-actions">${toolbarHtml}</div>` : ""}
+    </div>
+    ${configFieldDescriptionHtml(field)}
+    <div class="config-composite-body">${bodyHtml}</div>
+  </div>`;
+}
+
 function configFieldLabelHtml(field, options = {}) {
   const includeRestart = options.includeRestart !== false;
-  return `${esc(field.label)}${field.required ? `<span class="required-mark">*</span>` : ""}${includeRestart && field.restartRequired ? ` <span class="restart-mark" title="保存后需重启">⚠️</span>` : ""}${readOnlyBadgeHtml(field)}`;
+  return `${esc(field.label)}${includeRestart && field.restartRequired ? ` <span class="restart-mark" title="保存后需重启">⚠️</span>` : ""}${readOnlyBadgeHtml(field)}`;
 }
 
 function configFieldHelpButtonHtml(field) {
@@ -769,7 +825,7 @@ function configFieldHelpButtonHtml(field) {
   const description = configFieldDescription(field);
   if (!summary && !description) return "";
   const target = configDescriptionDomId(field.path);
-  return `<button type="button" class="config-field-help" data-action="toggle-config-description" data-target="${attr(target)}" data-summary="${attr(summary || description)}" aria-expanded="false" aria-controls="${attr(target)}" title="${attr(summary || "查看说明")}">?</button>`;
+  return `<button type="button" class="config-field-help" data-action="toggle-config-description" data-target="${attr(target)}" aria-expanded="false" aria-controls="${attr(target)}" title="点击查看详细说明">?</button>`;
 }
 
 function configFieldSummary(field) {
@@ -804,26 +860,27 @@ function readOnlyTableNoteHtml(field) {
   return field.readOnly ? `<span class="inline-note readonly-table-note">此配置项为只读，只能查看当前内容。</span>` : "";
 }
 
-function secretConfigFieldHtml(detail, field, labelHtml, descriptionHtml) {
+function secretConfigFieldHtml(detail, field) {
   const hasSecret = !!(detail.secretStates && detail.secretStates[field.path]);
   const value = displayConfigValue(detail.values[field.path]);
   const editorHidden = hasSecret && !value;
   const fetchText = field.readOnly ? "当前已保存密钥，点击后显示但不可编辑。" : "当前已保存密钥，点击后显示并可编辑。";
   const placeholder = field.readOnly ? "未设置" : (hasSecret ? "" : "请输入密钥");
-  return `<div class="${configFieldClass(field)}" data-config-field-path="${attr(field.path)}">
-    ${labelHtml}
-    <div class="config-secret-box" data-secret-field>
+  const id = `cfg-${field.path}`;
+  return configControlFieldHtml(
+    field,
+    id,
+    `<div class="config-secret-box" data-secret-field>
       <div class="secret-fetch-panel" data-secret-fetch-panel${editorHidden ? "" : " hidden"}>
         <button type="button" class="secret-fetch-button" data-action="load-config-secret" data-path="${attr(field.path)}">获取密钥</button>
         <span>${esc(fetchText)}</span>
       </div>
       <div class="secret-control" data-secret-editor${editorHidden ? " hidden" : ""}>
-        <input id="cfg-${attr(field.path)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-secret-input="true" data-secret-has-value="${hasSecret ? "true" : "false"}" data-secret-loaded="${editorHidden ? "false" : "true"}" type="${editorHidden ? "hidden" : "password"}" value="${attr(value)}" data-secret-original="${attr(value)}" placeholder="${attr(placeholder)}" autocomplete="off"${readOnlyInputAttrs(field)}>
+        <input id="${attr(id)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-secret-input="true" data-secret-has-value="${hasSecret ? "true" : "false"}" data-secret-loaded="${editorHidden ? "false" : "true"}" type="${editorHidden ? "hidden" : "password"}" value="${attr(value)}" data-secret-original="${attr(value)}" placeholder="${attr(placeholder)}" autocomplete="off"${readOnlyInputAttrs(field)}>
         <button type="button" class="secret-eye" data-action="toggle-config-secret" data-path="${attr(field.path)}" data-revealed="false" aria-pressed="false" title="查看真实值">${secretEyeIconHtml()}</button>
       </div>
-    </div>
-    ${descriptionHtml}
-  </div>`;
+    </div>`,
+  );
 }
 
 function toggleConfigDescription(button) {
@@ -860,23 +917,32 @@ function messageTemplateFieldHtml(detail, field) {
   const value = displayConfigValue(detail.values[field.path]);
   const kind = messageTemplateKind(field);
   const inputId = messageTemplateDomId("cfg-template", field.path);
-  const previewId = messageTemplateDomId("messageTemplatePreview", field.path);
   const statsId = messageTemplateDomId("messageTemplateStats", field.path);
-  const fieldLabel = configFieldLabelHtml(field);
-  return `<div class="${configFieldClass(field, "message-template-field")}" data-config-field-path="${attr(field.path)}">
-    <textarea id="${attr(inputId)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" hidden>${esc(value)}</textarea>
-    <div class="message-template-shell">
-      <div class="message-template-head">
-        <div>
-          <span class="primary-line config-field-title">${fieldLabel}${configFieldHelpButtonHtml(field)}</span>
-          <span id="${attr(statsId)}" class="sub-line">${esc(messageTemplateStats(value, kind))}</span>
-        </div>
-        ${field.readOnly ? "" : `<button type="button" class="compact message-template-edit-button" data-action="edit-message-template" data-path="${attr(field.path)}">编辑</button>`}
+  const inlineId = messageTemplateDomId("messageTemplateInline", field.path);
+  const toolbarHtml = field.readOnly ? "" : `<button type="button" class="compact message-template-edit-button" data-action="edit-message-template" data-path="${attr(field.path)}">编辑</button>`;
+  const inlineText = messageTemplateInlineText(value);
+  return configCompositeFieldHtml(
+    field,
+    inputId,
+    toolbarHtml,
+    `<textarea id="${attr(inputId)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" hidden>${esc(value)}</textarea>
+    <div class="message-template-compact">
+      <span id="${attr(statsId)}" class="message-template-stats">${esc(messageTemplateStats(value, kind))}</span>
+      <div id="${attr(inlineId)}" class="message-template-inline" title="${attr(inlineText)}">
+        ${esc(inlineText)}
       </div>
-      <div id="${attr(previewId)}" class="message-template-preview">${renderMessageTemplatePreview(value, kind)}</div>
-    </div>
-    ${configFieldDescriptionHtml(field)}
-  </div>`;
+    </div>`,
+    "message-template-field",
+  );
+}
+
+function messageTemplateInlineText(value) {
+  const text = String(value || "")
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean)
+    .join(" / ");
+  return text || "空模板";
 }
 
 function openMessageTemplateModal(path) {
@@ -950,10 +1016,14 @@ function setMessageTemplateValue(field, value) {
   const node = configInputFor(field);
   if (node) node.value = value;
   const kind = messageTemplateKind(field);
-  const preview = $(messageTemplateDomId("messageTemplatePreview", field.path));
-  if (preview) preview.innerHTML = renderMessageTemplatePreview(value, kind);
   const stats = $(messageTemplateDomId("messageTemplateStats", field.path));
   if (stats) stats.textContent = messageTemplateStats(value, kind);
+  const inline = $(messageTemplateDomId("messageTemplateInline", field.path));
+  if (inline) {
+    const inlineText = messageTemplateInlineText(value);
+    inline.textContent = inlineText;
+    inline.title = inlineText;
+  }
   if (state.currentConfigDetail) {
     updateConfigRestartButton(state.currentConfigDetail);
     updateConfigDirtyState(state.currentConfigDetail);
@@ -1261,43 +1331,39 @@ function mediaDeliveryProfilesFieldHtml(detail, field) {
   const profile = mediaDeliveryDefaultProfile(profiles, defaultProfileId);
   const mapping = mediaDeliveryPrimaryMapping(profile);
   const readOnly = !!field.readOnly;
-  const advancedOpen = profile.type === "AUTO" ? "" : " open";
-  return `<div class="${configFieldClass(field, "media-delivery-field full")}" data-config-field-path="${attr(field.path)}" data-media-delivery-field>
-    ${configFieldTitleHtml(field, "cfg-media-delivery-profiles")}
-    ${configFieldDescriptionHtml(field)}
-    <input id="cfg-media-delivery-profiles" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(profiles))}">
-    ${readOnly ? readOnlyTableNoteHtml(field) : `<details class="config-advanced media-delivery-advanced"${advancedOpen}>
-      <summary>
-        <span>高级媒体发送</span>
-        <small id="mediaDeliveryModeSummary">${esc(mediaDeliveryTypeLabel(profile.type))}</small>
-      </summary>
-      <div class="form-grid config-advanced-grid">
-        <div class="field">
+  return configCompositeFieldHtml(
+    field,
+    "cfg-media-delivery-profiles",
+    "",
+    `<input id="cfg-media-delivery-profiles" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(profiles))}">
+    ${readOnly ? readOnlyTableNoteHtml(field) : `<div class="media-delivery-panel">
+        <div class="media-delivery-control">
           <label for="mediaDeliveryType">发送方式</label>
           <select id="mediaDeliveryType">${mediaDeliveryTypeOptionsHtml(profile.type)}</select>
         </div>
-        <div class="field full">
+        <div class="media-delivery-hint">
           <span id="mediaDeliveryTypeHint" class="inline-note">${esc(mediaDeliveryTypeDescription(profile.type))}</span>
         </div>
-        <div class="field" data-media-delivery-local>
-          <label for="mediaDeliveryLocalBotRoot">项目文件路径前缀</label>
+        <div class="media-delivery-control" data-media-delivery-local>
+          <label for="mediaDeliveryLocalBotRoot">项目文件路径前缀（项目根目录）</label>
           <input id="mediaDeliveryLocalBotRoot" value="${attr(mapping.botRoot)}" placeholder="留空表示直接使用项目生成的本地路径">
         </div>
-        <div class="field" data-media-delivery-local>
+        <div class="media-delivery-control" data-media-delivery-local>
           <label for="mediaDeliveryLocalClientRoot">OneBot 可访问路径前缀</label>
           <input id="mediaDeliveryLocalClientRoot" value="${attr(mapping.clientRoot)}" placeholder="同机同路径时可以留空">
         </div>
-        <div class="field full" data-media-delivery-signed>
+        <div class="media-delivery-control full" data-media-delivery-signed>
           <label for="mediaDeliveryPublicBaseUrl">外部访问地址</label>
           <input id="mediaDeliveryPublicBaseUrl" value="${attr(profile.signedUrl.publicBaseUrl)}" placeholder="例如 http://192.168.1.10:2233">
         </div>
-        <div class="field" data-media-delivery-base64>
+        <div class="media-delivery-control" data-media-delivery-base64>
           <label for="mediaDeliveryBase64MaxMegabytes">Base64 兜底上限（MB）</label>
           <input id="mediaDeliveryBase64MaxMegabytes" type="number" step="any" min="0" value="${attr(profile.base64Fallback.maxMegabytes)}">
         </div>
-      </div>
-    </details>`}
-  </div>`;
+      </div>`}`,
+    "media-delivery-field",
+    " data-media-delivery-field",
+  );
 }
 
 function wireMediaDeliveryField(detail) {
@@ -1380,9 +1446,7 @@ function refreshMediaDeliveryUi() {
   const profiles = mediaDeliveryProfiles();
   const profile = mediaDeliveryDefaultProfile(profiles, mediaDeliveryDefaultProfileIdFromDom(profiles));
   const type = mediaDeliveryTypeValue(profile.type);
-  const summary = $("mediaDeliveryModeSummary");
   const hint = $("mediaDeliveryTypeHint");
-  if (summary) summary.textContent = mediaDeliveryTypeLabel(type);
   if (hint) hint.textContent = mediaDeliveryTypeDescription(type);
   pageRoot().querySelectorAll("[data-media-delivery-local]").forEach(item => {
     item.hidden = type !== "LOCAL_FILE";
@@ -1489,10 +1553,10 @@ function mediaDeliveryTypeLabel(type) {
 
 function mediaDeliveryTypeDescription(type) {
   switch (mediaDeliveryKnownType(type)) {
-    case "LOCAL_FILE": return "直接把本地文件路径交给目标平台，适合同机部署或文件系统互通。路径前缀留空时会直接使用项目生成的文件路径。";
-    case "SIGNED_URL": return "通过 Web 后台生成带签名的临时链接，适合 OneBot 客户端不在同一台机器但能访问主项目地址。";
+    case "LOCAL_FILE": return "直接把本地文件路径交给Napcat、LLonebot等项目，适合同一台机器部署或文件系统互通。使用Docker可配置路径映射。";
+    case "SIGNED_URL": return "这个指的是Napcat、LLonebot等项目访问 本项目 的地址，一般就是你目前访问的这个地址，适合 OneBot 客户端不在同一台机器但能访问本项目地址。";
     case "BASE64": return "把图片编码进消息里，只建议作为最后兜底；大量图片会增加网络、内存和日志压力。";
-    default: return "自动按本地路径、签名链接、Base64 的顺序尝试，普通部署建议保持这个选项。";
+    default: return "自动按本地路径、签名链接、Base64 的顺序尝试。推荐使用本地路径或外部访问地址。";
   }
 }
 
@@ -1509,31 +1573,39 @@ function mediaDeliveryNumberValue(id, fallback) {
 function oneBotConnectionsFieldHtml(detail, field) {
   const connections = normalizeOneBotConnections(detail.values[field.path]);
   const readOnly = !!field.readOnly;
-  return `<div class="${configFieldClass(field, "onebot-connection-field")}" data-config-field-path="${attr(field.path)}">
-    ${configFieldTitleHtml(field, "cfg-onebot-connections")}
-    ${configFieldDescriptionHtml(field)}
-    <input id="cfg-onebot-connections" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(connections))}">
-    ${readOnly ? readOnlyTableNoteHtml(field) : `<div class="command-permission-toolbar">
+  const toolbarHtml = readOnly ? "" : `
       <button type="button" data-action="add-onebot-connection">添加连接</button>
       <button type="button" class="secondary" data-action="clear-onebot-connections">清空</button>
-    </div>`}
+    `;
+  return configCompositeFieldHtml(
+    field,
+    "cfg-onebot-connections",
+    toolbarHtml,
+    `<input id="cfg-onebot-connections" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(connections))}">
+    ${readOnly ? readOnlyTableNoteHtml(field) : ""}
     <div id="oneBotConnectionTable">${renderOneBotConnectionTable(connections, readOnly)}</div>
-  </div>`;
+    `,
+    "onebot-connection-field",
+  );
 }
 
 function messageRoutingPlatformPoliciesFieldHtml(detail, field) {
   const policies = normalizeMessageRoutingPlatformPolicies(detail.values[field.path]);
   const readOnly = !!field.readOnly;
-  return `<div class="${configFieldClass(field, "message-routing-policy-field")}" data-config-field-path="${attr(field.path)}">
-    ${configFieldTitleHtml(field, "cfg-message-routing-platform-policies")}
-    ${configFieldDescriptionHtml(field)}
-    <input id="cfg-message-routing-platform-policies" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(policies))}">
-    ${readOnly ? readOnlyTableNoteHtml(field) : `<div class="command-permission-toolbar">
+  const toolbarHtml = readOnly ? "" : `
       <button type="button" data-action="add-message-routing-policy">添加策略</button>
       <button type="button" class="secondary" data-action="clear-message-routing-policies">清空</button>
-    </div>`}
+    `;
+  return configCompositeFieldHtml(
+    field,
+    "cfg-message-routing-platform-policies",
+    toolbarHtml,
+    `<input id="cfg-message-routing-platform-policies" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(policies))}">
+    ${readOnly ? readOnlyTableNoteHtml(field) : ""}
     <div id="messageRoutingPlatformPolicyTable">${renderMessageRoutingPlatformPolicyTable(policies, readOnly)}</div>
-  </div>`;
+    `,
+    "message-routing-policy-field",
+  );
 }
 
 function messageRoutingPlatformPolicies() {
@@ -1631,7 +1703,7 @@ async function openMessageRoutingPlatformPolicyModal(index = null) {
         <select id="routePlatform">${platformOptions.map(platform => `<option value="${attr(platform.platformId)}">${esc(commandPermissionPlatformOptionText(platform))}</option>`).join("")}</select>
       </div>
       <div class="field" id="routePlatformManualWrap" hidden>
-        <label>平台 ID<span class="required-mark">*</span></label>
+        <label>平台 ID</label>
         <input id="routePlatformManual" value="${attr(current.platformId)}" placeholder="例如：qq">
       </div>
       <div class="field">
@@ -1775,7 +1847,7 @@ function openOneBotConnectionModal(index = null) {
         <label class="check"><input id="onebotConnectionEnabled" type="checkbox"${current.enabled ? " checked" : ""}>启用这个连接</label>
       </div>
       <div class="field full">
-        <label>WebSocket 地址<span class="required-mark">*</span></label>
+        <label>WebSocket 地址</label>
         <input id="onebotConnectionUrl" value="${attr(current.url)}" placeholder="ws://127.0.0.1:6700">
       </div>
       <div class="field full">
@@ -1824,16 +1896,20 @@ function toggleOneBotConnectionToken(button) {
 function notificationTargetsFieldHtml(detail, field) {
   const targets = normalizeNotificationTargets(detail.values[field.path]);
   const readOnly = !!field.readOnly;
-  return `<div class="${configFieldClass(field, "notification-target-field")}" data-config-field-path="${attr(field.path)}">
-    ${configFieldTitleHtml(field, "cfg-notification-targets")}
-    ${configFieldDescriptionHtml(field)}
-    <input id="cfg-notification-targets" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(targets))}">
-    ${readOnly ? readOnlyTableNoteHtml(field) : `<div class="command-permission-toolbar">
+  const toolbarHtml = readOnly ? "" : `
       <button type="button" data-action="add-notification-target">添加目标</button>
       <button type="button" class="secondary" data-action="clear-notification-targets">清空</button>
-    </div>`}
+    `;
+  return configCompositeFieldHtml(
+    field,
+    "cfg-notification-targets",
+    toolbarHtml,
+    `<input id="cfg-notification-targets" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(targets))}">
+    ${readOnly ? readOnlyTableNoteHtml(field) : ""}
     <div id="notificationTargetTable">${renderNotificationTargetTable(targets, readOnly)}</div>
-  </div>`;
+    `,
+    "notification-target-field",
+  );
 }
 
 function notificationTargets() {
@@ -1947,7 +2023,7 @@ async function openNotificationTargetModal(index = null) {
         <select id="notifyPlatform">${platformOptions.map(platform => `<option value="${attr(platform.platformId)}">${esc(commandPermissionPlatformOptionText(platform))}</option>`).join("")}</select>
       </div>
       <div class="field" id="notifyPlatformManualWrap" hidden>
-        <label>平台 ID<span class="required-mark">*</span></label>
+        <label>平台 ID</label>
         <input id="notifyPlatformManual" value="${attr(current.platformId)}" placeholder="例如 qq、discord">
       </div>
       <div class="field">
@@ -1976,7 +2052,7 @@ async function openNotificationTargetModal(index = null) {
           <span id="notifyManualHint" class="inline-note">找不到目标时可以手动填写目标信息；不指定优先账号时会使用全局路由。</span>
           <div class="form-grid notification-target-manual-grid">
             <div class="field">
-              <label>目标 ID<span class="required-mark">*</span></label>
+              <label>目标 ID</label>
               <input id="notifyTargetId" value="${attr(current.externalId)}">
             </div>
             <div class="field">
@@ -2172,16 +2248,20 @@ function blankToNull(value) {
 function commandPermissionsFieldHtml(detail, field) {
   const rules = Array.isArray(detail.values[field.path]) ? detail.values[field.path] : [];
   const readOnly = !!field.readOnly;
-  return `<div class="${configFieldClass(field, "command-permission-field")}" data-config-field-path="${attr(field.path)}">
-    ${configFieldTitleHtml(field, "cfg-command-permissions")}
-    ${configFieldDescriptionHtml(field)}
-    <input id="cfg-command-permissions" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(rules))}">
-    ${readOnly ? readOnlyTableNoteHtml(field) : `<div class="command-permission-toolbar">
+  const toolbarHtml = readOnly ? "" : `
       <button type="button" data-action="add-command-permission">添加规则</button>
       <button type="button" class="secondary" data-action="clear-command-permissions">清空</button>
-    </div>`}
+    `;
+  return configCompositeFieldHtml(
+    field,
+    "cfg-command-permissions",
+    toolbarHtml,
+    `<input id="cfg-command-permissions" data-config-path="${attr(field.path)}" data-config-type="${field.type}" data-config-readonly="${readOnly ? "true" : "false"}" type="hidden" value="${attr(JSON.stringify(rules))}">
+    ${readOnly ? readOnlyTableNoteHtml(field) : ""}
     <div id="commandPermissionTable">${renderCommandPermissionTable(rules, readOnly)}</div>
-  </div>`;
+    `,
+    "command-permission-field",
+  );
 }
 
 function commandPermissionRules() {
@@ -2279,9 +2359,9 @@ async function openCommandPermissionModal() {
   openModal("添加权限规则", `
     <div class="form-grid command-permission-modal">
       <div class="field"><label>命令路径</label><select id="permCommandPath">${commandOptions.map(command => `<option value="${attr(command.pathText)}" data-kind="${attr(command.optionKind || "")}" data-required-role="${attr(command.requiredRole || "")}" data-default-role="${attr(command.defaultRole || "")}">${esc(commandPermissionCommandOptionText(command))}</option>`).join("")}</select></div>
-      <div class="field" id="permCommandManualWrap" hidden><label>命令路径<span class="required-mark">*</span></label><input id="permCommandManual" placeholder="例如：subscribe，或 filter *"></div>
+      <div class="field" id="permCommandManualWrap" hidden><label>命令路径</label><input id="permCommandManual" placeholder="例如：subscribe，或 filter *"></div>
       <div class="field"><label>目标平台</label><select id="permPlatform">${platformOptions.map(platform => `<option value="${attr(platform.platformId)}">${esc(commandPermissionPlatformOptionText(platform))}</option>`).join("")}</select></div>
-      <div class="field" id="permPlatformManualWrap" hidden><label>平台 ID<span class="required-mark">*</span></label><input id="permPlatformManual"></div>
+      <div class="field" id="permPlatformManualWrap" hidden><label>平台 ID</label><input id="permPlatformManual"></div>
       <div class="field"><label>目标类型</label><select id="permTargetKind"></select></div>
       <div class="field full" id="permTargetCandidateWrap" hidden>
         <div class="field-head">
@@ -2296,7 +2376,7 @@ async function openCommandPermissionModal() {
         <div id="permTargetCandidateList" class="target-choice-list"></div>
       </div>
       <div class="field full" id="permTargetManualWrap" hidden><label>目标 ID</label><input id="permTargetId" value="*"></div>
-      <div class="field" id="permSenderWrap"><label>发送者 ID<span class="required-mark">*</span></label><input id="permSenderId" placeholder="填写用户 ID，或 * 表示全部"></div>
+      <div class="field" id="permSenderWrap"><label>发送者 ID</label><input id="permSenderId" placeholder="填写用户 ID，或 * 表示全部"></div>
       <div class="field full"><span id="permSenderHint" class="inline-note"></span></div>
       <div class="field" id="permRoleWrap"><label>最高权限</label><select id="permRole"><option value="USER">普通用户</option><option value="MANAGER" selected>目标管理员</option><option value="ADMIN">系统管理员</option></select></div>
       <div class="field full"><span id="permCommandRoleHint" class="inline-note"></span></div>

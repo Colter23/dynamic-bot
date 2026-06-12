@@ -66,6 +66,19 @@ class AdminConfigJsonTest {
     }
 
     @Test
+    fun decodeShouldPreserveFieldsOutsideFormSpec() {
+        val decoded = AdminConfigJson.decode(
+            values = JsonObject(mapOf("visible" to JsonPrimitive("new"))),
+            current = PartialConfig(visible = "old", hidden = "keep"),
+            spec = partialSpec(),
+            clazz = PartialConfig::class,
+        )
+
+        assertEquals("new", decoded.visible)
+        assertEquals("keep", decoded.hidden)
+    }
+
+    @Test
     fun validateValuesShouldIgnoreReadOnlyField() {
         AdminConfigJson.validateValues(
             values = JsonObject(mapOf("name" to JsonPrimitive(""))),
@@ -151,6 +164,17 @@ class AdminConfigJsonTest {
         ),
     )
 
+    private fun partialSpec(): ConfigFormSpec = ConfigFormSpec(
+        title = "测试配置",
+        fields = listOf(
+            ConfigFieldSpec(
+                path = "visible",
+                label = "可见配置",
+                type = ConfigFieldType.TEXT,
+            ),
+        ),
+    )
+
     private data class SecretConfig(
         val token: String = "",
     )
@@ -158,5 +182,10 @@ class AdminConfigJsonTest {
     private data class ReadOnlyConfig(
         val name: String = "",
         val editable: String = "",
+    )
+
+    private data class PartialConfig(
+        val visible: String = "",
+        val hidden: String = "",
     )
 }

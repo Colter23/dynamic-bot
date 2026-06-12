@@ -1,5 +1,9 @@
 package top.colter.dynamic.admin
 
+import com.fasterxml.jackson.databind.JsonNode
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
+import com.fasterxml.jackson.module.kotlin.registerKotlinModule
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.MainConfigForms
 import top.colter.dynamic.LinkParseTriggerMode
@@ -91,6 +95,8 @@ import top.colter.dynamic.plugin.PluginCapability
 import top.colter.dynamic.core.tools.loggerFor
 
 private val logger = loggerFor<AdminService>()
+
+private val legacySubscriptionYamlMapper: ObjectMapper = ObjectMapper(YAMLFactory()).registerKotlinModule()
 
 public class AdminService(
     private val pluginProvider: () -> List<PluginInfo>,
@@ -1068,6 +1074,22 @@ public class AdminService(
     }
 
     public suspend fun importSubscriptions(document: SubscriptionExportDocument): SubscriptionImportResponse {
+        return importSubscriptions(document, skipAutoFollow = false)
+    }
+
+    public suspend fun importLegacyDynamicSubscriptions(request: LegacyDynamicSubscriptionImportRequest): SubscriptionImportResponse {
+        val document = parseLegacyDynamicSubscriptionYaml(request.content)
+        return importSubscriptions(document, skipAutoFollow = true)
+    }
+
+    public suspend fun createSubscription(request: CreateSubscriptionRequest): CreateSubscriptionResponse {
+        return createSubscriptionInternal(request, replacementFilterConditions = null, skipAutoFollow = false)
+    }
+
+    private suspend fun importSubscriptions(
+        document: SubscriptionExportDocument,
+        skipAutoFollow: Boolean,
+    ): SubscriptionImportResponse {
         require(document.schemaVersion == 1) { "订阅导入文件版本不支持：${document.schemaVersion}" }
 
         val warnings = mutableListOf<String>()
@@ -1096,6 +1118,7 @@ public class AdminService(
                 val response = createSubscriptionInternal(
                     request = item.toCreateSubscriptionRequest(),
                     replacementFilterConditions = filterConditions,
+                    skipAutoFollow = skipAutoFollow,
                 )
                 val status = if (response.subscriptionCreated) "CREATED" else "UPDATED"
                 if (response.subscriptionCreated) created += 1 else updated += 1
@@ -1137,10 +1160,6 @@ public class AdminService(
             items = items,
             warnings = warnings,
         )
-    }
-
-    public suspend fun createSubscription(request: CreateSubscriptionRequest): CreateSubscriptionResponse {
-        return createSubscriptionInternal(request, replacementFilterConditions = null)
     }
 
     private fun validateSubscriptionImportItemBeforeMutation(
@@ -1188,6 +1207,7 @@ public class AdminService(
     private suspend fun createSubscriptionInternal(
         request: CreateSubscriptionRequest,
         replacementFilterConditions: List<FilterCondition>?,
+        skipAutoFollow: Boolean,
     ): CreateSubscriptionResponse {
         val warnings = mutableListOf<String>()
         val publisherUpsert = if (request.publisherId != null) {
@@ -1319,7 +1339,11 @@ public class AdminService(
                 DynamicFilterRuleRepository.addRule(subscription.id, condition)
             }
         }
-        val autoFollowOutcome = if (subscriptionResult.changed && configProvider().subscription.autoFollowPublisherOnSubscribe) {
+        val autoFollowOutcome = if (
+            subscriptionResult.changed &&
+            !skipAutoFollow &&
+            configProvider().subscription.autoFollowPublisherOnSubscribe
+        ) {
             tryEnsureFollowed(publisherPlatform, publisherExternalId)
         } else {
             AutoFollowOutcome(followed = false)
@@ -2383,6 +2407,62 @@ private fun parseLinkParseTriggerModeOrNull(value: String?): LinkParseTriggerMod
     val normalized = value?.trim()?.takeIf { it.isNotBlank() } ?: return null
     if (normalized.equals("INHERIT", ignoreCase = true)) return null
     return parseEnum<LinkParseTriggerMode>(normalized, "linkParseTriggerMode")
+}
+
+private fun parseLegacyDynamicSubscriptionYaml(content: String): SubscriptionExportDocument {
+    val trimmed = content.trim()
+    require(trimmed.isNotBlank()) { "请填写旧版订阅 YAML 内容" }
+    val root = runCatching { legacySubscriptionYamlMapper.readTree(trimmed) }
+        .getOrElse { error ->
+            throw IllegalArgumentException("旧版订阅 YAML 格式无效：${error.message ?: error.javaClass.name}")
+        }
+    val dynamic = root.path("dynamic")
+    require(dynamic.isObject) { "旧版订阅 YAML 缺少 dynamic 数据" }
+
+    val items = mutableListOf<SubscriptionExportItem>()
+    val fields = dynamic.properties().iterator()
+    while (fields.hasNext()) {
+        val (uid, node) = fields.next()
+        val normalizedUid = uid.trim()
+        if (normalizedUid == "0") continue
+        if (normalizedUid.isBlank()) continue
+        require(normalizedUid.all(Char::isDigit)) { "dynamic 中存在无效 Bilibili UID：$uid" }
+        val contacts = node.path("contacts")
+        if (!contacts.isArray) continue
+        contacts.forEach { contactNode ->
+            val contact = legacyContactText(contactNode)
+            if (contact == null) return@forEach
+            val targetKind = if (contact.startsWith("-")) TargetKind.GROUP else TargetKind.USER
+            val targetId = contact.trimStart('-')
+            if (targetId.isBlank()) return@forEach
+            require(targetId.all(Char::isDigit)) {
+                "UID $normalizedUid 的 contacts 中存在无效 QQ 号：${contactNode.asText()}"
+            }
+            items += SubscriptionExportItem(
+                publisher = SubscriptionExportPublisher(
+                    platformId = "bilibili",
+                    kind = PublisherKind.USER.name,
+                    externalId = normalizedUid,
+                ),
+                target = SubscriptionExportTarget(
+                    platformId = "qq",
+                    targetKind = targetKind.name,
+                    externalId = targetId,
+                ),
+                publisherLookupMode = PUBLISHER_LOOKUP_MODE_PLACEHOLDER,
+            )
+        }
+    }
+    require(items.isNotEmpty()) { "旧版订阅 YAML 中没有可导入的 dynamic 订阅" }
+    return SubscriptionExportDocument(
+        exportedAtEpochSeconds = System.currentTimeMillis() / 1000,
+        subscriptions = items,
+    )
+}
+
+private fun legacyContactText(node: JsonNode): String? {
+    if (node.isNull) return null
+    return if (node.isNumber) node.asLong().toString() else node.asText("").trim()
 }
 
 private fun SubscriptionExportItem.toCreateSubscriptionRequest(): CreateSubscriptionRequest {

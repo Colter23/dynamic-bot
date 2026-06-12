@@ -60,7 +60,7 @@ internal object AdminConfigJson {
     ): T {
         validateValues(values, spec)
         val currentNode = mapper.valueToTree<JsonNode>(current)
-        val root = JsonNodeFactory.instance.objectNode()
+        val root = currentNode.deepCopy<ObjectNode>()
 
         spec.fields.forEach { field ->
             val incoming = values[field.path]

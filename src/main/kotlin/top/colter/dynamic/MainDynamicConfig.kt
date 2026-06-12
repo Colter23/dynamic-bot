@@ -130,7 +130,7 @@ public data class LinkVideoDownloadConfig(
 }
 
 public data class LinkVideoDownloadPromptConfig(
-    val downloading: String = "视频正在下载，完成后会继续推送。",
+    val downloading: String = "视频下载中，请稍候...",
     val failed: String = "视频下载或推送未完成：{reason}。",
 )
 

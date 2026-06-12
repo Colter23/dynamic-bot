@@ -460,12 +460,7 @@ class AdminServerTest {
     fun createSubscriptionShouldCreatePlaceholderPublisherWhenLookupIsSkipped() = runBlocking {
         initDb("admin-create-subscription-placeholder-publisher")
         val plugin = FakePublisherFollowPlugin()
-        val service = service(
-            plugin = plugin,
-            config = MainDynamicConfig(
-                subscription = SubscriptionConfig(autoFollowPublisherOnSubscribe = false),
-            ),
-        )
+        val service = service(plugin = plugin)
 
         val response = service.createSubscription(
             CreateSubscriptionRequest(
@@ -1066,6 +1061,50 @@ class AdminServerTest {
     }
 
     @Test
+    fun importLegacyDynamicSubscriptionsShouldMapBilibiliUidAndQqContacts() = runBlocking {
+        initDb("admin-subscription-import-legacy-yaml")
+        val plugin = FakePublisherFollowPlugin()
+        val service = service(
+            plugin = plugin,
+            config = MainDynamicConfig(
+                subscription = SubscriptionConfig(autoFollowPublisherOnSubscribe = false),
+            ),
+        )
+        val content = """
+            dataVersion: 1
+            dynamic:
+              0:
+                name: ALL
+                contacts:
+                  - '-1'
+              91352:
+                name: 心羽萝妮Official
+                contacts:
+                  - '-465134752'
+                  - 3375582524
+              1340190821:
+                name: 崩坏星穹铁道
+                contacts: []
+        """.trimIndent()
+
+        val result = service.importLegacyDynamicSubscriptions(LegacyDynamicSubscriptionImportRequest(content))
+        val publisher = PublisherRepository.findByKey(PublisherKey.of("bilibili", PublisherKind.USER, "91352"))
+        val group = SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "465134752"))
+        val user = SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.USER, "3375582524"))
+
+        assertEquals(2, result.total)
+        assertEquals(2, result.created)
+        assertEquals(0, result.failed)
+        assertEquals(0, plugin.fetchPublisherInfoCalls)
+        assertEquals(0, plugin.followPublisherCalls)
+        assertEquals("91352", publisher?.name)
+        assertNotNull(group)
+        assertNotNull(user)
+        assertEquals(2, SubscriptionRepository.findAll().size)
+        assertNull(SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "1")))
+    }
+
+    @Test
     fun importSubscriptionsShouldMapLegacyOnebotTargetPlatformToQq() = runBlocking {
         initDb("admin-subscription-import-onebot-target")
         val service = service(FakePublisherFollowPlugin())
@@ -1301,12 +1340,19 @@ class AdminServerTest {
             contentType(ContentType.Application.Json)
             setBody("""{"schemaVersion":1,"exportedAtEpochSeconds":1,"subscriptions":[]}""")
         }
+        val legacyImportResponse = client.post("/api/subscriptions/import/legacy-dynamic-yaml") {
+            header(HttpHeaders.Authorization, "Bearer test-token")
+            contentType(ContentType.Application.Json)
+            setBody("""{"content":"dynamic:\n  123:\n    contacts:\n      - '-100'\n"}""")
+        }
 
         assertEquals(HttpStatusCode.Unauthorized, unauthorized.status)
         assertEquals(HttpStatusCode.OK, exportResponse.status)
         assertTrue(exportResponse.bodyAsText().contains("\"schemaVersion\":1"))
         assertEquals(HttpStatusCode.OK, importResponse.status)
         assertTrue(importResponse.bodyAsText().contains("\"total\":0"))
+        assertEquals(HttpStatusCode.OK, legacyImportResponse.status)
+        assertTrue(legacyImportResponse.bodyAsText().contains("\"total\":1"))
     }
 
     @Test
