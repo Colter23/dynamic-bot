@@ -115,7 +115,7 @@ public data class LinkParseTemplates(
 public data class LinkVideoDownloadConfig(
     val enabled: Boolean = false,
     val maxDurationSeconds: Long = 300,
-    val maxFileMegabytes: Double = 200.0,
+    val maxFileMegabytes: Double = 0.0,
     val quality: LinkVideoQuality = LinkVideoQuality.P720,
     val ffmpegPath: String = "",
     val cacheRoot: String = "data/videos",
@@ -131,12 +131,7 @@ public data class LinkVideoDownloadConfig(
 
 public data class LinkVideoDownloadPromptConfig(
     val downloading: String = "视频正在下载，完成后会继续推送。",
-    val durationUnknown: String = "视频下载已跳过：视频时长未知。",
-    val durationTooLong: String = "视频下载已跳过：视频时长 {duration} 超过限制 {maxDuration}。",
-    val noDownloader: String = "视频下载已跳过：当前没有可用的视频下载器。",
-    val timeout: String = "视频下载未推送：下载超时（限制 {timeout}）。",
-    val fileTooLarge: String = "视频下载未推送：文件大小 {size} 超过限制 {maxSize}。",
-    val failed: String = "视频下载未推送：{reason}。",
+    val failed: String = "视频下载或推送未完成：{reason}。",
 )
 
 public data class ImageCacheConfig(

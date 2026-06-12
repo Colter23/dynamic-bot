@@ -452,6 +452,7 @@ class LinkParseServiceTest {
         val videoFile = cacheRoot.resolve("video.mp4")
         videoFile.writeBytes(byteArrayOf(0, 0, 0, 1))
         val resolver = FakeVideoLinkResolver()
+        val messenger = RecordingProgressMessenger()
         val downloader = FakeVideoDownloader(
             result = LinkVideoDownloadResult(
                 video = MediaRef(videoFile.toString(), MediaKind.VIDEO, mimeType = "video/mp4"),
@@ -466,7 +467,8 @@ class LinkParseServiceTest {
                 assertEquals(1, previewMessage.batches.size)
                 val content = previewMessage.batches.single().content
                 assertTrue(content.any { it is MessageContent.Image })
-                assertTrue(content.filterIsInstance<MessageContent.Text>().single().fallbackText.contains("视频正在下载"))
+                assertEquals(emptyList(), content.filterIsInstance<MessageContent.Text>())
+                assertEquals(listOf("视频正在下载，完成后会继续推送。"), messenger.sentTexts)
             },
         )
         val service = LinkParseService(
@@ -487,6 +489,59 @@ class LinkParseServiceTest {
             previewRenderer = LinkPreviewRenderer {
                 MediaRef("https://example.com/preview.png", MediaKind.IMAGE)
             },
+            progressMessenger = messenger,
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://www.bilibili.com/video/BV1xx411c7mD",
+            context = commandEvent("").context,
+            maxLinks = 1,
+            inReplyTo = "trace",
+        )
+
+        assertEquals(1, result.forwarded.size)
+        assertEquals(2, result.forwarded.single().deliveryCount)
+        assertEquals("BV1xx411c7mD", downloader.requests.single().parsedLink.targetId)
+        assertEquals(listOf("progress-1"), messenger.recalledIds)
+        val messages = MessageDeliveryRepository.findRecent(limit = 10)
+            .mapNotNull { MessageDeliveryRepository.findMessage(it.messageId) }
+        assertEquals(2, messages.size)
+        assertEquals(1, messages.count { message -> message.batches.single().content.any { it is MessageContent.Image } })
+        val videoMessage = messages.single { message -> message.batches.single().content.any { it is MessageContent.Video } }
+        val video = videoMessage.batches.single().content.single() as MessageContent.Video
+        assertEquals(videoFile.toString(), video.video.uri)
+        assertEquals(MediaKind.VIDEO, video.video.kind)
+    }
+
+    @Test
+    fun `video download should not limit file size when max megabytes is zero`() = runBlocking {
+        initDb("video-download-unlimited-size")
+        val cacheRoot = createTempDirectory("dynamic-bot-link-video-cache")
+        val videoFile = cacheRoot.resolve("video.mp4")
+        videoFile.writeBytes(byteArrayOf(0, 0, 0, 1))
+        val downloader = FakeVideoDownloader(
+            result = LinkVideoDownloadResult(
+                video = MediaRef(videoFile.toString(), MediaKind.VIDEO, mimeType = "video/mp4"),
+                fileSizeBytes = 512L * 1024L * 1024L,
+            ),
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeVideoLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        videoDownload = LinkVideoDownloadConfig(
+                            enabled = true,
+                            maxFileMegabytes = 0.0,
+                            cacheRoot = cacheRoot.toString(),
+                        ),
+                    ),
+                )
+            },
+            videoDownloadersProvider = { listOf(downloader) },
+            previewRenderer = LinkPreviewRenderer {
+                MediaRef("https://example.com/preview.png", MediaKind.IMAGE)
+            },
         )
 
         val result = service.parseAndDispatch(
@@ -496,16 +551,10 @@ class LinkParseServiceTest {
         )
 
         assertEquals(1, result.forwarded.size)
-        assertEquals(2, result.forwarded.single().deliveryCount)
-        assertEquals("BV1xx411c7mD", downloader.requests.single().parsedLink.targetId)
+        assertEquals(0, downloader.requests.single().maxBytes)
         val messages = MessageDeliveryRepository.findRecent(limit = 10)
             .mapNotNull { MessageDeliveryRepository.findMessage(it.messageId) }
-        assertEquals(2, messages.size)
-        assertEquals(1, messages.count { message -> message.batches.single().content.any { it is MessageContent.Image } })
-        val videoMessage = messages.single { message -> message.batches.single().content.any { it is MessageContent.Video } }
-        val video = videoMessage.batches.single().content.single() as MessageContent.Video
-        assertEquals(videoFile.toString(), video.video.uri)
-        assertEquals(MediaKind.VIDEO, video.video.kind)
+        assertTrue(messages.any { message -> message.batches.single().content.any { it is MessageContent.Video } })
     }
 
     @Test
@@ -543,6 +592,7 @@ class LinkParseServiceTest {
             previewRenderer = LinkPreviewRenderer {
                 MediaRef("https://example.com/preview.png", MediaKind.IMAGE)
             },
+            progressMessenger = RecordingProgressMessenger(),
             backgroundScope = this,
         )
 
@@ -550,6 +600,7 @@ class LinkParseServiceTest {
             text = "https://www.bilibili.com/video/BV1xx411c7mD",
             context = commandEvent("").context,
             maxLinks = 1,
+            inReplyTo = "trace",
         )
 
         assertEquals(1, result.forwarded.size)
@@ -684,7 +735,7 @@ class LinkParseServiceTest {
     }
 
     @Test
-    fun `video preview should append skipped download hint when duration exceeds limit`() = runBlocking {
+    fun `video preview should send skipped download hint separately when duration exceeds limit`() = runBlocking {
         initDb("video-download-skip-duration")
         val downloader = FakeVideoDownloader(
             result = LinkVideoDownloadResult(
@@ -718,12 +769,20 @@ class LinkParseServiceTest {
         )
 
         assertEquals(1, result.forwarded.size)
+        assertEquals(2, result.forwarded.single().deliveryCount)
         assertEquals(emptyList(), downloader.requests)
-        val message = MessageDeliveryRepository.findMessage(MessageDeliveryRepository.findRecent(limit = 1).single().messageId)!!
-        val content = message.batches.single().content
+        val messages = MessageDeliveryRepository.findRecent(limit = 10)
+            .mapNotNull { MessageDeliveryRepository.findMessage(it.messageId) }
+        assertEquals(2, messages.size)
+        val previewMessage = messages.single { message -> message.batches.single().content.any { it is MessageContent.Image } }
+        val content = previewMessage.batches.single().content
         val image = content.filterIsInstance<MessageContent.Image>().single()
         assertEquals("", image.fallbackText)
-        assertTrue(content.filterIsInstance<MessageContent.Text>().single().fallbackText.contains("视频下载已跳过"))
+        assertEquals(emptyList(), content.filterIsInstance<MessageContent.Text>())
+        val feedback = messages.single { message -> message.batches.single().content.any { it is MessageContent.Text } }
+        val text = feedback.batches.single().content.single() as MessageContent.Text
+        assertTrue(text.fallbackText.contains("视频下载或推送未完成"))
+        assertTrue(text.fallbackText.contains("视频时长 2m 超过限制 1m"))
     }
 
     @Test
@@ -830,11 +889,12 @@ class LinkParseServiceTest {
         val recalledIds: MutableList<String> = mutableListOf()
 
         override suspend fun send(
-            event: CommandEvent,
-            config: LinkParseProgressReplyConfig,
+            context: CommandContext,
+            inReplyTo: String,
+            text: String,
         ): LinkParseProgressReceipt? {
-            sentTexts += config.text
-            return LinkParseProgressReceipt(event.context.target, "progress-${sentTexts.size}")
+            sentTexts += text
+            return LinkParseProgressReceipt(context.target, "progress-${sentTexts.size}")
         }
 
         override suspend fun recall(receipt: LinkParseProgressReceipt) {

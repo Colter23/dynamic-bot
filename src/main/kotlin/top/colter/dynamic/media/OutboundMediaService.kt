@@ -97,7 +97,7 @@ public class OutboundMediaService(
         require(!Files.isSymbolicLink(realPath)) { "不允许访问符号链接" }
 
         val size = Files.size(realPath)
-        require(size <= root.maxBytes) {
+        require(root.allowsSize(size)) {
             "媒体文件超过大小限制：size=$size，maxBytes=${root.maxBytes}"
         }
         touchAccessTime(realPath)
@@ -167,7 +167,7 @@ public class OutboundMediaService(
 
             val root = findAllowedRoot(normalizedPath, config) ?: return media
             val size = runCatching { Files.size(normalizedPath) }.getOrElse { return media }
-            if (size > root.maxBytes) return media
+            if (!root.allowsSize(size)) return media
 
             val rewritten = when (selectedProfile.type) {
                 MediaDeliveryType.AUTO -> rewriteAuto(media, normalizedPath, root, size, selectedProfile)
@@ -693,6 +693,10 @@ public class OutboundMediaService(
         val transport = transportId?.trim()?.takeIf { it.isNotBlank() } ?: "sink"
         val id = route ?: account ?: return null
         return "$transport:$id"
+    }
+
+    private fun OutboundMediaRoot.allowsSize(size: Long): Boolean {
+        return maxBytes <= 0 || size <= maxBytes
     }
 
     private val WINDOWS_ABSOLUTE_PATH: Regex = Regex("""^[a-zA-Z]:[\\/].+$""")

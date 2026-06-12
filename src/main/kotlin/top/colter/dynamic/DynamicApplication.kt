@@ -193,6 +193,10 @@ public object DynamicApplication : CoroutineScope {
             },
         )
 
+        val linkParseProgressMessenger = DeliveryLinkParseProgressMessenger(
+            sendCommandResult = deliveryDispatcher::sendCommandResult,
+            recallMessage = deliveryDispatcher::recallMessage,
+        )
         val linkParseService = LinkParseService(
             resolversProvider = { pluginManager.getLinkResolvers() },
             configProvider = configStore::current,
@@ -209,6 +213,7 @@ public object DynamicApplication : CoroutineScope {
             onMessagesQueued = {
                 deliveryDispatcher.dispatchDue()
             },
+            progressMessenger = linkParseProgressMessenger,
             backgroundScope = this,
         )
 
@@ -232,10 +237,7 @@ public object DynamicApplication : CoroutineScope {
                 configProvider = configStore::current,
                 linkParseService = linkParseService,
                 eventBus = eventBus,
-                progressMessenger = DeliveryLinkParseProgressMessenger(
-                    sendCommandResult = deliveryDispatcher::sendCommandResult,
-                    recallMessage = deliveryDispatcher::recallMessage,
-                ),
+                progressMessenger = linkParseProgressMessenger,
                 primaryBotAccountResolver = ::resolvePrimaryCommandBotAccount,
             ),
         )

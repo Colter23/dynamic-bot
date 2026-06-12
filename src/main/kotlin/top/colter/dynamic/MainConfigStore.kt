@@ -244,6 +244,24 @@ public object MainConfigForms {
             remove("linkParsing.replyOnFailure")
             remove("linkParsing.progressReply.enabled")
         },
+        ConfigMigration(
+            id = "main-link-video-download-simplified-prompts",
+            description = "精简链接视频下载提示，并将旧默认视频大小上限改为不限制",
+        ) {
+            val maxFileMegabytes = when (val value = get("linkParsing.videoDownload.maxFileMegabytes")) {
+                is Number -> value.toDouble()
+                is String -> value.toDoubleOrNull()
+                else -> null
+            }
+            if (maxFileMegabytes == 200.0) {
+                set("linkParsing.videoDownload.maxFileMegabytes", 0.0)
+            }
+            remove("linkParsing.videoDownload.prompts.durationUnknown")
+            remove("linkParsing.videoDownload.prompts.durationTooLong")
+            remove("linkParsing.videoDownload.prompts.noDownloader")
+            remove("linkParsing.videoDownload.prompts.timeout")
+            remove("linkParsing.videoDownload.prompts.fileTooLarge")
+        },
     )
 
     public val formSpec: ConfigFormSpec
@@ -451,7 +469,7 @@ public object MainConfigForms {
                     label = "视频大小上限（MB）",
                     type = ConfigFieldType.NUMBER,
                     section = "链接解析",
-                    description = "只下载不超过这个大小的视频。\n支持小数，例如 0.5 表示 0.5 MB；超过后会退回为普通链接预览。",
+                    description = "只下载不超过这个大小的视频。\n设为 0 表示不限制大小；支持小数，例如 0.5 表示 0.5 MB。",
                     min = 0,
                     visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
@@ -516,55 +534,15 @@ public object MainConfigForms {
                     label = "下载中提示",
                     type = ConfigFieldType.TEXT,
                     section = "链接解析",
-                    description = "预览消息末尾追加的下载中提示。\n可使用 {title}、{id}、{link}；留空则不追加。",
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
-                ),
-                ConfigFieldSpec(
-                    path = "linkParsing.videoDownload.prompts.durationUnknown",
-                    label = "时长未知提示",
-                    type = ConfigFieldType.TEXT,
-                    section = "链接解析",
-                    description = "视频时长未知、无法判断是否满足下载条件时使用。\n可使用 {title}、{id}、{link}；留空则不追加。",
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
-                ),
-                ConfigFieldSpec(
-                    path = "linkParsing.videoDownload.prompts.durationTooLong",
-                    label = "时长超限提示",
-                    type = ConfigFieldType.TEXT,
-                    section = "链接解析",
-                    description = "视频超过最大时长时使用。\n可使用 {duration}、{maxDuration}、{title}、{id}、{link}；留空则不追加。",
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
-                ),
-                ConfigFieldSpec(
-                    path = "linkParsing.videoDownload.prompts.noDownloader",
-                    label = "无下载器提示",
-                    type = ConfigFieldType.TEXT,
-                    section = "链接解析",
-                    description = "当前链接平台没有可用视频下载器时使用。\n可使用 {platform}、{title}、{id}、{link}；留空则不追加。",
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
-                ),
-                ConfigFieldSpec(
-                    path = "linkParsing.videoDownload.prompts.timeout",
-                    label = "下载超时提示",
-                    type = ConfigFieldType.TEXT,
-                    section = "链接解析",
-                    description = "视频下载超时后的单独反馈消息。\n可使用 {timeout}、{title}、{id}、{link}；留空则不发送。",
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
-                ),
-                ConfigFieldSpec(
-                    path = "linkParsing.videoDownload.prompts.fileTooLarge",
-                    label = "文件过大提示",
-                    type = ConfigFieldType.TEXT,
-                    section = "链接解析",
-                    description = "视频文件超过大小上限时的单独反馈消息。\n可使用 {size}、{maxSize}、{title}、{id}、{link}；留空则不发送。",
+                    description = "开始下载视频时单独发送的提示。\n可使用 {title}、{id}、{link}；留空则不发送。",
                     visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.videoDownload.prompts.failed",
-                    label = "下载失败提示",
+                    label = "下载或推送失败提示",
                     type = ConfigFieldType.TEXT,
                     section = "链接解析",
-                    description = "视频下载异常失败后的单独反馈消息。\n可使用 {reason}、{title}、{id}、{link}；留空则不发送。",
+                    description = "视频无法下载或无法继续推送时单独发送的提示。\n可使用 {reason}、{title}、{id}、{link}；留空则不发送。",
                     visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
                 ConfigFieldSpec(
@@ -1040,11 +1018,6 @@ public object MainConfigForms {
         "linkParsing.videoDownload.maxConcurrentDownloads",
         "linkParsing.videoDownload.cleanupMaxIdleDays",
         "linkParsing.videoDownload.prompts.downloading",
-        "linkParsing.videoDownload.prompts.durationUnknown",
-        "linkParsing.videoDownload.prompts.durationTooLong",
-        "linkParsing.videoDownload.prompts.noDownloader",
-        "linkParsing.videoDownload.prompts.timeout",
-        "linkParsing.videoDownload.prompts.fileTooLarge",
         "linkParsing.videoDownload.prompts.failed",
         "messageRouting.defaultPolicy.strategy",
         "messageRouting.defaultPolicy.primaryAccountId",
@@ -1148,11 +1121,6 @@ public object MainConfigForms {
             "linkParsing.videoDownload.maxConcurrentDownloads",
             "linkParsing.videoDownload.cleanupMaxIdleDays",
             "linkParsing.videoDownload.prompts.downloading",
-            "linkParsing.videoDownload.prompts.durationUnknown",
-            "linkParsing.videoDownload.prompts.durationTooLong",
-            "linkParsing.videoDownload.prompts.noDownloader",
-            "linkParsing.videoDownload.prompts.timeout",
-            "linkParsing.videoDownload.prompts.fileTooLarge",
             "linkParsing.videoDownload.prompts.failed",
             "mediaDelivery.profiles",
             "mediaDelivery.defaultProfileId",
@@ -1243,7 +1211,7 @@ public object MainConfigForms {
         val videoDownload = config.linkParsing.videoDownload
         require(videoDownload.maxDurationSeconds >= 0) { "视频最大时长不能为负数" }
         require(videoDownload.maxFileMegabytes.isFiniteNumber()) { "视频最大大小必须是有效数字" }
-        require(videoDownload.maxFileMegabytes > 0.0) { "视频最大大小必须大于 0 MB" }
+        require(videoDownload.maxFileMegabytes >= 0.0) { "视频最大大小不能为负数" }
         require(videoDownload.cacheRoot.isNotBlank()) { "视频缓存目录不能为空" }
         require(videoDownload.timeoutSeconds > 0.0) { "视频下载超时必须大于 0 秒" }
         require(videoDownload.maxConcurrentDownloads >= 1) { "视频下载并发数至少为 1" }

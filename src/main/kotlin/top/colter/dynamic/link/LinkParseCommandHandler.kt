@@ -31,6 +31,7 @@ internal class LinkParseCommandHandler(
             text = input,
             context = invocation.context,
             maxLinks = maxLinksProvider(),
+            inReplyTo = invocation.traceId,
         )
         result.disabledReason?.let { return failed("链接解析失败：$it") }
         if (!result.hasSupportedLinks) return failed("未找到支持的链接")

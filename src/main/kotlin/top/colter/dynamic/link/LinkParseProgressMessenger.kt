@@ -1,6 +1,7 @@
 package top.colter.dynamic.link
 
 import top.colter.dynamic.LinkParseProgressReplyConfig
+import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandTarget
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
@@ -13,46 +14,59 @@ import top.colter.dynamic.event.CommandEvent
 
 private val progressLogger = loggerFor<LinkParseProgressMessenger>()
 
-internal data class LinkParseProgressReceipt(
+public data class LinkParseProgressReceipt(
     val target: TargetAddress,
     val sinkMessageId: String,
     val sinkRouteId: String? = null,
     val sinkAccountId: String? = null,
 )
 
-internal interface LinkParseProgressMessenger {
-    suspend fun send(event: CommandEvent, config: LinkParseProgressReplyConfig): LinkParseProgressReceipt?
+public interface LinkParseProgressMessenger {
+    public suspend fun send(event: CommandEvent, config: LinkParseProgressReplyConfig): LinkParseProgressReceipt? {
+        return send(event.context, event.traceId, config.text)
+    }
 
-    suspend fun recall(receipt: LinkParseProgressReceipt)
+    public suspend fun send(context: CommandContext, inReplyTo: String, text: String): LinkParseProgressReceipt?
+
+    public suspend fun recall(receipt: LinkParseProgressReceipt)
 }
 
-internal object NoopLinkParseProgressMessenger : LinkParseProgressMessenger {
-    override suspend fun send(event: CommandEvent, config: LinkParseProgressReplyConfig): LinkParseProgressReceipt? = null
+public object NoopLinkParseProgressMessenger : LinkParseProgressMessenger {
+    override suspend fun send(
+        context: CommandContext,
+        inReplyTo: String,
+        text: String,
+    ): LinkParseProgressReceipt? = null
 
     override suspend fun recall(receipt: LinkParseProgressReceipt) {
     }
 }
 
-internal class DeliveryLinkParseProgressMessenger(
+public class DeliveryLinkParseProgressMessenger(
     private val sendCommandResult: suspend (CommandResultSendRequest) -> MessageSendResult,
     private val recallMessage: suspend (TargetAddress, String, String?, String?) -> MessageRecallResult,
 ) : LinkParseProgressMessenger {
-    override suspend fun send(event: CommandEvent, config: LinkParseProgressReplyConfig): LinkParseProgressReceipt? {
-        val text = config.text.trim().takeIf { it.isNotBlank() } ?: return null
+    override suspend fun send(
+        context: CommandContext,
+        inReplyTo: String,
+        text: String,
+    ): LinkParseProgressReceipt? {
+        val value = text.trim().takeIf { it.isNotBlank() } ?: return null
+        val targetAddress = context.target.withPreferredAccount(context.botAccountId)
         val result = sendCommandResult(
             CommandResultSendRequest(
                 target = CommandTarget(
-                    address = event.context.target.withPreferredAccount(event.context.botAccountId),
-                    senderId = event.context.senderId,
+                    address = targetAddress,
+                    senderId = context.senderId,
                 ),
-                chain = listOf(MessageBatch(listOf(MessageContent.Text(text)))),
-                inReplyTo = event.traceId,
+                chain = listOf(MessageBatch(listOf(MessageContent.Text(value)))),
+                inReplyTo = inReplyTo,
             ),
         )
         return (result as? MessageSendResult.Sent)
             ?.sinkMessageId
             ?.takeIf { it.isNotBlank() }
-            ?.let { LinkParseProgressReceipt(event.context.target, it, result.sinkRouteId, result.sinkAccountId) }
+            ?.let { LinkParseProgressReceipt(targetAddress, it, result.sinkRouteId, result.sinkAccountId) }
     }
 
     override suspend fun recall(receipt: LinkParseProgressReceipt) {

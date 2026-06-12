@@ -69,6 +69,7 @@ internal class LinkAutoParseListener(
                 } else {
                     secondsToMillis(linkParsing.autoDedupeTtlSeconds, minimumMillis = 0)
                 },
+                inReplyTo = event.traceId,
                 onForwardingStarted = {
                     sendProgressOnce()
                 },

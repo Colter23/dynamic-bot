@@ -32,6 +32,7 @@ class MainConfigStoreTest {
         val paths = MainConfigForms.formSpec.fields.map { it.path }
 
         assertEquals(DrawOutputFormat.PNG, MainDynamicConfig().draw.outputFormat)
+        assertEquals(0.0, MainDynamicConfig().linkParsing.videoDownload.maxFileMegabytes)
         assertTrue("draw.outputFormat" in paths)
         assertTrue("draw.themeColors" in paths)
         assertTrue("draw.autoTheme" in paths)
@@ -231,6 +232,43 @@ class MainConfigStoreTest {
     }
 
     @Test
+    fun shouldMigrateSimplifiedVideoDownloadPromptFields() {
+        val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-video-download-migration"))
+        val path = configService.resolvePath(MainDynamicConfig.CONFIG_ID)
+        path.parent.createDirectories()
+        path.writeText(
+            """
+            webAdmin:
+              enabled: true
+              token: token
+            linkParsing:
+              videoDownload:
+                enabled: true
+                maxFileMegabytes: 200.0
+                prompts:
+                  downloading: "视频正在下载"
+                  durationUnknown: "时长未知"
+                  durationTooLong: "时长超限"
+                  noDownloader: "无下载器"
+                  timeout: "下载超时"
+                  fileTooLarge: "文件过大"
+                  failed: "下载失败：{reason}"
+            """.trimIndent(),
+        )
+
+        val loaded = MainConfigStore(configService).loadOrCreate { "token" }
+        val rewritten = path.readText()
+
+        assertEquals(0.0, loaded.linkParsing.videoDownload.maxFileMegabytes)
+        assertEquals("视频正在下载", loaded.linkParsing.videoDownload.prompts.downloading)
+        assertEquals("下载失败：{reason}", loaded.linkParsing.videoDownload.prompts.failed)
+        assertFalse(rewritten.contains("durationUnknown"))
+        assertFalse(rewritten.contains("durationTooLong"))
+        assertFalse(rewritten.contains("noDownloader"))
+        assertFalse(rewritten.contains("fileTooLarge"))
+    }
+
+    @Test
     fun webAdminConfigShouldExposeLogBufferCapacity() {
         val paths = MainConfigForms.formSpec.fields.map { it.path }
 
@@ -273,6 +311,11 @@ class MainConfigStoreTest {
         assertFalse(byPath.getValue("linkParsing.videoDownload.enabled").advanced)
         assertFalse("linkParsing.replyOnFailure" in byPath)
         assertFalse("linkParsing.progressReply.enabled" in byPath)
+        assertFalse("linkParsing.videoDownload.prompts.durationUnknown" in byPath)
+        assertFalse("linkParsing.videoDownload.prompts.durationTooLong" in byPath)
+        assertFalse("linkParsing.videoDownload.prompts.noDownloader" in byPath)
+        assertFalse("linkParsing.videoDownload.prompts.timeout" in byPath)
+        assertFalse("linkParsing.videoDownload.prompts.fileTooLarge" in byPath)
         assertEquals("发送与媒体", byPath.getValue("mediaDelivery.profiles").section)
         assertFalse(byPath.getValue("mediaDelivery.profiles").advanced)
         assertEquals("MEDIA_DELIVERY_PROFILES", byPath.getValue("mediaDelivery.profiles").component)
