@@ -156,22 +156,17 @@
     [data-theme="dark"] .dashboard-list-item,
     [data-theme="dark"] .target-choice,
     [data-theme="dark"] .rule-row,
-    [data-theme="dark"] .subscription-filter-toolbar {
+    [data-theme="dark"] .entity-filter-bar {
+      background: var(--panel-soft);
+    }
+
+    [data-theme="dark"] .entity-filter-summary {
       background: var(--panel);
       border-color: var(--line);
     }
 
-    [data-theme="dark"] .filter-toolbar-count {
-      background: var(--panel-soft);
-      border-color: var(--line);
-    }
-
-    [data-theme="dark"] .filter-toolbar-divider {
+    [data-theme="dark"] .entity-filter-divider {
       background: var(--line);
-    }
-
-    [data-theme="dark"] .entity-filter-bar {
-      background: var(--panel-soft);
     }
 
     [data-theme="dark"] .subscription-card {
@@ -1346,23 +1341,24 @@
       display: flex;
       align-items: center;
       justify-content: flex-start;
-      gap: 8px;
+      gap: 10px;
       flex-wrap: wrap;
-      margin-bottom: 10px;
-      padding: 10px;
+      margin-bottom: 14px;
+      padding: 10px 14px;
       border: 1px solid var(--line);
-      border-radius: 8px;
+      border-radius: 10px;
       background: var(--panel-soft);
     }
+
     .entity-filter-title {
-      min-height: 28px;
       display: inline-flex;
       align-items: center;
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 900;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 800;
       white-space: nowrap;
     }
+
     .entity-filter-main {
       min-width: 0;
       display: flex;
@@ -1371,24 +1367,47 @@
       flex: 1 1 520px;
       flex-wrap: wrap;
     }
+
     .entity-filter-controls {
       min-width: 0;
       max-width: 100%;
       display: flex;
       align-items: center;
       gap: 8px;
-      flex: 1 1 360px;
+      flex: 1 1 auto;
       flex-wrap: wrap;
     }
+
     .entity-filter-controls select {
       width: auto;
-      min-width: 142px;
-      max-width: 210px;
-      min-height: 28px;
-      height: 28px;
-      padding: 3px 8px;
+      min-width: 120px;
+      max-width: 160px;
+      min-height: 34px;
+      height: 34px;
+      padding: 4px 10px;
       font-size: 13px;
+      border-radius: 6px;
     }
+
+    .subscription-entity-filter .entity-filter-controls input {
+      min-width: 140px;
+      max-width: 180px;
+      min-height: 34px;
+      height: 34px;
+      padding: 4px 10px;
+      font-size: 13px;
+      border-radius: 6px;
+      flex: 1 1 140px;
+    }
+
+    .entity-filter-divider {
+      width: 1px;
+      height: 24px;
+      background: var(--line);
+      margin: 0 4px;
+      flex-shrink: 0;
+    }
+
     .entity-filter-tools {
       min-width: 0;
       display: flex;
@@ -1398,6 +1417,13 @@
       flex: 0 0 auto;
       flex-wrap: wrap;
       margin-left: auto;
+    }
+
+    .entity-filter-clear {
+      min-height: 34px;
+      padding: 6px 12px;
+      font-size: 13px;
+      border-radius: 6px;
     }
     .filter-apply-button,
     .filter-clear-button,
@@ -1452,15 +1478,7 @@
       cursor: default;
       opacity: 0.55;
     }
-    .entity-filter-clear {
-      min-height: 32px;
-      padding: 6px 12px;
-      font-size: 13px;
-      border-radius: 6px;
-    }
-
     .entity-filter-summary {
-      min-height: 32px;
       display: inline-flex;
       align-items: center;
       padding: 6px 12px;
@@ -1472,92 +1490,12 @@
       font-weight: 800;
       white-space: nowrap;
     }
-    .subscription-filter-toolbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      flex-wrap: wrap;
-      margin-bottom: 14px;
-      padding: 10px 14px;
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: var(--panel);
-      box-shadow: 0 1px 3px rgba(24, 33, 45, 0.04);
-    }
-
-    .subscription-filter-toolbar-left {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex-wrap: wrap;
-      flex: 1 1 auto;
-      min-width: 0;
-    }
-
-    .subscription-filter-toolbar-right {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      flex-shrink: 0;
-    }
-
-    .filter-toolbar-label {
-      color: var(--text);
-      font-size: 13px;
-      font-weight: 800;
-      white-space: nowrap;
-      margin-right: 4px;
-    }
-
-    .filter-toolbar-select {
-      min-width: 110px;
-      max-width: 140px;
-      min-height: 34px;
-      height: 34px;
-      padding: 4px 10px;
-      font-size: 13px;
-      border-radius: 6px;
-      flex-shrink: 0;
-    }
-
-    .filter-toolbar-input {
-      min-width: 140px;
-      max-width: 180px;
-      min-height: 34px;
-      height: 34px;
-      padding: 4px 10px;
-      font-size: 13px;
-      border-radius: 6px;
-      flex: 1 1 140px;
-    }
-
-    .filter-toolbar-divider {
-      width: 1px;
-      height: 24px;
-      background: var(--line);
-      margin: 0 4px;
-      flex-shrink: 0;
-    }
-
-    .filter-toolbar-count {
-      display: inline-flex;
-      align-items: center;
-      padding: 6px 12px;
-      border: 1px solid var(--line);
-      border-radius: 6px;
-      background: var(--panel-soft);
-      color: var(--muted);
-      font-size: 13px;
-      font-weight: 800;
-      white-space: nowrap;
-    }
-
     .filter-toolbar-clear {
       min-height: 34px;
       padding: 6px 12px;
       font-size: 13px;
     }
+
     .form-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5559,22 +5497,22 @@
         width: 100%;
         max-width: none;
       }
-      .subscription-filter-toolbar {
+      .entity-filter-bar {
         flex-direction: column;
         align-items: stretch;
+        gap: 10px;
         padding: 12px;
-        gap: 12px;
       }
-      .subscription-filter-toolbar-left {
+      .entity-filter-title {
+        font-size: 13px;
+      }
+      .entity-filter-controls {
         flex-direction: column;
-        align-items: stretch;
+        width: 100%;
         gap: 8px;
       }
-      .filter-toolbar-label {
-        margin-bottom: 4px;
-      }
-      .filter-toolbar-select,
-      .filter-toolbar-input {
+      .entity-filter-controls select,
+      .subscription-entity-filter .entity-filter-controls input {
         width: 100%;
         min-width: 0;
         max-width: none;
@@ -5583,20 +5521,17 @@
         font-size: 16px;
         padding: 8px 12px;
       }
-      .filter-toolbar-divider {
+      .entity-filter-divider {
         width: 100%;
         height: 1px;
         margin: 4px 0;
       }
-      .subscription-filter-toolbar-right {
-        width: 100%;
-        justify-content: space-between;
-      }
-      .filter-toolbar-count {
+      .entity-filter-summary {
         font-size: 13px;
       }
-      .filter-toolbar-clear {
-        min-height: 40px;
+      .entity-filter-clear {
+        width: 100%;
+        min-height: 44px;
         font-size: 14px;
       }
       .table-wrap {

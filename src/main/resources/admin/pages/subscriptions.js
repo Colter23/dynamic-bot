@@ -278,31 +278,19 @@ function subscriptionFilterBar(rows, filteredRows) {
   const subscriberPlatforms = uniqueValues(rows, row => row.subscriber && row.subscriber.platformId);
   const subscriberKinds = uniqueValues(rows, row => row.subscriber && row.subscriber.targetKind);
 
-  return `<div class="subscription-filter-toolbar">
-    <div class="subscription-filter-toolbar-left">
-      <span class="filter-toolbar-label">筛选：</span>
-      <select class="filter-toolbar-select" data-subscription-filter="publisherPlatform">
-        ${filterOptions("发布者平台", publisherPlatforms, subscriptionFilters.publisherPlatform)}
-      </select>
-      <select class="filter-toolbar-select" data-subscription-filter="publisherKind">
-        ${filterOptions("发布者类型", publisherKinds, subscriptionFilters.publisherKind, label)}
-      </select>
-      <input class="filter-toolbar-input" data-subscription-filter="publisherId" value="${attr(subscriptionFilters.publisherId)}" placeholder="发布者搜索">
-      <div class="filter-toolbar-divider"></div>
-      <select class="filter-toolbar-select" data-subscription-filter="subscriberPlatform">
-        ${filterOptions("目标平台", subscriberPlatforms, subscriptionFilters.subscriberPlatform)}
-      </select>
-      <select class="filter-toolbar-select" data-subscription-filter="subscriberKind">
-        ${filterOptions("目标类型", subscriberKinds, subscriptionFilters.subscriberKind, label)}
-      </select>
-      <input class="filter-toolbar-input" data-subscription-filter="subscriberId" value="${attr(subscriptionFilters.subscriberId)}" placeholder="目标搜索">
+  return `<div class="entity-filter-bar subscription-entity-filter">
+    <span class="entity-filter-title">筛选</span>
+    <div class="entity-filter-controls">
+      <select data-subscription-filter="publisherPlatform">${filterOptions("发布者平台", publisherPlatforms, subscriptionFilters.publisherPlatform)}</select>
+      <select data-subscription-filter="publisherKind">${filterOptions("发布者类型", publisherKinds, subscriptionFilters.publisherKind, label)}</select>
+      <input data-subscription-filter="publisherId" value="${attr(subscriptionFilters.publisherId)}" placeholder="发布者搜索">
+      <div class="entity-filter-divider"></div>
+      <select data-subscription-filter="subscriberPlatform">${filterOptions("目标平台", subscriberPlatforms, subscriptionFilters.subscriberPlatform)}</select>
+      <select data-subscription-filter="subscriberKind">${filterOptions("目标类型", subscriberKinds, subscriptionFilters.subscriberKind, label)}</select>
+      <input data-subscription-filter="subscriberId" value="${attr(subscriptionFilters.subscriberId)}" placeholder="目标搜索">
+      <button type="button" class="entity-filter-clear" data-subscription-filter-reset${active ? "" : " disabled"}>清除</button>
     </div>
-    <div class="subscription-filter-toolbar-right">
-      <span class="filter-toolbar-count">${filteredRows.length} / ${rows.length}</span>
-      <button type="button" class="secondary compact filter-toolbar-clear" data-subscription-filter-reset${active ? "" : " disabled"}>
-        <span>清除</span>
-      </button>
-    </div>
+    <span class="entity-filter-summary" data-subscription-filter-summary>${filteredRows.length} / ${rows.length}</span>
   </div>`;
 }
 
@@ -345,7 +333,7 @@ function refreshSubscriptionTable() {
     table.innerHTML = subscriptionTableHtml(filteredRows);
     hydrateMediaImages(table).catch(handleError);
   }
-  const summary = pageRoot().querySelector(".filter-toolbar-count");
+  const summary = pageRoot().querySelector("[data-subscription-filter-summary]");
   if (summary) summary.textContent = `${filteredRows.length} / ${rows.length}`;
   const reset = pageRoot().querySelector("[data-subscription-filter-reset]");
   if (reset) reset.disabled = !subscriptionFilterActive();
