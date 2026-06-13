@@ -269,6 +269,35 @@ class MainConfigStoreTest {
     }
 
     @Test
+    fun shouldMigrateLegacyLinkParseTemplatesToSingleMessageTemplate() {
+        val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-link-template-migration"))
+        val path = configService.resolvePath(MainDynamicConfig.CONFIG_ID)
+        path.parent.createDirectories()
+        path.writeText(
+            """
+            webAdmin:
+              enabled: true
+              token: token
+            linkParsing:
+              templates:
+                video: "{draw}\\n{title}"
+                live: "{draw}\\n{link}"
+                user: "{name}\\n{link}"
+                fallback: "{draw}"
+                videoFile: "{video}\\n{size}"
+            """.trimIndent(),
+        )
+
+        val loaded = MainConfigStore(configService).loadOrCreate { "token" }
+        val rewritten = path.readText()
+
+        assertEquals("{draw}\\n{title}\\r{video}\\n{size}", loaded.linkParsing.templates.message)
+        assertTrue(rewritten.contains("message:"))
+        assertFalse(rewritten.contains("videoFile:"))
+        assertFalse(rewritten.contains("fallback:"))
+    }
+
+    @Test
     fun webAdminConfigShouldHideLogBufferCapacityButStillValidate() {
         val paths = MainConfigForms.formSpec.fields.map { it.path }
 
@@ -309,8 +338,15 @@ class MainConfigStoreTest {
         assertFalse(byPath.getValue("draw.outputFormat").advanced)
         assertEquals("链接解析", byPath.getValue("linkParsing.videoDownload.enabled").section)
         assertFalse(byPath.getValue("linkParsing.videoDownload.enabled").advanced)
+        assertEquals("推送内容", byPath.getValue("linkParsing.templates.message").section)
+        assertTrue(byPath.getValue("linkParsing.templates.message").advanced)
         assertFalse("linkParsing.replyOnFailure" in byPath)
         assertFalse("linkParsing.progressReply.enabled" in byPath)
+        assertFalse("linkParsing.templates.video" in byPath)
+        assertFalse("linkParsing.templates.live" in byPath)
+        assertFalse("linkParsing.templates.user" in byPath)
+        assertFalse("linkParsing.templates.fallback" in byPath)
+        assertFalse("linkParsing.templates.videoFile" in byPath)
         assertFalse("linkParsing.videoDownload.prompts.durationUnknown" in byPath)
         assertFalse("linkParsing.videoDownload.prompts.durationTooLong" in byPath)
         assertFalse("linkParsing.videoDownload.prompts.noDownloader" in byPath)

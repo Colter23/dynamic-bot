@@ -16,6 +16,7 @@ let attr;
 let label;
 let notify;
 let openModal;
+let confirmDanger;
 let loadSubscriberTargetCandidates;
 let messageTargetChoiceHtml;
 let bindTargetSourceToggles;
@@ -45,6 +46,7 @@ function bindContext(nextCtx) {
     label,
     notify,
     openModal,
+    confirmDanger,
     loadSubscriberTargetCandidates,
     messageTargetChoiceHtml,
     bindTargetSourceToggles,
@@ -74,6 +76,10 @@ export async function handleAction(nextCtx, { action }) {
     await openForwardModal();
     return true;
   }
+  if (action === "stop-application") {
+    await stopApplication();
+    return true;
+  }
   return false;
 }
 
@@ -88,6 +94,7 @@ async function loadSystem(force) {
 
   const memoryPercent = Math.max(0, Math.min(100, Math.round((Number(status.usedMemoryBytes || 0) / Math.max(Number(status.maxMemoryBytes || 1), 1)) * 100)));
   const memoryMax = fmtBytes(status.maxMemoryBytes);
+  const memoryBarClass = memoryPercent >= 90 ? "danger" : memoryPercent >= 80 ? "warning" : "normal";
   pageRoot().innerHTML = `
     <section class="page system-page">
       <div class="grid system-grid">
@@ -106,7 +113,7 @@ async function loadSystem(force) {
               <span>堆内存占用</span>
               <strong>${memoryPercent}%</strong>
             </div>
-            <div class="system-meter-track" aria-hidden="true">
+            <div class="system-meter-track system-meter-${memoryBarClass}" aria-hidden="true">
               <span style="width:${memoryPercent}%"></span>
             </div>
             <div class="system-meter-foot">
@@ -152,7 +159,7 @@ async function loadSystem(force) {
           <div class="panel-head">
             <div>
               <h2>维护操作</h2>
-              <p>面向管理员的即时操作。</p>
+              <p>系统级管理操作，请谨慎执行</p>
             </div>
           </div>
           ${maintenanceOperationsHtml()}
@@ -175,8 +182,14 @@ async function loadForwardTargetPlatforms(force) {
 function maintenanceOperationsHtml() {
   return `<div class="system-operation-grid">
     <button type="button" class="system-operation-button" data-action="open-message-forward">
+      <span class="system-operation-icon">💬</span>
       <span class="system-operation-title">消息转发</span>
-      <span class="system-operation-desc">批量发送管理员消息</span>
+      <span class="system-operation-desc">批量发送管理员消息到指定目标</span>
+    </button>
+    <button type="button" class="system-operation-button system-operation-danger" data-action="stop-application">
+      <span class="system-operation-icon">⏹️</span>
+      <span class="system-operation-title">停止项目</span>
+      <span class="system-operation-desc">停止主项目进程并关闭后台</span>
     </button>
   </div>`;
 }
@@ -458,6 +471,16 @@ function forwardPlatformOptionText(platform) {
 function openForwardManualDetails(open) {
   const details = $("forwardManualDetails");
   if (details) details.open = !!open;
+}
+
+async function stopApplication() {
+  if (!(await confirmDanger("停止主项目", "确定停止主项目吗？当前进程会开始退出，后台也会断开连接。", { confirmText: "停止主项目" }))) return;
+  try {
+    const result = await api("/system/stop", { method: "POST" });
+    notify(result.message || "停止指令已发送", false);
+  } catch (error) {
+    handleError(error);
+  }
 }
 
 function stat(title, value, sub) {

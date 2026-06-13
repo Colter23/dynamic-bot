@@ -1071,17 +1071,10 @@ function messageTemplatePlaceholders(kind) {
       { value: "{stats}", label: "{stats}", title: "数据指标" },
       { value: "{duration}", label: "{duration}", title: "时长" },
     ];
-    if (kind === "LINK_VIDEO_FILE") {
-      return [
-        { value: "{video}", label: "{video}", title: "下载后的视频" },
-        ...linkCommon.filter(item => !["{draw}", "{cover}", "{kind}", "{stats}"].includes(item.value)),
-        { value: "{size}", label: "{size}", title: "视频大小" },
-        { value: "\\r", label: "\\r", title: "拆分为下一条消息" },
-        { value: "\\n", label: "\\n", title: "换行" },
-      ];
-    }
     return [
       ...linkCommon,
+      { value: "{video}", label: "{video}", title: "下载后的视频" },
+      { value: "{size}", label: "{size}", title: "视频大小" },
       { value: "\\r", label: "\\r", title: "拆分为下一条消息" },
       messageTemplateForwardToken(kind),
       { value: "\\n", label: "\\n", title: "换行" },
@@ -1279,11 +1272,6 @@ function messageTemplateSampleValues(kind) {
       duration: "3m 21s",
       size: "18.5 MB",
     };
-    if (kind === "LINK_VIDEO_FILE") {
-      base.draw = "";
-      base.cover = "";
-      base.kind = "视频";
-    }
     return base;
   }
   if (kind === "LIVE_STARTED") {

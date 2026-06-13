@@ -16,17 +16,41 @@ internal class LinkPreviewTemplateRenderer(
     private val previewRenderer: LinkPreviewRenderer,
     private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
-    suspend fun renderPreview(template: String, preview: LinkPreview): List<MessageBatch> {
-        return renderTemplate(template, LinkPreviewTemplateContext(preview = preview, time = nowEpochSeconds()))
+    fun plan(template: String): LinkPreviewTemplatePlan {
+        val steps = parseTemplateSegments(normalizeTemplateEscapes(template)).flatMap { segment ->
+            when (segment) {
+                is TemplateSegment.Text -> segment.value
+                    .split(CHAIN_SEPARATOR)
+                    .map { TemplateSegment.Text(it) }
+                is TemplateSegment.Forward -> listOf(segment)
+            }
+        }.map { segment ->
+            LinkPreviewTemplateStep(
+                segment = segment,
+                requiresVideo = segment.value.contains(VIDEO_PLACEHOLDER),
+                forward = segment is TemplateSegment.Forward,
+            )
+        }
+        return LinkPreviewTemplatePlan(
+            immediateSteps = steps.filterNot { it.requiresVideo },
+            videoSteps = steps.filter { it.requiresVideo },
+        )
     }
 
-    suspend fun renderVideoFile(
-        template: String,
+    suspend fun renderPlanPreview(
+        plan: LinkPreviewTemplatePlan,
+        preview: LinkPreview,
+    ): List<MessageBatch> {
+        return renderSteps(plan.immediateSteps, LinkPreviewTemplateContext(preview = preview, time = nowEpochSeconds()))
+    }
+
+    suspend fun renderPlanVideo(
+        plan: LinkPreviewTemplatePlan,
         preview: LinkPreview,
         video: LinkVideoDownloadResult,
     ): List<MessageBatch> {
-        return renderTemplate(
-            template = template,
+        return renderSteps(
+            steps = plan.videoSteps,
             context = LinkPreviewTemplateContext(
                 preview = preview,
                 video = video,
@@ -35,8 +59,8 @@ internal class LinkPreviewTemplateRenderer(
         )
     }
 
-    private suspend fun renderTemplate(
-        template: String,
+    private suspend fun renderSteps(
+        steps: List<LinkPreviewTemplateStep>,
         context: LinkPreviewTemplateContext,
     ): List<MessageBatch> {
         val batches = mutableListOf<MessageBatch>()
@@ -47,14 +71,11 @@ internal class LinkPreviewTemplateRenderer(
             current.clear()
         }
 
-        val normalizedTemplate = normalizeTemplateEscapes(template)
-        parseTemplateSegments(normalizedTemplate).forEach { segment ->
-            when (segment) {
+        steps.forEach { step ->
+            when (val segment = step.segment) {
                 is TemplateSegment.Text -> {
-                    segment.value.split(CHAIN_SEPARATOR).forEachIndexed { index, fragment ->
-                        if (index > 0) flush()
-                        current += renderFragment(fragment.replace(LINE_BREAK, "\n"), context)
-                    }
+                    current += renderFragment(segment.value.replace(LINE_BREAK, "\n"), context)
+                    flush()
                 }
                 is TemplateSegment.Forward -> renderForwardContent(segment.value, context)
                     ?.let { forward ->
@@ -187,9 +208,11 @@ internal class LinkPreviewTemplateRenderer(
         var drawImage: MediaRef? = null
     }
 
-    private sealed interface TemplateSegment {
-        data class Text(val value: String) : TemplateSegment
-        data class Forward(val value: String) : TemplateSegment
+    internal sealed interface TemplateSegment {
+        val value: String
+
+        data class Text(override val value: String) : TemplateSegment
+        data class Forward(override val value: String) : TemplateSegment
     }
 
     internal companion object {
@@ -244,10 +267,28 @@ internal class LinkPreviewTemplateRenderer(
         private const val FORWARD_END: String = "{<<}"
         private const val LINE_BREAK: String = "\\n"
         private const val CHAIN_SEPARATOR: String = "\\r"
+        private const val VIDEO_PLACEHOLDER: String = "{video}"
         private val PLACEHOLDER_REGEX: Regex = Regex("\\{([a-zA-Z0-9_]+)\\}")
         private val WRAPPED_ESCAPE_MARKER_REGEX: Regex = Regex("""\\+[ \t]*\r?\n[ \t]*([nr])""")
     }
 }
+
+internal data class LinkPreviewTemplatePlan(
+    val immediateSteps: List<LinkPreviewTemplateStep>,
+    val videoSteps: List<LinkPreviewTemplateStep>,
+) {
+    val requiresVideo: Boolean
+        get() = videoSteps.isNotEmpty()
+
+    val requiresVideoInForward: Boolean
+        get() = videoSteps.any { it.forward }
+}
+
+internal data class LinkPreviewTemplateStep(
+    val segment: LinkPreviewTemplateRenderer.TemplateSegment,
+    val requiresVideo: Boolean,
+    val forward: Boolean,
+)
 
 internal fun LinkPreview.fallbackText(): String {
     return buildString {

@@ -218,32 +218,52 @@ public class LinkParseService(
         context: CommandContext,
         inReplyTo: String?,
     ): LinkParseItemResult {
-        val videoPlan = videoDownloadPlan(preview, parsedLink)
-        val previewBatches = runCatching {
-            templateRenderer.renderPreview(configProvider().linkParsing.templates.forKind(preview.kind), preview)
-                .takeIf { it.isNotEmpty() }
-                ?: listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText()))))
+        val template = configProvider().linkParsing.templates.message
+        val templatePlan = runCatching {
+            templateRenderer.plan(template)
         }.getOrElse { error ->
             linkParseLogger.warn(error) {
-                "链接卡片绘图失败，回退为文本：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
+                "链接解析模板解析失败，回退为文本：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
+            }
+            return forwardMessage(listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))), parsedLink, context)
+        }
+
+        val immediateBatches = runCatching {
+            templateRenderer.renderPlanPreview(templatePlan, preview)
+        }.getOrElse { error ->
+            linkParseLogger.warn(error) {
+                "链接卡片模板渲染失败，回退为文本：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
             }
             listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText()))))
         }
-        val previewResult = forwardMessage(previewBatches, parsedLink, context)
-        if (previewResult !is LinkParseItemResult.Forwarded) return previewResult
+        var currentResult = when {
+            immediateBatches.isEmpty() -> null
+            else -> when (val immediateResult = forwardMessage(immediateBatches, parsedLink, context)) {
+                is LinkParseItemResult.Forwarded -> immediateResult
+                else -> return immediateResult
+            }
+        }
 
-        val downloadPlan = when (videoPlan) {
-            null -> return previewResult
+        if (!templatePlan.requiresVideo) {
+            return currentResult
+                ?: forwardMessage(listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))), parsedLink, context)
+        }
+
+        val downloadPlan = when (val planned = videoDownloadPlan(preview, parsedLink)) {
+            null -> return currentResult
+                ?: LinkParseItemResult.Failed(parsedLink, "链接解析模板只包含视频，但视频下载不可用")
             is VideoDownloadPlan.NotSent -> {
                 val feedback = sendVideoPrompt(
-                    message = videoPlan.message,
+                    message = planned.message,
                     parsedLink = parsedLink,
                     context = context,
                     inReplyTo = inReplyTo,
                 )
-                return previewResult.withAdditionalDeliveries(feedback.deliveryCount)
+                return currentResult?.withAdditionalDeliveries(feedback.deliveryCount)
+                    ?: videoPromptOnlyResult(feedback, parsedLink, context)
+                    ?: LinkParseItemResult.Failed(parsedLink, planned.message.ifBlank { "视频无法下载或推送" })
             }
-            is VideoDownloadPlan.Download -> videoPlan
+            is VideoDownloadPlan.Download -> planned
         }
 
         val downloadPrompt = sendVideoPrompt(
@@ -252,16 +272,18 @@ public class LinkParseService(
             context = context,
             inReplyTo = inReplyTo,
         )
-        val currentResult = previewResult.withAdditionalDeliveries(downloadPrompt.deliveryCount)
+        currentResult = currentResult?.withAdditionalDeliveries(downloadPrompt.deliveryCount)
+            ?: forwardedForContext(parsedLink, context, downloadPrompt.deliveryCount)
         val scope = backgroundScope
-        if (scope != null) {
+        if (scope != null && !templatePlan.requiresVideoInForward) {
             launchVideoDownloadFollowUp(
                 scope = scope,
+                templatePlan = templatePlan,
                 preview = preview,
                 parsedLink = parsedLink,
                 context = context,
                 downloader = downloadPlan.downloader,
-                previewResult = currentResult,
+                currentResult = currentResult,
                 downloadPromptReceipt = downloadPrompt.receipt,
                 inReplyTo = inReplyTo,
             )
@@ -269,11 +291,12 @@ public class LinkParseService(
         }
 
         return forwardVideoAfterDownload(
+            templatePlan = templatePlan,
             preview = preview,
             parsedLink = parsedLink,
             context = context,
             downloader = downloadPlan.downloader,
-            previewResult = currentResult,
+            currentResult = currentResult,
             downloadPromptReceipt = downloadPrompt.receipt,
             inReplyTo = inReplyTo,
         )
@@ -281,22 +304,24 @@ public class LinkParseService(
 
     private fun launchVideoDownloadFollowUp(
         scope: CoroutineScope,
+        templatePlan: LinkPreviewTemplatePlan,
         preview: LinkPreview,
         parsedLink: ParsedLink,
         context: CommandContext,
         downloader: LinkVideoDownloader,
-        previewResult: LinkParseItemResult.Forwarded,
+        currentResult: LinkParseItemResult.Forwarded,
         downloadPromptReceipt: LinkParseProgressReceipt?,
         inReplyTo: String?,
     ) {
         scope.launch {
             try {
                 forwardVideoAfterDownload(
+                    templatePlan = templatePlan,
                     preview = preview,
                     parsedLink = parsedLink,
                     context = context,
                     downloader = downloader,
-                    previewResult = previewResult,
+                    currentResult = currentResult,
                     downloadPromptReceipt = downloadPromptReceipt,
                     inReplyTo = inReplyTo,
                 )
@@ -311,11 +336,12 @@ public class LinkParseService(
     }
 
     private suspend fun forwardVideoAfterDownload(
+        templatePlan: LinkPreviewTemplatePlan,
         preview: LinkPreview,
         parsedLink: ParsedLink,
         context: CommandContext,
         downloader: LinkVideoDownloader,
-        previewResult: LinkParseItemResult.Forwarded,
+        currentResult: LinkParseItemResult.Forwarded,
         downloadPromptReceipt: LinkParseProgressReceipt?,
         inReplyTo: String?,
     ): LinkParseItemResult.Forwarded {
@@ -329,13 +355,13 @@ public class LinkParseService(
                         context = context,
                         inReplyTo = inReplyTo,
                     )
-                    return previewResult.withAdditionalDeliveries(feedback.deliveryCount)
+                    return currentResult.withAdditionalDeliveries(feedback.deliveryCount)
                 }
             }
             val videoBatches = runCatching {
-                templateRenderer.renderVideoFile(configProvider().linkParsing.templates.videoFile, preview, video)
+                templateRenderer.renderPlanVideo(templatePlan, preview, video)
                     .takeIf { it.isNotEmpty() }
-                    ?: listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText()))))
+                    ?: error("视频模板未产生可发送内容")
             }.getOrElse { error ->
                 linkParseLogger.warn(error) {
                     "链接视频模板渲染失败，跳过视频消息：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
@@ -346,11 +372,11 @@ public class LinkParseService(
                     context = context,
                     inReplyTo = inReplyTo,
                 )
-                return previewResult.withAdditionalDeliveries(feedback.deliveryCount)
+                return currentResult.withAdditionalDeliveries(feedback.deliveryCount)
             }
             val videoResult = forwardMessage(videoBatches, parsedLink, context)
             return if (videoResult is LinkParseItemResult.Forwarded) {
-                previewResult.copy(deliveryCount = previewResult.deliveryCount + videoResult.deliveryCount)
+                currentResult.copy(deliveryCount = currentResult.deliveryCount + videoResult.deliveryCount)
             } else {
                 val feedback = sendVideoPrompt(
                     message = videoFailurePrompt(
@@ -363,7 +389,7 @@ public class LinkParseService(
                     context = context,
                     inReplyTo = inReplyTo,
                 )
-                previewResult.withAdditionalDeliveries(feedback.deliveryCount)
+                currentResult.withAdditionalDeliveries(feedback.deliveryCount)
             }
         } finally {
             recallVideoPrompt(downloadPromptReceipt)
@@ -552,6 +578,31 @@ public class LinkParseService(
             context,
         )
         return VideoPromptResult(deliveryCount = (feedback as? LinkParseItemResult.Forwarded)?.deliveryCount ?: 0)
+    }
+
+    private suspend fun videoPromptOnlyResult(
+        prompt: VideoPromptResult,
+        parsedLink: ParsedLink,
+        context: CommandContext,
+    ): LinkParseItemResult.Forwarded? {
+        if (!prompt.hasOutput) return null
+        return forwardedForContext(parsedLink, context, prompt.deliveryCount)
+    }
+
+    private suspend fun forwardedForContext(
+        parsedLink: ParsedLink,
+        context: CommandContext,
+        deliveryCount: Int,
+    ): LinkParseItemResult.Forwarded {
+        val subscriber = SubscriberRepository.ensure(
+            address = context.target,
+            name = context.chatId,
+        )
+        return LinkParseItemResult.Forwarded(
+            parsedLink = parsedLink,
+            subscriber = subscriber,
+            deliveryCount = deliveryCount,
+        )
     }
 
     private suspend fun recallVideoPrompt(receipt: LinkParseProgressReceipt?) {
@@ -808,7 +859,10 @@ public class LinkParseService(
     private data class VideoPromptResult(
         val receipt: LinkParseProgressReceipt? = null,
         val deliveryCount: Int = 0,
-    )
+    ) {
+        val hasOutput: Boolean
+            get() = receipt != null || deliveryCount > 0
+    }
 
     private data class VideoDownloadLock(
         val mutex: Mutex = Mutex(),

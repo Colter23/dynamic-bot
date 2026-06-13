@@ -890,7 +890,6 @@ const $ = id => document.getElementById(id);
         event.stopPropagation();
       }
     });
-    $("stopApplication").onclick = stopApplication;
 
     applyTheme(state.theme);
 

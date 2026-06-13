@@ -5,7 +5,6 @@ import kotlin.math.roundToLong
 import top.colter.dynamic.core.command.CommandPermissionRule
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.event.SystemNotificationSeverity
-import top.colter.dynamic.core.link.LinkKinds
 import top.colter.dynamic.core.link.LinkVideoQuality
 import top.colter.dynamic.core.plugin.MessageSinkRoutingPolicy
 
@@ -91,24 +90,10 @@ public data class LinkParseProgressReplyConfig(
 )
 
 public data class LinkParseTemplates(
-    val video: String = DEFAULT_PREVIEW_TEMPLATE,
-    val live: String = DEFAULT_PREVIEW_TEMPLATE,
-    val user: String = DEFAULT_PREVIEW_TEMPLATE,
-    val fallback: String = DEFAULT_PREVIEW_TEMPLATE,
-    val videoFile: String = DEFAULT_VIDEO_FILE_TEMPLATE,
+    val message: String = DEFAULT_MESSAGE_TEMPLATE,
 ) {
-    public fun forKind(kind: String): String {
-        return when (kind) {
-            LinkKinds.VIDEO -> video
-            LinkKinds.LIVE -> live
-            LinkKinds.USER -> user
-            else -> fallback
-        }
-    }
-
     public companion object {
-        public const val DEFAULT_PREVIEW_TEMPLATE: String = "{draw}"
-        public const val DEFAULT_VIDEO_FILE_TEMPLATE: String = "{video}"
+        public const val DEFAULT_MESSAGE_TEMPLATE: String = "{draw}\\r{video}"
     }
 }
 

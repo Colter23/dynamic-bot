@@ -7,11 +7,6 @@ let attr;
 let fmtTime;
 let fmtBytes;
 let fmtDuration;
-let label;
-let pill;
-let tags;
-let cell;
-let platformTag;
 let beginPageRequest;
 let isCurrentPageRequest;
 let invalidatePageRequests;
@@ -21,7 +16,7 @@ function bindContext(nextCtx) {
   root = ctx.root;
   api = ctx.api;
   state = ctx.state;
-  ({ esc, attr, fmtTime, fmtBytes, fmtDuration, label, pill, tags, cell, platformTag } = ctx.ui);
+  ({ esc, attr, fmtTime, fmtBytes, fmtDuration } = ctx.ui);
   beginPageRequest = ctx.beginPageRequest;
   isCurrentPageRequest = ctx.isCurrentPageRequest;
   invalidatePageRequests = ctx.invalidatePageRequests;
@@ -48,112 +43,77 @@ async function loadDashboard(force) {
   const request = beginPageRequest("dashboard");
   if (force || !state.cache.dashboard) state.cache.dashboard = await api("/dashboard");
   if (!isCurrentPageRequest(request)) return;
+
   const data = state.cache.dashboard;
+  const system = data.system || {};
   const deliveryCounts = countMap(data.deliveryStatusCounts);
   const pluginCounts = countMap(data.pluginStateCounts);
   const plugins = data.plugins || [];
   const logins = data.platformLogins || [];
   const recentFailures = data.recentDeliveries || [];
   const recentLogs = data.recentLogs || [];
-  const memoryPercent = Math.max(0, Math.min(100, Math.round((Number(data.system.usedMemoryBytes || 0) / Math.max(Number(data.system.maxMemoryBytes || 1), 1)) * 100)));
-  const startedAt = fmtTime(data.system.startedAtEpochMillis, true);
+
   const activePlugins = pluginCounts.ACTIVE || plugins.filter(item => item.state === "ACTIVE").length;
   const totalPlugins = pluginCounts.TOTAL || plugins.length;
   const failedPlugins = pluginCounts.FAILED || plugins.filter(item => item.state === "FAILED").length;
   const loginSuccess = logins.filter(item => item.status === "SUCCESS").length;
   const loginFailed = logins.filter(item => item.status !== "SUCCESS").length;
   const pendingDeliveries = deliveryCounts.PENDING || 0;
+  const sendingDeliveries = deliveryCounts.SENDING || 0;
+  const sentDeliveries = deliveryCounts.SENT || 0;
   const failedDeliveries = deliveryCounts.FAILED || 0;
+  const memoryPercent = memoryUsagePercent(system);
+  const hasIssues = failedPlugins || loginFailed || failedDeliveries;
 
   pageRoot().innerHTML = `
-    <section class="page dashboard-page">
-      <section class="dashboard-status-banner ${failedPlugins || failedDeliveries || loginFailed ? "warn" : "ok"}">
-        <div class="dashboard-status-icon">${failedPlugins || failedDeliveries || loginFailed ? "⚠️" : "✓"}</div>
-        <div class="dashboard-status-text">
-          <h3>${failedPlugins || failedDeliveries || loginFailed ? "系统需要关注" : "系统运行正常"}</h3>
-          <p>刷新于 ${esc(fmtTime(data.generatedAtEpochMillis, true))} · 运行时间 ${fmtDuration(data.system.uptimeMs)}</p>
+    <section class="page dashboard-page dashboard-clean-page">
+      <section class="panel dashboard-clean-hero ${hasIssues ? "warn" : "ok"}">
+        <div class="dashboard-clean-hero-main">
+          <span class="dashboard-kicker">运行总览</span>
+          <h2>${hasIssues ? "系统有项目需要处理" : "系统运行正常"}</h2>
+          <p>刷新于 ${esc(fmtTime(data.generatedAtEpochMillis, true))}，已运行 ${esc(fmtDuration(system.uptimeMs))}。</p>
+          <div class="dashboard-clean-actions">
+            <button type="button" class="about-action primary" data-action="refresh-current">刷新仪表盘</button>
+            <button type="button" class="about-action secondary" data-action="goto" data-page="system">系统维护</button>
+          </div>
         </div>
-        ${failedPlugins || failedDeliveries || loginFailed ? `<div class="dashboard-status-details">
-          ${failedPlugins ? `<span class="dashboard-status-badge bad">${failedPlugins} 个插件异常</span>` : ""}
-          ${loginFailed ? `<span class="dashboard-status-badge warn">${loginFailed} 个账号未登录</span>` : ""}
-          ${failedDeliveries ? `<span class="dashboard-status-badge bad">${failedDeliveries} 条消息失败</span>` : ""}
-        </div>` : ""}
+        <div class="dashboard-clean-metrics">
+          ${dashboardMetric("订阅关系", data.subscriptionCount, "当前订阅配置")}
+          ${dashboardMetric("发布者", data.publisherCount, "已记录内容源")}
+          ${dashboardMetric("消息目标", data.subscriberCount, "可投递目标")}
+          ${dashboardMetric("堆内存", `${memoryPercent}%`, `${fmtBytes(system.usedMemoryBytes)} / ${fmtBytes(system.maxMemoryBytes)}`, memoryPercent >= 80 ? "warn" : "")}
+        </div>
       </section>
 
-      <div class="dashboard-metrics-row">
-        ${metricCardNew("订阅关系", data.subscriptionCount, "subscription", "订阅管理", "subscriptions")}
-        ${metricCardNew("发布者", data.publisherCount, "publisher", "内容源", "entities")}
-        ${metricCardNew("消息目标", data.subscriberCount, "target", "推送目标", "entities")}
-        ${metricCardNew("插件", `${activePlugins}/${totalPlugins}`, "plugin", `${failedPlugins ? failedPlugins + " 个异常" : "全部正常"}`, "plugins")}
-        ${metricCardNew("内存", `${memoryPercent}%`, "memory", `${fmtBytes(data.system.usedMemoryBytes)} / ${fmtBytes(data.system.maxMemoryBytes)}`, "system", memoryPercent >= 80 ? "warn" : "")}
-        ${metricCardNew("服务", data.system.webAdminPort, "port", data.system.webAdminHost, "system")}
-      </div>
+      <section class="dashboard-clean-grid">
+        ${summaryCard("插件状态", `${activePlugins}/${totalPlugins} 运行中`, failedPlugins ? `${failedPlugins} 个异常` : "全部正常", "plugins", [
+          infoRow("已加载", `${totalPlugins} 个插件`),
+          infoRow("运行中", `${activePlugins} 个`, activePlugins === totalPlugins ? "ok" : ""),
+          infoRow("异常", `${failedPlugins} 个`, failedPlugins ? "bad" : "ok"),
+        ], renderPluginSummary(plugins))}
 
-      <div class="dashboard-panels-grid">
-        <section class="dashboard-panel">
-          <div class="dashboard-panel-header">
-            <div class="dashboard-panel-title">
-              <span class="dashboard-panel-icon">🔌</span>
-              <div>
-                <h2>插件状态</h2>
-                <p>${activePlugins}/${totalPlugins} 插件运行中${failedPlugins ? `，${failedPlugins} 个异常` : ""}</p>
-              </div>
-            </div>
-            <button class="secondary compact" data-action="goto" data-page="plugins">管理插件</button>
-          </div>
-          <div class="dashboard-panel-body">
-            ${renderPluginHealth(plugins)}
-          </div>
-        </section>
+        ${summaryCard("账号连接", `${loginSuccess}/${logins.length || 0} 已登录`, loginFailed ? `${loginFailed} 个未登录` : "状态正常", "login", [
+          infoRow("来源账号", `${logins.length || 0} 个`),
+          infoRow("已登录", `${loginSuccess} 个`, loginSuccess === logins.length ? "ok" : ""),
+          infoRow("需处理", `${loginFailed} 个`, loginFailed ? "bad" : "ok"),
+        ], renderLoginSummary(logins))}
 
-        <section class="dashboard-panel">
-          <div class="dashboard-panel-header">
-            <div class="dashboard-panel-title">
-              <span class="dashboard-panel-icon">👤</span>
-              <div>
-                <h2>账号连接</h2>
-                <p>${loginSuccess}/${logins.length} 源账号已登录${loginFailed ? `，${loginFailed} 个未登录` : ""}</p>
-              </div>
-            </div>
-            <button class="secondary compact" data-action="goto" data-page="login">账号管理</button>
-          </div>
-          <div class="dashboard-panel-body">
-            ${renderLoginHealth(logins)}
-          </div>
-        </section>
+        ${summaryCard("消息投递", `${pendingDeliveries} 等待发送`, failedDeliveries ? `${failedDeliveries} 条失败` : "队列正常", "messages", [
+          infoRow("已发送", sentDeliveries, "ok"),
+          infoRow("发送中", sendingDeliveries),
+          infoRow("等待中", pendingDeliveries, pendingDeliveries ? "warn" : ""),
+          infoRow("失败", failedDeliveries, failedDeliveries ? "bad" : "ok"),
+        ], renderFailureSummary(recentFailures))}
 
-        <section class="dashboard-panel dashboard-panel-wide">
-          <div class="dashboard-panel-header">
-            <div class="dashboard-panel-title">
-              <span class="dashboard-panel-icon">📨</span>
-              <div>
-                <h2>消息投递</h2>
-                <p>${pendingDeliveries} 等待发送${failedDeliveries ? `，${failedDeliveries} 条失败` : ""}</p>
-              </div>
-            </div>
-            <button class="secondary compact" data-action="goto" data-page="messages">查看消息</button>
-          </div>
-          <div class="dashboard-panel-body">
-            ${renderDeliveryHealthNew(deliveryCounts, recentFailures)}
-          </div>
-        </section>
+        ${summaryCard("系统环境", esc(fmtDuration(system.uptimeMs)), `启动于 ${fmtTime(system.startedAtEpochMillis, true)}`, "system", [
+          infoRow("后台地址", `${system.webAdminHost}:${system.webAdminPort}`),
+          infoRow("堆内存", `${memoryPercent}%`, memoryPercent >= 80 ? "warn" : "ok"),
+          infoRow("Java", system.javaVersion || "-"),
+          infoRow("系统", system.osName || "-"),
+        ])}
 
-        <section class="dashboard-panel dashboard-panel-wide">
-          <div class="dashboard-panel-header">
-            <div class="dashboard-panel-title">
-              <span class="dashboard-panel-icon">📋</span>
-              <div>
-                <h2>系统日志</h2>
-                <p>最近的警告与错误记录</p>
-              </div>
-            </div>
-            <button class="secondary compact" data-action="goto" data-page="logs">完整日志</button>
-          </div>
-          <div class="dashboard-panel-body">
-            ${renderLogHealth(recentLogs)}
-          </div>
-        </section>
-      </div>
+        ${recentCard(recentLogs, recentFailures)}
+      </section>
     </section>`;
 }
 
@@ -161,141 +121,92 @@ function countMap(rows) {
   return Object.fromEntries((rows || []).map(item => [item.state, item.count]));
 }
 
-function metricCardNew(title, value, icon, sub, page = "", tone = "") {
-  const iconMap = {
-    subscription: "📋",
-    publisher: "📡",
-    target: "📮",
-    plugin: "🔌",
-    memory: "💾",
-    port: "🌐"
-  };
-  return `<button type="button" class="dashboard-metric-card-new ${attr(tone)}" data-action="goto" data-page="${attr(page)}">
-    <div class="dashboard-metric-icon">${iconMap[icon] || "📊"}</div>
-    <div class="dashboard-metric-content">
-      <div class="dashboard-metric-label">${esc(title)}</div>
-      <div class="dashboard-metric-value">${esc(value)}</div>
-      <div class="dashboard-metric-sub">${esc(sub)}</div>
-    </div>
-  </button>`;
+function memoryUsagePercent(system) {
+  const used = Number(system.usedMemoryBytes || 0);
+  const max = Math.max(Number(system.maxMemoryBytes || 1), 1);
+  return Math.max(0, Math.min(100, Math.round((used / max) * 100)));
 }
 
-function renderPluginHealth(plugins) {
-  if (!plugins.length) return `<div class="dashboard-empty">暂无插件</div>`;
-  return `<div class="dashboard-card-list">${
-    plugins.slice(0, 6).map(plugin => {
-      const stateClass = plugin.state === "ACTIVE" ? "ok" : plugin.state === "FAILED" ? "bad" : "warn";
-      const stateIcon = plugin.state === "ACTIVE" ? "✓" : plugin.state === "FAILED" ? "✗" : "◷";
-      return `<div class="dashboard-card-item">
-        <div class="dashboard-card-info">
-          <div class="dashboard-card-title">${esc(plugin.name)}</div>
-          <div class="dashboard-card-meta">
-            <span class="dashboard-card-id">${esc(plugin.id)}</span>
-            ${(plugin.capabilities || []).slice(0, 3).map(cap => `<span class="dashboard-tag">${esc(cap)}</span>`).join("")}
-          </div>
-        </div>
-        <div class="dashboard-card-status ${stateClass}">
-          <span class="dashboard-status-dot">${stateIcon}</span>
-          <span>${esc(plugin.state)}</span>
-        </div>
-      </div>`;
-    }).join("")
-  }</div>`;
-}
-
-function renderLoginHealth(items) {
-  if (!items.length) return `<div class="dashboard-empty">暂无源账号登录</div>`;
-  return `<div class="dashboard-card-list">${
-    items.map(item => {
-      const statusClass = item.status === "SUCCESS" ? "ok" : "bad";
-      const statusIcon = item.status === "SUCCESS" ? "✓" : "✗";
-      return `<div class="dashboard-card-item">
-        <div class="dashboard-card-info">
-          <div class="dashboard-card-title">${platformTag(item.platformId, item.platformId)}</div>
-          <div class="dashboard-card-meta">
-            <span>${esc(item.account && item.account.name || item.message || "-")}</span>
-          </div>
-        </div>
-        <div class="dashboard-card-status ${statusClass}">
-          <span class="dashboard-status-dot">${statusIcon}</span>
-          <span>${esc(item.status)}</span>
-        </div>
-      </div>`;
-    }).join("")
-  }</div>`;
-}
-
-function renderDeliveryHealthNew(counts, failures) {
-  const pending = counts.PENDING || 0;
-  const sending = counts.SENDING || 0;
-  const sent = counts.SENT || 0;
-  const failed = counts.FAILED || 0;
-
-  return `<div class="dashboard-delivery-section">
-    <div class="dashboard-delivery-stats">
-      <div class="dashboard-delivery-stat ok">
-        <div class="dashboard-delivery-stat-icon">✓</div>
-        <div class="dashboard-delivery-stat-content">
-          <div class="dashboard-delivery-stat-value">${sent}</div>
-          <div class="dashboard-delivery-stat-label">已发送</div>
-        </div>
-      </div>
-      <div class="dashboard-delivery-stat ${pending > 0 ? "warn" : "soft"}">
-        <div class="dashboard-delivery-stat-icon">◷</div>
-        <div class="dashboard-delivery-stat-content">
-          <div class="dashboard-delivery-stat-value">${pending}</div>
-          <div class="dashboard-delivery-stat-label">等待中</div>
-        </div>
-      </div>
-      <div class="dashboard-delivery-stat info">
-        <div class="dashboard-delivery-stat-icon">⟳</div>
-        <div class="dashboard-delivery-stat-content">
-          <div class="dashboard-delivery-stat-value">${sending}</div>
-          <div class="dashboard-delivery-stat-label">发送中</div>
-        </div>
-      </div>
-      <div class="dashboard-delivery-stat ${failed > 0 ? "bad" : "soft"}">
-        <div class="dashboard-delivery-stat-icon">✗</div>
-        <div class="dashboard-delivery-stat-content">
-          <div class="dashboard-delivery-stat-value">${failed}</div>
-          <div class="dashboard-delivery-stat-label">失败</div>
-        </div>
-      </div>
-    </div>
-    ${failures.length ? `<div class="dashboard-failures-list">
-      <div class="dashboard-failures-title">最近失败的消息</div>
-      ${failures.slice(0, 4).map(row => `<div class="dashboard-failure-item">
-        <div class="dashboard-failure-icon">⚠️</div>
-        <div class="dashboard-failure-content">
-          <div class="dashboard-failure-target">${esc(String(row.targetKey || "").replace(//g, " / "))}</div>
-          <div class="dashboard-failure-error">${esc(row.lastError || "-")}</div>
-          <div class="dashboard-failure-id">消息 ID: ${esc(row.messageId)}</div>
-        </div>
-      </div>`).join("")}
-    </div>` : ""}
+function dashboardMetric(title, value, hint, tone = "") {
+  return `<div class="dashboard-clean-metric ${attr(tone)}">
+    <span>${esc(title)}</span>
+    <b>${esc(String(value ?? "-"))}</b>
+    <small>${esc(String(hint || ""))}</small>
   </div>`;
 }
 
-function renderLogHealth(rows) {
-  if (!rows.length) return `<div class="dashboard-empty">暂无警告或错误日志</div>`;
-  return `<div class="dashboard-card-list">${
-    rows.slice(0, 6).map(row => {
-      const levelClass = row.level === "ERROR" ? "bad" : "warn";
-      const levelIcon = row.level === "ERROR" ? "✗" : "⚠";
-      return `<div class="dashboard-card-item">
-        <div class="dashboard-card-info">
-          <div class="dashboard-card-title">${esc(row.message)}</div>
-          <div class="dashboard-card-meta">
-            <span>${esc(row.loggerName)}</span>
-            <span>·</span>
-            <span>${fmtTime(row.timestampEpochMillis, true)}</span>
-          </div>
-        </div>
-        <div class="dashboard-card-status ${levelClass}">
-          <span class="dashboard-status-dot">${levelIcon}</span>
-          <span>${esc(row.level)}</span>
-        </div>
-      </div>`;
-    }).join("")
-  }</div>`;
+function summaryCard(title, value, subtitle, page, rows, extra = "") {
+  return `<article class="panel dashboard-clean-card">
+    <div class="dashboard-clean-card-head">
+      <div>
+        <h2>${esc(title)}</h2>
+        <p>${esc(subtitle || "")}</p>
+      </div>
+      <button type="button" class="secondary compact" data-action="goto" data-page="${attr(page)}">查看</button>
+    </div>
+    <div class="dashboard-clean-card-value">${value}</div>
+    <div class="dashboard-clean-info-list">${rows.join("")}</div>
+    ${extra ? `<div class="dashboard-clean-extra">${extra}</div>` : ""}
+  </article>`;
+}
+
+function infoRow(name, value, tone = "") {
+  return `<div class="dashboard-clean-info-row ${attr(tone)}">
+    <span>${esc(name)}</span>
+    <strong>${esc(String(value ?? "-"))}</strong>
+  </div>`;
+}
+
+function renderPluginSummary(plugins) {
+  if (!plugins.length) return `<div class="dashboard-clean-empty">暂无插件</div>`;
+  const failed = plugins.filter(plugin => plugin.state === "FAILED");
+  const rows = (failed.length ? failed : plugins).slice(0, 4);
+  return `<div class="dashboard-clean-chip-list">${rows.map(plugin => {
+    const tone = plugin.state === "ACTIVE" ? "ok" : plugin.state === "FAILED" ? "bad" : "warn";
+    return `<span class="dashboard-clean-chip ${tone}">${esc(plugin.name)} · ${esc(plugin.state)}</span>`;
+  }).join("")}</div>`;
+}
+
+function renderLoginSummary(items) {
+  if (!items.length) return `<div class="dashboard-clean-empty">暂无源账号登录</div>`;
+  const failed = items.filter(item => item.status !== "SUCCESS");
+  const rows = (failed.length ? failed : items).slice(0, 4);
+  return `<div class="dashboard-clean-chip-list">${rows.map(item => {
+    const tone = item.status === "SUCCESS" ? "ok" : "bad";
+    const name = item.account && item.account.name || item.message || item.platformId || "账号";
+    return `<span class="dashboard-clean-chip ${tone}">${esc(item.platformId)} · ${esc(name)}</span>`;
+  }).join("")}</div>`;
+}
+
+function renderFailureSummary(failures) {
+  if (!failures.length) return `<div class="dashboard-clean-empty">暂无最近失败投递</div>`;
+  return `<div class="dashboard-clean-lines">${failures.slice(0, 3).map(row => `<div class="dashboard-clean-line bad">
+    <strong>${esc(formatTargetKey(row.targetKey))}</strong>
+    <span>${esc(row.lastError || row.messageId || "投递失败")}</span>
+  </div>`).join("")}</div>`;
+}
+
+function recentCard(logs, failures) {
+  const rows = [
+    ...failures.slice(0, 3).map(item => ({ tone: "bad", title: formatTargetKey(item.targetKey), text: item.lastError || item.messageId || "投递失败" })),
+    ...logs.slice(0, 5).map(item => ({ tone: item.level === "ERROR" ? "bad" : "warn", title: `${item.level} · ${item.loggerName}`, text: item.message })),
+  ].slice(0, 6);
+
+  return `<article class="panel dashboard-clean-card dashboard-clean-card-wide">
+    <div class="dashboard-clean-card-head">
+      <div>
+        <h2>最近异常</h2>
+        <p>聚合展示投递失败和警告日志</p>
+      </div>
+      <button type="button" class="secondary compact" data-action="goto" data-page="logs">查看日志</button>
+    </div>
+    ${rows.length ? `<div class="dashboard-clean-lines">${rows.map(row => `<div class="dashboard-clean-line ${attr(row.tone)}">
+      <strong>${esc(row.title || "-")}</strong>
+      <span>${esc(row.text || "-")}</span>
+    </div>`).join("")}</div>` : `<div class="dashboard-clean-empty">暂无需要关注的异常</div>`}
+  </article>`;
+}
+
+function formatTargetKey(value) {
+  return String(value || "-").replace(//g, " / ");
 }

@@ -110,6 +110,23 @@ private fun MainDynamicConfig.withGeneratedMediaDeliverySecrets(secretProvider: 
     }
 }
 
+private fun mergeLegacyLinkTemplates(
+    previewTemplate: String?,
+    videoTemplate: String?,
+): String {
+    val preview = previewTemplate
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?: LinkParseTemplates.DEFAULT_MESSAGE_TEMPLATE.substringBefore("\\r")
+    if (preview.contains("{video}")) return preview
+
+    val video = videoTemplate
+        ?.trim()
+        ?.takeIf { it.isNotBlank() }
+        ?: "{video}"
+    return "$preview\\r$video"
+}
+
 public object MainConfigForms {
     public val migrations: List<ConfigMigration> = listOf(
         ConfigMigration(
@@ -246,8 +263,26 @@ public object MainConfigForms {
         },
         ConfigMigration(
             id = "main-link-video-download-simplified-prompts",
-            description = "精简链接视频下载提示，并将旧默认视频大小上限改为不限制",
+            description = "精简链接解析模板和视频下载提示，并将旧默认视频大小上限改为不限制",
         ) {
+            val oldVideoTemplate = (get("linkParsing.templates.video") as? String)
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+            val oldFallbackTemplate = (get("linkParsing.templates.fallback") as? String)
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+            val oldVideoFileTemplate = (get("linkParsing.templates.videoFile") as? String)
+                ?.trim()
+                ?.takeIf { it.isNotBlank() }
+            if (!contains("linkParsing.templates.message")) {
+                set(
+                    "linkParsing.templates.message",
+                    mergeLegacyLinkTemplates(
+                        previewTemplate = oldVideoTemplate ?: oldFallbackTemplate,
+                        videoTemplate = oldVideoFileTemplate,
+                    ),
+                )
+            }
             val maxFileMegabytes = when (val value = get("linkParsing.videoDownload.maxFileMegabytes")) {
                 is Number -> value.toDouble()
                 is String -> value.toDoubleOrNull()
@@ -261,6 +296,11 @@ public object MainConfigForms {
             remove("linkParsing.videoDownload.prompts.noDownloader")
             remove("linkParsing.videoDownload.prompts.timeout")
             remove("linkParsing.videoDownload.prompts.fileTooLarge")
+            remove("linkParsing.templates.video")
+            remove("linkParsing.templates.live")
+            remove("linkParsing.templates.user")
+            remove("linkParsing.templates.fallback")
+            remove("linkParsing.templates.videoFile")
         },
     )
 
@@ -397,55 +437,14 @@ public object MainConfigForms {
                     description = "完成后自动撤回解析中提示。\n如果目标平台不支持撤回，会自动忽略，不影响解析结果发送。",
                 ),
                 ConfigFieldSpec(
-                    path = "linkParsing.templates.video",
-                    label = "视频链接模板",
+                    path = "linkParsing.templates.message",
+                    label = "链接解析模板",
                     type = ConfigFieldType.TEXTAREA,
                     section = "链接解析模板",
-                    description = "视频链接预览的发送格式。\n可使用 {draw}、{cover}、{name}、{uid}、{id}、{kind}、{title}、{content}、{duration}、{stats}、{link}。\\n 表示换行，\\r 表示拆成多条消息。",
+                    description = "链接解析结果的发送格式。\n可使用 {draw}、{cover}、{video}、{name}、{uid}、{id}、{kind}、{title}、{content}、{duration}、{size}、{stats}、{link}。\\n 表示换行，\\r 表示拆成多条消息，{>>}...{<<} 会作为合并转发发送。{video} 放在合并转发外会下载完成后单独发送；放在合并转发内会等待视频后发送该合并转发。",
                     component = "MESSAGE_TEMPLATE_EDITOR",
-                    metadata = mapOf("templateKind" to "LINK_VIDEO"),
+                    metadata = mapOf("templateKind" to "LINK_MESSAGE"),
                     required = true,
-                ),
-                ConfigFieldSpec(
-                    path = "linkParsing.templates.live",
-                    label = "直播链接模板",
-                    type = ConfigFieldType.TEXTAREA,
-                    section = "链接解析模板",
-                    description = "直播间链接预览的发送格式。\n可使用 {draw}、{cover}、{name}、{uid}、{id}、{kind}、{title}、{content}、{stats}、{link}。\\n 表示换行，\\r 表示拆成多条消息。",
-                    component = "MESSAGE_TEMPLATE_EDITOR",
-                    metadata = mapOf("templateKind" to "LINK_LIVE"),
-                    required = true,
-                ),
-                ConfigFieldSpec(
-                    path = "linkParsing.templates.user",
-                    label = "用户页链接模板",
-                    type = ConfigFieldType.TEXTAREA,
-                    section = "链接解析模板",
-                    description = "用户主页链接预览的发送格式。\n可使用 {draw}、{cover}、{name}、{uid}、{id}、{kind}、{title}、{content}、{link}。\\n 表示换行，\\r 表示拆成多条消息。",
-                    component = "MESSAGE_TEMPLATE_EDITOR",
-                    metadata = mapOf("templateKind" to "LINK_USER"),
-                    required = true,
-                ),
-                ConfigFieldSpec(
-                    path = "linkParsing.templates.fallback",
-                    label = "通用链接模板",
-                    type = ConfigFieldType.TEXTAREA,
-                    section = "链接解析模板",
-                    description = "其他链接预览的发送格式。\n当链接没有专用模板时使用。可使用 {draw}、{cover}、{name}、{uid}、{id}、{kind}、{title}、{content}、{stats}、{link}。",
-                    component = "MESSAGE_TEMPLATE_EDITOR",
-                    metadata = mapOf("templateKind" to "LINK_FALLBACK"),
-                    required = true,
-                ),
-                ConfigFieldSpec(
-                    path = "linkParsing.templates.videoFile",
-                    label = "下载视频模板",
-                    type = ConfigFieldType.TEXTAREA,
-                    section = "链接解析模板",
-                    description = "视频文件发送成功后的消息格式。\n可使用 {video}、{name}、{uid}、{id}、{title}、{content}、{duration}、{size}、{link}。\\n 表示换行，\\r 表示拆成多条消息。",
-                    component = "MESSAGE_TEMPLATE_EDITOR",
-                    metadata = mapOf("templateKind" to "LINK_VIDEO_FILE"),
-                    required = true,
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.videoDownload.enabled",
@@ -952,11 +951,7 @@ public object MainConfigForms {
         "draw.width",
         "draw.font.text",
         "draw.font.emoji",
-        "linkParsing.templates.video",
-        "linkParsing.templates.live",
-        "linkParsing.templates.user",
-        "linkParsing.templates.fallback",
-        "linkParsing.templates.videoFile",
+        "linkParsing.templates.message",
         "linkParsing.maxLinksPerMessage",
         "linkParsing.autoDedupeTtlSeconds",
         "linkParsing.progressReply.text",
@@ -1045,11 +1040,7 @@ public object MainConfigForms {
             "draw.width",
             "draw.font.text",
             "draw.font.emoji",
-            "linkParsing.templates.video",
-            "linkParsing.templates.live",
-            "linkParsing.templates.user",
-            "linkParsing.templates.fallback",
-            "linkParsing.templates.videoFile",
+            "linkParsing.templates.message",
             "linkParsing.autoParseEnabled",
             "linkParsing.fallbackTriggerMode",
             "linkParsing.videoDownload.enabled",
@@ -1138,16 +1129,8 @@ public object MainConfigForms {
         }
         require(config.linkParsing.maxLinksPerMessage >= 1) { "单条消息最大解析链接数至少为 1" }
         require(config.linkParsing.autoDedupeTtlSeconds >= 0.0) { "自动去重时间窗口不能为负数" }
-        require(config.linkParsing.templates.video.isNotBlank()) { "视频链接模板不能为空" }
-        require(config.linkParsing.templates.live.isNotBlank()) { "直播链接模板不能为空" }
-        require(config.linkParsing.templates.user.isNotBlank()) { "用户页链接模板不能为空" }
-        require(config.linkParsing.templates.fallback.isNotBlank()) { "通用链接模板不能为空" }
-        require(config.linkParsing.templates.videoFile.isNotBlank()) { "下载视频模板不能为空" }
-        LinkPreviewTemplateRenderer.validate(config.linkParsing.templates.video)
-        LinkPreviewTemplateRenderer.validate(config.linkParsing.templates.live)
-        LinkPreviewTemplateRenderer.validate(config.linkParsing.templates.user)
-        LinkPreviewTemplateRenderer.validate(config.linkParsing.templates.fallback)
-        LinkPreviewTemplateRenderer.validate(config.linkParsing.templates.videoFile)
+        require(config.linkParsing.templates.message.isNotBlank()) { "链接解析模板不能为空" }
+        LinkPreviewTemplateRenderer.validate(config.linkParsing.templates.message)
         val videoDownload = config.linkParsing.videoDownload
         require(videoDownload.maxDurationSeconds >= 0) { "视频最大时长不能为负数" }
         require(videoDownload.maxFileMegabytes.isFiniteNumber()) { "视频最大大小必须是有效数字" }

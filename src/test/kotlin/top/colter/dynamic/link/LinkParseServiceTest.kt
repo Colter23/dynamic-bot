@@ -6,6 +6,7 @@ import kotlin.io.path.createDirectories
 import kotlin.io.path.writeBytes
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
@@ -468,7 +469,7 @@ class LinkParseServiceTest {
                 val content = previewMessage.batches.single().content
                 assertTrue(content.any { it is MessageContent.Image })
                 assertEquals(emptyList(), content.filterIsInstance<MessageContent.Text>())
-                assertEquals(listOf("视频正在下载，完成后会继续推送。"), messenger.sentTexts)
+                assertEquals(listOf("视频下载中，请稍候..."), messenger.sentTexts)
             },
         )
         val service = LinkParseService(
@@ -708,7 +709,7 @@ class LinkParseServiceTest {
                 MainDynamicConfig(
                     linkParsing = LinkParsingConfig(
                         templates = LinkParseTemplates(
-                            video = "【{kind}】{title}\\n{name}@{uid}\\n{content}\\n{link}",
+                            message = "【{kind}】{title}\\n{name}@{uid}\\n{content}\\n{link}",
                         ),
                     ),
                 )
@@ -732,6 +733,120 @@ class LinkParseServiceTest {
             "【视频】demo video\nbilibili@BV1xx411c7mD\ndemo description\nhttps://www.bilibili.com/video/BV1xx411c7mD",
             text.fallbackText,
         )
+    }
+
+    @Test
+    fun `video link template without video placeholder should not download video`() = runBlocking {
+        initDb("video-download-template-without-video")
+        val cacheRoot = createTempDirectory("dynamic-bot-link-video-cache")
+        val downloader = FakeVideoDownloader(
+            result = LinkVideoDownloadResult(
+                video = MediaRef("video.mp4", MediaKind.VIDEO, mimeType = "video/mp4"),
+                fileSizeBytes = 4,
+            ),
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeVideoLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{title}\\n{link}"),
+                        videoDownload = LinkVideoDownloadConfig(
+                            enabled = true,
+                            maxFileMegabytes = 1.0,
+                            cacheRoot = cacheRoot.toString(),
+                        ),
+                    ),
+                )
+            },
+            videoDownloadersProvider = { listOf(downloader) },
+            previewRenderer = LinkPreviewRenderer {
+                error("纯文本链接解析模板不应触发绘图")
+            },
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://www.bilibili.com/video/BV1xx411c7mD",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(1, result.forwarded.size)
+        assertEquals(emptyList(), downloader.requests)
+        val delivery = MessageDeliveryRepository.findRecent(limit = 1).single()
+        val message = MessageDeliveryRepository.findMessage(delivery.messageId)!!
+        val text = message.batches.single().content.single() as MessageContent.Text
+        assertEquals("demo video\nhttps://www.bilibili.com/video/BV1xx411c7mD", text.fallbackText)
+    }
+
+    @Test
+    fun `video placeholder inside forward should wait for download and send video in merged forward`() = runBlocking {
+        initDb("video-download-forward-sync")
+        val cacheRoot = createTempDirectory("dynamic-bot-link-video-cache")
+        val videoFile = cacheRoot.resolve("video.mp4")
+        videoFile.writeBytes(byteArrayOf(0, 0, 0, 1))
+        val downloadStarted = CompletableDeferred<Unit>()
+        val releaseDownload = CompletableDeferred<Unit>()
+        val messenger = RecordingProgressMessenger()
+        val downloader = FakeVideoDownloader(
+            result = LinkVideoDownloadResult(
+                video = MediaRef(videoFile.toString(), MediaKind.VIDEO, mimeType = "video/mp4"),
+                fileSizeBytes = 4,
+            ),
+            onRequest = {
+                downloadStarted.complete(Unit)
+                releaseDownload.await()
+            },
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeVideoLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{>>}{draw}\\r{video}{<<}"),
+                        videoDownload = LinkVideoDownloadConfig(
+                            enabled = true,
+                            maxFileMegabytes = 1.0,
+                            cacheRoot = cacheRoot.toString(),
+                        ),
+                    ),
+                )
+            },
+            videoDownloadersProvider = { listOf(downloader) },
+            previewRenderer = LinkPreviewRenderer {
+                MediaRef("https://example.com/preview.png", MediaKind.IMAGE)
+            },
+            progressMessenger = messenger,
+            backgroundScope = this,
+        )
+
+        val resultJob = async {
+            service.parseAndDispatch(
+                text = "https://www.bilibili.com/video/BV1xx411c7mD",
+                context = commandEvent("").context,
+                maxLinks = 1,
+                inReplyTo = "trace",
+            )
+        }
+
+        withTimeout(3_000) { downloadStarted.await() }
+        assertFalse(resultJob.isCompleted)
+        assertEquals(emptyList(), MessageDeliveryRepository.findRecent(limit = 10))
+        assertEquals(listOf("视频下载中，请稍候..."), messenger.sentTexts)
+
+        releaseDownload.complete(Unit)
+        val result = withTimeout(3_000) { resultJob.await() }
+
+        assertEquals(1, result.forwarded.size)
+        assertEquals(1, result.forwarded.single().deliveryCount)
+        assertEquals(listOf("progress-1"), messenger.recalledIds)
+        val message = MessageDeliveryRepository.findRecent(limit = 1)
+            .mapNotNull { MessageDeliveryRepository.findMessage(it.messageId) }
+            .single()
+        val forward = message.batches.single().content.single() as MessageContent.Forward
+        assertEquals(2, forward.nodes.size)
+        assertTrue(forward.nodes[0].batches.single().content.any { it is MessageContent.Image })
+        assertTrue(forward.nodes[1].batches.single().content.any { it is MessageContent.Video })
     }
 
     @Test
