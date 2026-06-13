@@ -1109,6 +1109,7 @@ public class AdminService(
         var updated = 0
         var failed = 0
         val items = mutableListOf<SubscriptionImportItemResult>()
+        val autoFollowCandidates = linkedMapOf<String, LinkedHashSet<String>>()
         for ((index, item) in latestByRelation.values) {
             val publisherKey = item.publisherKeyText()
             val targetKey = item.targetKeyText()
@@ -1118,10 +1119,17 @@ public class AdminService(
                 val response = createSubscriptionInternal(
                     request = item.toCreateSubscriptionRequest(),
                     replacementFilterConditions = filterConditions,
-                    skipAutoFollow = skipAutoFollow,
+                    skipAutoFollow = true,
                 )
                 val status = if (response.subscriptionCreated) "CREATED" else "UPDATED"
                 if (response.subscriptionCreated) created += 1 else updated += 1
+                if (!skipAutoFollow && response.subscriptionCreated) {
+                    response.subscription.publisher?.let { publisher ->
+                        autoFollowCandidates
+                            .getOrPut(publisher.platformId) { linkedSetOf() }
+                            .add(publisher.externalId)
+                    }
+                }
                 items += SubscriptionImportItemResult(
                     index = index,
                     status = status,
@@ -1146,6 +1154,12 @@ public class AdminService(
                 )
             }
         }
+        val autoFollowWarnings = if (!skipAutoFollow && configProvider().subscription.autoFollowPublisherOnSubscribe) {
+            ensureImportedPublishersFollowed(autoFollowCandidates)
+        } else {
+            emptyList()
+        }
+        warnings += autoFollowWarnings
 
         logger.info {
             "后台订阅导入完成：total=${document.subscriptions.size}，created=$created，updated=$updated，failed=$failed，duplicates=$duplicateCount"
@@ -1664,6 +1678,45 @@ public class AdminService(
                 warning = "未找到发布者关注插件，已跳过自动关注：$platform",
             )
         return ensureFollowed(plugin, platform, externalId)
+    }
+
+    private suspend fun ensureImportedPublishersFollowed(
+        candidatesByPlatform: Map<String, Set<String>>,
+    ): List<String> {
+        if (candidatesByPlatform.isEmpty()) return emptyList()
+        val warnings = mutableListOf<String>()
+        candidatesByPlatform.forEach { (platform, externalIds) ->
+            val ids = externalIds
+                .asSequence()
+                .map { it.trim() }
+                .filter { it.isNotBlank() }
+                .distinct()
+                .toList()
+            if (ids.isEmpty()) return@forEach
+            val plugin = publisherFollowResolver(platform)
+            if (plugin == null) {
+                warnings += "未找到发布者关注插件，已跳过导入自动关注：$platform，数量=${ids.size}"
+                return@forEach
+            }
+            val results = runCatching { plugin.followPublishers(ids) }
+                .getOrElse { error ->
+                    warnings += "导入自动关注失败：$platform，数量=${ids.size}，原因=${error.message ?: error.javaClass.name}"
+                    return@forEach
+                }
+            val failed = results.filterValues { it.status == FollowActionStatus.FAILED }
+            val unsupported = results.filterValues { it.status == FollowActionStatus.UNSUPPORTED }
+            if (failed.isNotEmpty()) {
+                warnings += "导入自动关注部分失败：$platform，数量=${failed.size}，示例=${failed.keys.take(3).joinToString(", ")}"
+            }
+            if (unsupported.isNotEmpty()) {
+                warnings += "平台不支持关注操作，已跳过导入自动关注：$platform，数量=${unsupported.size}"
+            }
+            val missing = ids.filterNot { it in results }
+            if (missing.isNotEmpty()) {
+                warnings += "导入自动关注结果缺失：$platform，数量=${missing.size}，示例=${missing.take(3).joinToString(", ")}"
+            }
+        }
+        return warnings
     }
 
     private suspend fun ensureFollowed(

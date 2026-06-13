@@ -1218,6 +1218,33 @@ class AdminServerTest {
     }
 
     @Test
+    fun importSubscriptionsShouldBatchAutoFollowCreatedPublishers() = runBlocking {
+        initDb("admin-subscription-import-batch-follow")
+        val plugin = FakePublisherFollowPlugin()
+        val service = service(plugin)
+        val document = SubscriptionExportDocument(
+            exportedAtEpochSeconds = 1,
+            subscriptions = listOf(
+                SubscriptionExportItem(
+                    publisher = SubscriptionExportPublisher("bilibili", "USER", "123"),
+                    target = SubscriptionExportTarget("qq", "GROUP", "100"),
+                ),
+                SubscriptionExportItem(
+                    publisher = SubscriptionExportPublisher("bilibili", "USER", "456"),
+                    target = SubscriptionExportTarget("qq", "GROUP", "200"),
+                ),
+            ),
+        )
+
+        val result = service.importSubscriptions(document)
+
+        assertEquals(2, result.created)
+        assertEquals(0, result.failed)
+        assertEquals(0, plugin.followPublisherCalls)
+        assertEquals(listOf(listOf("123", "456")), plugin.followPublisherBatches)
+    }
+
+    @Test
     fun importSubscriptionsShouldKeepBatchRunningWhenSingleItemFails() = runBlocking {
         initDb("admin-subscription-import-partial")
         val service = service(FakePublisherFollowPlugin())
@@ -1789,6 +1816,7 @@ class AdminServerTest {
         var searchPublisherInfoCalls: Int = 0
         var queryFollowStateCalls: Int = 0
         var followPublisherCalls: Int = 0
+        val followPublisherBatches: MutableList<List<String>> = mutableListOf()
         val searchResultsByQuery: MutableMap<String, List<PublisherInfo>> = linkedMapOf()
 
         override suspend fun fetchPublisherInfo(userId: String): PublisherInfo? {
@@ -1817,6 +1845,13 @@ class AdminServerTest {
             followPublisherCalls += 1
             followed = true
             return FollowActionResult(FollowActionStatus.DONE)
+        }
+
+        override suspend fun followPublishers(userIds: Collection<String>): Map<String, FollowActionResult> {
+            val ids = userIds.toList()
+            followPublisherBatches += ids
+            followed = true
+            return ids.associateWith { FollowActionResult(FollowActionStatus.DONE) }
         }
     }
 
