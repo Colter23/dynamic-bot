@@ -650,7 +650,7 @@ public object MainConfigForms {
                     label = "默认媒体交付 profile",
                     type = ConfigFieldType.TEXT,
                     section = "媒体交付",
-                    description = "消息出口没有单独指定时使用的媒体交付 profile ID。\nOneBot 可在插件配置或单个连接中引用这里的 profile。",
+                    description = "消息出口未指定媒体交付 profile 时使用的默认 profile ID。",
                     component = "HIDDEN",
                     required = true,
                 ),

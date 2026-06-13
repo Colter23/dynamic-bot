@@ -278,7 +278,7 @@ async function loadEntities(force) {
           { title: "主题", render: p => themeSwatch(p.drawTheme) },
           { title: "头图", render: p => p.bannerUri ? mediaImage(p.bannerUri, "header-image", p.platformId, "COVER") : `<span class="sub-line">-</span>` },
           { title: "创建时间", render: p => `<span class="sub-line">${fmtTime(p.createTime)}</span>` },
-          { title: "操作", render: p => `<div class="row-actions"><button data-action="edit-publisher" data-id="${p.id}">编辑</button><button class="entity-detail-button" data-action="publisher-detail" data-id="${p.id}">详情</button><button class="danger" data-action="delete-publisher" data-id="${p.id}">删除</button></div>` }
+          { title: "操作", render: p => `<div class="row-actions"><button class="entity-detail-button" data-action="publisher-detail" data-id="${p.id}">详情</button><button data-action="edit-publisher" data-id="${p.id}">编辑</button><button class="danger" data-action="delete-publisher" data-id="${p.id}">删除</button></div>` }
         ])}
       </section>
       <section class="panel full">
@@ -291,7 +291,7 @@ async function loadEntities(force) {
           { title: "链接解析", render: s => linkParseCell(s) },
           { title: "状态", render: s => entityStatePill(s.state) },
           { title: "创建时间", render: s => `<span class="sub-line">${fmtTime(s.createTime)}</span>` },
-          { title: "操作", render: s => `<div class="row-actions"><button data-action="edit-subscriber" data-id="${s.id}">编辑</button><button class="entity-detail-button" data-action="subscriber-detail" data-id="${s.id}">详情</button><button class="danger" data-action="delete-subscriber" data-id="${s.id}">删除</button></div>` }
+          { title: "操作", render: s => `<div class="row-actions"><button class="entity-detail-button" data-action="subscriber-detail" data-id="${s.id}">详情</button><button data-action="edit-subscriber" data-id="${s.id}">编辑</button><button class="danger" data-action="delete-subscriber" data-id="${s.id}">删除</button></div>` }
         ])}
       </section>
     </section>`;
