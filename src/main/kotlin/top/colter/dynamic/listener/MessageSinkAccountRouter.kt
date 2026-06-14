@@ -125,6 +125,7 @@ public class MessageSinkAccountRouter(
                     return result.copy(
                         sinkRouteId = result.sinkRouteId ?: route.routeId,
                         sinkAccountId = result.sinkAccountId ?: route.accountId,
+                        sinkTransportId = result.sinkTransportId ?: route.transportId,
                     )
                 }
                 is MessageSendResult.Failed -> {

@@ -31,6 +31,7 @@ import top.colter.dynamic.repository.MessageEnqueueResult
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PublisherLiveRecordRepository
 import top.colter.dynamic.repository.PublisherRepository
+import top.colter.dynamic.repository.SourceUpdateSnapshotRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.link.LINK_PARSE_EVENT_LABEL
@@ -95,6 +96,7 @@ public class SourceUpdateProcessor(
 
         val chain = buildMessageBatches(resolveDynamicTemplate(), normalizedUpdate, storedPublisher)
         return publishMessage(
+            sourcePlugin = request.sourcePlugin,
             update = normalizedUpdate,
             targets = deliverableTargets,
             batches = chain,
@@ -121,6 +123,7 @@ public class SourceUpdateProcessor(
 
         val chain = buildMessageBatches(resolveLiveTemplate(normalizedUpdate), normalizedUpdate, storedPublisher)
         return publishMessage(
+            sourcePlugin = request.sourcePlugin,
             update = normalizedUpdate,
             targets = targets,
             batches = chain,
@@ -230,6 +233,7 @@ public class SourceUpdateProcessor(
     }
 
     private suspend fun publishMessage(
+        sourcePlugin: String,
         update: SourceUpdate,
         targets: List<DeliveryTarget>,
         batches: List<MessageBatch>,
@@ -240,6 +244,8 @@ public class SourceUpdateProcessor(
             logger.warn { "跳过来源更新：$skipReason，渲染后的消息为空" }
             return SourceUpdatePublishResult.ignored("渲染后的消息为空")
         }
+
+        SourceUpdateSnapshotRepository.upsert(sourcePlugin, update)
 
         val (mentionAllTargets, normalTargets) = targets.partition { it.shouldMentionAll(update) }
         val results = listOfNotNull(

@@ -25,6 +25,7 @@ import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.table.MessageDeliveryTable
 import top.colter.dynamic.table.MessageOutboxTable
+import top.colter.dynamic.table.MessageSinkReceiptTable
 import top.colter.dynamic.core.tools.nowInstant
 
 public data class MessageEnqueueResult(
@@ -292,18 +293,29 @@ public object MessageDeliveryRepository {
             if (batch.isEmpty()) return MessageHistoryCleanupResult(deletedDeliveries, deletedMessages)
 
             val messageIds = batch.map { it.second }.distinct()
+            val deletionCandidates = transaction {
+                MessageDeliveryTable
+                    .selectAll()
+                    .where {
+                        (MessageDeliveryTable.messageId inList messageIds) and
+                            ((MessageDeliveryTable.status eq DeliveryStatus.SENT) or
+                                (MessageDeliveryTable.status eq DeliveryStatus.FAILED)) and
+                            (MessageDeliveryTable.updatedAt less cutoff)
+                    }
+                    .map { it[MessageDeliveryTable.id].value to it[MessageDeliveryTable.messageId] }
+            }
+            val deliveryIds = deletionCandidates.map { it.first }.distinct()
+            if (deliveryIds.isEmpty()) return@repeat
+
             val removedDeliveries = transaction {
-                MessageDeliveryTable.deleteWhere {
-                    (MessageDeliveryTable.messageId inList messageIds) and
-                        ((MessageDeliveryTable.status eq DeliveryStatus.SENT) or
-                            (MessageDeliveryTable.status eq DeliveryStatus.FAILED)) and
-                        (MessageDeliveryTable.updatedAt less cutoff)
-                }
+                MessageSinkReceiptTable.deleteWhere { MessageSinkReceiptTable.deliveryId inList deliveryIds }
+                MessageDeliveryTable.deleteWhere { MessageDeliveryTable.id inList deliveryIds }
             }
             deletedDeliveries += removedDeliveries
 
+            val affectedMessageIds = deletionCandidates.map { it.second }.distinct()
             val orphanMessageIds = transaction {
-                messageIds.filter { messageId ->
+                affectedMessageIds.filter { messageId ->
                     MessageDeliveryTable
                         .selectAll()
                         .where { MessageDeliveryTable.messageId eq messageId }

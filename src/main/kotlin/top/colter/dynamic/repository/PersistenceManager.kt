@@ -17,11 +17,13 @@ import top.colter.dynamic.table.DynamicFilterRuleTable
 import top.colter.dynamic.table.LinkParseTargetConfigTable
 import top.colter.dynamic.table.MessageDeliveryTable
 import top.colter.dynamic.table.MessageOutboxTable
+import top.colter.dynamic.table.MessageSinkReceiptTable
 import top.colter.dynamic.table.PublisherDrawThemeTable
 import top.colter.dynamic.table.PublisherLiveRecordTable
 import top.colter.dynamic.table.PublisherLiveStatusTable
 import top.colter.dynamic.table.PublisherTable
 import top.colter.dynamic.table.SourceCursorTable
+import top.colter.dynamic.table.SourceUpdateSnapshotTable
 import top.colter.dynamic.table.SubscriberTable
 import top.colter.dynamic.table.SubscriptionTable
 
@@ -151,8 +153,10 @@ private val SCHEMA_TABLES: Array<Table> = arrayOf(
     SourceCursorTable,
     DynamicFilterRuleTable,
     LinkParseTargetConfigTable,
+    SourceUpdateSnapshotTable,
     MessageOutboxTable,
     MessageDeliveryTable,
+    MessageSinkReceiptTable,
 )
 
 // 字段改名/数据搬运迁移追加到这里；操作必须幂等，剩余建表/补列/删旧列交给 MigrationUtils 对齐。

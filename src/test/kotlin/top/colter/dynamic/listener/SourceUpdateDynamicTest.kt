@@ -46,6 +46,7 @@ import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
+import top.colter.dynamic.repository.SourceUpdateSnapshotRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testMedia
@@ -98,6 +99,7 @@ class SourceUpdateDynamicTest {
         assertEquals(SourceUpdatePublishStatus.ENQUEUED, first.status)
         assertEquals(SourceUpdatePublishStatus.DUPLICATE, second.status)
         assertEquals("${request.update.key.stableValue()}:default", firstEvent.message.id)
+        assertEquals(request.update.key, SourceUpdateSnapshotRepository.findByUpdateKey(request.update.key)?.updateKey)
         assertEquals(1, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
         assertNull(withTimeoutOrNull(300) { received.receive() })
     }

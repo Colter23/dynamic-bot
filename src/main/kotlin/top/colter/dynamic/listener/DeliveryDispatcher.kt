@@ -27,6 +27,7 @@ import top.colter.dynamic.media.OutboundMediaRouteContext
 import top.colter.dynamic.media.OutboundMediaService
 import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.repository.MessageDeliveryRepository
+import top.colter.dynamic.repository.MessageSinkReceiptRepository
 
 private val logger = loggerFor<DeliveryDispatcher>()
 
@@ -334,6 +335,7 @@ public class DeliveryDispatcher(
         }
         val result = runCatching { sink.sendMessage(request) }
             .getOrElse { error -> MessageSendResult.failed(error.message ?: "消息发送失败", retryable = true) }
+            .withTransportId(sink.transportId)
         if (result is MessageSendResult.Failed) {
             outboundMediaService?.invalidateRoute(mediaRouteContext(sink))
         }
@@ -373,6 +375,17 @@ public class DeliveryDispatcher(
                     sinkRouteId = result.sinkRouteId,
                     sinkAccountId = result.sinkAccountId,
                 )
+                runCatching {
+                    MessageSinkReceiptRepository.recordSent(
+                        delivery = request.delivery,
+                        message = request.message,
+                        result = result,
+                    )
+                }.onFailure { error ->
+                    logger.warn(error) {
+                        "消息发送回执记录失败：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，sinkMessageId=${result.sinkMessageId ?: "-"}"
+                    }
+                }
                 logger.debug {
                     "消息发送成功：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，sinkMessageId=${result.sinkMessageId ?: "-"}，sinkRouteId=${result.sinkRouteId ?: "-"}，sinkAccountId=${result.sinkAccountId ?: "-"}"
                 }
@@ -466,6 +479,14 @@ public class DeliveryDispatcher(
 
     private fun String.withFailurePolicySuffix(suffix: String): String =
         if (isBlank()) suffix else "$this（$suffix）"
+
+    private fun MessageSendResult.withTransportId(transportId: String): MessageSendResult {
+        return if (this is MessageSendResult.Sent && sinkTransportId.isNullOrBlank()) {
+            copy(sinkTransportId = transportId)
+        } else {
+            this
+        }
+    }
 
     private data class RoutedSinkResolveResult(
         val routedSinkIds: List<String>,

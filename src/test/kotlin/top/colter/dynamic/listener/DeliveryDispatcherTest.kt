@@ -44,6 +44,7 @@ import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.plugin.PluginInfo
 import top.colter.dynamic.plugin.PluginState
 import top.colter.dynamic.repository.MessageDeliveryRepository
+import top.colter.dynamic.repository.MessageSinkReceiptRepository
 import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.testTargetAddress
 
@@ -67,6 +68,16 @@ class DeliveryDispatcherTest {
         assertEquals(DeliveryStatus.SENT, delivery.status)
         assertEquals(1, delivery.attempts)
         assertEquals("receipt-message-restart", delivery.sinkMessageId)
+        val receipt = assertNotNull(
+            MessageSinkReceiptRepository.findByPlatformMessage(
+                platformId = PlatformId.of("qq"),
+                target = target,
+                sinkMessageId = "receipt-message-restart",
+            ),
+        )
+        assertEquals("direct", receipt.transportId)
+        assertEquals(message.id, receipt.messageId)
+        assertEquals(delivery.id, receipt.deliveryId)
     }
 
     @Test

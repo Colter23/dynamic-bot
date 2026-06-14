@@ -10,6 +10,7 @@ import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.initTestDatabase
 import top.colter.dynamic.testTargetAddress
 
@@ -97,5 +98,44 @@ class MessageDeliveryRepositoryTest {
         assertEquals(1, terminal.deletedMessages)
         assertTrue(MessageDeliveryRepository.findByMessageId(message.id).isEmpty())
         assertNull(MessageDeliveryRepository.findMessage(message.id))
+    }
+
+    @Test
+    fun cleanupHistoryShouldRemoveReceiptsForExpandedDeliverySet() {
+        initTestDatabase("dynamic-bot-core-delivery-cleanup-receipts-db")
+
+        val group = testTargetAddress("onebot", TargetKind.GROUP, "10001")
+        val user = testTargetAddress("onebot", TargetKind.USER, "20001")
+        val message = Message(
+            id = "message-cleanup-receipts",
+            time = 1L,
+            targets = listOf(group, user),
+            batches = listOf(MessageBatch(listOf(MessageContent.Text("hello")))),
+        )
+
+        val deliveries = MessageDeliveryRepository.enqueue(message).newDeliveries
+        deliveries.forEachIndexed { index, delivery ->
+            MessageSinkReceiptRepository.recordSent(
+                delivery = delivery,
+                message = message,
+                result = MessageSendResult.sent(
+                    sinkMessageId = "sink-$index",
+                    sinkTransportId = "onebot",
+                    sinkMessageIds = listOf("sink-$index"),
+                ) as MessageSendResult.Sent,
+            )
+            assertTrue(MessageDeliveryRepository.markSent(delivery.id, sinkMessageId = "sink-$index"))
+        }
+        assertEquals(2, MessageSinkReceiptRepository.findByMessageId(message.id).size)
+
+        val result = MessageDeliveryRepository.cleanupHistory(
+            cutoffEpochSeconds = System.currentTimeMillis() / 1000 + 1,
+            batchSize = 1,
+        )
+
+        assertEquals(2, result.deletedDeliveries)
+        assertEquals(1, result.deletedMessages)
+        assertTrue(MessageDeliveryRepository.findByMessageId(message.id).isEmpty())
+        assertTrue(MessageSinkReceiptRepository.findByMessageId(message.id).isEmpty())
     }
 }

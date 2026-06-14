@@ -7,6 +7,7 @@ import org.jetbrains.exposed.v1.core.ColumnType
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.Message
+import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.UpdateKey
 import top.colter.dynamic.core.data.coreJson
@@ -49,6 +50,8 @@ public fun filterConditionColumn(): JsonColumnType<FilterCondition> =
 public fun updateKeyColumn(): JsonColumnType<UpdateKey> = JsonColumnType(UpdateKey.serializer())
 
 public fun messageColumn(): JsonColumnType<Message> = JsonColumnType(Message.serializer())
+
+public fun sourceUpdateColumn(): JsonColumnType<SourceUpdate> = JsonColumnType(SourceUpdate.serializer())
 
 public fun drawThemePaletteColumn(): JsonColumnType<DrawThemePalette> =
     JsonColumnType(DrawThemePalette.serializer())
