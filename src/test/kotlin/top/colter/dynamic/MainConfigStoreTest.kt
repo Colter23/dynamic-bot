@@ -32,6 +32,7 @@ class MainConfigStoreTest {
         val paths = MainConfigForms.formSpec.fields.map { it.path }
 
         assertEquals(DrawOutputFormat.PNG, MainDynamicConfig().draw.outputFormat)
+        assertEquals("{draw}", MainDynamicConfig().linkParsing.templates.message)
         assertEquals(0.0, MainDynamicConfig().linkParsing.videoDownload.maxFileMegabytes)
         assertTrue("draw.outputFormat" in paths)
         assertTrue("draw.themeColors" in paths)
@@ -262,6 +263,8 @@ class MainConfigStoreTest {
         assertEquals(0.0, loaded.linkParsing.videoDownload.maxFileMegabytes)
         assertEquals("视频正在下载", loaded.linkParsing.videoDownload.prompts.downloading)
         assertEquals("下载失败：{reason}", loaded.linkParsing.videoDownload.prompts.failed)
+        assertEquals("{draw}\\r{video}", loaded.linkParsing.templates.message)
+        assertFalse(Regex("""videoDownload:\r?\n\s+enabled:""").containsMatchIn(rewritten))
         assertFalse(rewritten.contains("durationUnknown"))
         assertFalse(rewritten.contains("durationTooLong"))
         assertFalse(rewritten.contains("noDownloader"))
@@ -279,6 +282,8 @@ class MainConfigStoreTest {
               enabled: true
               token: token
             linkParsing:
+              videoDownload:
+                enabled: true
               templates:
                 video: "{draw}\\n{title}"
                 live: "{draw}\\n{link}"
@@ -295,6 +300,32 @@ class MainConfigStoreTest {
         assertTrue(rewritten.contains("message:"))
         assertFalse(rewritten.contains("videoFile:"))
         assertFalse(rewritten.contains("fallback:"))
+    }
+
+    @Test
+    fun shouldRemoveVideoPlaceholderWhenMigratingDisabledLinkVideoDownload() {
+        val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-link-template-disabled-migration"))
+        val path = configService.resolvePath(MainDynamicConfig.CONFIG_ID)
+        path.parent.createDirectories()
+        path.writeText(
+            """
+            webAdmin:
+              enabled: true
+              token: token
+            linkParsing:
+              videoDownload:
+                enabled: false
+              templates:
+                message: "{draw}\\r{video}"
+            """.trimIndent(),
+        )
+
+        val loaded = MainConfigStore(configService).loadOrCreate { "token" }
+        val rewritten = path.readText()
+
+        assertEquals("{draw}", loaded.linkParsing.templates.message)
+        assertFalse(rewritten.contains("{video}"))
+        assertFalse(Regex("""videoDownload:\r?\n\s+enabled:""").containsMatchIn(rewritten))
     }
 
     @Test
@@ -336,12 +367,11 @@ class MainConfigStoreTest {
         assertFalse(byPath.getValue("command.prefix").advanced)
         assertEquals("推送内容", byPath.getValue("draw.outputFormat").section)
         assertFalse(byPath.getValue("draw.outputFormat").advanced)
-        assertEquals("链接解析", byPath.getValue("linkParsing.videoDownload.enabled").section)
-        assertFalse(byPath.getValue("linkParsing.videoDownload.enabled").advanced)
         assertEquals("推送内容", byPath.getValue("linkParsing.templates.message").section)
         assertTrue(byPath.getValue("linkParsing.templates.message").advanced)
         assertFalse("linkParsing.replyOnFailure" in byPath)
         assertFalse("linkParsing.progressReply.enabled" in byPath)
+        assertFalse("linkParsing.videoDownload.enabled" in byPath)
         assertFalse("linkParsing.templates.video" in byPath)
         assertFalse("linkParsing.templates.live" in byPath)
         assertFalse("linkParsing.templates.user" in byPath)

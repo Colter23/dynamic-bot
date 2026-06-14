@@ -93,12 +93,11 @@ public data class LinkParseTemplates(
     val message: String = DEFAULT_MESSAGE_TEMPLATE,
 ) {
     public companion object {
-        public const val DEFAULT_MESSAGE_TEMPLATE: String = "{draw}\\r{video}"
+        public const val DEFAULT_MESSAGE_TEMPLATE: String = "{draw}"
     }
 }
 
 public data class LinkVideoDownloadConfig(
-    val enabled: Boolean = false,
     val maxDurationSeconds: Long = 300,
     val maxFileMegabytes: Double = 0.0,
     val quality: LinkVideoQuality = LinkVideoQuality.P720,

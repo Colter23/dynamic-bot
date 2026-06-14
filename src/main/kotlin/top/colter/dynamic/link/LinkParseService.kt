@@ -402,11 +402,6 @@ public class LinkParseService(
         downloader: LinkVideoDownloader,
     ): VideoDownloadOutcome {
         val config = configProvider().linkParsing.videoDownload
-        if (!config.enabled) {
-            return VideoDownloadOutcome.NotSent(
-                videoFailurePrompt(config, preview, parsedLink, "视频下载功能未开启"),
-            )
-        }
         if (parsedLink.kind != LinkKinds.VIDEO || preview.kind != LinkKinds.VIDEO) {
             return VideoDownloadOutcome.NotSent(
                 videoFailurePrompt(config, preview, parsedLink, "当前链接不是视频"),
@@ -497,7 +492,6 @@ public class LinkParseService(
         parsedLink: ParsedLink,
     ): VideoDownloadPlan? {
         val config = configProvider().linkParsing.videoDownload
-        if (!config.enabled) return null
         if (parsedLink.kind != LinkKinds.VIDEO || preview.kind != LinkKinds.VIDEO) return null
 
         val duration = preview.durationSeconds

@@ -477,8 +477,8 @@ class LinkParseServiceTest {
             configProvider = {
                 MainDynamicConfig(
                     linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{draw}\\r{video}"),
                         videoDownload = LinkVideoDownloadConfig(
-                            enabled = true,
                             maxDurationSeconds = 300,
                             maxFileMegabytes = 1.0,
                             cacheRoot = cacheRoot.toString(),
@@ -531,8 +531,8 @@ class LinkParseServiceTest {
             configProvider = {
                 MainDynamicConfig(
                     linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{draw}\\r{video}"),
                         videoDownload = LinkVideoDownloadConfig(
-                            enabled = true,
                             maxFileMegabytes = 0.0,
                             cacheRoot = cacheRoot.toString(),
                         ),
@@ -581,8 +581,8 @@ class LinkParseServiceTest {
             configProvider = {
                 MainDynamicConfig(
                     linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{draw}\\r{video}"),
                         videoDownload = LinkVideoDownloadConfig(
-                            enabled = true,
                             maxFileMegabytes = 1.0,
                             cacheRoot = cacheRoot.toString(),
                         ),
@@ -657,8 +657,8 @@ class LinkParseServiceTest {
             configProvider = {
                 MainDynamicConfig(
                     linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{draw}\\r{video}"),
                         videoDownload = LinkVideoDownloadConfig(
-                            enabled = true,
                             maxConcurrentDownloads = 2,
                             maxFileMegabytes = 1.0,
                             cacheRoot = cacheRoot.toString(),
@@ -752,7 +752,6 @@ class LinkParseServiceTest {
                     linkParsing = LinkParsingConfig(
                         templates = LinkParseTemplates(message = "{title}\\n{link}"),
                         videoDownload = LinkVideoDownloadConfig(
-                            enabled = true,
                             maxFileMegabytes = 1.0,
                             cacheRoot = cacheRoot.toString(),
                         ),
@@ -805,7 +804,6 @@ class LinkParseServiceTest {
                     linkParsing = LinkParsingConfig(
                         templates = LinkParseTemplates(message = "{>>}{draw}\\r{video}{<<}"),
                         videoDownload = LinkVideoDownloadConfig(
-                            enabled = true,
                             maxFileMegabytes = 1.0,
                             cacheRoot = cacheRoot.toString(),
                         ),
@@ -863,8 +861,8 @@ class LinkParseServiceTest {
             configProvider = {
                 MainDynamicConfig(
                     linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{draw}\\r{video}"),
                         videoDownload = LinkVideoDownloadConfig(
-                            enabled = true,
                             maxDurationSeconds = 60,
                             maxFileMegabytes = 1.0,
                         ),
@@ -926,8 +924,8 @@ class LinkParseServiceTest {
             configProvider = {
                 MainDynamicConfig(
                     linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{draw}\\r{video}"),
                         videoDownload = LinkVideoDownloadConfig(
-                            enabled = true,
                             maxFileMegabytes = 1.0,
                             cacheRoot = cacheRoot.toString(),
                             ffmpegPath = "",

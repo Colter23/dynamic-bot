@@ -113,11 +113,13 @@ private fun MainDynamicConfig.withGeneratedMediaDeliverySecrets(secretProvider: 
 private fun mergeLegacyLinkTemplates(
     previewTemplate: String?,
     videoTemplate: String?,
+    includeVideo: Boolean,
 ): String {
     val preview = previewTemplate
         ?.trim()
         ?.takeIf { it.isNotBlank() }
         ?: LinkParseTemplates.DEFAULT_MESSAGE_TEMPLATE.substringBefore("\\r")
+    if (!includeVideo) return preview
     if (preview.contains("{video}")) return preview
 
     val video = videoTemplate
@@ -125,6 +127,59 @@ private fun mergeLegacyLinkTemplates(
         ?.takeIf { it.isNotBlank() }
         ?: "{video}"
     return "$preview\\r$video"
+}
+
+private fun rawBoolean(value: Any?): Boolean? {
+    return when (value) {
+        is Boolean -> value
+        is String -> value.equals("true", ignoreCase = true)
+        else -> null
+    }
+}
+
+private fun removeVideoTemplateSteps(template: String): String {
+    if (!template.contains("{video}")) return template
+
+    fun cleanChain(value: String): String {
+        return value
+            .split("\\r")
+            .filterNot { it.contains("{video}") }
+            .joinToString("\\r")
+    }
+
+    val result = buildString {
+        var index = 0
+        while (index < template.length) {
+            val start = template.indexOf("{>>}", startIndex = index)
+            if (start == -1) {
+                append(cleanChain(template.substring(index)))
+                break
+            }
+            append(cleanChain(template.substring(index, start)))
+            val contentStart = start + "{>>}".length
+            val close = template.indexOf("{<<}", startIndex = contentStart)
+            if (close == -1) {
+                append(cleanChain(template.substring(start)))
+                break
+            }
+            val forwardContent = template.substring(contentStart, close)
+            if (!forwardContent.contains("{video}")) {
+                append("{>>}")
+                append(forwardContent)
+                append("{<<}")
+            }
+            index = close + "{<<}".length
+        }
+    }.trimChainSeparators()
+
+    return result.takeIf { it.isNotBlank() } ?: LinkParseTemplates.DEFAULT_MESSAGE_TEMPLATE
+}
+
+private fun String.trimChainSeparators(): String {
+    var value = this
+    while (value.startsWith("\\r")) value = value.removePrefix("\\r")
+    while (value.endsWith("\\r")) value = value.removeSuffix("\\r")
+    return value.trim()
 }
 
 public object MainConfigForms {
@@ -263,8 +318,9 @@ public object MainConfigForms {
         },
         ConfigMigration(
             id = "main-link-video-download-simplified-prompts",
-            description = "精简链接解析模板和视频下载提示，并将旧默认视频大小上限改为不限制",
+            description = "精简链接解析模板和视频下载提示，用模板占位符控制视频下载，并将旧默认视频大小上限改为不限制",
         ) {
+            val legacyVideoDownloadEnabled = rawBoolean(get("linkParsing.videoDownload.enabled")) ?: false
             val oldVideoTemplate = (get("linkParsing.templates.video") as? String)
                 ?.trim()
                 ?.takeIf { it.isNotBlank() }
@@ -280,8 +336,14 @@ public object MainConfigForms {
                     mergeLegacyLinkTemplates(
                         previewTemplate = oldVideoTemplate ?: oldFallbackTemplate,
                         videoTemplate = oldVideoFileTemplate,
+                        includeVideo = legacyVideoDownloadEnabled,
                     ),
                 )
+            } else if (!legacyVideoDownloadEnabled) {
+                val currentTemplate = get("linkParsing.templates.message") as? String
+                if (currentTemplate != null) {
+                    set("linkParsing.templates.message", removeVideoTemplateSteps(currentTemplate))
+                }
             }
             val maxFileMegabytes = when (val value = get("linkParsing.videoDownload.maxFileMegabytes")) {
                 is Number -> value.toDouble()
@@ -296,6 +358,7 @@ public object MainConfigForms {
             remove("linkParsing.videoDownload.prompts.noDownloader")
             remove("linkParsing.videoDownload.prompts.timeout")
             remove("linkParsing.videoDownload.prompts.fileTooLarge")
+            remove("linkParsing.videoDownload.enabled")
             remove("linkParsing.templates.video")
             remove("linkParsing.templates.live")
             remove("linkParsing.templates.user")
@@ -441,46 +504,36 @@ public object MainConfigForms {
                     label = "链接解析模板",
                     type = ConfigFieldType.TEXTAREA,
                     section = "链接解析模板",
-                    description = "链接解析结果的发送格式。\n可使用 {draw}、{cover}、{video}、{name}、{uid}、{id}、{kind}、{title}、{content}、{duration}、{size}、{stats}、{link}。\\n 表示换行，\\r 表示拆成多条消息，{>>}...{<<} 会作为合并转发发送。{video} 放在合并转发外会下载完成后单独发送；放在合并转发内会等待视频后发送该合并转发。",
+                    description = "链接解析结果的发送格式。\n可使用 {draw}、{cover}、{video}、{name}、{uid}、{id}、{kind}、{title}、{content}、{duration}、{size}、{stats}、{link}。\\n 表示换行，\\r 表示拆成多条消息，{>>}...{<<} 会作为合并转发发送。模板包含 {video} 时才会尝试下载视频；{video} 放在合并转发外会下载完成后单独发送，放在合并转发内会等待视频后发送该合并转发。",
                     component = "MESSAGE_TEMPLATE_EDITOR",
                     metadata = mapOf("templateKind" to "LINK_MESSAGE"),
                     required = true,
-                ),
-                ConfigFieldSpec(
-                    path = "linkParsing.videoDownload.enabled",
-                    label = "自动下载视频",
-                    type = ConfigFieldType.BOOLEAN,
-                    section = "链接解析",
-                    description = "解析视频链接时尝试发送视频文件。\n如果下载失败、太大或太长，会自动退回为普通链接预览。",
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.videoDownload.maxDurationSeconds",
                     label = "最大视频时长（秒）",
                     type = ConfigFieldType.NUMBER,
                     section = "链接解析",
-                    description = "只下载不超过这个时长的视频。\n设为 0 表示不限制时长。",
+                    description = "链接解析模板包含 {video} 时，只下载不超过这个时长的视频。\n设为 0 表示不限制时长。",
                     min = 0,
                     numberKind = ConfigNumberKind.INTEGER,
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.videoDownload.maxFileMegabytes",
                     label = "视频大小上限（MB）",
                     type = ConfigFieldType.NUMBER,
                     section = "链接解析",
-                    description = "只下载不超过这个大小的视频。\n设为 0 表示不限制大小；支持小数，例如 0.5 表示 0.5 MB。",
+                    description = "链接解析模板包含 {video} 时，只下载不超过这个大小的视频。\n设为 0 表示不限制大小；支持小数，例如 0.5 表示 0.5 MB。",
                     min = 0,
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.videoDownload.quality",
                     label = "视频画质",
                     type = ConfigFieldType.SELECT,
                     section = "链接解析",
-                    description = "选择下载视频时的画质。\n固定档位表示最高不超过该画质；画质越高文件越大，也可能需要登录、大会员或 ffmpeg。",
+                    description = "链接解析模板包含 {video} 时使用的视频画质。\n固定档位表示最高不超过该画质；画质越高文件越大，也可能需要登录、大会员或 ffmpeg。",
                     options = linkVideoQualityOptions(),
                     required = true,
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.videoDownload.ffmpegPath",
@@ -488,7 +541,6 @@ public object MainConfigForms {
                     type = ConfigFieldType.TEXT,
                     section = "链接解析",
                     description = "用于合并视频和音频的 ffmpeg 程序。\n留空时会从项目目录自动查找；找不到时会退回为普通链接预览。",
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.videoDownload.cacheRoot",
@@ -497,7 +549,6 @@ public object MainConfigForms {
                     section = "链接解析",
                     description = "保存已下载视频文件的目录。\n后续清理任务会按缓存规则删除旧文件。",
                     required = true,
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.videoDownload.timeoutSeconds",
@@ -506,7 +557,6 @@ public object MainConfigForms {
                     section = "链接解析",
                     description = "单个视频最多下载多久。\n超过时间会停止下载，并退回为普通链接预览。",
                     min = 1,
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.videoDownload.maxConcurrentDownloads",
@@ -516,7 +566,6 @@ public object MainConfigForms {
                     description = "同一时间最多下载几个视频。\n调大可以更快处理多个链接，但会增加网络和磁盘压力。",
                     min = 1,
                     numberKind = ConfigNumberKind.INTEGER,
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.videoDownload.cleanupMaxIdleDays",
@@ -526,7 +575,6 @@ public object MainConfigForms {
                     description = "视频文件多久没被使用后可以清理。\n设为 0 表示下次清理任务运行时即可删除。",
                     min = 0,
                     numberKind = ConfigNumberKind.INTEGER,
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.videoDownload.prompts.downloading",
@@ -534,7 +582,6 @@ public object MainConfigForms {
                     type = ConfigFieldType.TEXT,
                     section = "链接解析",
                     description = "开始下载视频时单独发送的提示。\n可使用 {title}、{id}、{link}；留空则不发送。",
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.videoDownload.prompts.failed",
@@ -542,7 +589,6 @@ public object MainConfigForms {
                     type = ConfigFieldType.TEXT,
                     section = "链接解析",
                     description = "视频无法下载或无法继续推送时单独发送的提示。\n可使用 {reason}、{title}、{id}、{link}；留空则不发送。",
-                    visibleWhen = ConfigFieldVisibility("linkParsing.videoDownload.enabled", listOf("true")),
                 ),
                 ConfigFieldSpec(
                     path = "imageCache.sourceRoot",
@@ -1043,7 +1089,6 @@ public object MainConfigForms {
             "linkParsing.templates.message",
             "linkParsing.autoParseEnabled",
             "linkParsing.fallbackTriggerMode",
-            "linkParsing.videoDownload.enabled",
             "linkParsing.maxLinksPerMessage",
             "linkParsing.autoDedupeTtlSeconds",
             "linkParsing.progressReply.text",
