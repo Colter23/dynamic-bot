@@ -183,189 +183,7 @@ private fun String.trimChainSeparators(): String {
 }
 
 public object MainConfigForms {
-    public val migrations: List<ConfigMigration> = listOf(
-        ConfigMigration(
-            id = "main-draw-theme-colors",
-            description = "迁移旧绘图主题色字段到 draw.themeColors",
-        ) {
-            val legacyColors = listOf(
-                get("draw.themeColor") as? String,
-                get("draw.backgroundStartColor") as? String,
-                get("draw.backgroundEndColor") as? String,
-            )
-                .mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
-                .distinct()
-
-            if (!contains("draw.themeColors") && legacyColors.isNotEmpty()) {
-                set("draw.themeColors", legacyColors.joinToString(";"))
-            }
-            if (!contains("draw.outputFormat")) {
-                set("draw.outputFormat", DrawOutputFormat.PNG.name)
-            }
-            remove("draw.themeColor")
-            remove("draw.backgroundStartColor")
-            remove("draw.backgroundEndColor")
-        },
-        ConfigMigration(
-            id = "main-media-delivery-profiles",
-            description = "迁移旧出站媒体配置到媒体交付 profile，并转为分组配置",
-        ) {
-            if (!contains("mediaDelivery")) {
-                val enabled = get("outboundMedia.enabled") as? Boolean ?: true
-                val publicBaseUrl = (get("outboundMedia.publicBaseUrl") as? String).orEmpty()
-                val urlTtlSeconds = when (val value = get("outboundMedia.urlTtlSeconds")) {
-                    is Number -> value.toInt()
-                    is String -> value.toIntOrNull()
-                    else -> null
-                } ?: 1_800
-                val signingSecret = (get("outboundMedia.signingSecret") as? String).orEmpty()
-                val hasRemoteProfile = publicBaseUrl.trim().isNotBlank()
-                val defaultProfileId = if (enabled && hasRemoteProfile) "remote" else "auto"
-                val autoProfile = mapOf(
-                    "id" to "auto",
-                    "name" to "自动",
-                    "type" to MediaDeliveryType.AUTO.name,
-                    "localFile" to mapOf("pathMappings" to emptyList<Map<String, Any?>>()),
-                    "signedUrl" to mapOf(
-                        "publicBaseUrl" to "",
-                        "ttlSeconds" to 1_800,
-                        "signingSecret" to signingSecret,
-                    ),
-                    "base64Fallback" to mapOf("maxMegabytes" to 8.0),
-                    "auto" to mapOf("probeCacheMinutes" to 30, "failedProbeCacheMinutes" to 5),
-                )
-                val profiles = if (hasRemoteProfile) {
-                    listOf(
-                        autoProfile,
-                        mapOf(
-                            "id" to "remote",
-                            "name" to "外部访问",
-                            "type" to MediaDeliveryType.SIGNED_URL.name,
-                            "localFile" to mapOf("pathMappings" to emptyList<Map<String, Any?>>()),
-                            "signedUrl" to mapOf(
-                                "publicBaseUrl" to publicBaseUrl,
-                                "ttlSeconds" to urlTtlSeconds,
-                                "signingSecret" to signingSecret,
-                            ),
-                            "base64Fallback" to mapOf("maxMegabytes" to 8.0),
-                            "auto" to mapOf("probeCacheMinutes" to 30, "failedProbeCacheMinutes" to 5),
-                        ),
-                    )
-                } else {
-                    listOf(autoProfile)
-                }
-                set("mediaDelivery.defaultProfileId", defaultProfileId)
-                set("mediaDelivery.profiles", profiles)
-            }
-            val currentProfiles = get("mediaDelivery.profiles") as? List<*>
-            if (currentProfiles != null) {
-                val migrated = currentProfiles.map { rawProfile ->
-                    val profile = rawProfile as? Map<*, *> ?: return@map rawProfile
-                    val id = profile["id"] ?: "auto"
-                    val name = profile["name"] ?: "自动"
-                    val type = profile["type"] ?: MediaDeliveryType.AUTO.name
-                    val pathMappings = when (val localFile = profile["localFile"]) {
-                        is Map<*, *> -> localFile["pathMappings"] as? List<*> ?: emptyList<Any?>()
-                        else -> profile["pathMappings"] as? List<*> ?: emptyList<Any?>()
-                    }
-                    val signedUrl = profile["signedUrl"] as? Map<*, *>
-                    val publicBaseUrl = signedUrl?.get("publicBaseUrl") ?: profile["publicBaseUrl"] ?: ""
-                    val ttlSeconds = signedUrl?.get("ttlSeconds")
-                        ?: signedUrl?.get("urlTtlSeconds")
-                        ?: profile["urlTtlSeconds"]
-                        ?: 1_800
-                    val signingSecret = signedUrl?.get("signingSecret") ?: profile["signingSecret"] ?: ""
-                    val base64Fallback = profile["base64Fallback"] as? Map<*, *>
-                    val maxMegabytes = base64Fallback?.get("maxMegabytes") ?: run {
-                        val bytes = when (val value = profile["imageBase64MaxBytes"]) {
-                            is Number -> value.toDouble()
-                            is String -> value.toDoubleOrNull()
-                            else -> null
-                        }
-                        bytes?.let { it / (1024.0 * 1024.0) } ?: 8.0
-                    }
-                    val auto = profile["auto"] as? Map<*, *>
-                    mapOf(
-                        "id" to id,
-                        "name" to name,
-                        "type" to type,
-                        "localFile" to mapOf("pathMappings" to pathMappings),
-                        "signedUrl" to mapOf(
-                            "publicBaseUrl" to publicBaseUrl,
-                            "ttlSeconds" to ttlSeconds,
-                            "signingSecret" to signingSecret,
-                        ),
-                        "base64Fallback" to mapOf("maxMegabytes" to maxMegabytes),
-                        "auto" to mapOf(
-                            "probeCacheMinutes" to (auto?.get("probeCacheMinutes") ?: 30),
-                            "failedProbeCacheMinutes" to (auto?.get("failedProbeCacheMinutes") ?: 5),
-                        ),
-                    )
-                }
-                set("mediaDelivery.profiles", migrated)
-            }
-            remove("outboundMedia")
-        },
-        ConfigMigration(
-            id = "main-link-parse-simplified-replies",
-            description = "删除链接解析失败回复开关和解析中提示开关，改为固定失败回复与空提示文字关闭",
-        ) {
-            if (get("linkParsing.progressReply.enabled") == false) {
-                set("linkParsing.progressReply.text", "")
-            }
-            remove("linkParsing.replyOnFailure")
-            remove("linkParsing.progressReply.enabled")
-        },
-        ConfigMigration(
-            id = "main-link-video-download-simplified-prompts",
-            description = "精简链接解析模板和视频下载提示，用模板占位符控制视频下载，并将旧默认视频大小上限改为不限制",
-        ) {
-            val legacyVideoDownloadEnabled = rawBoolean(get("linkParsing.videoDownload.enabled")) ?: false
-            val oldVideoTemplate = (get("linkParsing.templates.video") as? String)
-                ?.trim()
-                ?.takeIf { it.isNotBlank() }
-            val oldFallbackTemplate = (get("linkParsing.templates.fallback") as? String)
-                ?.trim()
-                ?.takeIf { it.isNotBlank() }
-            val oldVideoFileTemplate = (get("linkParsing.templates.videoFile") as? String)
-                ?.trim()
-                ?.takeIf { it.isNotBlank() }
-            if (!contains("linkParsing.templates.message")) {
-                set(
-                    "linkParsing.templates.message",
-                    mergeLegacyLinkTemplates(
-                        previewTemplate = oldVideoTemplate ?: oldFallbackTemplate,
-                        videoTemplate = oldVideoFileTemplate,
-                        includeVideo = legacyVideoDownloadEnabled,
-                    ),
-                )
-            } else if (!legacyVideoDownloadEnabled) {
-                val currentTemplate = get("linkParsing.templates.message") as? String
-                if (currentTemplate != null) {
-                    set("linkParsing.templates.message", removeVideoTemplateSteps(currentTemplate))
-                }
-            }
-            val maxFileMegabytes = when (val value = get("linkParsing.videoDownload.maxFileMegabytes")) {
-                is Number -> value.toDouble()
-                is String -> value.toDoubleOrNull()
-                else -> null
-            }
-            if (maxFileMegabytes == 200.0) {
-                set("linkParsing.videoDownload.maxFileMegabytes", 0.0)
-            }
-            remove("linkParsing.videoDownload.prompts.durationUnknown")
-            remove("linkParsing.videoDownload.prompts.durationTooLong")
-            remove("linkParsing.videoDownload.prompts.noDownloader")
-            remove("linkParsing.videoDownload.prompts.timeout")
-            remove("linkParsing.videoDownload.prompts.fileTooLarge")
-            remove("linkParsing.videoDownload.enabled")
-            remove("linkParsing.templates.video")
-            remove("linkParsing.templates.live")
-            remove("linkParsing.templates.user")
-            remove("linkParsing.templates.fallback")
-            remove("linkParsing.templates.videoFile")
-        },
-    )
+    public val migrations: List<ConfigMigration> = listOf()
 
     public val formSpec: ConfigFormSpec
         get() = ConfigFormSpec(
@@ -997,7 +815,6 @@ public object MainConfigForms {
         "draw.width",
         "draw.font.text",
         "draw.font.emoji",
-        "linkParsing.templates.message",
         "linkParsing.maxLinksPerMessage",
         "linkParsing.autoDedupeTtlSeconds",
         "linkParsing.progressReply.text",
@@ -1041,8 +858,7 @@ public object MainConfigForms {
                 path.startsWith("subscription.") ||
                 path.startsWith("notifications.") -> "基础设置"
             path.startsWith("templates.") ||
-                path.startsWith("draw.") ||
-                path.startsWith("linkParsing.templates.") -> "推送内容"
+                path.startsWith("draw.") -> "推送内容"
             path.startsWith("linkParsing.") -> "链接解析"
             path.startsWith("messageRouting.") ||
                 path.startsWith("mediaDelivery.") ||
@@ -1086,9 +902,9 @@ public object MainConfigForms {
             "draw.width",
             "draw.font.text",
             "draw.font.emoji",
-            "linkParsing.templates.message",
             "linkParsing.autoParseEnabled",
             "linkParsing.fallbackTriggerMode",
+            "linkParsing.templates.message",
             "linkParsing.maxLinksPerMessage",
             "linkParsing.autoDedupeTtlSeconds",
             "linkParsing.progressReply.text",
