@@ -3,16 +3,19 @@ FROM eclipse-temurin:21-jdk AS builder
 
 WORKDIR /build
 
-# 复制 Gradle wrapper 和构建配置
+# 复制 Gradle wrapper 和构建配置（支持 CI 缓存层）
 COPY gradlew gradlew.bat ./
 COPY gradle ./gradle
 COPY build.gradle.kts settings.gradle.kts gradle.properties ./
+
+# 下载依赖（独立缓存层）
+RUN chmod +x ./gradlew && ./gradlew --no-daemon dependencies --quiet || true
 
 # 复制源代码
 COPY src ./src
 
 # 构建 fat jar
-RUN chmod +x ./gradlew && ./gradlew --no-daemon fatJar
+RUN ./gradlew --no-daemon fatJar
 
 # 运行阶段
 FROM eclipse-temurin:17-jre
@@ -23,9 +26,18 @@ LABEL description="dynamic-bot - 动态转发系统"
 ARG APP_UID=1000
 ARG APP_GID=1000
 
-# 创建非 root 用户
-RUN groupadd --gid ${APP_GID} dynamicbot && \
-    useradd --uid ${APP_UID} --gid dynamicbot --create-home --shell /usr/sbin/nologin dynamicbot
+# 创建非 root 用户（兼容已占用的 UID/GID）
+RUN set -e; \
+    if ! getent group ${APP_GID} > /dev/null 2>&1; then \
+        groupadd --gid ${APP_GID} dynamicbot; \
+    elif ! getent group dynamicbot > /dev/null 2>&1; then \
+        groupadd dynamicbot; \
+    fi && \
+    if ! getent passwd ${APP_UID} > /dev/null 2>&1; then \
+        useradd --uid ${APP_UID} --gid $(getent group dynamicbot | cut -d: -f3) --no-create-home --shell /bin/false dynamicbot; \
+    elif ! id dynamicbot > /dev/null 2>&1; then \
+        useradd --gid $(getent group dynamicbot | cut -d: -f3) --no-create-home --shell /bin/false dynamicbot; \
+    fi
 
 # 健康检查需要 curl；ca-certificates 保障 HTTPS 插件目录和媒体下载可用
 RUN apt-get update && \
@@ -50,9 +62,10 @@ USER dynamicbot
 # 暴露 Web Admin 默认端口
 EXPOSE 2233
 
-# 健康检查
+# 健康检查（支持自定义端口）
+ENV HEALTH_CHECK_PORT=2233
 HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:2233/api/health || exit 1
+    CMD curl -f http://localhost:${HEALTH_CHECK_PORT}/api/health || exit 1
 
 # 设置 JVM 参数
 ENV JAVA_OPTS="-Xms256m -Xmx1g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"

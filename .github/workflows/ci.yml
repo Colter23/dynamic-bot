@@ -42,16 +42,17 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Make Gradle wrapper executable
-        run: chmod +x ./gradlew
+        run: chmod +x ./dynamic-bot/gradlew
 
       - name: Run tests and build application jar
+        working-directory: ./dynamic-bot
         run: ./gradlew --no-daemon test fatJar
 
       - name: Upload application jar
         uses: actions/upload-artifact@v4
         with:
           name: dynamic-bot
-          path: build/libs/*-all.jar
+          path: dynamic-bot/build/libs/*-all.jar
           if-no-files-found: error
 
       - name: Upload test reports
@@ -59,7 +60,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: test-reports
-          path: build/reports/tests/
+          path: dynamic-bot/build/reports/tests/
 
   docker:
     name: Docker
@@ -78,9 +79,9 @@ jobs:
         shell: bash
         run: |
           tag_version="${GITHUB_REF_NAME#v}"
-          project_version="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' build.gradle.kts | head -n 1)"
+          project_version="$(sed -nE 's/^version[[:space:]]*=[[:space:]]*"([^"]+)".*/\1/p' dynamic-bot/build.gradle.kts | head -n 1)"
           if [[ -z "$project_version" ]]; then
-            echo "Cannot find project version in build.gradle.kts"
+            echo "Cannot find project version in dynamic-bot/build.gradle.kts"
             exit 1
           fi
           if [[ "$tag_version" != "$project_version" ]]; then
@@ -114,7 +115,8 @@ jobs:
       - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
-          context: .
+          context: ./dynamic-bot
+          file: ./dynamic-bot/Dockerfile
           push: ${{ startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.publishImage == true) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
