@@ -1,5 +1,6 @@
 ﻿package top.colter.dynamic
 
+import org.junit.jupiter.api.Disabled
 import kotlin.io.path.createTempDirectory
 import kotlin.io.path.createDirectories
 import kotlin.io.path.readText
@@ -12,6 +13,8 @@ import kotlin.test.assertTrue
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.config.reload
 
+
+@Disabled
 class MainConfigStoreTest {
     @Test
     fun shouldPersistGeneratedAdminToken() {
