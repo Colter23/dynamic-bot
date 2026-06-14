@@ -760,6 +760,7 @@ function capabilityText(value) {
     PUBLISHER_FOLLOW: "发布者关注",
     PUBLISHER_LOGIN: "平台登录",
     MESSAGE_SINK: "消息发送",
+    INCOMING_MESSAGE_CONSUMER: "入站消息消费",
     COMMAND_CONTRIBUTOR: "命令",
     LINK_RESOLVER: "链接解析",
     LINK_VIDEO_DOWNLOADER: "视频下载",

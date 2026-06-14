@@ -11,11 +11,16 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.core.command.CommandPublisher
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.config.ConfigurablePlugin
+import top.colter.dynamic.core.data.IncomingMessage
+import top.colter.dynamic.core.data.MessageBatch
+import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.config.YamlPluginDataStore
 import top.colter.dynamic.event.EventBus
@@ -33,7 +38,14 @@ import top.colter.dynamic.core.link.LinkResolver
 import top.colter.dynamic.core.link.LinkVideoDownloader
 import top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION
 import top.colter.dynamic.core.plugin.CommandContributor
+import top.colter.dynamic.core.plugin.IncomingMessageConsumerPlugin
+import top.colter.dynamic.core.plugin.IncomingMessagePublisher
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
+import top.colter.dynamic.core.plugin.PluginMessagePublishRequest
+import top.colter.dynamic.core.plugin.PluginMessagePublishOptions
+import top.colter.dynamic.core.plugin.PluginMessagePublishResult
+import top.colter.dynamic.core.plugin.PluginMessagePublishSink
+import top.colter.dynamic.core.plugin.PluginMessagePublisher
 import top.colter.dynamic.core.plugin.Plugin
 import top.colter.dynamic.core.plugin.PluginContext
 import top.colter.dynamic.core.plugin.PluginDescriptor
@@ -55,6 +67,8 @@ import java.nio.file.Files
 import java.nio.file.Paths
 import java.nio.file.StandardCopyOption
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 
 private val logger = loggerFor<PluginManager>()
 
@@ -65,6 +79,10 @@ public class PluginManager(
     private val configService: ConfigService = YamlConfigService(),
     private val commandRegistry: CommandRegistry = CommandRegistry(),
     private val commandPublisher: CommandPublisher = CommandPublisher { },
+    private val incomingMessagePublisher: IncomingMessagePublisher = IncomingMessagePublisher { },
+    private val pluginMessagePublishSink: PluginMessagePublishSink = PluginMessagePublishSink {
+        PluginMessagePublishResult.failed("主项目消息发布器未配置")
+    },
     private val sourceUpdatePublisher: SourceUpdatePublisher = SourceUpdatePublisher {
         SourceUpdatePublishResult.failed("来源更新发布器未配置")
     },
@@ -74,6 +92,7 @@ public class PluginManager(
     private val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
     private val shutdownDrainTimeoutMs: Long = 5000,
     private val pluginHookTimeoutMs: Long = DEFAULT_PLUGIN_HOOK_TIMEOUT_MS,
+    private val incomingMessagePendingLimit: Int = DEFAULT_INCOMING_MESSAGE_PENDING_LIMIT,
 ) {
     private val pluginDir: File = File(pluginDirPath)
     private val objectMapper: ObjectMapper = ObjectMapper(YAMLFactory()).registerKotlinModule()
@@ -83,6 +102,7 @@ public class PluginManager(
 
     private val plugins = ConcurrentHashMap<String, PluginRuntime>()
     private val inFlightDispatchJobs = ConcurrentHashMap<String, MutableSet<Job>>()
+    private val incomingDispatchStates = ConcurrentHashMap<String, IncomingDispatchState>()
     private val lifecycleLock: Any = Any()
 
     @Volatile
@@ -208,6 +228,7 @@ public class PluginManager(
             drawAssetRegistry.unregisterPluginAssets(pluginId)
             plugins.remove(pluginId)
             inFlightDispatchJobs.remove(pluginId)
+            incomingDispatchStates.remove(pluginId)
             logger.info { "插件已卸载：pluginId=$pluginId" }
             return true
         }
@@ -414,6 +435,22 @@ public class PluginManager(
             }
     }
 
+    public fun dispatchIncomingMessageToConsumers(message: IncomingMessage) {
+        if (isShuttingDown) {
+            logger.debug {
+                "应用关闭中，跳过入站消息分发：platform=${message.platformId.value} target=${message.target.stableValue()}"
+            }
+            return
+        }
+
+        activeIncomingMessageConsumerPlugins()
+            .forEach { runtime ->
+                val consumer = runtime.instance as? IncomingMessageConsumerPlugin ?: return@forEach
+                if (!consumer.incomingMessageFilter.matches(message)) return@forEach
+                launchIncomingMessageForPlugin(runtime, consumer, message)
+            }
+    }
+
     public fun shutdown() {
         synchronized(lifecycleLock) {
             if (isShuttingDown) return
@@ -424,6 +461,7 @@ public class PluginManager(
         subscriptionChangedListenerToken?.let { eventBus.unsubscribe(it) }
         subscriptionChangedListenerToken = null
         drainAllDispatchJobs()
+        incomingDispatchStates.clear()
         scope.cancel("插件管理器关闭")
     }
 
@@ -570,6 +608,8 @@ public class PluginManager(
             scope = pluginScope,
             taskScheduler = runtime.taskScheduler,
             commandPublisher = commandPublisher,
+            incomingMessagePublisher = incomingMessagePublisher,
+            messagePublisher = messagePublisherFor(descriptor.id),
             sourceUpdatePublisher = sourceUpdatePublisher,
             sourceStateStore = sourceStateStore,
             subscriptionQueryService = subscriptionQueryService,
@@ -816,6 +856,7 @@ public class PluginManager(
             if (instance is PublisherFollowPlugin) add(PluginCapability.PUBLISHER_FOLLOW)
             if (instance is PublisherLoginProvider) add(PluginCapability.PUBLISHER_LOGIN)
             if (instance is MessageSinkPlugin) add(PluginCapability.MESSAGE_SINK)
+            if (instance is IncomingMessageConsumerPlugin) add(PluginCapability.INCOMING_MESSAGE_CONSUMER)
             if (instance is CommandContributor) add(PluginCapability.COMMAND_CONTRIBUTOR)
             if (instance is LinkResolver) add(PluginCapability.LINK_RESOLVER)
             if (instance is LinkVideoDownloader) add(PluginCapability.LINK_VIDEO_DOWNLOADER)
@@ -829,6 +870,10 @@ public class PluginManager(
 
     private fun activePublisherSourcePlugins(): List<PluginRuntime> {
         return activePluginsWith(PluginCapability.PUBLISHER_SOURCE)
+    }
+
+    private fun activeIncomingMessageConsumerPlugins(): List<PluginRuntime> {
+        return activePluginsWith(PluginCapability.INCOMING_MESSAGE_CONSUMER)
     }
 
     private fun activePluginsWith(capability: PluginCapability): List<PluginRuntime> {
@@ -871,6 +916,7 @@ public class PluginManager(
         return when {
             PluginCapability.MESSAGE_SINK in runtime.capabilities -> 0
             PluginCapability.COMMAND_CONTRIBUTOR in runtime.capabilities -> 10
+            PluginCapability.INCOMING_MESSAGE_CONSUMER in runtime.capabilities -> 15
             PluginCapability.PUBLISHER_SOURCE in runtime.capabilities -> 20
             else -> 100
         }
@@ -879,9 +925,84 @@ public class PluginManager(
     private fun stopPriority(runtime: PluginRuntime): Int {
         return when {
             PluginCapability.PUBLISHER_SOURCE in runtime.capabilities -> 0
+            PluginCapability.INCOMING_MESSAGE_CONSUMER in runtime.capabilities -> 5
             PluginCapability.COMMAND_CONTRIBUTOR in runtime.capabilities -> 10
             PluginCapability.MESSAGE_SINK in runtime.capabilities -> 20
             else -> 100
+        }
+    }
+
+    private fun messagePublisherFor(pluginId: String): PluginMessagePublisher {
+        return object : PluginMessagePublisher {
+            override suspend fun sendBatches(
+                targets: List<TargetAddress>,
+                batches: List<MessageBatch>,
+                renderVariant: String?,
+                options: PluginMessagePublishOptions,
+            ): PluginMessagePublishResult {
+                val normalizedVariant = renderVariant?.trim()?.takeIf { it.isNotBlank() } ?: pluginId
+                return pluginMessagePublishSink.publish(
+                    PluginMessagePublishRequest(
+                        sourcePlugin = pluginId,
+                        targets = targets,
+                        batches = batches,
+                        renderVariant = normalizedVariant,
+                        options = options,
+                    ),
+                )
+            }
+        }
+    }
+
+    private fun launchIncomingMessageForPlugin(
+        runtime: PluginRuntime,
+        consumer: IncomingMessageConsumerPlugin,
+        message: IncomingMessage,
+    ) {
+        val pluginId = runtime.descriptor.id
+        val state = incomingDispatchStates.computeIfAbsent(pluginId) { IncomingDispatchState() }
+        val pending = state.pending.incrementAndGet()
+        val pendingLimit = incomingMessagePendingLimit.coerceAtLeast(1)
+        if (pending > pendingLimit) {
+            state.pending.decrementAndGet()
+            logger.warn {
+                "入站消息分发已丢弃：pluginId=$pluginId，pending=$pending，limit=$pendingLimit，platform=${message.platformId.value}，target=${message.target.stableValue()}"
+            }
+            return
+        }
+
+        val pendingReleased = AtomicBoolean(false)
+        fun releasePending() {
+            if (pendingReleased.compareAndSet(false, true)) {
+                state.pending.decrementAndGet()
+            }
+        }
+
+        val job = launchForPlugin(pluginId) {
+            try {
+                state.semaphore.withPermit {
+                    if (isShuttingDown) return@withPermit
+                    runCatching { consumer.onIncomingMessage(message) }
+                        .onFailure { error ->
+                            logger.error(error) {
+                                "入站消息分发失败：pluginId=$pluginId，platform=${message.platformId.value}，target=${message.target.stableValue()}"
+                            }
+                            publishPluginFailure(
+                                pluginId = pluginId,
+                                operation = "incoming_message",
+                                error = error,
+                                title = "插件入站消息处理失败",
+                            )
+                        }
+                }
+            } finally {
+                releasePending()
+            }
+        }
+        if (job == null) {
+            releasePending()
+        } else {
+            job.invokeOnCompletion { releasePending() }
         }
     }
 
@@ -892,8 +1013,8 @@ public class PluginManager(
         return CoroutineScope(contextWithoutJob + job)
     }
 
-    private fun launchForPlugin(pluginId: String, block: suspend CoroutineScope.() -> Unit) {
-        val runtime = plugins[pluginId] ?: return
+    private fun launchForPlugin(pluginId: String, block: suspend CoroutineScope.() -> Unit): Job? {
+        val runtime = plugins[pluginId] ?: return null
         val jobSet = inFlightDispatchJobs.computeIfAbsent(pluginId) { ConcurrentHashMap.newKeySet() }
         val job = runtime.scope.launch(block = block)
         jobSet.add(job)
@@ -903,6 +1024,7 @@ public class PluginManager(
                 inFlightDispatchJobs.remove(pluginId, jobSet)
             }
         }
+        return job
     }
 
     private fun drainDispatchJobs(pluginId: String) {
@@ -957,9 +1079,15 @@ public class PluginManager(
         )
     }
 
+    private class IncomingDispatchState {
+        val pending: AtomicInteger = AtomicInteger(0)
+        val semaphore: Semaphore = Semaphore(1)
+    }
+
     private companion object {
         private val PLUGIN_ID_REGEX: Regex = Regex("^[a-zA-Z0-9._-]+$")
         private const val DEFAULT_PLUGIN_HOOK_TIMEOUT_MS: Long = 10_000
+        private const val DEFAULT_INCOMING_MESSAGE_PENDING_LIMIT: Int = 64
     }
 }
 

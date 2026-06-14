@@ -25,6 +25,7 @@ import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.MessageDeliveryPolicy
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
@@ -209,6 +210,53 @@ class DeliveryDispatcherTest {
     }
 
     @Test
+    fun `delivery with retry disabled should fail without scheduling retry`() = runBlocking {
+        initDb("retry-disabled")
+        val sink = RecordingSink(
+            result = { MessageSendResult.failed("temporary failure", retryable = true) },
+        )
+        val target = testTargetAddress(platformId = "qq", kind = TargetKind.GROUP, externalId = "10001")
+        val message = testMessage(
+            id = "message-retry-disabled",
+            target = target,
+            deliveryPolicy = MessageDeliveryPolicy(retry = false),
+        )
+        MessageDeliveryRepository.enqueue(message)
+
+        val stats = dispatcher(sink).dispatchDue()
+
+        assertEquals(1, stats.failed)
+        assertEquals(0, stats.retried)
+        assertEquals(listOf("message-retry-disabled"), sink.sentMessageIds)
+        val delivery = MessageDeliveryRepository.findByMessageId(message.id).single()
+        assertEquals(DeliveryStatus.FAILED, delivery.status)
+        assertEquals(1, delivery.attempts)
+        assertTrue(delivery.lastError.orEmpty().contains("禁用重试"))
+    }
+
+    @Test
+    fun `expired delivery should fail without calling sink`() = runBlocking {
+        initDb("expired-policy")
+        val sink = RecordingSink()
+        val target = testTargetAddress(platformId = "qq", kind = TargetKind.GROUP, externalId = "10001")
+        val message = testMessage(
+            id = "message-expired",
+            target = target,
+            deliveryPolicy = MessageDeliveryPolicy(expiresAtEpochSeconds = 1),
+        )
+        MessageDeliveryRepository.enqueue(message)
+
+        val stats = dispatcher(sink).dispatchDue()
+
+        assertEquals(1, stats.failed)
+        assertEquals(emptyList(), sink.sentMessageIds)
+        val delivery = MessageDeliveryRepository.findByMessageId(message.id).single()
+        assertEquals(DeliveryStatus.FAILED, delivery.status)
+        assertEquals(1, delivery.attempts)
+        assertTrue(delivery.lastError.orEmpty().contains("过期"))
+    }
+
+    @Test
     fun `routed sink should rewrite media for each selected route profile`() = runBlocking {
         initDb("route-media-profile")
         val renderedRoot = createTempDirectory("delivery-route-media-profile")
@@ -363,10 +411,15 @@ class DeliveryDispatcherTest {
         ),
     )
 
-    private fun testMessage(id: String, target: TargetAddress): Message {
+    private fun testMessage(
+        id: String,
+        target: TargetAddress,
+        deliveryPolicy: MessageDeliveryPolicy = MessageDeliveryPolicy(),
+    ): Message {
         return Message(
             id = id,
             time = 1L,
+            deliveryPolicy = deliveryPolicy,
             targets = listOf(target),
             batches = listOf(MessageBatch(listOf(MessageContent.Text("hello")))),
         )

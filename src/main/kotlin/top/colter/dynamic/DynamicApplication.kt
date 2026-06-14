@@ -17,12 +17,18 @@ import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.command.CommandPublisher
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.data.CommandContext
+import top.colter.dynamic.core.data.MessageDeliveryPolicy
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.event.IncomingMessageEvent
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.event.ListenerToken
+import top.colter.dynamic.core.plugin.IncomingMessagePublisher
+import top.colter.dynamic.core.plugin.PluginMessagePublishOptions
+import top.colter.dynamic.core.plugin.PluginMessagePublishResult
+import top.colter.dynamic.core.plugin.PluginMessagePublishSink
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.core.event.SourceUpdatePublisher
@@ -76,6 +82,31 @@ public object DynamicApplication : CoroutineScope {
             ),
         )
     }
+    private val incomingMessagePublisher: IncomingMessagePublisher = IncomingMessagePublisher { message ->
+        eventBus.broadcast(IncomingMessageEvent(message))
+    }
+    private val pluginMessagePublishSink: PluginMessagePublishSink = PluginMessagePublishSink { request ->
+        if (!::outboundMessageService.isInitialized) {
+            return@PluginMessagePublishSink PluginMessagePublishResult.failed("主项目消息发布器尚未初始化")
+        }
+        runCatching {
+            val result = outboundMessageService.enqueueBatches(
+                source = request.sourcePlugin,
+                targets = request.targets,
+                batches = request.batches,
+                renderVariant = request.renderVariant,
+                deliveryPolicy = request.options.toDeliveryPolicy(),
+            )
+            PluginMessagePublishResult.accepted(
+                messageId = result.message.id,
+                targetCount = result.targetCount,
+                newDeliveryCount = result.newDeliveryCount,
+                existingDeliveryCount = result.existingDeliveryCount,
+            )
+        }.getOrElse { error ->
+            PluginMessagePublishResult.failed(error.message ?: error::class.qualifiedName ?: "消息发布失败")
+        }
+    }
     private val sourceUpdatePublisher: SourceUpdatePublisher = SourceUpdatePublisher { request ->
         if (::sourceUpdateProcessor.isInitialized) {
             sourceUpdateProcessor.process(request)
@@ -90,6 +121,8 @@ public object DynamicApplication : CoroutineScope {
         configService = configService,
         commandRegistry = commandRegistry,
         commandPublisher = commandPublisher,
+        incomingMessagePublisher = incomingMessagePublisher,
+        pluginMessagePublishSink = pluginMessagePublishSink,
         sourceUpdatePublisher = sourceUpdatePublisher,
         drawAssetRegistry = drawAssetRegistry,
     )
@@ -243,6 +276,14 @@ public object DynamicApplication : CoroutineScope {
         )
 
         listenerTokens += eventBus.subscribe(
+            object : Listener<IncomingMessageEvent> {
+                override suspend fun onMessage(event: IncomingMessageEvent) {
+                    pluginManager.dispatchIncomingMessageToConsumers(event.message)
+                }
+            },
+        )
+
+        listenerTokens += eventBus.subscribe(
             SystemNotificationService(
                 configProvider = configStore::current,
                 outboundMessageService = outboundMessageService,
@@ -314,6 +355,17 @@ public object DynamicApplication : CoroutineScope {
         val bytes = ByteArray(32)
         SecureRandom().nextBytes(bytes)
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+    }
+
+    private fun PluginMessagePublishOptions.toDeliveryPolicy(): MessageDeliveryPolicy {
+        val now = System.currentTimeMillis() / 1000
+        val expiresAt = expiresInSeconds?.let { seconds ->
+            if (seconds > Long.MAX_VALUE - now) Long.MAX_VALUE else now + seconds
+        }
+        return MessageDeliveryPolicy(
+            retry = retry,
+            expiresAtEpochSeconds = expiresAt,
+        )
     }
 
     private fun registerImageCleanupTask(config: MainDynamicConfig) {

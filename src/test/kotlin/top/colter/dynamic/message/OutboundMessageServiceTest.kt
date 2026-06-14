@@ -5,6 +5,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlinx.coroutines.runBlocking
+import top.colter.dynamic.core.data.MessageDeliveryPolicy
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
@@ -27,6 +28,7 @@ class OutboundMessageServiceTest {
             targets = listOf(TargetAddress.of("qq", TargetKind.GROUP, "10001")),
             text = " hello ",
             renderVariant = RENDER_VARIANT_MANUAL_FORWARD,
+            deliveryPolicy = MessageDeliveryPolicy(retry = false, expiresAtEpochSeconds = 60),
         )
 
         assertEquals("manual-forward:web-admin:1:uuid", result.message.id)
@@ -34,6 +36,7 @@ class OutboundMessageServiceTest {
         assertEquals(1, triggered)
         val stored = assertNotNull(MessageDeliveryRepository.findMessage(result.message.id))
         assertEquals(RENDER_VARIANT_MANUAL_FORWARD, stored.renderVariant)
+        assertEquals(MessageDeliveryPolicy(retry = false, expiresAtEpochSeconds = 60), stored.deliveryPolicy)
         assertEquals("hello", (stored.batches.single().content.single() as MessageContent.Text).fallbackText)
     }
 

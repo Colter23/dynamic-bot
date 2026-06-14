@@ -179,6 +179,14 @@ public class DeliveryDispatcher(
     }
 
     private suspend fun sendDelivery(request: MessageDeliveryRequest, config: DeliveryConfig): DeliveryOutcome {
+        if (request.message.deliveryPolicy.isExpired(nowEpochSeconds())) {
+            MessageDeliveryRepository.markFailed(request.delivery.id, "消息已过期，未继续投递")
+            logger.warn {
+                "消息投递已跳过：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，原因=消息已过期"
+            }
+            return DeliveryOutcome.FAILED
+        }
+
         val routed = resolveRoutedSinks(request.target)
         if (routed.routedSinkIds.isNotEmpty()) {
             val (sendRequest, candidates) = prepareRoutedDeliveryRequest(request, routed.candidates)
@@ -379,7 +387,11 @@ public class DeliveryDispatcher(
         result: MessageSendResult.Failed,
         config: DeliveryConfig,
     ): DeliveryOutcome {
-        val shouldRetry = !result.partialSent &&
+        val policy = request.message.deliveryPolicy
+        val expired = policy.isExpired(nowEpochSeconds())
+        val shouldRetry = !expired &&
+            policy.retry &&
+            !result.partialSent &&
             result.retryable &&
             request.delivery.attempts < config.maxAttempts.coerceAtLeast(1)
         return if (shouldRetry) {
@@ -394,7 +406,13 @@ public class DeliveryDispatcher(
             }
             DeliveryOutcome.RETRIED
         } else {
-            MessageDeliveryRepository.markFailed(request.delivery.id, result.reason)
+            val reason = when {
+                expired -> result.reason.withFailurePolicySuffix("消息已过期，不再重试")
+                !policy.retry && result.retryable && !result.partialSent ->
+                    result.reason.withFailurePolicySuffix("消息已禁用重试")
+                else -> result.reason
+            }
+            MessageDeliveryRepository.markFailed(request.delivery.id, reason)
             logger.warn {
                 "消息发送失败，已标记失败：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，原因=${result.reason}"
             }
@@ -445,6 +463,9 @@ public class DeliveryDispatcher(
     }
 
     private fun wholeSeconds(seconds: Double): Long = ceil(seconds).toLong().coerceAtLeast(1)
+
+    private fun String.withFailurePolicySuffix(suffix: String): String =
+        if (isBlank()) suffix else "$this（$suffix）"
 
     private data class RoutedSinkResolveResult(
         val routedSinkIds: List<String>,

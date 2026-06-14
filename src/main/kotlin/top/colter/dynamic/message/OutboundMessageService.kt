@@ -5,6 +5,7 @@ import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.MessageDelivery
+import top.colter.dynamic.core.data.MessageDeliveryPolicy
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.repository.MessageDeliveryRepository
@@ -41,6 +42,7 @@ public class OutboundMessageService(
         targets: List<TargetAddress>,
         text: String,
         renderVariant: String,
+        deliveryPolicy: MessageDeliveryPolicy = MessageDeliveryPolicy(),
     ): OutboundMessageEnqueueResult {
         val normalizedText = text.trim().also {
             require(it.isNotBlank()) { "消息内容不能为空" }
@@ -50,6 +52,7 @@ public class OutboundMessageService(
             targets = targets,
             batches = listOf(MessageBatch(listOf(MessageContent.Text(normalizedText)))),
             renderVariant = renderVariant,
+            deliveryPolicy = deliveryPolicy,
         )
     }
 
@@ -58,6 +61,7 @@ public class OutboundMessageService(
         targets: List<TargetAddress>,
         batches: List<MessageBatch>,
         renderVariant: String,
+        deliveryPolicy: MessageDeliveryPolicy = MessageDeliveryPolicy(),
     ): OutboundMessageEnqueueResult {
         val normalizedSource = source.trim().takeIf { it.isNotBlank() } ?: "main"
         val normalizedRenderVariant = renderVariant.trim().takeIf { it.isNotBlank() }
@@ -73,6 +77,7 @@ public class OutboundMessageService(
             time = nowEpochSeconds(),
             sourceUpdateKey = null,
             renderVariant = normalizedRenderVariant,
+            deliveryPolicy = deliveryPolicy,
             targets = normalizedTargets,
             batches = batches,
         )
