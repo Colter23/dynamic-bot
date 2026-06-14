@@ -2,9 +2,7 @@ version: '3.8'
 
 services:
   dynamic-bot:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/colter23/dynamic-bot:latest
     container_name: dynamic-bot
     restart: unless-stopped
     ports:

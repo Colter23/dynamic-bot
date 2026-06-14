@@ -1,7 +1,8 @@
 # Docker 相关文件
 data/
 config/
-plugins/
+plugins/*
+!plugins/catalog.json
 
 # IDE
 .idea/

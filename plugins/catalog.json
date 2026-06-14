@@ -17,6 +17,28 @@
         "PUBLISHER_LOOKUP",
         "PUBLISHER_FOLLOW",
         "PUBLISHER_LOGIN",
+        "LINK_RESOLVER",
+        "LINK_VIDEO_DOWNLOADER",
+        "CONFIGURABLE"
+      ]
+    },
+    {
+      "id": "weibo-publisher",
+      "name": "微博动态源插件",
+      "description": "检测微博动态事件，支持发布者资料查询、Cookie 登录状态和订阅联动。",
+      "release": {
+        "provider": "GITHUB_RELEASE",
+        "repository": "Colter23/dynamic-bot-weibo",
+        "assetPattern": "dynamic-bot-weibo-*-all.jar",
+        "checksumAssetPattern": "dynamic-bot-weibo-*-all.jar.sha256"
+      },
+      "homepageUrl": "https://github.com/Colter23/dynamic-bot-weibo",
+      "capabilities": [
+        "PUBLISHER_SOURCE",
+        "PUBLISHER_LOOKUP",
+        "PUBLISHER_FOLLOW",
+        "PUBLISHER_LOGIN",
+        "LINK_RESOLVER",
         "CONFIGURABLE"
       ]
     },
@@ -33,7 +55,6 @@
       "homepageUrl": "https://github.com/Colter23/dynamic-bot-onebot",
       "capabilities": [
         "MESSAGE_SINK",
-        "COMMAND_CONTRIBUTOR",
         "CONFIGURABLE"
       ]
     }

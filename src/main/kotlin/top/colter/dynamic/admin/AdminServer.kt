@@ -199,6 +199,9 @@ public fun Application.adminModule(context: AdminServerContext) {
         }
 
         route("/api") {
+            get("/health") {
+                call.respondText("""{"status":"ok"}""", ContentType.Application.Json)
+            }
             get("/dashboard") {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.dashboard() }

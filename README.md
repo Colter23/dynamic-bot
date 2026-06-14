@@ -76,10 +76,16 @@ config/main.yml
 
 ## Docker
 
-项目包含 `Dockerfile` 和 `docker-compose.yml`。
+默认从 GHCR 拉取镜像：
 
 ```powershell
 docker compose up -d
+```
+
+镜像地址：
+
+```text
+ghcr.io/colter23/dynamic-bot
 ```
 
 详细说明见 [DOCKER.md](DOCKER.md)。

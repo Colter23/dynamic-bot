@@ -14,19 +14,19 @@
 
    ```bash
    # 在 dynamic-bot 目录执行
-   docker-compose up -d
+   docker compose up -d
    ```
 
 3. **查看日志**
 
    ```bash
-   docker-compose logs -f dynamic-bot
+   docker compose logs -f dynamic-bot
    ```
 
 4. **停止服务**
 
    ```bash
-   docker-compose down
+   docker compose down
    ```
 
 5. **访问 Web 管理后台**
@@ -85,12 +85,18 @@ mkdir -p data config plugins
 2. 重启容器使插件生效：
 
    ```bash
-   docker-compose restart dynamic-bot
+   docker compose restart dynamic-bot
    ```
 
 ## 仅使用 Dockerfile
 
-如果不使用 Docker Compose，可以直接使用 Dockerfile：
+默认 `docker-compose.yml` 会使用 GHCR 镜像：
+
+```text
+ghcr.io/colter23/dynamic-bot:latest
+```
+
+如果需要从源码本地构建，可以直接使用 Dockerfile：
 
 1. **构建镜像**
 
@@ -143,7 +149,7 @@ docker inspect --format='{{.State.Health.Status}}' dynamic-bot
 1. 检查日志：
 
    ```bash
-   docker-compose logs dynamic-bot
+   docker compose logs dynamic-bot
    ```
 
 2. 检查端口占用：
@@ -167,7 +173,7 @@ docker inspect --format='{{.State.Health.Status}}' dynamic-bot
 配置文件修改后需要重启容器：
 
 ```bash
-docker-compose restart dynamic-bot
+docker compose restart dynamic-bot
 ```
 
 ### Web Admin 无法访问
@@ -175,7 +181,7 @@ docker-compose restart dynamic-bot
 1. 确认容器正在运行：
 
    ```bash
-   docker-compose ps
+   docker compose ps
    ```
 
 2. 检查健康状态（应为 `healthy`）：
@@ -191,16 +197,14 @@ docker-compose restart dynamic-bot
 1. 拉取最新代码并重新构建：
 
    ```bash
-   git pull
-   docker-compose down
-   docker-compose build --no-cache
-   docker-compose up -d
+   docker compose pull
+   docker compose up -d
    ```
 
 2. 查看新版本日志确认启动正常：
 
    ```bash
-   docker-compose logs -f dynamic-bot
+   docker compose logs -f dynamic-bot
    ```
 
 ## 生产环境建议
