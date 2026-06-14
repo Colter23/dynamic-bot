@@ -1,3 +1,6 @@
+import org.gradle.api.file.DuplicatesStrategy
+import org.gradle.kotlin.dsl.kotlin
+
 plugins {
     kotlin("jvm") version "2.4.0"
     kotlin("plugin.serialization") version "2.4.0"
@@ -25,14 +28,14 @@ dependencies {
     val log4jVersion = "2.26.0"
     val slf4jVersion = "2.0.18"
 
-    implementation("top.colter.skiko:skiko-layout:0.0.4")
+    implementation("top.colter.skiko:skiko-layout:0.0.5")
     implementation("org.jetbrains.skiko:skiko-awt:$skikoVersion")
     implementation("io.ktor:ktor-server-core:$ktorVersion")
     implementation("io.ktor:ktor-server-netty:$ktorVersion")
     implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")
     implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
 
-    implementation("top.colter.dynamic:dynamic-bot-core:0.0.6")
+    implementation("top.colter.dynamic:dynamic-bot-core:0.0.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
     implementation("io.github.oshai:kotlin-logging-jvm:8.0.4")
     implementation("ch.qos.logback:logback-classic:1.5.34")
