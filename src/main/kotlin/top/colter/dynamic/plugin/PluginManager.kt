@@ -41,6 +41,10 @@ import top.colter.dynamic.core.plugin.CommandContributor
 import top.colter.dynamic.core.plugin.IncomingMessageConsumerPlugin
 import top.colter.dynamic.core.plugin.IncomingMessagePublisher
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
+import top.colter.dynamic.core.plugin.PluginAdminApiProvider
+import top.colter.dynamic.core.plugin.PluginAdminApiRequest
+import top.colter.dynamic.core.plugin.PluginAdminApiResponse
+import top.colter.dynamic.core.plugin.PluginAdminPageProvider
 import top.colter.dynamic.core.plugin.PluginMessagePublishRequest
 import top.colter.dynamic.core.plugin.PluginMessagePublishOptions
 import top.colter.dynamic.core.plugin.PluginMessagePublishResult
@@ -477,6 +481,56 @@ public class PluginManager(
         return extensionHandles(activeOnly = false)
     }
 
+    public fun getPluginAdminPages(): List<PluginAdminPageInfo> {
+        return plugins.values
+            .flatMap { runtime ->
+                val provider = runtime.instance as? PluginAdminPageProvider ?: return@flatMap emptyList()
+                provider.adminPages
+                    .filter { page -> !page.enabledWhenPluginActive || runtime.state == PluginState.ACTIVE }
+                    .map { page ->
+                        PluginAdminPageInfo(
+                            pluginId = runtime.descriptor.id,
+                            pluginName = runtime.descriptor.name,
+                            pluginVersion = runtime.descriptor.version,
+                            loadTime = runtime.loadTime,
+                            pluginState = runtime.state,
+                            page = page,
+                        )
+                    }
+            }
+            .sortedWith(compareBy<PluginAdminPageInfo> { it.page.navGroup }.thenBy { it.pluginName }.thenBy { it.page.title })
+    }
+
+    public fun readPluginAdminResource(pluginId: String, pageId: String, resourcePath: String): PluginAdminResource {
+        val runtime = plugins[pluginId] ?: throw NoSuchElementException("未找到插件：$pluginId")
+        val provider = runtime.instance as? PluginAdminPageProvider
+            ?: throw NoSuchElementException("插件未提供后台页面：$pluginId")
+        val page = provider.adminPages.firstOrNull { it.id == pageId }
+            ?: throw NoSuchElementException("插件后台页面不存在：pluginId=$pluginId，pageId=$pageId")
+        if (page.enabledWhenPluginActive && runtime.state != PluginState.ACTIVE) {
+            throw IllegalStateException("插件后台页面不可用：pluginId=$pluginId，state=${runtime.state}")
+        }
+        val classLoader = runtime.classLoader ?: runtime.instance::class.java.classLoader
+        val normalized = normalizePluginAdminResourcePath(resourcePath)
+        val fullPath = "${normalizePluginAdminResourcePath(page.resourceRoot)}/$normalized"
+        val bytes = classLoader.getResourceAsStream(fullPath)?.use { it.readBytes() }
+            ?: throw NoSuchElementException("插件后台资源不存在：pluginId=$pluginId，path=$normalized")
+        return PluginAdminResource(bytes = bytes, resourcePath = normalized)
+    }
+
+    public suspend fun handlePluginAdminApi(
+        pluginId: String,
+        request: PluginAdminApiRequest,
+    ): PluginAdminApiResponse {
+        val runtime = plugins[pluginId] ?: throw NoSuchElementException("未找到插件：$pluginId")
+        if (runtime.state != PluginState.ACTIVE) {
+            throw IllegalStateException("插件后台接口不可用：pluginId=$pluginId，state=${runtime.state}")
+        }
+        val provider = runtime.instance as? PluginAdminApiProvider
+            ?: throw NoSuchElementException("插件未提供后台接口：$pluginId")
+        return provider.handleAdminApi(request)
+    }
+
     public fun getPluginTasks(): List<PluginTaskInfo> {
         return plugins.values
             .flatMap { runtime ->
@@ -860,6 +914,8 @@ public class PluginManager(
             if (instance is CommandContributor) add(PluginCapability.COMMAND_CONTRIBUTOR)
             if (instance is LinkResolver) add(PluginCapability.LINK_RESOLVER)
             if (instance is LinkVideoDownloader) add(PluginCapability.LINK_VIDEO_DOWNLOADER)
+            if (instance is PluginAdminPageProvider && instance.adminPages.isNotEmpty()) add(PluginCapability.ADMIN_PAGE)
+            if (instance is PluginAdminApiProvider) add(PluginCapability.ADMIN_API)
             if (instance is ConfigurablePlugin<*>) add(PluginCapability.CONFIGURABLE)
         }
     }
@@ -1089,6 +1145,16 @@ public class PluginManager(
         private const val DEFAULT_PLUGIN_HOOK_TIMEOUT_MS: Long = 10_000
         private const val DEFAULT_INCOMING_MESSAGE_PENDING_LIMIT: Int = 64
     }
+}
+
+private fun normalizePluginAdminResourcePath(path: String): String {
+    val normalized = path.replace('\\', '/').trim('/')
+    require(normalized.isNotBlank()) { "插件后台资源路径不能为空" }
+    val segments = normalized.split("/")
+    require(segments.none { it.isBlank() || it == "." || it == ".." }) {
+        "插件后台资源路径非法：$path"
+    }
+    return segments.joinToString("/")
 }
 
 public data class LoadResult(

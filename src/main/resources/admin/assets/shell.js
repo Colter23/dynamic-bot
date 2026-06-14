@@ -34,7 +34,8 @@ const $ = id => document.getElementById(id);
       activePageModule: null,
       pageLoadSeq: 0,
       pageRequestSeq: {},
-      restoringHash: false
+      restoringHash: false,
+      pluginAdminPagesLoaded: false
     };
 
     function applyTheme(theme) {
@@ -529,7 +530,9 @@ const $ = id => document.getElementById(id);
     function showApp() {
       $("loginView").hidden = true;
       $("appView").hidden = false;
-      setPage(location.hash.replace("#", "") || "dashboard");
+      loadPluginAdminPages()
+        .catch(handleError)
+        .finally(() => setPage(location.hash.replace("#", "") || "dashboard"));
     }
     function logout(message) {
       state.token = "";
@@ -569,6 +572,54 @@ const $ = id => document.getElementById(id);
       await loadPage(state.page, false);
       return true;
     }
+
+    async function loadPluginAdminPages(force = false) {
+      if (state.pluginAdminPagesLoaded && !force) return;
+      const response = await api("/plugin-admin-pages");
+      registerPluginAdminPages(response && response.pages || []);
+      state.pluginAdminPagesLoaded = true;
+    }
+
+    function registerPluginAdminPages(items) {
+      document.querySelectorAll("[data-plugin-admin-nav]").forEach(node => node.remove());
+      Object.keys(pages)
+        .filter(key => key.startsWith("plugin:"))
+        .forEach(key => delete pages[key]);
+
+      const grouped = new Map();
+      (items || []).forEach(item => {
+        const key = `plugin:${item.pluginId}:${item.pageId}`;
+        pages[key] = [
+          item.title || item.pluginName || item.pluginId,
+          item.subtitle || item.pluginName || "",
+          item.htmlPath,
+          item.scriptPath,
+          item
+        ];
+        const group = item.navGroup || "插件功能";
+        if (!grouped.has(group)) grouped.set(group, []);
+        grouped.get(group).push(Object.assign({}, item, { key }));
+      });
+
+      const nav = document.querySelector(".nav");
+      if (!nav) return;
+      Array.from(grouped.entries()).forEach(([group, entries]) => {
+        const wrapper = document.createElement("div");
+        wrapper.className = "nav-group";
+        wrapper.dataset.pluginAdminNav = "true";
+        wrapper.innerHTML = `<span class="nav-group-title">${esc(group)}</span>` + entries.map(item => `
+          <button data-nav="${attr(item.key)}">
+            <span class="nav-icon">${esc(item.navIcon || "插件")}</span>
+            <span>${esc(item.title || item.pluginName || item.pluginId)}</span>
+          </button>
+        `).join("");
+        nav.appendChild(wrapper);
+      });
+      document.querySelectorAll("[data-plugin-admin-nav] [data-nav]").forEach(button => {
+        button.onclick = () => setPage(button.dataset.nav);
+      });
+    }
+
     function restoreCurrentHash() {
       if (location.hash.replace("#", "") === state.page) return;
       state.restoringHash = true;
@@ -627,6 +678,8 @@ const $ = id => document.getElementById(id);
         invalidate,
         setPage,
         loadPage,
+        loadPluginAdminPages,
+        pluginAdminApi,
         handleError,
         hydrateMediaImages,
         releaseMediaObjectUrls,
@@ -675,8 +728,16 @@ const $ = id => document.getElementById(id);
       publisherKey,
       targetKey,
       policyEvents,
-      mentionEvents
+      mentionEvents,
+      pluginAdminApi
     };
+
+    async function pluginAdminApi(path, options = {}) {
+      const spec = pages[state.page] && pages[state.page][4];
+      if (!spec || !spec.pluginId) throw new Error("当前页面不是插件后台页面");
+      const normalized = String(path || "").replace(/^\/+/, "");
+      return api(`/plugins/${encodeURIComponent(spec.pluginId)}/admin/${normalized}`, options);
+    }
 
 
 
@@ -827,6 +888,9 @@ const $ = id => document.getElementById(id);
             system: ["system"],
             about: ["system", "plugins"]
           };
+          if (String(state.page || "").startsWith("plugin:")) {
+            await loadPluginAdminPages(true);
+          }
           invalidate(...(keysByPage[state.page] || []));
           await loadPage(state.page, true);
           notify("已刷新", false);

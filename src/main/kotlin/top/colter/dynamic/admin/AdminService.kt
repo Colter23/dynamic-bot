@@ -48,6 +48,7 @@ import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.core.plugin.MessageTargetCandidate
 import top.colter.dynamic.core.plugin.MessageTargetSource
 import top.colter.dynamic.plugin.PluginHandle
+import top.colter.dynamic.plugin.PluginAdminPageInfo
 import top.colter.dynamic.plugin.PluginInfo
 import top.colter.dynamic.plugin.PluginManager
 import top.colter.dynamic.plugin.PluginReloadResult
@@ -106,6 +107,7 @@ public class AdminService(
     private val publisherLookupResolver: (String) -> PublisherLookupPlugin?,
     private val publisherFollowResolver: (String) -> PublisherFollowPlugin?,
     private val configurablePluginProvider: () -> List<PluginHandle<ConfigurablePlugin<*>>> = { emptyList() },
+    private val pluginAdminPageProvider: () -> List<PluginAdminPageInfo> = { emptyList() },
     private val configProvider: () -> MainDynamicConfig,
     private val mainConfigUpdater: (MainDynamicConfig) -> ConfigApplyResult = {
         throw IllegalStateException("主配置编辑未初始化")
@@ -163,6 +165,7 @@ public class AdminService(
         publisherLookupResolver = { platformId -> pluginManager.findPublisherLookupPlugin(platformId) },
         publisherFollowResolver = { platformId -> pluginManager.findPublisherFollowPlugin(platformId) },
         configurablePluginProvider = { pluginManager.getConfigurablePlugins() },
+        pluginAdminPageProvider = { pluginManager.getPluginAdminPages() },
         configProvider = configProvider,
         mainConfigUpdater = mainConfigUpdater,
         configService = configService,
@@ -389,6 +392,12 @@ public class AdminService(
 
     public fun pluginCatalog(force: Boolean = false): PluginCatalogResponse {
         return requirePluginCatalogService().catalog(force = force)
+    }
+
+    public fun pluginAdminPages(): PluginAdminPagesResponse {
+        return PluginAdminPagesResponse(
+            pages = pluginAdminPageProvider().map { it.toDto() },
+        )
     }
 
     public fun installCatalogPlugin(id: String): PluginCatalogOperationResponse {
@@ -2151,6 +2160,21 @@ private fun PluginInfo.toDto(catalog: PluginCatalogEntryDto? = null): PluginDto 
     catalogVersion = catalog?.version,
     updateAvailable = catalog?.updateAvailable ?: false,
     catalogStatus = catalog?.catalogStatus,
+)
+
+private fun PluginAdminPageInfo.toDto(): PluginAdminPageDto = PluginAdminPageDto(
+    key = pageKey,
+    pluginId = pluginId,
+    pluginName = pluginName,
+    pluginVersion = pluginVersion,
+    pluginState = pluginState.name,
+    pageId = page.id,
+    title = page.title,
+    subtitle = page.subtitle,
+    navGroup = page.navGroup,
+    navIcon = page.navIcon,
+    htmlPath = htmlPath,
+    scriptPath = scriptPath,
 )
 
 private fun PluginInfo.errorText(): String? = error?.message ?: error?.javaClass?.name

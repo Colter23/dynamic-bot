@@ -12,6 +12,8 @@ public enum class PluginCapability {
     COMMAND_CONTRIBUTOR,
     LINK_RESOLVER,
     LINK_VIDEO_DOWNLOADER,
+    ADMIN_PAGE,
+    ADMIN_API,
     CONFIGURABLE,
 }
 

@@ -49,6 +49,11 @@ import top.colter.dynamic.core.event.SystemNotificationSeverity
 import top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION
 import top.colter.dynamic.core.plugin.CommandContributor
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
+import top.colter.dynamic.core.plugin.PluginAdminApiProvider
+import top.colter.dynamic.core.plugin.PluginAdminApiRequest
+import top.colter.dynamic.core.plugin.PluginAdminApiResponse
+import top.colter.dynamic.core.plugin.PluginAdminPageDescriptor
+import top.colter.dynamic.core.plugin.PluginAdminPageProvider
 import top.colter.dynamic.core.plugin.Plugin
 import top.colter.dynamic.core.plugin.PluginContext
 import top.colter.dynamic.core.plugin.PluginDescriptor
@@ -185,6 +190,45 @@ class PluginManagerLifecycleTest {
         assertNotNull(drawAssetRegistry.image(PlatformId.of("bilibili"), "avatarBadge.official.individual", 24, 24))
         assertTrue(manager.unloadPlugin("draw-assets"))
         assertNull(drawAssetRegistry.image(PlatformId.of("bilibili"), "avatarBadge.official.individual", 24, 24))
+        manager.shutdown()
+    }
+
+    @Test
+    fun loadShouldExposePluginAdminPagesResourcesAndApiCapability() = runBlocking {
+        val pluginDir = createTempDirectory("plugin-manager-admin-page").toFile()
+        val manager = PluginManager(pluginDirPath = pluginDir.path)
+        createPluginJar(
+            pluginDir = pluginDir,
+            id = "admin-page",
+            mainClass = AdminPagePlugin::class.java.name,
+            resourceEntries = mapOf(
+                "web/index.html" to """<div data-page-root>admin page</div>""".toByteArray(Charsets.UTF_8),
+                "web/index.js" to """export function mount() {}""".toByteArray(Charsets.UTF_8),
+            ),
+        )
+
+        val result = manager.loadAllPlugins()
+        manager.startAllPlugins()
+
+        assertEquals(listOf("admin-page"), result.loadedPlugins)
+        val info = manager.getAllPlugins().single()
+        assertTrue(PluginCapability.ADMIN_PAGE in info.capabilities)
+        assertTrue(PluginCapability.ADMIN_API in info.capabilities)
+
+        val page = manager.getPluginAdminPages().single()
+        assertEquals("admin-page:translate", page.pageKey)
+        assertTrue(page.htmlPath.startsWith("/admin/plugins/admin-page/pages/translate/index.html?v=0.0.1-"))
+        assertTrue(page.scriptPath.startsWith("/admin/plugins/admin-page/pages/translate/index.js?v=0.0.1-"))
+        assertEquals("admin page", manager.readPluginAdminResource("admin-page", "translate", "index.html").bytes.toString(Charsets.UTF_8).substringAfter(">").substringBefore("<"))
+
+        val response = manager.handlePluginAdminApi(
+            "admin-page",
+            PluginAdminApiRequest(method = "GET", path = "rules"),
+        )
+        assertEquals(PluginAdminApiResponse.ok().status, response.status)
+
+        assertTrue(manager.unloadPlugin("admin-page"))
+        assertTrue(manager.getPluginAdminPages().isEmpty())
         manager.shutdown()
     }
 
@@ -476,6 +520,22 @@ class PluginManagerLifecycleTest {
             started.complete(Unit)
             release.await()
             completed = true
+        }
+    }
+
+    class AdminPagePlugin : PluginAdminPageProvider, PluginAdminApiProvider {
+        override val adminPages: List<PluginAdminPageDescriptor> = listOf(
+            PluginAdminPageDescriptor(
+                id = "translate",
+                title = "Translate",
+                subtitle = "Rules",
+                navGroup = "Plugin",
+                navIcon = "T",
+            )
+        )
+
+        override suspend fun handleAdminApi(request: PluginAdminApiRequest): PluginAdminApiResponse {
+            return PluginAdminApiResponse.ok()
         }
     }
 }

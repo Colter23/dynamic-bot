@@ -15,6 +15,7 @@ import io.ktor.server.netty.NettyApplicationEngine
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.path
 import io.ktor.server.request.receive
+import io.ktor.server.request.receiveText
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondFile
@@ -30,6 +31,8 @@ import java.security.MessageDigest
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.WebAdminConfig
 import top.colter.dynamic.command.CommandRegistry
@@ -38,6 +41,9 @@ import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
+import top.colter.dynamic.core.plugin.PluginAdminApiRequest
+import top.colter.dynamic.core.plugin.PluginAdminApiResponse
+import top.colter.dynamic.core.plugin.PluginAdminApiStatus
 import top.colter.dynamic.core.task.TaskScheduler
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.config.YamlConfigService
@@ -95,6 +101,7 @@ public class AdminServer(
             ),
             outboundMediaService = outboundMediaService,
             drawAssetRegistry = drawAssetRegistry,
+            pluginManager = pluginManager,
             stopRequester = stopRequester,
         )
         engine = embeddedServer(Netty, host = config.host, port = config.port) {
@@ -134,6 +141,7 @@ public data class AdminServerContext(
     val mediaService: AdminMediaService = AdminMediaService(),
     val outboundMediaService: OutboundMediaService = OutboundMediaService(configProvider = { MainDynamicConfig() }),
     val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
+    val pluginManager: PluginManager? = null,
     val stopRequester: ((String) -> Unit)? = null,
 )
 
@@ -159,6 +167,9 @@ public fun Application.adminModule(context: AdminServerContext) {
         }
         get("/admin/pages/{...}") {
             call.respondAdminStaticResource("/admin/pages/")
+        }
+        get("/admin/plugins/{pluginId}/pages/{pageId}/{...}") {
+            call.respondPluginAdminResource(context)
         }
         get("/admin/{...}") {
             call.respondText(AdminStatic.indexHtml, ContentType.Text.Html)
@@ -195,6 +206,32 @@ public fun Application.adminModule(context: AdminServerContext) {
             get("/plugins") {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.plugins() }
+            }
+            get("/plugin-admin-pages") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi { context.service.pluginAdminPages() }
+            }
+            route("/plugins/{pluginId}/admin") {
+                get("{...}") {
+                    if (!call.ensureAuthorized(context)) return@get
+                    call.respondPluginAdminApi(context, "GET")
+                }
+                post("{...}") {
+                    if (!call.ensureAuthorized(context)) return@post
+                    call.respondPluginAdminApi(context, "POST")
+                }
+                put("{...}") {
+                    if (!call.ensureAuthorized(context)) return@put
+                    call.respondPluginAdminApi(context, "PUT")
+                }
+                patch("{...}") {
+                    if (!call.ensureAuthorized(context)) return@patch
+                    call.respondPluginAdminApi(context, "PATCH")
+                }
+                delete("{...}") {
+                    if (!call.ensureAuthorized(context)) return@delete
+                    call.respondPluginAdminApi(context, "DELETE")
+                }
             }
             get("/plugin-catalog") {
                 if (!call.ensureAuthorized(context)) return@get
@@ -572,6 +609,78 @@ private suspend fun ApplicationCall.respondMedia(block: suspend () -> AdminMedia
     }
 }
 
+private suspend fun ApplicationCall.respondPluginAdminResource(context: AdminServerContext) {
+    val manager = context.pluginManager
+    if (manager == null) {
+        respond(HttpStatusCode.NotFound, ErrorResponse("插件后台页面功能未启用"))
+        return
+    }
+    val pluginId = pathString("pluginId")
+    val pageId = pathString("pageId")
+    val routePrefix = "/admin/plugins/$pluginId/pages/$pageId/"
+    val requestPath = request.path()
+    if (!requestPath.startsWith(routePrefix)) {
+        respond(HttpStatusCode.BadRequest, ErrorResponse("插件后台资源路径无效"))
+        return
+    }
+    val resourcePath = requestPath.removePrefix(routePrefix)
+    try {
+        val resource = manager.readPluginAdminResource(pluginId, pageId, resourcePath)
+        response.headers.append(HttpHeaders.CacheControl, "private, max-age=60")
+        respondBytes(
+            bytes = resource.bytes,
+            contentType = contentTypeFromAssetPath(resource.resourcePath) ?: ContentType.Application.OctetStream,
+        )
+    } catch (e: IllegalArgumentException) {
+        respond(HttpStatusCode.BadRequest, ErrorResponse(e.message ?: "插件后台资源路径无效"))
+    } catch (e: NoSuchElementException) {
+        respond(HttpStatusCode.NotFound, ErrorResponse(e.message ?: "插件后台资源不存在"))
+    } catch (e: IllegalStateException) {
+        respond(HttpStatusCode.Conflict, ErrorResponse(e.message ?: "插件后台页面不可用"))
+    } catch (e: Exception) {
+        logger.error(e) { "插件后台资源读取失败：${request.path()}" }
+        respond(HttpStatusCode.InternalServerError, ErrorResponse("插件后台资源读取失败"))
+    }
+}
+
+private suspend fun ApplicationCall.respondPluginAdminApi(context: AdminServerContext, method: String) {
+    val manager = context.pluginManager
+    if (manager == null) {
+        respond(HttpStatusCode.NotFound, ErrorResponse("插件后台接口功能未启用"))
+        return
+    }
+    val pluginId = pathString("pluginId")
+    val routePrefix = "/api/plugins/$pluginId/admin"
+    val rawPath = request.path().removePrefix(routePrefix).trim('/')
+    try {
+        val body = receivePluginAdminApiBody()
+        val query = request.queryParameters.entries().associate { entry ->
+            entry.key to entry.value
+        }
+        val result = manager.handlePluginAdminApi(
+            pluginId = pluginId,
+            request = PluginAdminApiRequest(
+                method = method,
+                path = rawPath,
+                query = query,
+                body = body,
+            ),
+        )
+        respond(result.httpStatusCode(), result.body)
+    } catch (e: IllegalArgumentException) {
+        respond(HttpStatusCode.BadRequest, ErrorResponse(e.message ?: "插件后台接口请求无效"))
+    } catch (e: SerializationException) {
+        respond(HttpStatusCode.BadRequest, ErrorResponse(e.message ?: "插件后台接口请求体格式无效"))
+    } catch (e: NoSuchElementException) {
+        respond(HttpStatusCode.NotFound, ErrorResponse(e.message ?: "插件后台接口不存在"))
+    } catch (e: IllegalStateException) {
+        respond(HttpStatusCode.Conflict, ErrorResponse(e.message ?: "插件后台接口不可用"))
+    } catch (e: Exception) {
+        logger.error(e) { "插件后台接口处理失败：${request.path()}" }
+        respond(HttpStatusCode.InternalServerError, ErrorResponse("插件后台接口处理失败"))
+    }
+}
+
 private suspend fun ApplicationCall.respondOutboundMedia(block: suspend () -> OutboundMediaResult) {
     try {
         val result = block()
@@ -633,7 +742,29 @@ private fun contentTypeFromAssetPath(path: String): ContentType? {
         "gif" -> ContentType.Image.GIF
         "webp" -> ContentType("image", "webp")
         "svg" -> ContentType("image", "svg+xml")
+        "html" -> ContentType.Text.Html
+        "css" -> ContentType.Text.CSS
+        "js",
+        "mjs" -> ContentType.Text.JavaScript
+        "json" -> ContentType.Application.Json
         else -> null
+    }
+}
+
+private suspend fun ApplicationCall.receivePluginAdminApiBody(): JsonElement {
+    val contentLength = request.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+    if (contentLength == 0L) return JsonNull
+    val raw = receiveText()
+    if (raw.isBlank()) return JsonNull
+    return Json.parseToJsonElement(raw)
+}
+
+private fun PluginAdminApiResponse.httpStatusCode(): HttpStatusCode {
+    return when (status) {
+        PluginAdminApiStatus.OK -> HttpStatusCode.OK
+        PluginAdminApiStatus.BAD_REQUEST -> HttpStatusCode.BadRequest
+        PluginAdminApiStatus.NOT_FOUND -> HttpStatusCode.NotFound
+        PluginAdminApiStatus.CONFLICT -> HttpStatusCode.Conflict
     }
 }
 

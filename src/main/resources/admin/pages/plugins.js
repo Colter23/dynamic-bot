@@ -608,6 +608,7 @@ async function openCatalogOperation(id, mode) {
 async function reloadAfterOperation(forceCatalog) {
   pageSeq += 1;
   state.cache.plugins = await api("/plugins");
+  await ctx.loadPluginAdminPages(true);
   if (forceCatalog || state.cache.pluginCatalog) {
     const result = await fetchCatalog(forceCatalog);
     catalogModalError = result.error;

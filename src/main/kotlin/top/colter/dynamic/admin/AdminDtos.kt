@@ -180,6 +180,27 @@ public data class PluginLifecycleResponse(
 )
 
 @Serializable
+public data class PluginAdminPagesResponse(
+    val pages: List<PluginAdminPageDto>,
+)
+
+@Serializable
+public data class PluginAdminPageDto(
+    val key: String,
+    val pluginId: String,
+    val pluginName: String,
+    val pluginVersion: String,
+    val pluginState: String,
+    val pageId: String,
+    val title: String,
+    val subtitle: String = "",
+    val navGroup: String,
+    val navIcon: String,
+    val htmlPath: String,
+    val scriptPath: String,
+)
+
+@Serializable
 public data class PlatformLoginDto(
     val platformId: String,
     val pluginId: String,

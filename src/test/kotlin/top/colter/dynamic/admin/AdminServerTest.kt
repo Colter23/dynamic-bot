@@ -28,6 +28,8 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.MainDynamicConfig
@@ -69,6 +71,11 @@ import top.colter.dynamic.core.plugin.MessageTargetCandidate
 import top.colter.dynamic.core.plugin.PlatformDrawAssetDescriptor
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKind
+import top.colter.dynamic.core.plugin.PluginAdminApiProvider
+import top.colter.dynamic.core.plugin.PluginAdminApiRequest
+import top.colter.dynamic.core.plugin.PluginAdminApiResponse
+import top.colter.dynamic.core.plugin.PluginAdminPageDescriptor
+import top.colter.dynamic.core.plugin.PluginAdminPageProvider
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.task.TaskDefinition
@@ -84,6 +91,7 @@ import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.plugin.PluginInfo
 import top.colter.dynamic.plugin.PluginState
 import top.colter.dynamic.plugin.PluginTaskInfo
+import top.colter.dynamic.plugin.PluginManager
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.LinkParseTargetConfigRepository
 import top.colter.dynamic.repository.MessageDeliveryRepository
@@ -141,6 +149,51 @@ class AdminServerTest {
 
         assertEquals(HttpStatusCode.Unauthorized, unauthorized.status)
         assertEquals(HttpStatusCode.OK, authorized.status)
+    }
+
+    @Test
+    fun adminShouldServePluginAdminPagesResourcesAndApi() = testApplication {
+        val plugin = FakeAdminPagePlugin()
+        val manager = PluginManager(pluginDirPath = createTempDirectory("admin-plugin-pages").toString())
+        manager.registerPluginForTest(
+            descriptor = PluginDescriptor(
+                id = "translate-plugin",
+                name = "Translate Plugin",
+                version = "1.0.0",
+                mainClass = plugin::class.java.name,
+            ),
+            instance = plugin,
+            state = PluginState.ACTIVE,
+            classLoader = plugin::class.java.classLoader,
+        )
+        application {
+            adminModule(staticRouteContext(pluginManager = manager))
+        }
+
+        val pages = client.get("/api/plugin-admin-pages") {
+            header(HttpHeaders.Authorization, "Bearer test-token")
+        }
+        val html = client.get("/admin/plugins/translate-plugin/pages/rules/test-plugin-page.html?v=1.0.0-test")
+        val js = client.get("/admin/plugins/translate-plugin/pages/rules/test-plugin-page.js?v=1.0.0-test")
+        val api = client.post("/api/plugins/translate-plugin/admin/rules") {
+            header(HttpHeaders.Authorization, "Bearer test-token")
+            contentType(ContentType.Application.Json)
+            setBody("""{"name":"demo"}""")
+        }
+
+        assertEquals(HttpStatusCode.OK, pages.status)
+        assertTrue(pages.bodyAsText().contains("\"pluginId\":\"translate-plugin\""))
+        assertTrue(pages.bodyAsText().contains("\"pageId\":\"rules\""))
+        assertEquals(HttpStatusCode.OK, html.status)
+        assertTrue(html.bodyAsText().contains("test-plugin-page"))
+        assertEquals(ContentType.Text.Html, html.contentType()?.withoutParameters())
+        assertEquals(HttpStatusCode.OK, js.status)
+        assertTrue(js.bodyAsText().contains("export function mount"))
+        assertEquals(HttpStatusCode.OK, api.status)
+        assertTrue(api.bodyAsText().contains("\"path\":\"rules\""))
+        assertTrue(api.bodyAsText().contains("\"method\":\"POST\""))
+
+        manager.shutdown()
     }
 
     @Test
@@ -1787,6 +1840,7 @@ class AdminServerTest {
     private fun staticRouteContext(
         drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
         pluginCatalogService: PluginCatalogService? = null,
+        pluginManager: PluginManager? = null,
     ): AdminServerContext {
         return AdminServerContext(
             token = "test-token",
@@ -1794,6 +1848,7 @@ class AdminServerTest {
                 pluginProvider = { emptyList() },
                 publisherLookupResolver = { null },
                 publisherFollowResolver = { null },
+                pluginAdminPageProvider = { pluginManager?.getPluginAdminPages().orEmpty() },
                 configProvider = { MainDynamicConfig() },
                 pluginCatalogService = pluginCatalogService,
             ),
@@ -1801,7 +1856,36 @@ class AdminServerTest {
                 loginProviderResolver = { null },
             ),
             drawAssetRegistry = drawAssetRegistry,
+            pluginManager = pluginManager,
         )
+    }
+
+    private class FakeAdminPagePlugin : MessageSinkPlugin, PluginAdminPageProvider, PluginAdminApiProvider {
+        override val transportId: String = "fake-admin"
+        override val supportedTargetPlatforms: Set<PlatformId> = setOf(PlatformId.of("qq"))
+        override val adminPages: List<PluginAdminPageDescriptor> = listOf(
+            PluginAdminPageDescriptor(
+                id = "rules",
+                title = "翻译规则",
+                subtitle = "管理翻译插件规则",
+                navGroup = "插件功能",
+                navIcon = "译",
+                resourceRoot = "admin",
+                entryHtml = "test-plugin-page.html",
+                entryScript = "test-plugin-page.js",
+            )
+        )
+
+        override suspend fun handleAdminApi(request: PluginAdminApiRequest): PluginAdminApiResponse {
+            return PluginAdminApiResponse.ok(
+                JsonObject(
+                    mapOf(
+                        "method" to JsonPrimitive(request.method),
+                        "path" to JsonPrimitive(request.path),
+                    )
+                )
+            )
+        }
     }
 
     private class FakePublisherFollowPlugin : PublisherFollowPlugin {
