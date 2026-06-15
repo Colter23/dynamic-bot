@@ -82,6 +82,7 @@ import top.colter.dynamic.core.task.TaskDefinition
 import top.colter.dynamic.core.task.TaskSchedule
 import top.colter.dynamic.core.task.TaskSnapshot
 import top.colter.dynamic.core.task.TaskStatus
+import top.colter.dynamic.draw.DrawThemeFactory
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.event.EventBus
@@ -1618,6 +1619,99 @@ class AdminServerTest {
 
         assertNull(cleared.drawTheme)
         assertNull(PublisherDrawThemeRepository.findByPublisherId(publisher.id))
+    }
+
+    @Test
+    fun refreshPublisherProfileShouldOverwriteProfileAndRegenerateTheme() = runBlocking {
+        initDb("admin-refresh-publisher-profile")
+        val publisher = PublisherRepository.upsertInfo(
+            testPublisherInfo(
+                name = "旧名称",
+                avatarBadgeKey = "old-badge",
+                avatar = MediaRef("https://example.com/old-face.png", MediaKind.AVATAR),
+                banner = MediaRef("https://example.com/old-header.png", MediaKind.COVER),
+                pendant = MediaRef("https://example.com/old-pendant.png", MediaKind.AVATAR),
+            )
+        ).value
+        var initializedPublisherId: Int? = null
+        val regeneratedPalette = DrawThemeFactory.fromColors(listOf("#112233", "#445566")).toPalette()
+        val service = service(
+            plugin = FakePublisherFollowPlugin(),
+            publisherThemeInitializer = PublisherThemeInitializer { refreshedPublisher, _ ->
+                initializedPublisherId = refreshedPublisher.id
+                assertNull(PublisherDrawThemeRepository.findByPublisherId(refreshedPublisher.id))
+                PublisherDrawThemeRepository.upsert(
+                    refreshedPublisher.id,
+                    regeneratedPalette,
+                )
+            },
+        )
+        service.updatePublisher(publisher.id, UpdatePublisherRequest(themeColors = "#FE65A6;#BFFAFF"))
+
+        val refreshed = service.refreshPublisherProfile(publisher.id)
+        val stored = PublisherRepository.findById(publisher.id)
+        val theme = assertNotNull(PublisherDrawThemeRepository.findByPublisherId(publisher.id))
+
+        assertEquals(publisher.id, initializedPublisherId)
+        assertEquals("demo-up", refreshed.name)
+        assertEquals("https://example.com/face.png", refreshed.avatarUri)
+        assertEquals("https://example.com/header.png", refreshed.bannerUri)
+        assertNull(stored?.avatarBadgeKey)
+        assertNull(stored?.pendant)
+        assertEquals(regeneratedPalette.backgroundColors, theme.palette.backgroundColors)
+        assertEquals(regeneratedPalette.backgroundColors, refreshed.drawTheme?.backgroundColors)
+    }
+
+    @Test
+    fun refreshPublisherProfileShouldRestoreExistingThemeWhenRegenerationProducesNoTheme() = runBlocking {
+        initDb("admin-refresh-publisher-profile-restore-theme")
+        val publisher = PublisherRepository.upsertInfo(
+            testPublisherInfo(
+                name = "old-name",
+                avatar = MediaRef("https://example.com/old-face.png", MediaKind.AVATAR),
+                banner = MediaRef("https://example.com/old-header.png", MediaKind.COVER),
+            )
+        ).value
+        val service = service(plugin = FakePublisherFollowPlugin())
+        service.updatePublisher(publisher.id, UpdatePublisherRequest(themeColors = "#FE65A6;#BFFAFF"))
+        val previousTheme = assertNotNull(PublisherDrawThemeRepository.findByPublisherId(publisher.id))
+
+        val refreshed = service.refreshPublisherProfile(publisher.id)
+        val restoredTheme = assertNotNull(PublisherDrawThemeRepository.findByPublisherId(publisher.id))
+
+        assertEquals("demo-up", refreshed.name)
+        assertEquals("https://example.com/face.png", refreshed.avatarUri)
+        assertEquals("https://example.com/header.png", refreshed.bannerUri)
+        assertEquals(previousTheme.palette.backgroundColors, restoredTheme.palette.backgroundColors)
+        assertEquals(previousTheme.palette.backgroundColors, refreshed.drawTheme?.backgroundColors)
+    }
+
+    @Test
+    fun refreshSubscriberProfileShouldOverwriteNameAndAvatar() = runBlocking {
+        initDb("admin-refresh-subscriber-profile")
+        val oldAvatar = MediaRef("https://example.com/old-group.png", MediaKind.AVATAR)
+        val newAvatar = MediaRef("https://example.com/new-group.png", MediaKind.AVATAR)
+        val subscriber = SubscriberRepository.upsert(
+            address = TargetAddress.of("qq", TargetKind.GROUP, "100"),
+            name = "旧群名",
+            avatar = oldAvatar,
+        ).value
+        LinkParseTargetConfigRepository.upsert(subscriber.address, LinkParseTriggerMode.ALWAYS, updatedBy = "test")
+        val service = service(
+            plugin = FakePublisherFollowPlugin(),
+            sink = FakeMessageSinkPlugin(
+                listOf(MessageTargetCandidate(subscriber.address, "新群名", newAvatar)),
+            ),
+        )
+
+        val refreshed = service.refreshSubscriberProfile(subscriber.id)
+        val stored = SubscriberRepository.findById(subscriber.id)
+
+        assertEquals("新群名", refreshed.name)
+        assertEquals(newAvatar.uri, refreshed.avatarUri)
+        assertEquals("ALWAYS", refreshed.linkParseTriggerMode)
+        assertEquals("新群名", stored?.name)
+        assertEquals(newAvatar, stored?.avatar)
     }
 
     @Test

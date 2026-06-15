@@ -175,12 +175,36 @@ export async function handleAction(nextCtx, { action, id }) {
     notify(result.message, false);
     return true;
   }
+  if (action === "refresh-publisher-profile") {
+    if (!(await confirmDanger(
+      "刷新发布者资料",
+      "确定刷新这个发布者资料吗？名称、头像、头图和挂件会被平台资料覆盖，发布者主题也会重新生成。",
+      { confirmText: "刷新资料" },
+    ))) return true;
+    await api(`/publishers/${id}/refresh-profile`, { method: "POST" });
+    invalidate("dashboard", "publishers", "subscriptions");
+    await loadEntities(true);
+    notify("发布者资料已刷新", false);
+    return true;
+  }
   if (action === "delete-subscriber") {
     if (!(await confirmDanger("删除消息目标", "确定删除这个消息目标及关联订阅吗？相关订阅也会一并移除。", { confirmText: "删除" }))) return true;
     const result = await api(`/subscribers/${id}`, { method: "DELETE" });
     invalidate("dashboard", "subscribers", "subscriptions");
     await loadEntities(true);
     notify(result.message, false);
+    return true;
+  }
+  if (action === "refresh-subscriber-profile") {
+    if (!(await confirmDanger(
+      "刷新消息目标资料",
+      "确定刷新这个消息目标资料吗？名称和头像会被平台资料覆盖。",
+      { confirmText: "刷新资料" },
+    ))) return true;
+    await api(`/subscribers/${id}/refresh-profile`, { method: "POST" });
+    invalidate("dashboard", "subscribers", "subscriptions");
+    await loadEntities(true);
+    notify("消息目标资料已刷新", false);
     return true;
   }
   return false;
@@ -278,7 +302,7 @@ async function loadEntities(force) {
           { title: "主题", render: p => themeSwatch(p.drawTheme) },
           { title: "头图", render: p => p.bannerUri ? mediaImage(p.bannerUri, "header-image", p.platformId, "COVER") : `<span class="sub-line">-</span>` },
           { title: "创建时间", render: p => `<span class="sub-line">${fmtTime(p.createTime)}</span>` },
-          { title: "操作", render: p => `<div class="row-actions"><button class="entity-detail-button" data-action="publisher-detail" data-id="${p.id}">详情</button><button data-action="edit-publisher" data-id="${p.id}">编辑</button><button class="danger" data-action="delete-publisher" data-id="${p.id}">删除</button></div>` }
+          { title: "操作", render: p => `<div class="row-actions"><button class="entity-refresh-button" data-action="refresh-publisher-profile" data-id="${p.id}" title="刷新资料">↻</button><button class="entity-detail-button" data-action="publisher-detail" data-id="${p.id}">详情</button><button data-action="edit-publisher" data-id="${p.id}">编辑</button><button class="danger" data-action="delete-publisher" data-id="${p.id}">删除</button></div>` }
         ])}
       </section>
       <section class="panel full">
@@ -291,7 +315,7 @@ async function loadEntities(force) {
           { title: "链接解析", render: s => linkParseCell(s) },
           { title: "状态", render: s => entityStatePill(s.state) },
           { title: "创建时间", render: s => `<span class="sub-line">${fmtTime(s.createTime)}</span>` },
-          { title: "操作", render: s => `<div class="row-actions"><button class="entity-detail-button" data-action="subscriber-detail" data-id="${s.id}">详情</button><button data-action="edit-subscriber" data-id="${s.id}">编辑</button><button class="danger" data-action="delete-subscriber" data-id="${s.id}">删除</button></div>` }
+          { title: "操作", render: s => `<div class="row-actions"><button class="entity-refresh-button" data-action="refresh-subscriber-profile" data-id="${s.id}" title="刷新资料">↻</button><button class="entity-detail-button" data-action="subscriber-detail" data-id="${s.id}">详情</button><button data-action="edit-subscriber" data-id="${s.id}">编辑</button><button class="danger" data-action="delete-subscriber" data-id="${s.id}">删除</button></div>` }
         ])}
       </section>
     </section>`;

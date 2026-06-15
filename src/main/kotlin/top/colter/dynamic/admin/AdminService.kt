@@ -824,6 +824,51 @@ public class AdminService(
         return PublisherRepository.findById(id)?.toDto(drawTheme = drawTheme) ?: updated.toDto(drawTheme = drawTheme)
     }
 
+    public suspend fun refreshPublisherProfile(id: Int): PublisherDto {
+        val publisher = PublisherRepository.findById(id) ?: throw NoSuchElementException("未找到发布者：$id")
+        val publisherInfo = fetchPublisherInfo(
+            platform = publisher.platformId.value,
+            externalId = publisher.externalId,
+            useCache = false,
+        ).first.normalized()
+        val updated = publisher.copy(
+            name = publisherInfo.name,
+            avatarBadgeKey = publisherInfo.avatarBadgeKey,
+            avatar = publisherInfo.avatar,
+            banner = publisherInfo.banner,
+            pendant = publisherInfo.pendant,
+        )
+        val previousDrawTheme = PublisherDrawThemeRepository.findByPublisherId(id)
+        fun restorePreviousDrawTheme() {
+            if (previousDrawTheme != null) {
+                PublisherDrawThemeRepository.upsert(id, previousDrawTheme.palette)
+            }
+        }
+
+        PublisherRepository.replace(updated)
+        publisherDrawThemeService.clearTheme(id)
+        try {
+            publisherThemeInitializer.initializeAfterPublisherUpsert(updated)
+        } catch (error: CancellationException) {
+            restorePreviousDrawTheme()
+            throw error
+        } catch (error: Exception) {
+            restorePreviousDrawTheme()
+            throw error
+        }
+        var drawTheme = PublisherDrawThemeRepository.findByPublisherId(id)
+        if (drawTheme == null && previousDrawTheme != null) {
+            drawTheme = PublisherDrawThemeRepository.upsert(id, previousDrawTheme.palette)
+            logger.warn {
+                "后台发布者资料已刷新，但主题未重新生成，已恢复刷新前主题：publisherId=$id，platform=${updated.platformId.value}，externalId=${updated.externalId}"
+            }
+        }
+        logger.info {
+            "后台发布者资料已刷新：publisherId=$id，platform=${updated.platformId.value}，externalId=${updated.externalId}"
+        }
+        return (PublisherRepository.findById(id) ?: updated).toDto(drawTheme = drawTheme)
+    }
+
     public fun deletePublisher(id: Int): ActionResultResponse {
         val publisher = PublisherRepository.findById(id) ?: throw NoSuchElementException("未找到发布者：$id")
         val removedSubscriptions = SubscriptionRepository.findAll()
@@ -1003,6 +1048,25 @@ public class AdminService(
             "后台消息目标已更新：subscriberId=$id，target=${updated.address.stableValue()}，state=${updated.state}"
         }
         return (SubscriberRepository.findById(id) ?: updated).toDto(
+            linkParseTriggerMode = linkParseConfig?.triggerMode,
+            fallbackTriggerMode = configProvider().linkParsing.fallbackTriggerMode,
+        )
+    }
+
+    public suspend fun refreshSubscriberProfile(id: Int): SubscriberDto {
+        val subscriber = SubscriberRepository.findById(id) ?: throw NoSuchElementException("未找到消息目标：$id")
+        val targetProfile = resolveSubscriberTarget(subscriber.address)
+            ?: throw NoSuchElementException("未找到消息目标资料：${subscriber.address.stableValue()}")
+        val updated = subscriber.copy(
+            name = targetProfile.name.trim().takeIf { it.isNotBlank() } ?: subscriber.address.externalId,
+            avatar = targetProfile.avatar,
+        )
+        SubscriberRepository.replace(updated)
+        val linkParseConfig = LinkParseTargetConfigRepository.findByAddress(updated.address)
+        logger.info {
+            "后台消息目标资料已刷新：subscriberId=$id，target=${updated.address.stableValue()}"
+        }
+        return updated.toDto(
             linkParseTriggerMode = linkParseConfig?.triggerMode,
             fallbackTriggerMode = configProvider().linkParsing.fallbackTriggerMode,
         )

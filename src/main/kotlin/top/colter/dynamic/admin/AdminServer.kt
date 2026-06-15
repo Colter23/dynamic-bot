@@ -406,6 +406,11 @@ public fun Application.adminModule(context: AdminServerContext) {
                 val id = call.pathInt("id")
                 call.respondApi { context.service.updatePublisher(id, call.receive()) }
             }
+            post("/publishers/{id}/refresh-profile") {
+                if (!call.ensureAuthorized(context)) return@post
+                val id = call.pathInt("id")
+                call.respondApi { context.service.refreshPublisherProfile(id) }
+            }
             delete("/publishers/{id}") {
                 if (!call.ensureAuthorized(context)) return@delete
                 val id = call.pathInt("id")
@@ -436,6 +441,11 @@ public fun Application.adminModule(context: AdminServerContext) {
                 if (!call.ensureAuthorized(context)) return@patch
                 val id = call.pathInt("id")
                 call.respondApi { context.service.updateSubscriber(id, call.receive()) }
+            }
+            post("/subscribers/{id}/refresh-profile") {
+                if (!call.ensureAuthorized(context)) return@post
+                val id = call.pathInt("id")
+                call.respondApi { context.service.refreshSubscriberProfile(id) }
             }
             delete("/subscribers/{id}") {
                 if (!call.ensureAuthorized(context)) return@delete
