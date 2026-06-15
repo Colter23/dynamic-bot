@@ -535,6 +535,40 @@ class AdminServerTest {
     }
 
     @Test
+    fun createSubscriptionShouldRefreshPlaceholderPublisherWhenLookupIsVerified() = runBlocking {
+        initDb("admin-create-subscription-refresh-placeholder-publisher")
+        PublisherRepository.upsertInfo(
+            testPublisherInfo(
+                key = PublisherKey.of("bilibili", PublisherKind.USER, "123"),
+                name = "123",
+                avatar = MediaRef("", MediaKind.AVATAR),
+            )
+        )
+        val plugin = FakePublisherFollowPlugin()
+        val service = service(plugin = plugin)
+
+        val response = service.createSubscription(
+            CreateSubscriptionRequest(
+                subscriberPlatform = "qq",
+                targetKind = "GROUP",
+                subscriberTargetId = "100",
+                publisherPlatform = "bilibili",
+                publisherExternalId = "123",
+                publisherLookupMode = "VERIFY",
+            ),
+        )
+        val publisher = PublisherRepository.findByKey(PublisherKey.of("bilibili", PublisherKind.USER, "123"))
+
+        assertEquals(1, plugin.fetchPublisherInfoCalls)
+        assertFalse(response.publisherCreated)
+        assertTrue(response.publisherUpdated)
+        assertEquals("demo-up", response.subscription.publisher?.name)
+        assertEquals("https://example.com/face.png", publisher?.avatar?.uri)
+        assertEquals("https://example.com/header.png", publisher?.banner?.uri)
+        assertTrue(response.warnings.isEmpty())
+    }
+
+    @Test
     fun updateSubscriptionShouldBroadcastUpdatedEvent() = runBlocking {
         initDb("admin-update-subscription-event")
         val eventBus = EventBus()

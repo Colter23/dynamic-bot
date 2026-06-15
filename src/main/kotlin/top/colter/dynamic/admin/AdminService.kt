@@ -1267,6 +1267,15 @@ public class AdminService(
                 val cachedPublisherInfo = cachedPublisherCandidate(publisherKey)
                 if (cachedPublisherInfo != null) {
                     PublisherRepository.upsertInfo(cachedPublisherInfo)
+                } else if (
+                    publisherLookupMode == PUBLISHER_LOOKUP_MODE_VERIFY &&
+                    existedPublisher.isPlaceholderPublisher()
+                ) {
+                    val publisherInfo = fetchPublisherInfo(platform, externalId, useCache = false)
+                        .first
+                        .normalized()
+                        .copy(key = publisherKey)
+                    PublisherRepository.upsertInfo(publisherInfo)
                 } else {
                     UpsertResult(existedPublisher, created = false, updated = false)
                 }

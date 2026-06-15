@@ -809,7 +809,7 @@ async function openCreateSubscription() {
           <div class="field">
             <label>发布者 UID / 用户名<span class="required-mark">*</span></label>
             <div class="publisher-search-row">
-              <input id="subNewPublisherId" placeholder="填写 UID 可直接添加；填写用户名需搜索选择">
+              <input id="subNewPublisherId" placeholder="填写 UID 会自动查询资料；填写用户名需搜索选择">
               <button type="button" class="publisher-search-button" id="subNewPublisherSearch">搜索</button>
             </div>
           </div>
@@ -817,7 +817,7 @@ async function openCreateSubscription() {
             <div class="field-head"><label>搜索结果</label></div>
             <div id="subNewPublisherResultList" class="target-choice-list"></div>
           </div>
-          <div class="field full"><span id="subNewPublisherStatus" class="inline-note">可填写 UID 手动添加；用户名搜索成功后请选择结果。</span></div>
+          <div class="field full"><span id="subNewPublisherStatus" class="inline-note">填写 UID 时创建前会自动查询资料；用户名搜索成功后请选择结果。</span></div>
         </div>
       </section>
 
@@ -968,7 +968,7 @@ async function openCreateSubscription() {
     } else {
       $("subNewPublisherResultWrap").hidden = false;
       $("subNewPublisherResultList").innerHTML = `<div class="empty">未找到发布者</div>`;
-      $("subNewPublisherStatus").textContent = "未找到发布者；如果填写的是 UID，可以直接添加";
+      $("subNewPublisherStatus").textContent = "未找到发布者，请确认 UID 或关键词后重试";
     }
   };
   $("subNewTargetPlatform").onchange = refreshTargetKinds;
@@ -996,13 +996,13 @@ async function openCreateSubscription() {
   $("subNewPublisherId").oninput = () => {
     publisherCandidates = [];
     $("subNewPublisherResultWrap").hidden = true;
-    $("subNewPublisherStatus").textContent = "可填写 UID 手动添加；用户名搜索成功后请选择结果。";
+    $("subNewPublisherStatus").textContent = "填写 UID 时创建前会自动查询资料；用户名搜索成功后请选择结果。";
   };
   $("subNewPublisherPlatform").onchange = () => {
     if (!isModalActive()) return;
     publisherCandidates = [];
     $("subNewPublisherResultWrap").hidden = true;
-    $("subNewPublisherStatus").textContent = "可填写 UID 手动添加；用户名搜索成功后请选择结果。";
+    $("subNewPublisherStatus").textContent = "填写 UID 时创建前会自动查询资料；用户名搜索成功后请选择结果。";
     policyUpdater();
   };
   await hydrateMediaImages($("modalBody"));
@@ -1257,7 +1257,7 @@ function collectCreateSubscriptionPublisher(candidates) {
     kind: candidate && candidate.kind || "USER",
     externalId,
     label: candidate && candidate.name || externalId,
-    publisherLookupMode: candidate ? "VERIFY" : "PLACEHOLDER",
+    publisherLookupMode: "VERIFY",
   };
 }
 
