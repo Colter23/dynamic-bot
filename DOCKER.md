@@ -231,7 +231,7 @@ docker inspect --format='{{.State.Health.Status}}' dynamic-bot
 - `org.jetbrains.skiko.LibraryLoader.findAndLoadLibrary`
 - `AccessDeniedException: /home/dynamicbot`
 
-**原因**：绘图依赖 Skiko，首次初始化时需要解压原生库。容器已把 `HOME`、`XDG_CACHE_HOME` 和临时目录指向 `/app/.runtime`，并在启动时修复权限。如果仍然报错，通常是旧镜像尚未更新，或手动覆盖了运行时目录。
+**原因**：绘图依赖 Skiko，首次初始化时需要解压原生库；Linux 下还依赖系统的 `libGL.so.1`。容器镜像已经内置这个库，并把 `HOME`、`XDG_CACHE_HOME` 和临时目录指向 `/app/.runtime`，同时在启动时修复权限。如果仍然报错，通常是旧镜像未更新、运行时目录被手动覆盖，或者宿主机上本地构建镜像时漏装了对应系统库。
 
 **解决方案**：
 
@@ -241,6 +241,8 @@ docker compose up -d --force-recreate
 ```
 
 如果你自定义了 `APP_RUNTIME_DIR`，确认该目录在容器内可写。
+
+如果是在普通 Linux 发行版上本地运行 fatJar，而不是用 Docker 镜像，通常还需要手动安装图形基础库，例如 Debian/Ubuntu 上的 `libgl1`，必要时再补字体和 X11 相关运行库。
 
 ### 插件下载失败
 

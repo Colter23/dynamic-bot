@@ -35,9 +35,10 @@ ENV HOME=/app/.runtime/home
 ENV XDG_CACHE_HOME=/app/.runtime/cache
 ENV TMPDIR=/app/.runtime/tmp
 
-# 健康检查需要 curl；ca-certificates 保障 HTTPS 插件目录和媒体下载可用；gosu 用于初始化权限后降权运行
+# 健康检查需要 curl；ca-certificates 保障 HTTPS 插件目录和媒体下载可用；gosu 用于初始化权限后降权运行；
+# Skiko 在 Linux 下加载原生库时需要 libGL.so.1，即使服务端绘图不直连显示器也需要提供该运行库
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates gosu && \
+    apt-get install -y --no-install-recommends curl ca-certificates gosu libgl1 && \
     rm -rf /var/lib/apt/lists/*
 
 # 创建必要的目录结构。构建阶段使用系统 UID/GID，启动时再按 APP_UID/APP_GID 调整，避免基础镜像已占用 1000 导致构建失败。
