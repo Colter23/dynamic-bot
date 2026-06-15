@@ -38,13 +38,14 @@ public class MainConfigStore(
     public fun loadOrCreate(
         adminTokenProvider: () -> String,
         secretProvider: () -> String,
+        defaultConfigProvider: () -> MainDynamicConfig = { MainDynamicConfig() },
     ): MainDynamicConfig {
         val loaded = configService.loadOrCreate(
             MainDynamicConfig.CONFIG_ID,
             MainDynamicConfig::class,
             MainConfigForms.migrations,
         ) {
-            MainDynamicConfig()
+            defaultConfigProvider()
         }
         val withToken = if (loaded.webAdmin.enabled && loaded.webAdmin.token.isBlank()) {
             loaded.copy(webAdmin = loaded.webAdmin.copy(token = adminTokenProvider()))

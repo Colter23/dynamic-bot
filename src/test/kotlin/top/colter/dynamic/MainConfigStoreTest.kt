@@ -25,6 +25,31 @@ class MainConfigStoreTest {
     }
 
     @Test
+    fun shouldUseInjectedDefaultConfigOnlyWhenCreatingMainConfig() {
+        val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-config"))
+        val store = MainConfigStore(configService)
+
+        val created = store.loadOrCreate(
+            adminTokenProvider = { "token" },
+            secretProvider = { "secret" },
+            defaultConfigProvider = {
+                MainDynamicConfig(webAdmin = WebAdminConfig(host = "0.0.0.0"))
+            },
+        )
+        val loadedAgain = MainConfigStore(configService).loadOrCreate(
+            adminTokenProvider = { "new-token" },
+            secretProvider = { "new-secret" },
+            defaultConfigProvider = {
+                MainDynamicConfig(webAdmin = WebAdminConfig(host = "127.0.0.1"))
+            },
+        )
+
+        assertEquals("0.0.0.0", created.webAdmin.host)
+        assertEquals("0.0.0.0", loadedAgain.webAdmin.host)
+        assertEquals("token", loadedAgain.webAdmin.token)
+    }
+
+    @Test
     fun defaultConfigAndFormShouldExposeImportantFields() {
         val config = MainDynamicConfig()
         val paths = MainConfigForms.formSpec.fields.map { it.path }

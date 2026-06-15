@@ -34,6 +34,8 @@ java -jar build\libs\dynamic-bot-0.0.1-all.jar
 http://127.0.0.1:2233
 ```
 
+如果通过 Docker 首次启动，后台会默认监听 `0.0.0.0`，方便容器外访问；已有 `config/main.yml` 不会被自动改写。
+
 首次启动时，如果没有配置后台 token，程序会自动生成并写入：
 
 ```text

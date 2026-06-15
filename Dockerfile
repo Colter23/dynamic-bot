@@ -30,6 +30,7 @@ ENV APP_UID=${APP_UID}
 ENV APP_GID=${APP_GID}
 ENV APP_USER=dynamicbot
 ENV APP_RUNTIME_DIR=/app/.runtime
+ENV DYNAMIC_BOT_WEB_ADMIN_HOST=0.0.0.0
 ENV HOME=/app/.runtime/home
 ENV XDG_CACHE_HOME=/app/.runtime/cache
 ENV TMPDIR=/app/.runtime/tmp

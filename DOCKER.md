@@ -39,6 +39,8 @@
 
    使用 token 访问：`http://localhost:2233`
 
+Docker 镜像首次生成 `config/main.yml` 时，会把 Web 后台监听地址默认写成 `0.0.0.0`，这样宿主机才能通过端口映射访问后台。已有配置文件不会被自动覆盖；如果是旧配置，请在后台或 `config/main.yml` 中确认 `webAdmin.host` 不是 `127.0.0.1`。
+
 ## 配置说明
 
 ### 端口映射

@@ -157,6 +157,7 @@ public object DynamicApplication : CoroutineScope {
         val config = configStore.loadOrCreate(
             adminTokenProvider = { generateAdminToken().also { generatedAdminToken = it } },
             secretProvider = { generateAdminToken() },
+            defaultConfigProvider = ::defaultMainConfig,
         )
         generatedAdminToken?.let { token ->
             logger.info {
@@ -356,6 +357,17 @@ public object DynamicApplication : CoroutineScope {
         val bytes = ByteArray(32)
         SecureRandom().nextBytes(bytes)
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
+    }
+
+    private fun defaultMainConfig(): MainDynamicConfig {
+        val webAdminHost = System.getenv("DYNAMIC_BOT_WEB_ADMIN_HOST")
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+        return if (webAdminHost == null) {
+            MainDynamicConfig()
+        } else {
+            MainDynamicConfig(webAdmin = WebAdminConfig(host = webAdminHost))
+        }
     }
 
     private fun PluginMessagePublishOptions.toDeliveryPolicy(): MessageDeliveryPolicy {
