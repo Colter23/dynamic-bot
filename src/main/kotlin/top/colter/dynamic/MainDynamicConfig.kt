@@ -20,6 +20,7 @@ public data class MainDynamicConfig(
     val delivery: DeliveryConfig = DeliveryConfig(),
     val draw: DrawSettings = DrawSettings(),
     val pluginCatalog: PluginCatalogConfig = PluginCatalogConfig(),
+    val network: NetworkConfig = NetworkConfig(),
     val webAdmin: WebAdminConfig = WebAdminConfig(),
 ) {
     public companion object {
@@ -61,6 +62,22 @@ public data class PluginCatalogConfig(
         public const val DEFAULT_URL: String =
             "https://raw.githubusercontent.com/Colter23/dynamic-bot/main/plugins/catalog.json"
     }
+}
+
+public data class NetworkConfig(
+    val proxy: NetworkProxyConfig = NetworkProxyConfig(),
+)
+
+public data class NetworkProxyConfig(
+    val enabled: Boolean = false,
+    val type: NetworkProxyType = NetworkProxyType.HTTP,
+    val host: String = "",
+    val port: Int = 7890,
+)
+
+public enum class NetworkProxyType {
+    HTTP,
+    SOCKS,
 }
 
 public data class SubscriptionConfig(

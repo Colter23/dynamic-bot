@@ -74,6 +74,10 @@ class MainConfigStoreTest {
                 "mediaDelivery.profiles",
                 "messageRouting.defaultPolicy.strategy",
                 "messageRouting.defaultPolicy.primaryAccountId",
+                "network.proxy.enabled",
+                "network.proxy.type",
+                "network.proxy.host",
+                "network.proxy.port",
             ),
         )
         assertContainsNone(
@@ -116,6 +120,54 @@ class MainConfigStoreTest {
         }
 
         assertTrue(error.message!!.contains("https"))
+    }
+
+    @Test
+    fun networkProxyConfigShouldStayLightweightAndValidateOnlyWhenEnabled() {
+        val paths = MainConfigForms.formSpec.fields.map { it.path }
+
+        assertContainsAll(
+            paths,
+            listOf(
+                "network.proxy.enabled",
+                "network.proxy.type",
+                "network.proxy.host",
+                "network.proxy.port",
+            ),
+        )
+
+        MainConfigForms.validate(
+            MainDynamicConfig(
+                webAdmin = WebAdminConfig(token = "token"),
+                network = NetworkConfig(
+                    proxy = NetworkProxyConfig(enabled = false, host = "", port = 7890),
+                ),
+            ),
+        )
+
+        val missingHost = assertFailsWith<IllegalArgumentException> {
+            MainConfigForms.validate(
+                MainDynamicConfig(
+                    webAdmin = WebAdminConfig(token = "token"),
+                    network = NetworkConfig(
+                        proxy = NetworkProxyConfig(enabled = true, host = "", port = 7890),
+                    ),
+                ),
+            )
+        }
+        assertTrue(missingHost.message!!.contains("代理主机"))
+
+        val invalidPort = assertFailsWith<IllegalArgumentException> {
+            MainConfigForms.validate(
+                MainDynamicConfig(
+                    webAdmin = WebAdminConfig(token = "token"),
+                    network = NetworkConfig(
+                        proxy = NetworkProxyConfig(enabled = true, host = "127.0.0.1", port = 0),
+                    ),
+                ),
+            )
+        }
+        assertTrue(invalidPort.message!!.contains("代理端口"))
     }
 
     @Test
@@ -206,6 +258,8 @@ class MainConfigStoreTest {
         assertEquals("HIDDEN", byPath.getValue("mediaDelivery.defaultProfileId").component)
         assertFalse(byPath.getValue("messageRouting.defaultPolicy.strategy").advanced)
         assertFalse(byPath.getValue("messageRouting.defaultPolicy.primaryAccountId").advanced)
+        assertEquals("系统维护", byPath.getValue("network.proxy.enabled").section)
+        assertTrue(byPath.getValue("network.proxy.enabled").advanced)
 
         assertContainsNone(
             paths,

@@ -188,6 +188,7 @@ public class AdminService(
             pluginProvider = { pluginManager.getAllPlugins() },
             pluginDirPathProvider = { pluginManager.pluginDirPath },
             pluginInstaller = pluginManager::installOrUpdatePluginJar,
+            proxyConfigProvider = { configProvider().network.proxy },
         ),
         startedAtEpochMillis = startedAtEpochMillis,
     )

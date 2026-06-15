@@ -7,6 +7,8 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import top.colter.dynamic.NetworkProxyConfig
+import top.colter.dynamic.NetworkProxyType
 import top.colter.dynamic.PluginCatalogConfig
 import top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION
 import top.colter.dynamic.plugin.PluginInfo
@@ -14,7 +16,9 @@ import top.colter.dynamic.plugin.PluginInstallResult
 import top.colter.dynamic.plugin.PluginScanner
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.net.InetSocketAddress
 import java.net.URI
+import java.net.Proxy
 import java.net.SocketTimeoutException
 import java.net.URLEncoder
 import java.net.URLConnection
@@ -31,7 +35,8 @@ public class PluginCatalogService(
     private val pluginProvider: () -> List<PluginInfo>,
     private val pluginDirPathProvider: () -> String = { "plugins" },
     private val pluginInstaller: (File, String, String, Boolean, Boolean) -> PluginInstallResult,
-    private val downloader: PluginCatalogDownloader = UrlPluginCatalogDownloader(),
+    private val proxyConfigProvider: () -> NetworkProxyConfig = { NetworkProxyConfig() },
+    private val downloader: PluginCatalogDownloader = UrlPluginCatalogDownloader(proxyConfigProvider),
     private val clock: () -> Long = { System.currentTimeMillis() },
 ) {
     private val json = Json {
@@ -544,7 +549,9 @@ public data class PluginCatalogDownloadResult(
     val sha256: String,
 )
 
-public class UrlPluginCatalogDownloader : PluginCatalogDownloader {
+public class UrlPluginCatalogDownloader(
+    private val proxyConfigProvider: () -> NetworkProxyConfig = { NetworkProxyConfig() },
+) : PluginCatalogDownloader {
     override fun downloadToByteArray(url: String, timeoutSeconds: Double, maxBytes: Long): ByteArray {
         val deadline = DownloadDeadline(timeoutSeconds)
         val logUrl = redactUrlForLog(url)
@@ -633,7 +640,12 @@ public class UrlPluginCatalogDownloader : PluginCatalogDownloader {
 
     private fun openConnection(url: String, totalTimeoutMillis: Int): URLConnection {
         requireHttpsUrl(url, "下载地址")
-        val connection = URI(url).toURL().openConnection()
+        val proxy = proxyConfigProvider().toJavaProxy()
+        val connection = if (proxy == Proxy.NO_PROXY) {
+            URI(url).toURL().openConnection()
+        } else {
+            URI(url).toURL().openConnection(proxy)
+        }
         val connectTimeout = totalTimeoutMillis.coerceAtMost(MAX_CONNECT_TIMEOUT_MS).coerceAtLeast(1)
         val idleTimeout = totalTimeoutMillis.coerceAtMost(MAX_READ_IDLE_TIMEOUT_MS).coerceAtLeast(1)
         connection.connectTimeout = connectTimeout
@@ -641,6 +653,18 @@ public class UrlPluginCatalogDownloader : PluginCatalogDownloader {
         connection.setRequestProperty("User-Agent", "dynamic-bot-plugin-catalog")
         connection.setRequestProperty("Accept", "application/vnd.github+json,application/json,*/*")
         return connection
+    }
+
+    private fun NetworkProxyConfig.toJavaProxy(): Proxy {
+        if (!enabled) return Proxy.NO_PROXY
+        val normalizedHost = host.trim()
+        require(normalizedHost.isNotBlank()) { "启用网络代理时代理主机不能为空" }
+        require(port in 1..65_535) { "网络代理端口必须在 1 到 65535 之间" }
+        val proxyType = when (type) {
+            NetworkProxyType.HTTP -> Proxy.Type.HTTP
+            NetworkProxyType.SOCKS -> Proxy.Type.SOCKS
+        }
+        return Proxy(proxyType, InetSocketAddress.createUnresolved(normalizedHost, port))
     }
 
     private fun logDownloadProgress(

@@ -791,6 +791,39 @@ public object MainConfigForms {
                     description = "下载插件和插件目录时最多等待多久。\n支持小数，例如 0.5 表示 0.5 秒。",
                 ),
                 ConfigFieldSpec(
+                    path = "network.proxy.enabled",
+                    label = "启用网络代理",
+                    type = ConfigFieldType.BOOLEAN,
+                    section = "网络",
+                    description = "让主项目内置的网络下载走代理。\n当前用于插件目录与插件 Jar 下载；关闭后使用系统默认直连或 JVM 代理设置。",
+                ),
+                ConfigFieldSpec(
+                    path = "network.proxy.type",
+                    label = "代理类型",
+                    type = ConfigFieldType.SELECT,
+                    section = "网络",
+                    description = "代理协议类型。\nHTTP 适合常见 HTTP/HTTPS 代理；SOCKS 适合 SOCKS5 代理。",
+                    options = networkProxyTypeOptions(),
+                    required = true,
+                ),
+                ConfigFieldSpec(
+                    path = "network.proxy.host",
+                    label = "代理主机",
+                    type = ConfigFieldType.TEXT,
+                    section = "网络",
+                    description = "代理服务器地址。\n例如 127.0.0.1、host.docker.internal 或局域网代理地址。",
+                ),
+                ConfigFieldSpec(
+                    path = "network.proxy.port",
+                    label = "代理端口",
+                    type = ConfigFieldType.NUMBER,
+                    section = "网络",
+                    description = "代理服务器端口。\n例如 7890、7897 或 1080。",
+                    min = 1,
+                    max = 65_535,
+                    numberKind = ConfigNumberKind.INTEGER,
+                ),
+                ConfigFieldSpec(
                     path = "webAdmin.enabled",
                     label = "启用 Web 后台",
                     type = ConfigFieldType.BOOLEAN,
@@ -881,6 +914,10 @@ public object MainConfigForms {
         "imageCache.renderedCleanup.maxIdleDays",
         "pluginCatalog.url",
         "pluginCatalog.downloadTimeoutSeconds",
+        "network.proxy.enabled",
+        "network.proxy.type",
+        "network.proxy.host",
+        "network.proxy.port",
     )
 
     private fun ConfigFieldSpec.withMainConfigPresentation(): ConfigFieldSpec {
@@ -896,7 +933,8 @@ public object MainConfigForms {
                 path.startsWith("delivery.") -> "发送与媒体"
             path.startsWith("webAdmin.") ||
                 path.startsWith("imageCache.") ||
-                path.startsWith("pluginCatalog.") -> "系统维护"
+                path.startsWith("pluginCatalog.") ||
+                path.startsWith("network.") -> "系统维护"
             else -> section
         }
         return copy(section = groupedSection, advanced = path in advancedMainConfigPaths)
@@ -969,6 +1007,11 @@ public object MainConfigForms {
             "webAdmin.port",
             "webAdmin.token",
             "pluginCatalog.url",
+            "pluginCatalog.downloadTimeoutSeconds",
+            "network.proxy.enabled",
+            "network.proxy.type",
+            "network.proxy.host",
+            "network.proxy.port",
             "webAdmin.enabled",
             "imageCache.sourceRoot",
             "imageCache.renderedRoot",
@@ -980,7 +1023,6 @@ public object MainConfigForms {
             "imageCache.sourceCleanup.maxIdleDays",
             "imageCache.renderedCleanup.enabled",
             "imageCache.renderedCleanup.maxIdleDays",
-            "pluginCatalog.downloadTimeoutSeconds",
         )
         fun sectionRank(field: ConfigFieldSpec): Int {
             val index = sectionOrder.indexOf(field.section)
@@ -1107,6 +1149,11 @@ public object MainConfigForms {
         require(config.pluginCatalog.downloadTimeoutSeconds > 0.0) { "插件下载超时必须大于 0 秒" }
         require(config.pluginCatalog.maxDownloadMegabytes.isFiniteNumber()) { "插件最大下载大小必须是有效数字" }
         require(config.pluginCatalog.maxDownloadMegabytes > 0.0) { "插件最大下载大小必须大于 0 MB" }
+        val proxy = config.network.proxy
+        if (proxy.enabled) {
+            require(proxy.host.isNotBlank()) { "启用网络代理时代理主机不能为空" }
+            require(proxy.port in 1..65_535) { "网络代理端口必须在 1 到 65535 之间" }
+        }
         require(config.webAdmin.port in 1..65_535) { "Web 后台端口必须在 1 到 65535 之间" }
         require(config.webAdmin.host.isNotBlank()) { "Web 后台监听地址不能为空" }
         require(config.webAdmin.logBufferCapacity in 100..AdminLogBuffer.MAX_CAPACITY) {
@@ -1268,6 +1315,13 @@ public object MainConfigForms {
             ConfigFieldOption(LinkVideoQuality.DOLBY.name, "最高 杜比视界"),
             ConfigFieldOption(LinkVideoQuality.P8K.name, "最高 8K"),
             ConfigFieldOption(LinkVideoQuality.AUTO_HIGHEST.name, "自动最高"),
+        )
+    }
+
+    public fun networkProxyTypeOptions(): List<ConfigFieldOption> {
+        return listOf(
+            ConfigFieldOption(NetworkProxyType.HTTP.name, "HTTP"),
+            ConfigFieldOption(NetworkProxyType.SOCKS.name, "SOCKS"),
         )
     }
 
