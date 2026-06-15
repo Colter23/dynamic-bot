@@ -64,6 +64,9 @@ class MainConfigStoreTest {
                 "draw.outputFormat",
                 "draw.themeColors",
                 "draw.autoTheme",
+                "draw.font.typography.autoNormalize",
+                "draw.font.typography.lineHeightScale",
+                "draw.font.typography.letterSpacingEm",
                 "linkParsing.templates.message",
                 "linkParsing.videoDownload.prompts.downloading",
                 "linkParsing.videoDownload.prompts.failed",
@@ -193,6 +196,8 @@ class MainConfigStoreTest {
         assertFalse(byPath.getValue("command.prefix").advanced)
         assertEquals("推送内容", byPath.getValue("draw.outputFormat").section)
         assertFalse(byPath.getValue("draw.outputFormat").advanced)
+        assertEquals("推送内容", byPath.getValue("draw.font.typography.autoNormalize").section)
+        assertTrue(byPath.getValue("draw.font.typography.autoNormalize").advanced)
         assertEquals("链接解析", byPath.getValue("linkParsing.templates.message").section)
         assertEquals("MESSAGE_TEMPLATE_EDITOR", byPath.getValue("linkParsing.templates.message").component)
         assertEquals("发送与媒体", byPath.getValue("mediaDelivery.profiles").section)

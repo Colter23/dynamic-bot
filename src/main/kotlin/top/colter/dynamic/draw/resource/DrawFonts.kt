@@ -4,8 +4,10 @@ import org.jetbrains.skia.Data
 import org.jetbrains.skia.FontMgr
 import org.jetbrains.skia.Typeface
 import top.colter.dynamic.DrawFontSettings
+import top.colter.dynamic.DrawTypographySettings
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.skiko.FontRegistry
+import top.colter.skiko.FontTypographySettings
 import java.net.URI
 import java.nio.file.Files
 import java.nio.file.Path
@@ -45,6 +47,7 @@ internal object DrawFonts {
         }
 
         val fontRegistry = FontRegistry()
+        fontRegistry.typographySettings = settings.typography.toFontTypographySettings()
         val text = loadTextFonts(fontRegistry, settings.text, dataFontFiles)
         val emoji = loadEmojiFonts(fontRegistry, settings.emoji, dataFontFiles)
 
@@ -519,6 +522,14 @@ internal object DrawFonts {
     }
 
     private fun fontRole(emoji: Boolean): String = if (emoji) "Emoji 字体" else "正文字体"
+
+    private fun DrawTypographySettings.toFontTypographySettings(): FontTypographySettings {
+        return FontTypographySettings(
+            normalizeLineHeight = autoNormalize,
+            lineHeightScale = lineHeightScale.toFloat(),
+            letterSpacingEm = letterSpacingEm.toFloat(),
+        )
+    }
 
     private fun FontLoadGroup.summary(): String {
         val primaryText = primary?.summary() ?: "<null>"

@@ -254,6 +254,13 @@ public data class DrawSettings(
 public data class DrawFontSettings(
     val text: String = "",
     val emoji: String = "",
+    val typography: DrawTypographySettings = DrawTypographySettings(),
+)
+
+public data class DrawTypographySettings(
+    val autoNormalize: Boolean = true,
+    val lineHeightScale: Double = 1.0,
+    val letterSpacingEm: Double = 0.0,
 )
 
 public enum class DrawOutputFormat {

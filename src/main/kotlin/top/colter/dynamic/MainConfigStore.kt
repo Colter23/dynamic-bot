@@ -750,6 +750,33 @@ public object MainConfigForms {
                     restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
+                    path = "draw.font.typography.autoNormalize",
+                    label = "自动统一行高",
+                    type = ConfigFieldType.BOOLEAN,
+                    section = "绘图",
+                    description = "让不同字体的行高尽量接近统一体验。\n默认开启；关闭后完全使用字体自身的默认行高。",
+                    restartRequired = true,
+                    restartTarget = "主程序",
+                ),
+                ConfigFieldSpec(
+                    path = "draw.font.typography.lineHeightScale",
+                    label = "行高微调系数",
+                    type = ConfigFieldType.NUMBER,
+                    section = "绘图",
+                    description = "在自动统一行高的基础上再做整体微调。\n1 表示不额外缩放，0.95 更紧凑，1.05 更宽松。",
+                    restartRequired = true,
+                    restartTarget = "主程序",
+                ),
+                ConfigFieldSpec(
+                    path = "draw.font.typography.letterSpacingEm",
+                    label = "字间距偏移（em）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "绘图",
+                    description = "给正文统一加一点字间距修正。\n一般保持 0 即可；正数更松，负数更紧。",
+                    restartRequired = true,
+                    restartTarget = "主程序",
+                ),
+                ConfigFieldSpec(
                     path = "pluginCatalog.url",
                     label = "插件目录地址",
                     type = ConfigFieldType.TEXT,
@@ -816,6 +843,9 @@ public object MainConfigForms {
         "draw.width",
         "draw.font.text",
         "draw.font.emoji",
+        "draw.font.typography.autoNormalize",
+        "draw.font.typography.lineHeightScale",
+        "draw.font.typography.letterSpacingEm",
         "linkParsing.maxLinksPerMessage",
         "linkParsing.autoDedupeTtlSeconds",
         "linkParsing.progressReply.text",
@@ -903,6 +933,9 @@ public object MainConfigForms {
             "draw.width",
             "draw.font.text",
             "draw.font.emoji",
+            "draw.font.typography.autoNormalize",
+            "draw.font.typography.lineHeightScale",
+            "draw.font.typography.letterSpacingEm",
             "linkParsing.autoParseEnabled",
             "linkParsing.fallbackTriggerMode",
             "linkParsing.templates.message",
@@ -1058,6 +1091,14 @@ public object MainConfigForms {
         }
         DrawThemeFactory.parseThemeColors(config.draw.themeColors)
         require(config.draw.width >= 320) { "绘图宽度至少为 320" }
+        require(config.draw.font.typography.lineHeightScale.isFiniteNumber()) { "行高微调系数必须是有效数字" }
+        require(config.draw.font.typography.lineHeightScale in 0.75..1.5) {
+            "行高微调系数必须在 0.75 到 1.5 之间"
+        }
+        require(config.draw.font.typography.letterSpacingEm.isFiniteNumber()) { "字间距偏移必须是有效数字" }
+        require(config.draw.font.typography.letterSpacingEm in -0.08..0.08) {
+            "字间距偏移必须在 -0.08 到 0.08 之间"
+        }
         val catalogUrl = config.pluginCatalog.url.trim()
         if (catalogUrl.isNotBlank()) {
             require(catalogUrl.startsWith("https://", ignoreCase = true)) { "插件列表地址必须使用 https://" }
