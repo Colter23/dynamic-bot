@@ -102,6 +102,22 @@ class DrawConfigTest {
     }
 
     @Test
+    fun `draw config matches bundled font with relaxed family name`() {
+        val bundledTextFamily = assertNotNull(
+            DrawConfig(platform = PlatformDescriptor.of("bilibili", "Bilibili")).fontRegistry.textTypeface,
+        ).familyName
+
+        val config = DrawConfig(
+            platform = PlatformDescriptor.of("bilibili", "Bilibili"),
+            settings = DrawSettings(
+                font = DrawFontSettings(text = "HarmonyOS Sans SC Medium"),
+            ),
+        )
+
+        assertEquals(bundledTextFamily, assertNotNull(config.fontRegistry.textTypeface).familyName)
+    }
+
+    @Test
     fun `draw config can resolve configured font file name from data font directory`() {
         withDataFontDirectory("NotoColorEmoji.ttf") {
             val config = DrawConfig(

@@ -189,10 +189,13 @@ internal object DrawFonts {
     ): FontCandidate? {
         aliases.forEach { alias ->
             namedCandidates.firstOrNull { it.matchesName(alias) }?.let { candidate ->
-                logger.info {
+                logger.debug {
                     "已匹配用户配置绘图${fontRole(emoji)}：configured=$entry，alias=$alias，family=${candidate.typeface.familyName}，source=${candidate.source}"
                 }
-                return candidate.copy(source = "configured:$entry -> ${candidate.source}")
+                return candidate.copy(
+                    source = "configured:$entry -> ${candidate.source}",
+                    aliases = (candidate.aliases + entry + aliases).distinct(),
+                )
             }
 
             loadFamilyCandidate(
@@ -219,12 +222,12 @@ internal object DrawFonts {
             logger.warn(it) { "从内存加载内置绘图${fontRole(emoji)}失败：resource=$FONT_PATH/$name，bytes=${bytes.size}" }
         }.getOrNull()
         if (fromData != null) {
-            logger.info { "已读取内置绘图${fontRole(emoji)}：resource=$FONT_PATH/$name，family=${fromData.familyName}，glyphs=${fromData.glyphsCount}" }
+            logger.debug { "已读取内置绘图${fontRole(emoji)}：resource=$FONT_PATH/$name，family=${fromData.familyName}，glyphs=${fromData.glyphsCount}" }
             return FontCandidate(
                 source = source,
                 key = source,
                 typeface = fromData,
-                aliases = fontAliases(name),
+                aliases = fontAliases(name) + fontAliases(fromData.familyName),
             )
         }
 
@@ -270,12 +273,12 @@ internal object DrawFonts {
             if (fontSet.count() <= 0) return@runCatching null
 
             val face = fontSet.getTypeface(0) ?: return@runCatching null
-            logger.info { "已解析绘图${fontRole(emoji)}字体族：configured=$familyName，family=${face.familyName}，glyphs=${face.glyphsCount}" }
+            logger.debug { "已解析绘图${fontRole(emoji)}字体族：configured=$familyName，family=${face.familyName}，glyphs=${face.glyphsCount}" }
             FontCandidate(
                 source = source,
                 key = "family:${familyName.lowercase()}:${face.familyName.lowercase()}",
                 typeface = face,
-                aliases = listOf(familyName),
+                aliases = fontAliases(familyName) + fontAliases(face.familyName),
             )
         }.onFailure {
             logger.warn(it) { "解析绘图${fontRole(emoji)}字体族失败：configured=$familyName" }
@@ -285,12 +288,12 @@ internal object DrawFonts {
     private fun loadFileCandidate(path: Path, emoji: Boolean, source: String): FontCandidate? {
         val normalized = path.toAbsolutePath().normalize()
         val face = makeTypefaceFromFile(normalized, emoji) ?: return null
-        logger.info { "已读取绘图${fontRole(emoji)}文件：source=$source，family=${face.familyName}，glyphs=${face.glyphsCount}" }
+        logger.debug { "已读取绘图${fontRole(emoji)}文件：source=$source，family=${face.familyName}，glyphs=${face.glyphsCount}" }
         return FontCandidate(
             source = source,
             key = "file:$normalized",
             typeface = face,
-            aliases = fontAliases(normalized),
+            aliases = fontAliases(normalized) + fontAliases(face.familyName),
         )
     }
 
@@ -324,7 +327,7 @@ internal object DrawFonts {
         aliases.drop(1).forEach { alias ->
             fontRegistry.registerTypeface(typeface, alias)
         }
-        logger.info { "已加载主绘图${fontRole(emoji)}：${toResult().summary()}" }
+        logger.debug { "已加载主绘图${fontRole(emoji)}：${toResult().summary()}" }
     }
 
     private fun FontCandidate.registerAsFallback(fontRegistry: FontRegistry, emoji: Boolean) {
@@ -333,7 +336,7 @@ internal object DrawFonts {
         aliases.forEach { alias ->
             fontRegistry.registerTypeface(typeface, alias)
         }
-        logger.info { "已加载回退绘图${fontRole(emoji)}：${toResult().summary()}" }
+        logger.debug { "已加载回退绘图${fontRole(emoji)}：${toResult().summary()}" }
     }
 
     private fun configuredFontFile(entry: String, dataFontFiles: List<Path>): Path? {
@@ -442,8 +445,11 @@ internal object DrawFonts {
 
     private fun fontAliases(name: String): List<String> {
         val fileName = name.substringAfterLast('/').substringAfterLast('\\')
-        val stem = fileName.substringBeforeLast('.', fileName)
-        return listOf(fileName, stem)
+        val stem = fileName.removeSupportedFontExtension()
+        val words = splitFontNameWords(stem)
+        val displayName = words.joinToString(" ")
+        val displayNameWithoutStyle = stripTrailingStyleWords(words).joinToString(" ")
+        return listOf(fileName, stem, displayName, displayNameWithoutStyle)
             .map { it.trim() }
             .filter { it.isNotEmpty() }
             .distinct()
@@ -451,8 +457,46 @@ internal object DrawFonts {
 
     private fun FontCandidate.matchesName(name: String): Boolean {
         val text = name.trim()
+        val requestedKeys = fontNameKeys(text)
+        val candidateKeys = fontNameKeys(typeface.familyName) + aliases.flatMap(::fontNameKeys)
         return typeface.familyName.equals(text, ignoreCase = true) ||
-            aliases.any { it.equals(text, ignoreCase = true) }
+            aliases.any { it.equals(text, ignoreCase = true) } ||
+            requestedKeys.any { it in candidateKeys }
+    }
+
+    private fun fontNameKeys(name: String): Set<String> {
+        val fileName = name.substringAfterLast('/').substringAfterLast('\\')
+        val stem = fileName.removeSupportedFontExtension()
+        val words = splitFontNameWords(stem)
+        val withoutStyle = stripTrailingStyleWords(words)
+        return buildSet {
+            addFontNameKey(stem)
+            addFontNameKey(words.joinToString(" "))
+            addFontNameKey(withoutStyle.joinToString(" "))
+        }
+    }
+
+    private fun MutableSet<String>.addFontNameKey(name: String) {
+        val key = name.lowercase().filter { it.isLetterOrDigit() }
+        if (key.isNotEmpty()) add(key)
+    }
+
+    private fun splitFontNameWords(name: String): List<String> {
+        return name
+            .replace(Regex("(?<=[a-z])(?=[A-Z])"), " ")
+            .split(Regex("[\\s_.\\-]+"))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+    }
+
+    private fun stripTrailingStyleWords(words: List<String>): List<String> {
+        val trimmed = words.dropLastWhile { it.lowercase() in FONT_STYLE_SUFFIXES }
+        return trimmed.ifEmpty { words }
+    }
+
+    private fun String.removeSupportedFontExtension(): String {
+        val extension = substringAfterLast('.', missingDelimiterValue = "").lowercase()
+        return if (extension in FONT_EXTENSIONS) substringBeforeLast('.') else this
     }
 
     private fun Path.isSupportedFontFile(): Boolean {
@@ -520,6 +564,25 @@ internal object DrawFonts {
     )
 
     private val FONT_EXTENSIONS: Set<String> = setOf("ttf", "otf", "ttc", "otc")
+
+    private val FONT_STYLE_SUFFIXES: Set<String> = setOf(
+        "regular",
+        "normal",
+        "medium",
+        "light",
+        "thin",
+        "bold",
+        "semibold",
+        "demibold",
+        "demi",
+        "black",
+        "heavy",
+        "italic",
+        "oblique",
+        "condensed",
+        "variable",
+        "vf",
+    )
 
     private val SYSTEM_TEXT_FONT_FAMILIES: List<String> = listOf(
         "Microsoft YaHei",
