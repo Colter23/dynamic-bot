@@ -86,9 +86,11 @@ import top.colter.dynamic.repository.SubscriptionMutationResult
 import top.colter.dynamic.repository.UpsertResult
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.encodeToJsonElement
@@ -390,8 +392,10 @@ public class AdminService(
             .map { it.toDto(catalogById[it.descriptor.id]) }
     }
 
-    public fun pluginCatalog(force: Boolean = false): PluginCatalogResponse {
-        return requirePluginCatalogService().catalog(force = force)
+    public suspend fun pluginCatalog(force: Boolean = false): PluginCatalogResponse {
+        return withContext(Dispatchers.IO) {
+            requirePluginCatalogService().catalog(force = force)
+        }
     }
 
     public fun pluginAdminPages(): PluginAdminPagesResponse {
@@ -400,12 +404,16 @@ public class AdminService(
         )
     }
 
-    public fun installCatalogPlugin(id: String): PluginCatalogOperationResponse {
-        return requirePluginCatalogService().install(id)
+    public suspend fun installCatalogPlugin(id: String): PluginCatalogOperationResponse {
+        return withContext(Dispatchers.IO) {
+            requirePluginCatalogService().install(id)
+        }
     }
 
-    public fun updateCatalogPlugin(id: String): PluginCatalogOperationResponse {
-        return requirePluginCatalogService().update(id)
+    public suspend fun updateCatalogPlugin(id: String): PluginCatalogOperationResponse {
+        return withContext(Dispatchers.IO) {
+            requirePluginCatalogService().update(id)
+        }
     }
 
     public fun reloadPlugin(id: String): PluginReloadResponse {

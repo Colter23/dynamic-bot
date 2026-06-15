@@ -15,12 +15,16 @@ import top.colter.dynamic.plugin.PluginScanner
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.URI
+import java.net.SocketTimeoutException
 import java.net.URLEncoder
 import java.net.URLConnection
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.security.MessageDigest
 import kotlin.math.roundToInt
+import top.colter.dynamic.core.tools.loggerFor
+
+private val logger = loggerFor<PluginCatalogService>()
 
 public class PluginCatalogService(
     private val configProvider: () -> PluginCatalogConfig,
@@ -57,6 +61,8 @@ public class PluginCatalogService(
     public fun install(pluginId: String): PluginCatalogOperationResponse {
         val normalizedId = pluginId.trim()
         require(normalizedId.isNotBlank()) { "插件 ID 不能为空" }
+        val startedAt = clock()
+        logger.info { "开始安装插件：pluginId=$normalizedId" }
         return synchronized(operationLock) {
             val config = configProvider()
             val item = loadCatalog(config, force = false).itemOrThrow(normalizedId)
@@ -68,9 +74,15 @@ public class PluginCatalogService(
             val jarFile = downloadAndVerifyJar(item, config)
             try {
                 val result = pluginInstaller(jarFile, item.id, item.version, true, false)
+                logger.info {
+                    "插件安装完成：pluginId=${item.id}，version=${item.version}，elapsedMs=${clock() - startedAt}"
+                }
                 result.toOperationResponse(item)
             } catch (e: Throwable) {
                 jarFile.delete()
+                logger.warn(e) {
+                    "插件安装失败：pluginId=${item.id}，version=${item.version}，elapsedMs=${clock() - startedAt}"
+                }
                 throw e
             }
         }
@@ -79,6 +91,8 @@ public class PluginCatalogService(
     public fun update(pluginId: String): PluginCatalogOperationResponse {
         val normalizedId = pluginId.trim()
         require(normalizedId.isNotBlank()) { "插件 ID 不能为空" }
+        val startedAt = clock()
+        logger.info { "开始更新插件：pluginId=$normalizedId" }
         return synchronized(operationLock) {
             val config = configProvider()
             val installed = pluginProvider().firstOrNull { it.descriptor.id == normalizedId }
@@ -92,9 +106,15 @@ public class PluginCatalogService(
             val jarFile = downloadAndVerifyJar(item, config)
             try {
                 val result = pluginInstaller(jarFile, item.id, item.version, true, true)
+                logger.info {
+                    "插件更新完成：pluginId=${item.id}，version=${item.version}，elapsedMs=${clock() - startedAt}"
+                }
                 result.toOperationResponse(item)
             } catch (e: Throwable) {
                 jarFile.delete()
+                logger.warn(e) {
+                    "插件更新失败：pluginId=${item.id}，version=${item.version}，elapsedMs=${clock() - startedAt}"
+                }
                 throw e
             }
         }
@@ -115,6 +135,10 @@ public class PluginCatalogService(
                 ?.takeIf { !force && it.url == url && retryNow < it.expiresAt(config) }
                 ?.let { return@synchronized it }
 
+            val startedAt = clock()
+            logger.info {
+                "开始获取插件目录：url=${redactUrlForLog(url)}，force=$force，timeoutSeconds=${config.downloadTimeoutSeconds}"
+            }
             val content = try {
                 CatalogContent(
                     bytes = downloader.downloadToByteArray(
@@ -127,14 +151,17 @@ public class PluginCatalogService(
                     warning = null,
                 )
             } catch (e: Exception) {
+                logger.warn {
+                    "远程插件目录获取失败：url=${redactUrlForLog(url)}，elapsedMs=${clock() - startedAt}，reason=${e.safeMessage()}"
+                }
                 localDefaultCatalogContent(config, e)
-                    ?: throw IllegalStateException("插件目录获取失败：${e.message ?: e::class.simpleName ?: "未知错误"}", e)
+                    ?: throw IllegalStateException("插件目录获取失败：${e.safeMessage()}", e)
             }
             val text = content.bytes.toString(Charsets.UTF_8)
             val document = try {
                 json.decodeFromString<PluginCatalogDocument>(text)
             } catch (e: SerializationException) {
-                throw IllegalArgumentException("插件目录 JSON 格式无效：${e.message}", e)
+                throw IllegalArgumentException("插件目录 JSON 格式无效：${e.safeMessage()}", e)
             }
             validateCatalog(document)
             CachedCatalog(
@@ -146,7 +173,12 @@ public class PluginCatalogService(
                 sourceUrl = content.sourceUrl,
                 warning = content.warning,
             )
-                .also { cachedCatalog = it }
+                .also {
+                    cachedCatalog = it
+                    logger.info {
+                        "插件目录已加载：source=${it.source}，plugins=${document.plugins.size}，elapsedMs=${clock() - startedAt}"
+                    }
+                }
         }
     }
 
@@ -161,10 +193,11 @@ public class PluginCatalogService(
                 error = null,
             )
         } catch (e: Exception) {
+            logger.warn { "插件发布信息解析失败：pluginId=${source.id}，reason=${e.safeMessage()}" }
             CachedCatalogEntry(
                 source = source,
                 item = null,
-                error = e.message ?: e::class.simpleName ?: "未知错误",
+                error = e.safeMessage(),
             )
         }
     }
@@ -218,6 +251,7 @@ public class PluginCatalogService(
             ?.let { "tags/${urlPathSegment(it)}" }
             ?: "latest"
         val url = "https://api.github.com/repos/${source.repository}/releases/$releasePath"
+        logger.debug { "开始获取 GitHub Release：repo=${source.repository}，url=${redactUrlForLog(url)}" }
         val bytes = try {
             downloader.downloadToByteArray(
                 url = url,
@@ -226,14 +260,14 @@ public class PluginCatalogService(
             )
         } catch (e: Exception) {
             throw IllegalStateException(
-                "GitHub Release 获取失败：repo=${source.repository}，${e.message ?: e::class.simpleName ?: "未知错误"}",
+                "GitHub Release 获取失败：repo=${source.repository}，${e.safeMessage()}",
                 e,
             )
         }
         return try {
             json.decodeFromString<GitHubReleaseResponse>(bytes.toString(Charsets.UTF_8))
         } catch (e: SerializationException) {
-            throw IllegalArgumentException("GitHub Release JSON 格式无效：repo=${source.repository}，${e.message}", e)
+            throw IllegalArgumentException("GitHub Release JSON 格式无效：repo=${source.repository}，${e.safeMessage()}", e)
         }
     }
 
@@ -291,6 +325,10 @@ public class PluginCatalogService(
         jarFile.delete()
 
         return try {
+            val startedAt = clock()
+            logger.info {
+                "开始下载插件 Jar：pluginId=${item.id}，version=${item.version}，sizeBytes=${item.sizeBytes}，timeoutSeconds=${config.downloadTimeoutSeconds}"
+            }
             val result = try {
                 downloader.downloadToFile(
                     url = item.downloadUrl,
@@ -299,7 +337,13 @@ public class PluginCatalogService(
                     maxBytes = config.maxDownloadBytes,
                 )
             } catch (e: Exception) {
-                throw IllegalStateException("插件下载失败：pluginId=${item.id}，${e.message ?: e::class.simpleName ?: "未知错误"}", e)
+                logger.warn {
+                    "插件 Jar 下载失败：pluginId=${item.id}，version=${item.version}，elapsedMs=${clock() - startedAt}，reason=${e.safeMessage()}"
+                }
+                throw IllegalStateException("插件下载失败：pluginId=${item.id}，${e.safeMessage()}", e)
+            }
+            logger.info {
+                "插件 Jar 下载完成：pluginId=${item.id}，version=${item.version}，bytes=${result.bytesRead}，elapsedMs=${clock() - startedAt}"
             }
             require(result.sha256.equals(item.sha256, ignoreCase = true)) {
                 "插件下载校验失败：pluginId=${item.id}，期望 sha256=${item.sha256}，实际 sha256=${result.sha256}"
@@ -314,6 +358,7 @@ public class PluginCatalogService(
             require(descriptor.apiVersion == item.apiVersion) {
                 "插件 Jar API 版本不匹配：catalog=${item.apiVersion}，jar=${descriptor.apiVersion}"
             }
+            logger.info { "插件 Jar 校验通过：pluginId=${item.id}，version=${item.version}" }
             jarFile
         } catch (e: Throwable) {
             jarFile.delete()
@@ -459,7 +504,7 @@ public class PluginCatalogService(
         if (config.url.trim() != PluginCatalogConfig.DEFAULT_URL) return null
         val file = File(pluginDirPathProvider()).resolve("catalog.json")
         if (!file.isFile) return null
-        val causeText = cause.message ?: cause::class.simpleName ?: "未知错误"
+        val causeText = cause.safeMessage()
         return CatalogContent(
             bytes = file.readBytes(),
             source = "LOCAL_FALLBACK",
@@ -501,7 +546,9 @@ public data class PluginCatalogDownloadResult(
 
 public class UrlPluginCatalogDownloader : PluginCatalogDownloader {
     override fun downloadToByteArray(url: String, timeoutSeconds: Double, maxBytes: Long): ByteArray {
-        val connection = openConnection(url, timeoutSeconds)
+        val deadline = DownloadDeadline(timeoutSeconds)
+        val logUrl = redactUrlForLog(url)
+        val connection = openConnection(url, deadline.timeoutMs)
         connection.contentLengthLong
             .takeIf { it > maxBytes }
             ?.let { throw IllegalStateException("下载内容超过大小限制：size=$it，maxBytes=$maxBytes") }
@@ -510,7 +557,9 @@ public class UrlPluginCatalogDownloader : PluginCatalogDownloader {
         connection.getInputStream().buffered().use { input ->
             val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
             var total = 0L
+            var lastProgressAt = deadline.startedAtMillis
             while (true) {
+                deadline.check(logUrl, total)
                 val read = input.read(buffer)
                 if (read < 0) break
                 total += read
@@ -518,6 +567,13 @@ public class UrlPluginCatalogDownloader : PluginCatalogDownloader {
                     throw IllegalStateException("下载内容超过大小限制：maxBytes=$maxBytes")
                 }
                 output.write(buffer, 0, read)
+                lastProgressAt = logDownloadProgress(
+                    url = logUrl,
+                    bytesRead = total,
+                    contentLength = connection.contentLengthLong,
+                    startedAtMillis = deadline.startedAtMillis,
+                    lastProgressAtMillis = lastProgressAt,
+                )
             }
         }
         return output.toByteArray()
@@ -529,7 +585,9 @@ public class UrlPluginCatalogDownloader : PluginCatalogDownloader {
         timeoutSeconds: Double,
         maxBytes: Long,
     ): PluginCatalogDownloadResult {
-        val connection = openConnection(url, timeoutSeconds)
+        val deadline = DownloadDeadline(timeoutSeconds)
+        val logUrl = redactUrlForLog(url)
+        val connection = openConnection(url, deadline.timeoutMs)
         connection.contentLengthLong
             .takeIf { it > maxBytes }
             ?.let { throw IllegalStateException("插件文件超过大小限制：size=$it，maxBytes=$maxBytes") }
@@ -541,7 +599,9 @@ public class UrlPluginCatalogDownloader : PluginCatalogDownloader {
             connection.getInputStream().buffered().use { input ->
                 destination.outputStream().buffered().use { output ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                    var lastProgressAt = deadline.startedAtMillis
                     while (true) {
+                        deadline.check(logUrl, total)
                         val read = input.read(buffer)
                         if (read < 0) break
                         total += read
@@ -550,6 +610,13 @@ public class UrlPluginCatalogDownloader : PluginCatalogDownloader {
                         }
                         digest.update(buffer, 0, read)
                         output.write(buffer, 0, read)
+                        lastProgressAt = logDownloadProgress(
+                            url = logUrl,
+                            bytesRead = total,
+                            contentLength = connection.contentLengthLong,
+                            startedAtMillis = deadline.startedAtMillis,
+                            lastProgressAtMillis = lastProgressAt,
+                        )
                     }
                 }
             }
@@ -564,15 +631,55 @@ public class UrlPluginCatalogDownloader : PluginCatalogDownloader {
         )
     }
 
-    private fun openConnection(url: String, timeoutSeconds: Double): URLConnection {
+    private fun openConnection(url: String, totalTimeoutMillis: Int): URLConnection {
         requireHttpsUrl(url, "下载地址")
         val connection = URI(url).toURL().openConnection()
-        val timeout = timeoutMillis(timeoutSeconds)
-        connection.connectTimeout = timeout
-        connection.readTimeout = timeout
+        val connectTimeout = totalTimeoutMillis.coerceAtMost(MAX_CONNECT_TIMEOUT_MS).coerceAtLeast(1)
+        val idleTimeout = totalTimeoutMillis.coerceAtMost(MAX_READ_IDLE_TIMEOUT_MS).coerceAtLeast(1)
+        connection.connectTimeout = connectTimeout
+        connection.readTimeout = idleTimeout
         connection.setRequestProperty("User-Agent", "dynamic-bot-plugin-catalog")
         connection.setRequestProperty("Accept", "application/vnd.github+json,application/json,*/*")
         return connection
+    }
+
+    private fun logDownloadProgress(
+        url: String,
+        bytesRead: Long,
+        contentLength: Long,
+        startedAtMillis: Long,
+        lastProgressAtMillis: Long,
+    ): Long {
+        val now = System.currentTimeMillis()
+        if (now - lastProgressAtMillis < DOWNLOAD_PROGRESS_LOG_INTERVAL_MS) return lastProgressAtMillis
+        val percent = contentLength
+            .takeIf { it > 0 }
+            ?.let { "%.1f%%".format(bytesRead.toDouble() * 100.0 / it.toDouble()) }
+            ?: "未知"
+        logger.info {
+            "插件下载进行中：url=$url，bytes=$bytesRead，contentLength=$contentLength，percent=$percent，elapsedMs=${now - startedAtMillis}"
+        }
+        return now
+    }
+
+    private class DownloadDeadline(timeoutSeconds: Double) {
+        val timeoutMs: Int = timeoutMillis(timeoutSeconds)
+        val startedAtMillis: Long = System.currentTimeMillis()
+
+        fun check(url: String, bytesRead: Long) {
+            val elapsed = System.currentTimeMillis() - startedAtMillis
+            if (elapsed > timeoutMs) {
+                throw SocketTimeoutException(
+                    "下载总耗时超过限制：url=$url，timeoutMs=$timeoutMs，elapsedMs=$elapsed，bytesRead=$bytesRead",
+                )
+            }
+        }
+    }
+
+    private companion object {
+        private const val DOWNLOAD_PROGRESS_LOG_INTERVAL_MS: Long = 5_000
+        private const val MAX_CONNECT_TIMEOUT_MS: Int = 10_000
+        private const val MAX_READ_IDLE_TIMEOUT_MS: Int = 5_000
     }
 }
 
@@ -675,6 +782,39 @@ private fun requireHttpUrl(url: String, label: String) {
     require(scheme.equals("https", ignoreCase = true) || scheme.equals("http", ignoreCase = true)) {
         "$label 必须使用 http:// 或 https://"
     }
+}
+
+private fun Throwable.safeMessage(): String {
+    return (message ?: this::class.simpleName ?: "未知错误").redactUrlsForLog()
+}
+
+private fun String.redactUrlsForLog(): String {
+    return replace(Regex("""https?://[^\s，,。；;）)]+""")) { result ->
+        redactUrlForLog(result.value)
+    }
+}
+
+private fun redactUrlForLog(url: String): String {
+    return runCatching {
+        val uri = URI(url)
+        val scheme = uri.scheme ?: return@runCatching url.withoutQueryAndFragment()
+        val authority = (uri.rawAuthority ?: "")
+            .substringAfterLast("@")
+            .ifBlank { uri.host.orEmpty() + uri.portSuffix() }
+        val path = uri.rawPath.orEmpty()
+        val redacted = if (uri.rawQuery != null || uri.rawFragment != null) "?<hidden>" else ""
+        "$scheme://$authority$path$redacted"
+    }.getOrElse {
+        url.withoutQueryAndFragment()
+    }
+}
+
+private fun URI.portSuffix(): String {
+    return if (port >= 0) ":$port" else ""
+}
+
+private fun String.withoutQueryAndFragment(): String {
+    return substringBefore('?').substringBefore('#')
 }
 
 private fun timeoutMillis(seconds: Double): Int {

@@ -138,6 +138,47 @@ class PluginCatalogServiceTest {
     }
 
     @Test
+    fun catalogShouldRedactSensitiveUrlInFailureMessage() {
+        val service = PluginCatalogService(
+            configProvider = { PluginCatalogConfig(url = "https://example.com/catalog.json") },
+            pluginProvider = { emptyList() },
+            pluginDirPathProvider = { createTempDirectory("plugin-catalog-redacted").toString() },
+            pluginInstaller = { _, id, version, _, _ ->
+                PluginInstallResult(
+                    pluginId = id,
+                    success = true,
+                    changed = true,
+                    pluginState = PluginState.ACTIVE,
+                    newVersion = version,
+                    message = "ok",
+                )
+            },
+            downloader = object : PluginCatalogDownloader {
+                override fun downloadToByteArray(url: String, timeoutSeconds: Double, maxBytes: Long): ByteArray {
+                    throw IllegalStateException("failed https://example.com/catalog.json?token=secret#frag")
+                }
+
+                override fun downloadToFile(
+                    url: String,
+                    destination: File,
+                    timeoutSeconds: Double,
+                    maxBytes: Long,
+                ): PluginCatalogDownloadResult {
+                    throw IllegalStateException("failed https://example.com/demo.jar?token=secret#frag")
+                }
+            },
+        )
+
+        val error = assertFailsWith<IllegalStateException> {
+            service.catalog()
+        }
+
+        assertTrue(error.message!!.contains("https://example.com/catalog.json?<hidden>"))
+        assertFalse(error.message!!.contains("token=secret"))
+        assertFalse(error.message!!.contains("frag"))
+    }
+
+    @Test
     fun catalogShouldFallbackToLocalDefaultCatalogWhenOfficialUrlFails() {
         val localDir = createTempDirectory("plugin-catalog-local").toFile()
         localDir.resolve("catalog.json").writeText(
