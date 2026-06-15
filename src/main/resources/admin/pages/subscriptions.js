@@ -425,7 +425,7 @@ function openSubscriptionImportModal() {
             <label>导入格式</label>
             <select id="subscriptionImportFormat">
               <option value="JSON">dynamic-bot JSON</option>
-              <option value="LEGACY_DYNAMIC_YAML">旧版订阅 YAML</option>
+              <option value="LEGACY_DYNAMIC_YAML">bilibili-dynamic-mirai-plugin 插件订阅数据 YAML</option>
             </select>
           </div>
           <div class="field full">
@@ -517,11 +517,11 @@ function refreshSubscriptionImportFormatUi() {
   const note = $("subscriptionImportNote");
   if (labelNode) labelNode.textContent = legacy ? "粘贴旧版 YAML" : "粘贴 JSON";
   if (input) input.placeholder = legacy
-    ? "粘贴旧项目的订阅 YAML，只会导入 dynamic 数据"
+    ? "粘贴 bilibili-dynamic-mirai-plugin 的订阅 YAML，只会导入 dynamic 数据"
     : "可以粘贴导出的 dynamic-bot 订阅 JSON";
   if (placeholderWrap) placeholderWrap.hidden = legacy;
   if (note) note.textContent = legacy
-    ? "旧版 YAML 只解析 dynamic 字段，跳过 0；负数 QQ 号导入为群，正数导入为好友，不会请求 B 站接口。"
+    ? "旧版 miari YAML 只解析 dynamic 字段，跳过 0；负数 QQ 号导入为群，正数导入为好友，不会请求 B 站接口。"
     : "导入不是全局事务：单条失败不会影响其他订阅。";
 }
 
