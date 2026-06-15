@@ -75,6 +75,8 @@ environment:
 | `./config` | `/app/config` | 配置文件 |
 | `./plugins` | `/app/plugins` | 插件 JAR 文件 |
 
+如果要给绘图补充字体，可以把字体文件放到宿主机的 `data/fonts/`，容器启动后会自动读取并作为回退字体。
+
 容器启动时会自动创建这些目录，并在需要时修复目录权限。Java 主进程不会以 root 运行，启动脚本只在初始化挂载目录时短暂使用 root。
 
 ```bash

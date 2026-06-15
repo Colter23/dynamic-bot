@@ -61,6 +61,7 @@ config/main.yml
 - `data/images/source`：来源原图缓存。
 - `data/images/draw`：推送渲染图缓存。
 - `data/videos`：链接解析视频缓存。
+- `data/fonts`：绘图字体文件。
 - `data/plugins/`：插件自己的数据。
 - `plugins/`：插件 JAR。
 

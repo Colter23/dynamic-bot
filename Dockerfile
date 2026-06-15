@@ -49,7 +49,7 @@ RUN set -eux; \
     if ! id dynamicbot >/dev/null 2>&1; then \
         useradd --system --gid dynamicbot --home-dir /app/.runtime/home --no-create-home --shell /usr/sbin/nologin dynamicbot; \
     fi; \
-    mkdir -p /app/.runtime/home /app/.runtime/cache /app/.runtime/tmp /app/data/images/source /app/data/images/draw /app/data/plugins /app/data/videos /app/data/login-qr /app/config /app/plugins /app/defaults/plugins && \
+    mkdir -p /app/.runtime/home /app/.runtime/cache /app/.runtime/tmp /app/data/images/source /app/data/images/draw /app/data/plugins /app/data/videos /app/data/login-qr /app/data/fonts /app/config /app/plugins /app/defaults/plugins && \
     chown -R dynamicbot:dynamicbot /app
 
 # 内置官方插件目录，远程目录临时不可用时可作为兜底
