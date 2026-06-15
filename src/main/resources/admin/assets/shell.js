@@ -228,15 +228,11 @@ const $ = id => document.getElementById(id);
           `--theme-qr:${qr}`,
         ].join(";"))}" title="${attr(tooltip)}" aria-label="${attr(`${modeText}主题预览`)}">
           <div class="theme-preview-card">
+            <span class="theme-preview-pill">Aa</span>
             <div class="theme-preview-main">
               <span class="theme-preview-title"></span>
               <span class="theme-preview-line main"></span>
               <span class="theme-preview-line sub"></span>
-              <span class="theme-preview-link"></span>
-            </div>
-            <div class="theme-preview-side">
-              <span class="theme-preview-pill">Aa</span>
-              <span class="theme-preview-qr"></span>
             </div>
           </div>
         </div>

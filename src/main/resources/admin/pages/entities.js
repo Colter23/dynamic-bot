@@ -293,30 +293,34 @@ async function loadEntities(force) {
       <section class="panel full">
         <div class="panel-head"><h2>发布者</h2><button class="add-button" data-action="create-publisher">添加</button></div>
         ${entityFilterBar("publisher", publishers, filteredPublishers)}
+        <div class="entity-table entity-publisher-table">
         ${renderTable(filteredPublishers, [
           { title: "平台", render: p => platformTag(p.platformId, p.platformId) },
           { title: "发布者", render: p => entityPublisherCell(p) },
-          { title: "订阅", render: p => subscriptionCountButton("publisher-subscriptions", p.id, p.subscriptionCount, "查看订阅用户") },
-          { title: "直播状态", render: p => publisherLiveStatusCell(p) },
-          { title: "状态", render: p => entityStatePill(p.state) },
-          { title: "主题", render: p => themeSwatch(p.drawTheme) },
           { title: "头图", render: p => p.bannerUri ? mediaImage(p.bannerUri, "header-image", p.platformId, "COVER") : `<span class="sub-line">-</span>` },
+          { title: "主题", render: p => themeSwatch(p.drawTheme) },
+          { title: "直播状态", render: p => publisherLiveStatusCell(p) },
+          { title: "订阅", render: p => subscriptionCountButton("publisher-subscriptions", p.id, p.subscriptionCount, "查看订阅用户") },
+          { title: "状态", render: p => entityStatePill(p.state) },
           { title: "创建时间", render: p => `<span class="sub-line">${fmtTime(p.createTime)}</span>` },
           { title: "操作", render: p => `<div class="row-actions"><button class="entity-refresh-button" data-action="refresh-publisher-profile" data-id="${p.id}" title="刷新资料">↻</button><button class="entity-detail-button" data-action="publisher-detail" data-id="${p.id}">详情</button><button data-action="edit-publisher" data-id="${p.id}">编辑</button><button class="danger" data-action="delete-publisher" data-id="${p.id}">删除</button></div>` }
         ])}
+        </div>
       </section>
       <section class="panel full">
         <div class="panel-head"><h2>消息目标</h2><button class="add-button" data-action="create-subscriber">添加</button></div>
         ${entityFilterBar("subscriber", subscribers, filteredSubscribers)}
+        <div class="entity-table entity-subscriber-table">
         ${renderTable(filteredSubscribers, [
           { title: "平台", render: s => platformTag(s.platformId, s.platformId) },
           { title: "目标", render: s => entitySubscriberCell(s) },
-          { title: "订阅", render: s => subscriptionCountButton("subscriber-subscriptions", s.id, s.subscriptionCount, "查看订阅发布者") },
           { title: "链接解析", render: s => linkParseCell(s) },
+          { title: "订阅", render: s => subscriptionCountButton("subscriber-subscriptions", s.id, s.subscriptionCount, "查看订阅发布者") },
           { title: "状态", render: s => entityStatePill(s.state) },
           { title: "创建时间", render: s => `<span class="sub-line">${fmtTime(s.createTime)}</span>` },
           { title: "操作", render: s => `<div class="row-actions"><button class="entity-refresh-button" data-action="refresh-subscriber-profile" data-id="${s.id}" title="刷新资料">↻</button><button class="entity-detail-button" data-action="subscriber-detail" data-id="${s.id}">详情</button><button data-action="edit-subscriber" data-id="${s.id}">编辑</button><button class="danger" data-action="delete-subscriber" data-id="${s.id}">删除</button></div>` }
         ])}
+        </div>
       </section>
     </section>`;
   bindEntityFilters();
@@ -347,20 +351,49 @@ function subscriptionCountButton(action, id, count, title) {
 function publisherLiveStatusCell(publisher) {
   const liveSubscriptionCount = Number(publisher.liveSubscriptionCount || 0);
   if (liveSubscriptionCount <= 0) {
-    return cell("未订阅直播", "启用开播/下播订阅后显示状态");
+    return `<span class="entity-live-empty" title="启用开播或下播订阅后显示状态">
+      <span class="entity-live-dot"></span>
+      <span class="entity-live-text">未订阅直播</span>
+    </span>`;
   }
   const status = (publisher.liveStatuses || [])[0];
   if (!status) {
-    return liveStatusButton(publisher.id, "等待检测", `${liveSubscriptionCount} 个直播订阅`);
+    return liveStatusButton(publisher.id, "WAITING", "待检测", `${liveSubscriptionCount} 个直播订阅`);
   }
-  const observed = status.lastObservedAtEpochSeconds ? `最后观察 ${fmtTime(status.lastObservedAtEpochSeconds)}` : `${liveSubscriptionCount} 个直播订阅`;
-  return liveStatusButton(publisher.id, pill(status.status), observed);
+  const statusValue = String(status.status || "").toUpperCase();
+  const observed = status.lastObservedAtEpochSeconds ? `最后观察：${fmtTime(status.lastObservedAtEpochSeconds)}` : "尚未记录观察时间";
+  return liveStatusButton(
+    publisher.id,
+    statusValue,
+    liveStatusLabel(statusValue),
+    `${observed}；${liveSubscriptionCount} 个直播订阅`,
+  );
 }
 
-function liveStatusButton(id, title, sub) {
-  return `<button type="button" class="entity-live-button" data-action="publisher-live" data-id="${attr(id)}" title="查看直播状态与记录">
-    <span class="primary-line">${typeof title === "string" && title.includes("<") ? title : esc(title)}</span>
-    <span class="sub-line">${esc(sub || "")}</span>
+function liveStatusLabel(status) {
+  const map = {
+    OPEN: "直播中",
+    CLOSE: "未开播",
+    ROUND: "轮播中",
+    WAITING: "待检测",
+  };
+  return map[status] || label(status);
+}
+
+function liveStatusClass(status) {
+  const map = {
+    OPEN: "is-live",
+    CLOSE: "is-offline",
+    ROUND: "is-round",
+    WAITING: "is-waiting",
+  };
+  return map[status] || "is-unknown";
+}
+
+function liveStatusButton(id, status, text, title) {
+  return `<button type="button" class="entity-live-button ${liveStatusClass(status)}" data-action="publisher-live" data-id="${attr(id)}" title="${attr(title || "查看直播状态与记录")}">
+    <span class="entity-live-dot"></span>
+    <span class="entity-live-text">${esc(text || "-")}</span>
   </button>`;
 }
 
