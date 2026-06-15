@@ -39,9 +39,14 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates gosu && \
     rm -rf /var/lib/apt/lists/*
 
-# 创建必要的目录结构
-RUN groupadd --gid ${APP_GID} dynamicbot && \
-    useradd --uid ${APP_UID} --gid ${APP_GID} --home-dir /app/.runtime/home --no-create-home --shell /usr/sbin/nologin dynamicbot && \
+# 创建必要的目录结构。构建阶段使用系统 UID/GID，启动时再按 APP_UID/APP_GID 调整，避免基础镜像已占用 1000 导致构建失败。
+RUN set -eux; \
+    if ! getent group dynamicbot >/dev/null 2>&1; then \
+        groupadd --system dynamicbot; \
+    fi; \
+    if ! id dynamicbot >/dev/null 2>&1; then \
+        useradd --system --gid dynamicbot --home-dir /app/.runtime/home --no-create-home --shell /usr/sbin/nologin dynamicbot; \
+    fi; \
     mkdir -p /app/.runtime/home /app/.runtime/cache /app/.runtime/tmp /app/data/images/source /app/data/images/draw /app/data/plugins /app/data/videos /app/data/login-qr /app/config /app/plugins /app/defaults/plugins && \
     chown -R dynamicbot:dynamicbot /app
 
