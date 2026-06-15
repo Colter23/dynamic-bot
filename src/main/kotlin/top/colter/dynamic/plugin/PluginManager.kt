@@ -329,7 +329,11 @@ public class PluginManager(
             validateDescriptor(descriptor)
             validateApiVersion(descriptor.apiVersion)
 
-            pluginDir.mkdirs()
+            try {
+                Files.createDirectories(pluginDir.toPath())
+            } catch (e: Exception) {
+                throw IllegalStateException("无法创建插件目录：path=${pluginDir.absolutePath}", e)
+            }
             val existing = plugins[pluginId]
             if (requireInstalled && existing == null) {
                 throw NoSuchElementException("插件未安装：$pluginId")
@@ -822,7 +826,7 @@ public class PluginManager(
     }
 
     private fun moveFile(source: File, target: File) {
-        target.parentFile?.mkdirs()
+        target.parentFile?.toPath()?.let { Files.createDirectories(it) }
         try {
             Files.move(
                 source.toPath(),

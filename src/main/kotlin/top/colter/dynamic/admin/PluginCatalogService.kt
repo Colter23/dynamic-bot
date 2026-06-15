@@ -18,6 +18,7 @@ import java.net.URI
 import java.net.URLEncoder
 import java.net.URLConnection
 import java.nio.charset.StandardCharsets
+import java.nio.file.Files
 import java.security.MessageDigest
 import kotlin.math.roundToInt
 
@@ -273,7 +274,19 @@ public class PluginCatalogService(
             "插件文件超过大小限制：pluginId=${item.id}，size=${item.sizeBytes}，maxBytes=${config.maxDownloadBytes}"
         }
         val downloadDir = File(pluginDirPathProvider()).resolve(".downloads")
-        downloadDir.mkdirs()
+        try {
+            Files.createDirectories(downloadDir.toPath())
+        } catch (e: Exception) {
+            throw IllegalStateException(
+                "无法创建插件下载目录：path=${downloadDir.absolutePath}，请检查目录权限",
+                e,
+            )
+        }
+        if (!downloadDir.canWrite()) {
+            throw IllegalStateException(
+                "插件下载目录不可写：path=${downloadDir.absolutePath}，请检查目录权限"
+            )
+        }
         val jarFile = downloadDir.resolve("${item.id}-${item.version}.jar.tmp")
         jarFile.delete()
 
@@ -521,7 +534,7 @@ public class UrlPluginCatalogDownloader : PluginCatalogDownloader {
             .takeIf { it > maxBytes }
             ?.let { throw IllegalStateException("插件文件超过大小限制：size=$it，maxBytes=$maxBytes") }
 
-        destination.parentFile?.mkdirs()
+        destination.parentFile?.toPath()?.let { Files.createDirectories(it) }
         val digest = MessageDigest.getInstance("SHA-256")
         var total = 0L
         try {

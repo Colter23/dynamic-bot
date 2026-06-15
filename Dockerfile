@@ -9,7 +9,7 @@ COPY gradle ./gradle
 COPY build.gradle.kts settings.gradle.kts gradle.properties ./
 
 # 下载依赖（独立缓存层）
-RUN chmod +x ./gradlew && ./gradlew --no-daemon dependencies --quiet || true
+RUN chmod +x ./gradlew && ./gradlew --no-daemon dependencies --quiet
 
 # 复制源代码
 COPY src ./src
@@ -26,26 +26,23 @@ LABEL description="dynamic-bot - 动态转发系统"
 ARG APP_UID=1000
 ARG APP_GID=1000
 
-# 创建非 root 用户（兼容已占用的 UID/GID）
-RUN set -e; \
-    if ! getent group ${APP_GID} > /dev/null 2>&1; then \
-        groupadd --gid ${APP_GID} dynamicbot; \
-    elif ! getent group dynamicbot > /dev/null 2>&1; then \
-        groupadd dynamicbot; \
-    fi && \
-    if ! getent passwd ${APP_UID} > /dev/null 2>&1; then \
-        useradd --uid ${APP_UID} --gid $(getent group dynamicbot | cut -d: -f3) --no-create-home --shell /bin/false dynamicbot; \
-    elif ! id dynamicbot > /dev/null 2>&1; then \
-        useradd --gid $(getent group dynamicbot | cut -d: -f3) --no-create-home --shell /bin/false dynamicbot; \
-    fi
+ENV APP_UID=${APP_UID}
+ENV APP_GID=${APP_GID}
+ENV APP_USER=dynamicbot
+ENV APP_RUNTIME_DIR=/app/.runtime
+ENV HOME=/app/.runtime/home
+ENV XDG_CACHE_HOME=/app/.runtime/cache
+ENV TMPDIR=/app/.runtime/tmp
 
-# 健康检查需要 curl；ca-certificates 保障 HTTPS 插件目录和媒体下载可用
+# 健康检查需要 curl；ca-certificates 保障 HTTPS 插件目录和媒体下载可用；gosu 用于初始化权限后降权运行
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates && \
+    apt-get install -y --no-install-recommends curl ca-certificates gosu && \
     rm -rf /var/lib/apt/lists/*
 
 # 创建必要的目录结构
-RUN mkdir -p /app/data/images /app/data/plugins /app/config /app/plugins /app/defaults/plugins && \
+RUN groupadd --gid ${APP_GID} dynamicbot && \
+    useradd --uid ${APP_UID} --gid ${APP_GID} --home-dir /app/.runtime/home --no-create-home --shell /usr/sbin/nologin dynamicbot && \
+    mkdir -p /app/.runtime/home /app/.runtime/cache /app/.runtime/tmp /app/data/images/source /app/data/images/draw /app/data/plugins /app/data/videos /app/data/login-qr /app/config /app/plugins /app/defaults/plugins && \
     chown -R dynamicbot:dynamicbot /app
 
 # 内置官方插件目录，远程目录临时不可用时可作为兜底
@@ -54,10 +51,9 @@ COPY --chown=dynamicbot:dynamicbot plugins/catalog.json /app/defaults/plugins/ca
 WORKDIR /app
 
 # 从构建阶段复制 jar
-COPY --from=builder /build/build/libs/*-all.jar ./dynamic-bot.jar
-
-# 切换到非 root 用户
-USER dynamicbot
+COPY --from=builder --chown=dynamicbot:dynamicbot /build/build/libs/*-all.jar ./dynamic-bot.jar
+COPY docker/entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 # 暴露 Web Admin 默认端口
 EXPOSE 2233
@@ -70,5 +66,6 @@ HEALTHCHECK --interval=30s --timeout=3s --start-period=40s --retries=3 \
 # 设置 JVM 参数
 ENV JAVA_OPTS="-Xms256m -Xmx1g -XX:+UseG1GC -XX:MaxGCPauseMillis=200"
 
-# 启动应用
-ENTRYPOINT ["sh", "-c", "if [ ! -f /app/plugins/catalog.json ] && [ -f /app/defaults/plugins/catalog.json ]; then cp /app/defaults/plugins/catalog.json /app/plugins/catalog.json || true; fi; exec java $JAVA_OPTS -jar dynamic-bot.jar"]
+# 入口脚本会以 root 初始化挂载卷权限，然后用 gosu 降权运行 Java 主进程
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["sh", "-c", "exec java $JAVA_OPTS -jar /app/dynamic-bot.jar"]

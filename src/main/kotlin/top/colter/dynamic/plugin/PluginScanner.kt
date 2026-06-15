@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import top.colter.dynamic.core.plugin.PluginDescriptor
 import top.colter.dynamic.core.tools.loggerFor
 import java.io.File
+import java.nio.file.Files
 import java.util.jar.JarFile
 
 private val logger = loggerFor<PluginScanner>()
@@ -19,8 +20,12 @@ public class PluginScanner(
 
     public fun scanForPlugins(): List<ScanResult> {
         if (!pluginDir.exists()) {
-            pluginDir.mkdirs()
-            logger.info { "插件目录已创建：${pluginDir.absolutePath}" }
+            runCatching { Files.createDirectories(pluginDir.toPath()) }
+                .onSuccess { logger.info { "插件目录已创建：${pluginDir.absolutePath}" } }
+                .onFailure {
+                    logger.error(it) { "无法创建插件目录：${pluginDir.absolutePath}" }
+                    return emptyList()
+                }
             return emptyList()
         }
 

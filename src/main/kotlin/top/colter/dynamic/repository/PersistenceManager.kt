@@ -1,6 +1,7 @@
 package top.colter.dynamic.repository
 
 import java.io.File
+import java.nio.file.Files
 import kotlin.time.Instant
 import org.jetbrains.exposed.v1.core.Column
 import org.jetbrains.exposed.v1.core.Table
@@ -47,7 +48,11 @@ public object PersistenceManager {
             if (initialized && currentPath == dbPath) return
 
             val databaseFile = File(dbPath)
-            databaseFile.parentFile?.mkdirs()
+            try {
+                databaseFile.parentFile?.toPath()?.let { Files.createDirectories(it) }
+            } catch (e: Exception) {
+                throw IllegalStateException("无法创建数据库目录：path=${databaseFile.parentFile?.absolutePath}", e)
+            }
 
             val jdbcUrl = "jdbc:sqlite:${databaseFile.path}"
             Database.connect(url = jdbcUrl, driver = "org.sqlite.JDBC")

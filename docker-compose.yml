@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   dynamic-bot:
     image: ghcr.io/colter23/dynamic-bot:latest
@@ -15,8 +13,14 @@ services:
       # 插件目录
       - ./plugins:/app/plugins
     environment:
+      # 启动脚本会先修复挂载目录权限，再以该 UID/GID 运行 Java 主进程
+      APP_UID: ${APP_UID:-1000}
+      APP_GID: ${APP_GID:-1000}
+      FIX_VOLUME_PERMISSIONS: ${FIX_VOLUME_PERMISSIONS:-auto}
+      # Skiko 原生库、临时文件等运行时缓存目录；默认不挂载，避免污染 data 目录
+      APP_RUNTIME_DIR: ${APP_RUNTIME_DIR:-/app/.runtime}
       # JVM 内存配置，可根据实际需求调整
-      - JAVA_OPTS=-Xms256m -Xmx1g -XX:+UseG1GC -XX:MaxGCPauseMillis=200
+      JAVA_OPTS: -Xms256m -Xmx1g -XX:+UseG1GC -XX:MaxGCPauseMillis=200
     networks:
       - dynamic-bot-network
     # 健康检查
