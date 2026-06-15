@@ -97,6 +97,13 @@ ghcr.io/colter23/dynamic-bot
 .\gradlew.bat fatJar
 ```
 
+默认 fatJar 会带上常用桌面和 Linux 的 Skiko 原生库，方便直接跨平台运行。如果只需要某个平台，可以指定：
+
+```powershell
+.\gradlew.bat fatJar -PskikoRuntimeTargets=windows-x64
+.\gradlew.bat fatJar -PskikoRuntimeTargets=linux-x64
+```
+
 生成的完整 JAR：
 
 ```text

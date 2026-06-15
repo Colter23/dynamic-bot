@@ -19,6 +19,45 @@ configurations.configureEach {
     resolutionStrategy.force("org.slf4j:slf4j-api:2.0.18")
 }
 
+fun currentSkikoRuntimeTarget(): String {
+    val targetOs = when {
+        System.getProperty("os.name") == "Mac OS X" -> "macos"
+        System.getProperty("os.name").startsWith("Win") -> "windows"
+        System.getProperty("os.name").startsWith("Linux") -> "linux"
+        else -> error("Unsupported OS: ${System.getProperty("os.name")}")
+    }
+
+    val targetArch = when (System.getProperty("os.arch")) {
+        "x86_64", "amd64" -> "x64"
+        "aarch64" -> "arm64"
+        else -> error("Unsupported arch: ${System.getProperty("os.arch")}")
+    }
+    return "$targetOs-$targetArch"
+}
+
+fun skikoRuntimeTargets(): Set<String> {
+    val supportedTargets = setOf(
+        "windows-x64",
+        "linux-x64",
+        "linux-arm64",
+        "macos-x64",
+        "macos-arm64",
+    )
+    val configured = providers.gradleProperty("skikoRuntimeTargets")
+        .orNull
+        ?.split(",")
+        ?.map { it.trim() }
+        ?.filter { it.isNotEmpty() }
+
+    val targets = configured?.toCollection(linkedSetOf())
+        ?: linkedSetOf(currentSkikoRuntimeTarget(), "windows-x64", "linux-x64")
+    val unsupported = targets - supportedTargets
+    require(unsupported.isEmpty()) {
+        "Unsupported skikoRuntimeTargets: ${unsupported.joinToString()}. Supported: ${supportedTargets.joinToString()}"
+    }
+    return targets
+}
+
 dependencies {
     val coroutinesVersion = "1.11.0"
     val exposedVersion = "1.3.0"
@@ -52,22 +91,7 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-kotlin-datetime:$exposedVersion")
     implementation("org.xerial:sqlite-jdbc:3.53.2.0")
 
-    val osName = System.getProperty("os.name")
-    val targetOs = when {
-        osName == "Mac OS X" -> "macos"
-        osName.startsWith("Win") -> "windows"
-        osName.startsWith("Linux") -> "linux"
-        else -> error("Unsupported OS: $osName")
-    }
-
-    val osArch = System.getProperty("os.arch")
-    val targetArch = when (osArch) {
-        "x86_64", "amd64" -> "x64"
-        "aarch64" -> "arm64"
-        else -> error("Unsupported arch: $osArch")
-    }
-    val target = "${targetOs}-${targetArch}"
-    linkedSetOf(target, "windows-x64", "linux-x64").forEach { runtimeTarget ->
+    skikoRuntimeTargets().forEach { runtimeTarget ->
         runtimeOnly("org.jetbrains.skiko:skiko-awt-runtime-$runtimeTarget:$skikoVersion")
     }
     testImplementation("io.ktor:ktor-server-test-host:$ktorVersion")

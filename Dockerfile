@@ -8,14 +8,14 @@ COPY gradlew gradlew.bat ./
 COPY gradle ./gradle
 COPY build.gradle.kts settings.gradle.kts gradle.properties ./
 
-# 下载依赖（独立缓存层）
-RUN chmod +x ./gradlew && ./gradlew --no-daemon dependencies --quiet
+# 下载依赖（独立缓存层）。Docker 镜像只需要 Linux x64 的 Skiko 原生库。
+RUN chmod +x ./gradlew && ./gradlew --no-daemon dependencies --quiet -PskikoRuntimeTargets=linux-x64
 
 # 复制源代码
 COPY src ./src
 
 # 构建 fat jar
-RUN ./gradlew --no-daemon fatJar
+RUN ./gradlew --no-daemon fatJar -PskikoRuntimeTargets=linux-x64
 
 # 运行阶段
 FROM eclipse-temurin:17-jre
