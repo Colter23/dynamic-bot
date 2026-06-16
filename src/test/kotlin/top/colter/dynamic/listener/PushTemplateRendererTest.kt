@@ -13,6 +13,7 @@ import top.colter.dynamic.core.data.DynamicMediaCard
 import top.colter.dynamic.core.data.DynamicMediaCardKind
 import top.colter.dynamic.core.data.DynamicMetric
 import top.colter.dynamic.core.data.DynamicPayload
+import top.colter.dynamic.core.data.DynamicReferenceKind
 import top.colter.dynamic.core.data.ImageGridBlock
 import top.colter.dynamic.core.data.ImageItem
 import top.colter.dynamic.core.data.LivePayload
@@ -22,6 +23,7 @@ import top.colter.dynamic.core.data.MediaCardStyle
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.RepostBlock
 import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.TextBlock
@@ -43,6 +45,8 @@ class PushTemplateRendererTest {
         val text = chains.single().content.single().fallbackText
         assertTrue(text.contains("Demo UP 123 dynamic-1"))
         assertTrue(text.contains("Demo content"))
+        assertTrue(text.contains("转发自 Origin UP："))
+        assertTrue(text.contains("Origin content"))
         assertTrue(text.contains("https://t.bilibili.com/dynamic-1"))
         assertTrue(text.contains("{unknown}"))
     }
@@ -73,7 +77,8 @@ class PushTemplateRendererTest {
         assertEquals(" middle ", contents[2].fallbackText)
         assertEquals("https://example.com/pic-a.png", (contents[3] as MessageContent.Image).image.uri)
         assertEquals("https://example.com/pic-b.png", (contents[4] as MessageContent.Image).image.uri)
-        assertEquals(" after", contents[5].fallbackText)
+        assertEquals("https://example.com/origin-pic.png", (contents[5] as MessageContent.Image).image.uri)
+        assertEquals(" after", contents[6].fallbackText)
     }
 
     @Test
@@ -96,9 +101,67 @@ class PushTemplateRendererTest {
                 "https://example.com/content-link",
                 "https://www.bilibili.com/video/BV1",
                 "https://example.com/card",
+                "https://t.bilibili.com/origin-1",
+                "https://example.com/origin-link",
             ).joinToString("\n"),
             chains.single().content.single().fallbackText,
         )
+    }
+
+    @Test
+    fun shouldIncludeRepostContentAndImagesInDynamicPlaceholders() {
+        val chains = renderer.render(
+            "{content}\\r{images}",
+            demoDynamic(),
+            drawImage = null,
+        )
+
+        assertEquals(2, chains.size)
+        assertEquals(
+            "Demo contentlink\n\n转发自 Origin UP：\nOrigin contentorigin link",
+            chains[0].content.single().fallbackText,
+        )
+        val images = chains[1].content.filterIsInstance<MessageContent.Image>().map { it.image.uri }
+        assertEquals(
+            listOf(
+                "https://example.com/pic-a.png",
+                "https://example.com/pic-b.png",
+                "https://example.com/origin-pic.png",
+            ),
+            images,
+        )
+    }
+
+    @Test
+    fun shouldKeepTextOrderAroundRepostBlocks() {
+        val chains = renderer.render(
+            "{content}",
+            demoDynamic().copy(
+                payload = DynamicPayload(
+                    title = "Demo Title",
+                    blocks = listOf(
+                        TextBlock(DynamicContent.text("before")),
+                        RepostBlock(
+                            referenceKind = DynamicReferenceKind.REPOST,
+                            key = testDynamicUpdate(externalId = "order-origin").key,
+                            link = "https://t.bilibili.com/order-origin",
+                            embedded = testDynamicUpdate(
+                                publisher = testPublisherInfo(name = "Order Origin"),
+                                externalId = "order-origin",
+                                payload = DynamicPayload(
+                                    blocks = listOf(TextBlock(DynamicContent.text("origin"))),
+                                ),
+                            ),
+                        ),
+                        TextBlock(DynamicContent.text("after")),
+                    ),
+                ),
+            ),
+            drawImage = null,
+        )
+
+        assertEquals(1, chains.size)
+        assertEquals("before\n\n转发自 Order Origin：\norigin\n\nafter", chains.single().content.single().fallbackText)
     }
 
     @Test
@@ -142,7 +205,7 @@ class PushTemplateRendererTest {
         assertEquals("Demo UP", forward.sourceName)
         assertEquals("123", forward.nodes[0].senderId)
         assertEquals(1_710_000_000, forward.nodes[0].time)
-        assertEquals("完整文字：\nDemo contentlink", forward.nodes[0].batches.single().content.single().fallbackText)
+        assertEquals("完整文字：\nDemo contentlink\n\n转发自 Origin UP：\nOrigin contentorigin link", forward.nodes[0].batches.single().content.single().fallbackText)
         assertEquals("全部原图：\n", forward.nodes[1].batches.single().content[0].fallbackText)
         assertEquals("https://example.com/pic-a.png", (forward.nodes[1].batches.single().content[1] as MessageContent.Image).image.uri)
         assertEquals("tail", chains[2].content.single().fallbackText)
@@ -189,11 +252,12 @@ class PushTemplateRendererTest {
         )
 
         val forward = assertIs<MessageContent.Forward>(chains.single().content.single())
-        assertEquals("Demo contentlink", forward.nodes[0].batches.single().content.single().fallbackText)
+        assertEquals("Demo contentlink\n\n转发自 Origin UP：\nOrigin contentorigin link", forward.nodes[0].batches.single().content.single().fallbackText)
         val imageContents = forward.nodes[1].batches.single().content
-        assertEquals(2, imageContents.size)
+        assertEquals(3, imageContents.size)
         assertEquals("https://example.com/pic-a.png", (imageContents[0] as MessageContent.Image).image.uri)
         assertEquals("https://example.com/pic-b.png", (imageContents[1] as MessageContent.Image).image.uri)
+        assertEquals("https://example.com/origin-pic.png", (imageContents[2] as MessageContent.Image).image.uri)
     }
 
     @Test
@@ -240,6 +304,30 @@ class PushTemplateRendererTest {
     }
 
     private fun demoDynamic(): SourceUpdate {
+        val originUpdate = testDynamicUpdate(
+            publisher = testPublisherInfo(name = "Origin UP"),
+            externalId = "origin-1",
+            payload = DynamicPayload(
+                title = "Origin Title",
+                blocks = listOf(
+                    TextBlock(
+                        DynamicContent(
+                            listOf(
+                                DynamicContentNodeText("Origin content"),
+                                DynamicContentNodeLink("origin link", url = "https://example.com/origin-link"),
+                            ),
+                        ),
+                    ),
+                    ImageGridBlock(
+                        images = listOf(
+                            ImageItem(testMedia("https://example.com/origin-pic.png", MediaKind.IMAGE), width = 100, height = 100),
+                        ),
+                    ),
+                ),
+            ),
+        ).copy(
+            link = "https://t.bilibili.com/origin-1",
+        )
         return testDynamicUpdate(
             publisher = testPublisherInfo(name = "Demo UP"),
             externalId = "dynamic-1",
@@ -290,6 +378,12 @@ class PushTemplateRendererTest {
                             cover = testMedia("https://example.com/card.png", MediaKind.COVER),
                             link = "https://example.com/card",
                         ),
+                    ),
+                    RepostBlock(
+                        referenceKind = DynamicReferenceKind.REPOST,
+                        key = originUpdate.key,
+                        link = originUpdate.link,
+                        embedded = originUpdate,
                     ),
                 ),
             ),

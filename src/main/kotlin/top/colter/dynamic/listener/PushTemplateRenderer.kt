@@ -1,5 +1,6 @@
 ﻿package top.colter.dynamic.listener
 
+import top.colter.dynamic.core.data.DynamicBlock
 import top.colter.dynamic.core.data.DynamicContentNodeLink
 import top.colter.dynamic.core.data.DynamicContentNodeMention
 import top.colter.dynamic.core.data.DynamicContentNodeTag
@@ -163,7 +164,7 @@ public class PushTemplateRenderer {
     ) {
         when (key) {
             "draw" -> drawImage?.let { contents += MessageContent.Image(fallbackText = "", image = it) }
-            "images" -> dynamic.blocks.filterIsInstance<ImageGridBlock>().forEach { block ->
+            "images" -> collectDynamicBlocks(update, dynamic).filterIsInstance<ImageGridBlock>().forEach { block ->
                 block.images.forEach {
                     contents += MessageContent.Image(fallbackText = "", image = it.image, altText = it.alt)
                 }
@@ -173,15 +174,17 @@ public class PushTemplateRenderer {
         }
     }
 
-    private fun dynamicTextValue(key: String, update: SourceUpdate, dynamic: DynamicPayload): String? {
+    private fun dynamicTextValue(
+        key: String,
+        update: SourceUpdate,
+        dynamic: DynamicPayload,
+    ): String? {
         return when (key) {
             "name" -> update.publisher.name
             "uid" -> update.publisher.externalId
             "did" -> update.key.externalId
             "time" -> update.occurredAtEpochSeconds.formatTime()
-            "content" -> dynamic.blocks
-                .filterIsInstance<TextBlock>()
-                .joinToString("\n") { it.content.plainText }
+            "content" -> formatDynamicContent(update, dynamic)
             "link" -> update.link
             else -> null
         }
@@ -232,6 +235,78 @@ public class PushTemplateRenderer {
             "duration" -> if (update.eventType == SourceEventType.LIVE_ENDED) durationText(update, live) else null
             else -> null
         }
+    }
+
+    private fun formatDynamicContent(update: SourceUpdate, dynamic: DynamicPayload): String {
+        return formatDynamicContent(update, dynamic, mutableSetOf(update.key.stableValue()))
+    }
+
+    private fun formatDynamicContent(
+        update: SourceUpdate,
+        dynamic: DynamicPayload,
+        visitedUpdateKeys: MutableSet<String>,
+    ): String {
+        val sections = mutableListOf<String>()
+        val currentText = StringBuilder()
+
+        fun flushText() {
+            val text = currentText.toString()
+            if (text.isNotBlank()) {
+                sections += text
+            }
+            currentText.clear()
+        }
+
+        dynamic.blocks.forEach { block ->
+            when (block) {
+                is TextBlock -> {
+                    val text = block.content.plainText
+                    if (text.isNotBlank()) {
+                        if (currentText.isNotEmpty()) {
+                            currentText.append('\n')
+                        }
+                        currentText.append(text)
+                    }
+                }
+                is RepostBlock -> {
+                    flushText()
+                    val embedded = block.embedded ?: return@forEach
+                    if (!visitedUpdateKeys.add(embedded.key.stableValue())) return@forEach
+                    val payload = embedded.payload as? DynamicPayload ?: return@forEach
+                    val repostContent = formatDynamicContent(embedded, payload, visitedUpdateKeys)
+                        .trim('\r', '\n')
+                        .takeIf { it.isNotBlank() }
+                        ?: return@forEach
+                    val publisherName = embedded.publisher.name.trim().ifBlank { embedded.publisher.externalId }
+                    sections += "转发自 $publisherName：\n$repostContent"
+                }
+                else -> Unit
+            }
+        }
+        flushText()
+
+        return sections.joinToString("\n\n")
+    }
+
+    private fun collectDynamicBlocks(update: SourceUpdate, dynamic: DynamicPayload): List<DynamicBlock> {
+        return collectDynamicBlocks(dynamic, mutableSetOf(update.key.stableValue()))
+    }
+
+    private fun collectDynamicBlocks(
+        dynamic: DynamicPayload,
+        visitedUpdateKeys: MutableSet<String>,
+    ): List<DynamicBlock> {
+        val blocks = mutableListOf<DynamicBlock>()
+        dynamic.blocks.forEach { block ->
+            blocks += block
+            if (block is RepostBlock) {
+                val embedded = block.embedded ?: return@forEach
+                if (!visitedUpdateKeys.add(embedded.key.stableValue())) return@forEach
+                val payload = embedded.payload as? DynamicPayload ?: return@forEach
+                blocks += collectDynamicBlocks(payload, visitedUpdateKeys)
+            }
+        }
+        return blocks
     }
 
     private fun collectAdditionalLinks(update: SourceUpdate, dynamic: DynamicPayload): List<String> {
