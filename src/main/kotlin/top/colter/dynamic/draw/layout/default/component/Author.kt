@@ -1,6 +1,7 @@
 package top.colter.dynamic.draw.layout.default.component
 
 import org.jetbrains.skia.Image
+import org.jetbrains.skia.paragraph.TextStyle
 import top.colter.skiko.Modifier
 import top.colter.skiko.background
 import top.colter.skiko.bleed
@@ -213,17 +214,9 @@ internal fun Layout.AuthorContent(
             .margin(right = textStyle.rightSpacing),
     ) {
         val nameStyle = textStyle.name
-        Text(
+        AuthorTextLine(
             text = name,
-            color = nameStyle.color,
-            fontSize = nameStyle.fontSize,
-            maxLinesCount = 1,
-            stroke = TextStroke(
-                width = nameStyle.strokeWidth,
-                color = nameStyle.strokeColor,
-            ),
-            textShadows = nameStyle.shadows,
-            alignment = LayoutAlignment.LEFT_TOP,
+            style = nameStyle,
             modifier = Modifier()
                 .fillMaxWidth()
                 .height(nameStyle.lineHeight)
@@ -232,17 +225,9 @@ internal fun Layout.AuthorContent(
         )
 
         val timeStyle = textStyle.time
-        Text(
+        AuthorTextLine(
             text = time,
-            color = timeStyle.color,
-            fontSize = timeStyle.fontSize,
-            maxLinesCount = 1,
-            textShadows = timeStyle.shadows,
-            stroke = TextStroke(
-                width = timeStyle.strokeWidth,
-                color = timeStyle.strokeColor,
-            ),
-            alignment = LayoutAlignment.LEFT_TOP,
+            style = timeStyle,
             modifier = Modifier()
                 .fillMaxWidth()
                 .height(timeStyle.lineHeight)
@@ -258,3 +243,29 @@ internal fun Layout.AuthorContent(
         modifier = Modifier().fillMaxHeight(),
     )
 }
+
+private fun Layout.AuthorTextLine(
+    text: String,
+    style: AuthorTextLineStyle,
+    modifier: Modifier,
+) {
+    Text(
+        text = text,
+        textStyle = TextStyle()
+            .setColor(style.color)
+            .setFontSize(style.fontSize.px)
+            .setHeight(style.lineHeightRatio)
+            .apply { topRatio = 0.5f },
+        maxLinesCount = 1,
+        textShadows = style.shadows,
+        stroke = TextStroke(
+            width = style.strokeWidth,
+            color = style.strokeColor,
+        ),
+        alignment = LayoutAlignment.LEFT_TOP,
+        modifier = modifier,
+    )
+}
+
+private val AuthorTextLineStyle.lineHeightRatio: Float
+    get() = (lineHeight.px / fontSize.px.coerceAtLeast(1f)).coerceIn(1.0f, 2.0f)

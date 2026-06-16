@@ -4,8 +4,10 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
+import top.colter.dynamic.DrawFontSettings
 import top.colter.dynamic.DrawOrnament
 import top.colter.dynamic.DrawSettings
+import top.colter.dynamic.DrawTypographySettings
 import top.colter.dynamic.core.data.DynamicBlockRole
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicContentNode
@@ -77,14 +79,14 @@ private const val PREVIEW_LAYOUTS_PROPERTY = "dynamic.draw.preview.layouts"
 private const val PREVIEW_LAYOUTS_ENV = "DYNAMIC_DRAW_PREVIEW_LAYOUTS"
 private const val DEFAULT_THEME_COLORS = "#FE65A6"
 private const val DARK_THEME_COLORS = "#101624;#24182D;#0D2630"
+private const val DRAW_FONT = "HarmonyOS_SansSC_Medium.ttf" //"HanYiZhongYuanJian.ttf"
+private const val EMOJI_FONT = "NotoColorEmoji.ttf"
 
 class DrawTest {
 
     @BeforeTest
     fun init() {
         Dp.factor = 1f
-        Fonts.default.loadTextTypeface(loadTestResource("font", "HarmonyOS_SansSC_Medium.ttf").absolutePath)
-        Fonts.default.loadEmojiTypeface(loadTestResource("font", "NotoColorEmoji.ttf").absolutePath)
     }
 
     @Test
@@ -943,6 +945,15 @@ class DrawTest {
                 layout = layout,
                 ornament = ornament,
                 themeColors = themeColors,
+                font = DrawFontSettings(
+                    text = loadTestResource("font", DRAW_FONT).absolutePath,
+                    emoji = loadTestResource("font", EMOJI_FONT).absolutePath,
+                    typography = DrawTypographySettings(
+                        autoNormalize = true,
+                        lineHeightScale = 1.0,
+                        letterSpacingEm = 0.0,
+                    ),
+                ),
             ),
             assetResolver = TestPlatformDrawAssetResolver,
         )

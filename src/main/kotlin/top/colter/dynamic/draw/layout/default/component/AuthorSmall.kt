@@ -2,6 +2,7 @@
 
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
+import org.jetbrains.skia.paragraph.TextStyle
 import top.colter.skiko.*
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.TextShadow
@@ -55,22 +56,40 @@ internal fun Layout.AuthorSmall(
         modifier = Modifier().fillMaxWidth().fillHeight(), // .background(Color.GREEN),
         alignment = LayoutAlignment.LEFT_TOP
     ) {
-        Text(
+        AuthorSmallTextLine(
             text = name,
-            color = accentColor,
             fontSize = 33.dp,
+            color = accentColor,
             textShadows = authorSmallNameShadows,
-            alignment = LayoutAlignment.LEFT_TOP,
             modifier = Modifier()
                 .margin(right = 10.dp)
                 .offset(y = authorSmallNameTop)
         )
-        Text(
+        AuthorSmallTextLine(
             text = time,
-            color = mutedColor,
             fontSize = 26.dp,
-            alignment = LayoutAlignment.LEFT_TOP,
+            color = mutedColor,
             modifier = Modifier().offset(y = authorSmallTimeTop),
         )
     }
+}
+
+private fun Layout.AuthorSmallTextLine(
+    text: String,
+    fontSize: Dp,
+    color: Int,
+    modifier: Modifier,
+    textShadows: List<TextShadow> = emptyList(),
+) {
+    Text(
+        text = text,
+        textStyle = TextStyle()
+            .setColor(color)
+            .setFontSize(fontSize.px)
+            .setHeight(1f)
+            .apply { topRatio = 0.5f },
+        textShadows = textShadows,
+        alignment = LayoutAlignment.LEFT_TOP,
+        modifier = modifier,
+    )
 }

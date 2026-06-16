@@ -201,12 +201,12 @@ private fun defaultAuthorContentStyle(
                 textSpacing = 18.dp,
             ),
             text = AuthorTextBlockStyle(
-                top = 7.dp,
+                top = (-5).dp,
                 rightSpacing = 12.dp,
-                timeTopSpacing = 5.dp,
+                timeTopSpacing = 12.dp,
                 name = AuthorTextLineStyle(
                     left = (-21).dp,
-                    fontSize = 48.dp,
+                    fontSize = 50.dp,
                     lineHeight = 80.dp,
                     color = Color.WHITE.withAlpha(0.9f),
                     strokeWidth = 8.dp,
@@ -216,7 +216,7 @@ private fun defaultAuthorContentStyle(
                 ),
                 time = AuthorTextLineStyle(
                     left = 0.dp,
-                    fontSize = 34.dp,
+                    fontSize = 36.dp,
                     lineHeight = 42.dp,
                     color = Color.WHITE.withAlpha(0.8f),
                     strokeWidth = 5.dp,
@@ -237,9 +237,9 @@ private fun defaultAuthorContentStyle(
                 textSpacing = 18.dp,
             ),
             text = AuthorTextBlockStyle(
-                top = (-2).dp,
+                top = (-12).dp,
                 rightSpacing = 12.dp,
-                timeTopSpacing = 8.dp,
+                timeTopSpacing = 15.dp,
                 name = AuthorTextLineStyle(
                     left = (-21).dp,
                     fontSize = 43.dp,
@@ -315,23 +315,23 @@ private fun minimalAuthorContentStyle(
                 textSpacing = 18.dp,
             ),
             text = AuthorTextBlockStyle(
-                top = 5.dp,
+                top = 8.dp,
                 rightSpacing = 12.dp,
-                timeTopSpacing = 5.dp,
+                timeTopSpacing = 10.dp,
                 name = AuthorTextLineStyle(
                     left = (-20).dp,
-                    fontSize = 46.dp,
-                    lineHeight = 66.dp,
+                    fontSize = 43.dp,
+                    lineHeight = 58.dp,
                     color = Color.WHITE.withAlpha(0.9f),
                     strokeWidth = 5.dp,
                     strokeColor = paintAccentColor,
-                    bleedVertical = 14.dp,
+                    bleedVertical = 20.dp,
                     shadows = nameShadows,
                 ),
                 time = AuthorTextLineStyle(
                     left = 0.dp,
-                    fontSize = 32.dp,
-                    lineHeight = 38.dp,
+                    fontSize = 30.dp,
+                    lineHeight = 36.dp,
                     color = Color.WHITE.withAlpha(0.8f),
                     strokeWidth = 5.dp,
                     strokeColor = paintAccentColor.withAlpha(0.6f),
@@ -345,15 +345,15 @@ private fun minimalAuthorContentStyle(
         AuthorContentStyle(
             height = 92.dp,
             avatar = AuthorAvatarStyle(
-                size = 92.dp,//84
+                size = 92.dp,
                 left = 15.dp,
-                top = (-3).dp,//8
+                top = (-3).dp,
                 textSpacing = 18.dp,
             ),
             text = AuthorTextBlockStyle(
-                top = (-12).dp,//-5
+                top = (-12).dp,
                 rightSpacing = 12.dp,
-                timeTopSpacing = 8.dp,
+                timeTopSpacing = 10.dp,
                 name = AuthorTextLineStyle(
                     left = (-20).dp,
                     fontSize = 43.dp,
@@ -361,7 +361,7 @@ private fun minimalAuthorContentStyle(
                     color = Color.WHITE.withAlpha(0.9f),
                     strokeWidth = 5.dp,
                     strokeColor = paintAccentColor,
-                    bleedVertical = 14.dp,
+                    bleedVertical = 20.dp,
                     shadows = nameShadows,
                 ),
                 time = AuthorTextLineStyle(
