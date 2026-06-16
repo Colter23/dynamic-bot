@@ -67,7 +67,7 @@ dependencies {
     val log4jVersion = "2.26.0"
     val slf4jVersion = "2.0.18"
 
-    implementation("top.colter.skiko:skiko-layout:0.0.6")
+    implementation("top.colter.skiko:skiko-layout:0.0.7")
     implementation("org.jetbrains.skiko:skiko-awt:$skikoVersion")
     implementation("io.ktor:ktor-server-core:$ktorVersion")
     implementation("io.ktor:ktor-server-netty:$ktorVersion")

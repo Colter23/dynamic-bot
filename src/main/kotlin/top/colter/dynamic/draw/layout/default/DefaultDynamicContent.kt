@@ -6,6 +6,7 @@ import org.jetbrains.skia.paragraph.Alignment
 import org.jetbrains.skia.paragraph.TextStyle
 import top.colter.dynamic.core.data.DynamicBlock
 import top.colter.dynamic.core.data.DynamicContent
+import top.colter.dynamic.core.data.DynamicContentNode
 import top.colter.dynamic.core.data.DynamicContentIcon
 import top.colter.dynamic.core.data.DynamicContentNodeEmoji
 import top.colter.dynamic.core.data.DynamicContentNodeLink
@@ -31,6 +32,11 @@ private const val LONG_CONTENT_CHARS = 420
 private const val MAX_CONTENT_FONT_SIZE = 48f
 private const val NORMAL_CONTENT_FONT_SIZE = 36f
 private const val MIN_CONTENT_FONT_SIZE = 30f
+private const val SHORT_EMOJI_ONLY_COUNT = 4
+private const val NORMAL_EMOJI_ONLY_COUNT = 12
+private const val MAX_EMOJI_ONLY_FONT_SIZE = 96f
+private const val NORMAL_EMOJI_ONLY_FONT_SIZE = 76f
+private const val MIN_EMOJI_ONLY_FONT_SIZE = 56f
 private const val TITLE_TO_CONTENT_RATIO = 1.2f
 private const val FONT_SIZE_STEP = 0.5f
 private val minTitleFontSize = 38.dp
@@ -157,7 +163,12 @@ private data class DynamicFontSizeRange(
 )
 
 private fun dynamicContentFontSizeRange(content: DynamicContent): DynamicFontSizeRange {
-    return dynamicContentFontSizeRange(content.displayCharCount())
+    val charCount = content.displayCharCount()
+    return if (content.isImageEmojiOnly()) {
+        dynamicImageEmojiOnlyFontSizeRange(charCount)
+    } else {
+        dynamicContentFontSizeRange(charCount)
+    }
 }
 
 private fun dynamicContentFontSizeRange(charCount: Int): DynamicFontSizeRange {
@@ -188,6 +199,23 @@ private fun dynamicContentBaseFontSize(charCount: Int): Dp {
         else -> MIN_CONTENT_FONT_SIZE
     }
     return size.dp
+}
+
+private fun dynamicImageEmojiOnlyFontSizeRange(emojiCount: Int): DynamicFontSizeRange {
+    val max = when {
+        emojiCount <= SHORT_EMOJI_ONLY_COUNT -> MAX_EMOJI_ONLY_FONT_SIZE
+        emojiCount <= NORMAL_EMOJI_ONLY_COUNT -> interpolate(
+            start = MAX_EMOJI_ONLY_FONT_SIZE,
+            end = NORMAL_EMOJI_ONLY_FONT_SIZE,
+            progress = (emojiCount - SHORT_EMOJI_ONLY_COUNT).toFloat() / (NORMAL_EMOJI_ONLY_COUNT - SHORT_EMOJI_ONLY_COUNT),
+        )
+        else -> MIN_EMOJI_ONLY_FONT_SIZE
+    }
+    val min = (max - 16f).coerceAtLeast(MAX_CONTENT_FONT_SIZE)
+    return DynamicFontSizeRange(
+        min = min.dp,
+        max = max.dp,
+    )
 }
 
 private fun dynamicTitleFontSizeRange(blocks: List<DynamicBlock>): DynamicFontSizeRange {
@@ -233,9 +261,56 @@ private fun dynamicContentFontSizeBoost(charCount: Int): Float {
 }
 
 private fun DynamicContent.displayCharCount(): Int {
-    val text = plainText.trim()
-    return if (text.isEmpty()) 0 else text.codePointCount(0, text.length)
+    val firstVisibleIndex = nodes.indexOfFirst { it.hasVisibleContent() }
+    if (firstVisibleIndex < 0) return 0
+    val lastVisibleIndex = nodes.indexOfLast { it.hasVisibleContent() }
+
+    return nodes.withIndex().sumOf { (index, node) ->
+        if (index !in firstVisibleIndex..lastVisibleIndex) {
+            0
+        } else {
+            node.displayCharCount(
+                trimStart = index == firstVisibleIndex,
+                trimEnd = index == lastVisibleIndex,
+            )
+        }
+    }
 }
+
+private fun DynamicContentNode.hasVisibleContent(): Boolean {
+    return when (this) {
+        is DynamicContentNodeEmoji -> image != null || text.isNotBlank()
+        else -> text.isNotBlank()
+    }
+}
+
+private fun DynamicContentNode.displayCharCount(
+    trimStart: Boolean = false,
+    trimEnd: Boolean = false,
+): Int {
+    return when (this) {
+        is DynamicContentNodeEmoji -> if (image != null) {
+            1
+        } else {
+            text.trimForDisplayCount(trimStart, trimEnd).codePointCount()
+        }
+        else -> text.trimForDisplayCount(trimStart, trimEnd).codePointCount()
+    }
+}
+
+private fun DynamicContent.isImageEmojiOnly(): Boolean {
+    val visibleNodes = nodes.filter { it.hasVisibleContent() }
+    return visibleNodes.isNotEmpty() && visibleNodes.all { it is DynamicContentNodeEmoji && it.image != null }
+}
+
+private fun String.trimForDisplayCount(trimStart: Boolean, trimEnd: Boolean): String {
+    var value = this
+    if (trimStart) value = value.trimStart()
+    if (trimEnd) value = value.trimEnd()
+    return value
+}
+
+private fun String.codePointCount(): Int = codePointCount(0, length)
 
 private fun interpolate(start: Float, end: Float, progress: Float): Float {
     val clampedProgress = progress.coerceIn(0f, 1f)

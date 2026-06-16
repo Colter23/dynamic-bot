@@ -3,10 +3,12 @@ import top.colter.dynamic.DrawSettings
 import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.skiko.FontRegistry
+import org.jetbrains.skia.paragraph.TextStyle
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
@@ -22,6 +24,17 @@ class DrawConfigTest {
 
         assertNotNull(config.fontRegistry.textTypeface)
         assertNotNull(config.fontRegistry.emojiTypeface)
+    }
+
+    @Test
+    fun `draw config appends emoji fallback to normal text style`() {
+        val config = DrawConfig(
+            platform = PlatformDescriptor.of("bilibili", "Bilibili"),
+        )
+
+        val resolved = config.fontRegistry.resolveTextStyle(TextStyle().setFontSize(24f))
+
+        assertContentEquals(arrayOf(FontRegistry.TEXT_FAMILY, FontRegistry.EMOJI_FAMILY), resolved.fontFamilies)
     }
 
     @Test
@@ -132,6 +145,21 @@ class DrawConfigTest {
     }
 
     @Test
+    fun `draw config does not auto add normal data fonts to emoji fallback`() {
+        withDataFontDirectory("HarmonyOS_SansSC_Medium.ttf") {
+            val config = DrawConfig(
+                platform = PlatformDescriptor.of("bilibili", "Bilibili"),
+            )
+
+            assertEquals(
+                "HarmonyOS Sans SC",
+                assertNotNull(config.fontRegistry.fontRegistryFallback("HarmonyOS_SansSC_Medium.ttf")).familyName,
+            )
+            assertTrue("HarmonyOS Sans SC" !in config.fontRegistry.familyNames(FontRegistry.EMOJI_FAMILY))
+        }
+    }
+
+    @Test
     fun `draw config falls back to bundled alias when configured font file cannot be loaded`() {
         val bundledTextFamily = assertNotNull(
             DrawConfig(platform = PlatformDescriptor.of("bilibili", "Bilibili")).fontRegistry.textTypeface,
@@ -189,6 +217,13 @@ class DrawConfigTest {
 
     private fun FontRegistry.fontRegistryFallback(name: String) =
         matchFamily(name).getTypeface(0)
+
+    private fun FontRegistry.familyNames(name: String): Set<String> {
+        val fontSet = matchFamily(name)
+        return (0 until fontSet.count())
+            .mapNotNull { fontSet.getTypeface(it)?.familyName }
+            .toSet()
+    }
 
     private fun testFontPath(name: String): String {
         return testFontResource(name).toString()

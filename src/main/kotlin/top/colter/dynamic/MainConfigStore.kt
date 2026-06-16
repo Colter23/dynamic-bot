@@ -745,7 +745,7 @@ public object MainConfigForms {
                     label = "Emoji 字体",
                     type = ConfigFieldType.TEXT,
                     section = "绘图",
-                    description = "Emoji 使用的字体。\n可以按顺序填写多个字体，用英文分号分隔；支持绝对路径、相对路径、字体文件名和字体家族名。\n同时会自动加载 data/fonts 里的字体作为回退；留空时使用内置 Emoji 字体作为主字体。",
+                    description = "文本中 Unicode Emoji 使用的字体。\n可以按顺序填写多个字体，用英文分号分隔；支持绝对路径、相对路径、字体文件名和字体家族名。\ndata/fonts 中只有文件名包含 emoji 的字体会自动作为回退；留空时使用内置 Emoji 字体。\n不属于 Emoji 的特殊装饰字符仍依赖正文字体回退。",
                     restartRequired = true,
                     restartTarget = "主程序",
                 ),

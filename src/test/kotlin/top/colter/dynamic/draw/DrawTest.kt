@@ -144,6 +144,12 @@ class DrawTest {
                 ornament = DrawOrnament.QRCODE,
                 themeColors = DARK_THEME_COLORS,
             ),
+            PreviewCase(
+                fileName = "dynamic_07_emoji_only.png",
+                update = emojiOnlyDynamic(),
+                layout = "default",
+                ornament = DrawOrnament.LOGO,
+            ),
         )
     }
 
@@ -385,6 +391,25 @@ class DrawTest {
                         text("然后分区开始做刘海，先分三大块最后再做层次细分。我比较喜欢保留一点毛流感，所以需要两侧刘海要打薄，这样做出来有层次感。边做边喷一点水，过会再喷发胶，还没干的时候用手掐用尖尾梳弄出一点纹理来都可以。"),
                     ),
                     imageGrid(count = 9),
+                ),
+            ),
+        )
+    }
+
+    private fun emojiOnlyDynamic(): SourceUpdate {
+        return dynamicUpdate(
+            id = "preview-emoji-only",
+            publisher = previewPublisher(
+                id = "emoji-only-up",
+                name = "表情观察员",
+                header = "header2.png",
+            ),
+            payload = DynamicPayload(
+                blocks = listOf(
+                    richTextBlock(
+                        emoji("[阿库娅_不关我事]"),
+                        emoji("[热词系列_知识增加]"),
+                    ),
                 ),
             ),
         )

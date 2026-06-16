@@ -102,15 +102,26 @@ internal object DrawFonts {
         bundledFont: String,
         emoji: Boolean,
     ): FontLoadGroup {
-        val dataFonts = dataFontFiles.mapNotNull { path ->
+        val autoDataFontFiles = autoDataFontFiles(dataFontFiles, emoji)
+        val dataFonts = autoDataFontFiles.mapNotNull { path ->
             loadFileCandidate(path, emoji, source = "data-font:${path.toAbsolutePath().normalize()}")
         }
         val bundled = loadBundledCandidate(bundledFont, emoji)
+        val configuredLookupFonts = if (emoji && setting.isNotBlank()) {
+            val autoDataFontKeys = autoDataFontFiles.mapTo(linkedSetOf()) { it.toAbsolutePath().normalize() }
+            dataFontFiles
+                .filterNot { it.toAbsolutePath().normalize() in autoDataFontKeys }
+                .mapNotNull { path ->
+                    loadFileCandidate(path, emoji, source = "data-font-config-lookup:${path.toAbsolutePath().normalize()}")
+                }
+        } else {
+            emptyList()
+        }
         val configured = loadConfiguredCandidates(
             fontRegistry = fontRegistry,
             setting = setting,
             dataFontFiles = dataFontFiles,
-            namedCandidates = listOfNotNull(bundled) + dataFonts,
+            namedCandidates = listOfNotNull(bundled) + dataFonts + configuredLookupFonts,
             emoji = emoji,
         )
         val system = loadSystemCandidate(fontRegistry, emoji)
@@ -129,6 +140,11 @@ internal object DrawFonts {
             primary = primary?.toResult(),
             fallbacks = unique.drop(1).map { it.toResult() },
         )
+    }
+
+    private fun autoDataFontFiles(dataFontFiles: List<Path>, emoji: Boolean): List<Path> {
+        if (!emoji) return dataFontFiles
+        return dataFontFiles.filter { it.fileName.toString().contains("emoji", ignoreCase = true) }
     }
 
     private fun loadConfiguredCandidates(
