@@ -17,12 +17,14 @@ services:
       APP_UID: ${APP_UID:-1000}
       APP_GID: ${APP_GID:-1000}
       FIX_VOLUME_PERMISSIONS: ${FIX_VOLUME_PERMISSIONS:-auto}
+      # 默认使用亚洲上海时区，可通过 TZ 覆盖
+      TZ: ${TZ:-Asia/Shanghai}
       # Skiko 原生库、临时文件等运行时缓存目录；默认不挂载，避免污染 data 目录
       APP_RUNTIME_DIR: ${APP_RUNTIME_DIR:-/app/.runtime}
       # Docker 首次生成主配置时默认监听所有网卡，避免容器内 127.0.0.1 导致宿主机无法访问后台
       DYNAMIC_BOT_WEB_ADMIN_HOST: ${DYNAMIC_BOT_WEB_ADMIN_HOST:-0.0.0.0}
       # JVM 内存配置，可根据实际需求调整
-      JAVA_OPTS: -Xms256m -Xmx1g -XX:+UseG1GC -XX:MaxGCPauseMillis=200
+      JAVA_OPTS: ${JAVA_OPTS:--Xms256m -Xmx1g -XX:+UseG1GC -XX:MaxGCPauseMillis=200}
     networks:
       - dynamic-bot-network
     # 健康检查
