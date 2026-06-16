@@ -12,11 +12,30 @@ import top.colter.dynamic.core.link.LinkVideoDownloadResult
 import top.colter.dynamic.draw.LinkPreviewRenderer
 import top.colter.dynamic.util.formatTime
 
-internal class LinkPreviewTemplateRenderer(
+public data class LinkPreviewTemplateRenderResult(
+    val batches: List<MessageBatch>,
+    val drawImage: MediaRef? = null,
+)
+
+public class LinkPreviewTemplateRenderer(
     private val previewRenderer: LinkPreviewRenderer,
     private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
-    fun plan(template: String): LinkPreviewTemplatePlan {
+    public suspend fun renderPreview(
+        template: String,
+        preview: LinkPreview,
+    ): List<MessageBatch> {
+        return renderPreviewResult(template, preview).batches
+    }
+
+    public suspend fun renderPreviewResult(
+        template: String,
+        preview: LinkPreview,
+    ): LinkPreviewTemplateRenderResult {
+        return renderPlanPreviewResult(plan(template), preview)
+    }
+
+    internal fun plan(template: String): LinkPreviewTemplatePlan {
         val steps = parseTemplateSegments(normalizeTemplateEscapes(template)).flatMap { segment ->
             when (segment) {
                 is TemplateSegment.Text -> segment.value
@@ -37,14 +56,25 @@ internal class LinkPreviewTemplateRenderer(
         )
     }
 
-    suspend fun renderPlanPreview(
+    internal suspend fun renderPlanPreview(
         plan: LinkPreviewTemplatePlan,
         preview: LinkPreview,
     ): List<MessageBatch> {
-        return renderSteps(plan.immediateSteps, LinkPreviewTemplateContext(preview = preview, time = nowEpochSeconds()))
+        return renderPlanPreviewResult(plan, preview).batches
     }
 
-    suspend fun renderPlanVideo(
+    internal suspend fun renderPlanPreviewResult(
+        plan: LinkPreviewTemplatePlan,
+        preview: LinkPreview,
+    ): LinkPreviewTemplateRenderResult {
+        val context = LinkPreviewTemplateContext(preview = preview, time = nowEpochSeconds())
+        return LinkPreviewTemplateRenderResult(
+            batches = renderSteps(plan.immediateSteps, context),
+            drawImage = context.drawImage?.copy(kind = MediaKind.IMAGE),
+        )
+    }
+
+    internal suspend fun renderPlanVideo(
         plan: LinkPreviewTemplatePlan,
         preview: LinkPreview,
         video: LinkVideoDownloadResult,

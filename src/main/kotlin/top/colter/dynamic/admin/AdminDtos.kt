@@ -5,8 +5,12 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import top.colter.dynamic.core.config.ConfigFormSpec
 import top.colter.dynamic.core.data.FilterCondition
+import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageBatch
+import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.SubscriptionPolicy
+import top.colter.dynamic.core.link.LinkPreview
+import top.colter.dynamic.core.link.ParsedLink
 
 @Serializable
 public data class ErrorResponse(
@@ -17,6 +21,74 @@ public data class ErrorResponse(
 public data class ActionResultResponse(
     val changed: Boolean,
     val message: String,
+)
+
+@Serializable
+public data class AdminTestPreviewRequest(
+    val mode: String = "MOCK",
+    val mockEventType: String = "DYNAMIC",
+    val presetId: String? = null,
+    val presetOptions: AdminTestPresetOptions = AdminTestPresetOptions(),
+    val customUpdate: SourceUpdate? = null,
+    val link: String? = null,
+    val template: String? = null,
+)
+
+@Serializable
+public data class AdminTestPresetsResponse(
+    val generatedAtEpochMillis: Long,
+    val defaultPresetId: String,
+    val presets: List<AdminTestPresetDto>,
+)
+
+@Serializable
+public data class AdminTestPresetDto(
+    val id: String,
+    val name: String,
+    val description: String,
+    val group: String,
+    val eventType: String,
+    val recommended: Boolean = false,
+    val tags: List<String> = emptyList(),
+    val defaultOptions: AdminTestPresetOptions = AdminTestPresetOptions(),
+)
+
+@Serializable
+public data class AdminTestPresetOptions(
+    val textVariant: String? = null,
+    val imageCount: Int? = null,
+    val imageRatio: String? = null,
+    val includeVideoCard: Boolean? = null,
+    val includeArticleCard: Boolean? = null,
+    val includeAdditionalCard: Boolean? = null,
+    val includeRepost: Boolean? = null,
+    val themeColors: String? = null,
+)
+
+@Serializable
+public data class AdminTestPreviewResponse(
+    val mode: String,
+    val status: String,
+    val message: String,
+    val elapsedMillis: Long,
+    val parsedLink: ParsedLink? = null,
+    val resolutionType: String? = null,
+    val template: String = "",
+    val templateSource: String = "",
+    val batches: List<MessageBatch> = emptyList(),
+    val drawImage: MediaRef? = null,
+    val media: List<AdminTestMediaDto> = emptyList(),
+    val update: SourceUpdate? = null,
+    val preview: LinkPreview? = null,
+    val warnings: List<String> = emptyList(),
+)
+
+@Serializable
+public data class AdminTestMediaDto(
+    val kind: String,
+    val uri: String,
+    val source: String,
+    val alt: String? = null,
 )
 
 @Serializable

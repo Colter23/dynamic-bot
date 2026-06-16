@@ -47,6 +47,7 @@ import top.colter.dynamic.core.plugin.PluginAdminApiStatus
 import top.colter.dynamic.core.task.TaskScheduler
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.config.YamlConfigService
+import top.colter.dynamic.draw.DefaultDynamicDrawService
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.draw.resource.PlatformDrawAssetResource
 import top.colter.dynamic.event.EventBus
@@ -80,6 +81,10 @@ public class AdminServer(
         val adminLoginService = AdminLoginService(
             loginProviderResolver = { platformId -> pluginManager.findPublisherLoginProvider(platformId) },
         )
+        val adminDrawService = DefaultDynamicDrawService(
+            configProvider = configProvider,
+            assetResolver = drawAssetRegistry,
+        )
         val context = AdminServerContext(
             token = config.token,
             tokenProvider = { configProvider().webAdmin.token },
@@ -98,6 +103,17 @@ public class AdminServer(
             mediaService = AdminMediaService(
                 configProvider = configProvider,
                 registeredLocalMediaLookup = DatabaseAdminRegisteredLocalMediaLookup,
+            ),
+            testService = AdminTestService(
+                resolversProvider = { pluginManager.getLinkResolvers() },
+                configProvider = configProvider,
+                drawService = adminDrawService,
+                drawServiceFactory = { effectiveConfigProvider ->
+                    DefaultDynamicDrawService(
+                        configProvider = effectiveConfigProvider,
+                        assetResolver = drawAssetRegistry,
+                    )
+                },
             ),
             outboundMediaService = outboundMediaService,
             drawAssetRegistry = drawAssetRegistry,
@@ -139,6 +155,7 @@ public data class AdminServerContext(
     val service: AdminService,
     val loginService: AdminLoginService,
     val mediaService: AdminMediaService = AdminMediaService(),
+    val testService: AdminTestService = AdminTestService(),
     val outboundMediaService: OutboundMediaService = OutboundMediaService(configProvider = { MainDynamicConfig() }),
     val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
     val pluginManager: PluginManager? = null,
@@ -201,6 +218,14 @@ public fun Application.adminModule(context: AdminServerContext) {
         route("/api") {
             get("/health") {
                 call.respondText("""{"status":"ok"}""", ContentType.Application.Json)
+            }
+            post("/test/preview") {
+                if (!call.ensureAuthorized(context)) return@post
+                call.respondApi { context.testService.preview(call.receive()) }
+            }
+            get("/test/presets") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi { context.testService.presets() }
             }
             get("/dashboard") {
                 if (!call.ensureAuthorized(context)) return@get
