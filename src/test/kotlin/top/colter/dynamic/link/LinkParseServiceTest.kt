@@ -848,6 +848,61 @@ class LinkParseServiceTest {
     }
 
     @Test
+    fun `video placeholder inside forward should keep non-video nodes when duration exceeds limit`() = runBlocking {
+        initDb("video-download-forward-skip-duration")
+        val downloader = FakeVideoDownloader(
+            result = LinkVideoDownloadResult(
+                video = MediaRef("video.mp4", MediaKind.VIDEO, mimeType = "video/mp4"),
+                fileSizeBytes = 4,
+            ),
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeVideoLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{>>}{title}\\n{content}\\r{cover}\\r{video}{<<}"),
+                        videoDownload = LinkVideoDownloadConfig(
+                            maxDurationSeconds = 60,
+                            maxFileMegabytes = 1.0,
+                        ),
+                    ),
+                )
+            },
+            videoDownloadersProvider = { listOf(downloader) },
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://www.bilibili.com/video/BV1xx411c7mD",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(1, result.forwarded.size)
+        assertEquals(2, result.forwarded.single().deliveryCount)
+        assertEquals(emptyList(), downloader.requests)
+        val messages = MessageDeliveryRepository.findRecent(limit = 10)
+            .mapNotNull { MessageDeliveryRepository.findMessage(it.messageId) }
+        assertEquals(2, messages.size)
+        val forward = messages
+            .flatMap { message -> message.batches.single().content }
+            .filterIsInstance<MessageContent.Forward>()
+            .single()
+        assertEquals(2, forward.nodes.size)
+        val firstNodeText = forward.nodes[0].batches.single().content.single() as MessageContent.Text
+        assertEquals("demo video\ndemo description", firstNodeText.fallbackText)
+        assertTrue(forward.nodes[1].batches.single().content.single() is MessageContent.Image)
+        assertFalse(forward.nodes.any { node ->
+            node.batches.any { batch -> batch.content.any { it is MessageContent.Video } }
+        })
+        val feedback = messages
+            .flatMap { message -> message.batches.single().content }
+            .filterIsInstance<MessageContent.Text>()
+            .single { it.fallbackText.contains("视频下载或推送未完成") }
+        assertTrue(feedback.fallbackText.contains("视频时长 2m 超过限制 1m"))
+    }
+
+    @Test
     fun `video preview should send skipped download hint separately when duration exceeds limit`() = runBlocking {
         initDb("video-download-skip-duration")
         val downloader = FakeVideoDownloader(
@@ -896,6 +951,42 @@ class LinkParseServiceTest {
         val text = feedback.batches.single().content.single() as MessageContent.Text
         assertTrue(text.fallbackText.contains("视频下载或推送未完成"))
         assertTrue(text.fallbackText.contains("视频时长 2m 超过限制 1m"))
+    }
+
+    @Test
+    fun `live link with video only template should fallback to preview text`() = runBlocking {
+        initDb("live-video-only-template")
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeLiveLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{>>}{title}\\n{content}\\r{cover}\\r{video}{<<}"),
+                    ),
+                )
+            },
+            previewRenderer = LinkPreviewRenderer {
+                error("纯视频占位符直播模板不应触发绘图")
+            },
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://live.bilibili.com/14375476",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(emptyList(), result.failures)
+        assertEquals(1, result.forwarded.size)
+        assertEquals(1, result.forwarded.single().deliveryCount)
+        val message = MessageDeliveryRepository.findRecent(limit = 1)
+            .mapNotNull { MessageDeliveryRepository.findMessage(it.messageId) }
+            .single()
+        val forward = message.batches.single().content.single() as MessageContent.Forward
+        assertEquals(2, forward.nodes.size)
+        val firstNodeText = forward.nodes[0].batches.single().content.single() as MessageContent.Text
+        assertEquals("demo live\ndemo live description", firstNodeText.fallbackText)
+        assertTrue(forward.nodes[1].batches.single().content.single() is MessageContent.Image)
     }
 
     @Test
@@ -1172,7 +1263,48 @@ class LinkParseServiceTest {
                     url = parsedLink.normalizedUrl,
                     title = "demo video",
                     description = "demo description",
+                    cover = MediaRef("https://example.com/cover.png", MediaKind.IMAGE),
                     durationSeconds = 120,
+                ),
+            )
+        }
+    }
+
+    private class FakeLiveLinkResolver : LinkResolver {
+        override val platformId: PlatformId = PlatformId.of("bilibili")
+
+        override fun matchesLink(inputUrl: String): Boolean {
+            return inputUrl.startsWith("https://live.bilibili.com/")
+        }
+
+        override suspend fun parseLink(inputUrl: String): ParsedLink? {
+            val id = inputUrl.substringAfterLast("/").substringBefore("?").takeIf { it.isNotBlank() } ?: return null
+            return ParsedLink(
+                platformId = platformId,
+                kind = LinkKinds.LIVE,
+                targetId = id,
+                normalizedUrl = "https://live.bilibili.com/$id",
+                sourceUrl = inputUrl,
+            )
+        }
+
+        override suspend fun resolveLink(parsedLink: ParsedLink): LinkResolution {
+            return LinkResolution.Preview(
+                parsedLink = parsedLink,
+                preview = LinkPreview(
+                    platformId = platformId,
+                    kind = LinkKinds.LIVE,
+                    id = parsedLink.targetId,
+                    url = parsedLink.normalizedUrl,
+                    title = "demo live",
+                    description = "demo live description",
+                    cover = MediaRef("https://example.com/live-cover.png", MediaKind.IMAGE),
+                    metrics = listOf(
+                        top.colter.dynamic.core.data.DynamicMetric(
+                            key = "online",
+                            display = "42",
+                        ),
+                    ),
                 ),
             )
         }

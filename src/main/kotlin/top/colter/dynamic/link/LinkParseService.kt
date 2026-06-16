@@ -250,8 +250,30 @@ public class LinkParseService(
         }
 
         val downloadPlan = when (val planned = videoDownloadPlan(preview, parsedLink)) {
-            null -> return currentResult
-                ?: LinkParseItemResult.Failed(parsedLink, "链接解析模板只包含视频，但视频下载不可用")
+            null -> {
+                val fallbackBatches = renderVideoFallbackBatches(templatePlan, preview, parsedLink)
+                return when {
+                    fallbackBatches.isNotEmpty() -> {
+                        val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context)
+                        when (fallbackResult) {
+                            is LinkParseItemResult.Forwarded -> currentResult?.withAdditionalDeliveries(fallbackResult.deliveryCount)
+                                ?: fallbackResult
+                            else -> currentResult
+                                ?: forwardMessage(
+                                    listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))),
+                                    parsedLink,
+                                    context,
+                                )
+                        }
+                    }
+                    currentResult != null -> currentResult
+                    else -> forwardMessage(
+                        listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))),
+                        parsedLink,
+                        context,
+                    )
+                }
+            }
             is VideoDownloadPlan.NotSent -> {
                 val feedback = sendVideoPrompt(
                     message = planned.message,
@@ -259,6 +281,19 @@ public class LinkParseService(
                     context = context,
                     inReplyTo = inReplyTo,
                 )
+                val fallbackBatches = renderVideoFallbackBatches(templatePlan, preview, parsedLink)
+                if (fallbackBatches.isNotEmpty()) {
+                    val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context)
+                    return if (fallbackResult is LinkParseItemResult.Forwarded) {
+                        currentResult
+                            ?.withAdditionalDeliveries(fallbackResult.deliveryCount + feedback.deliveryCount)
+                            ?: fallbackResult.withAdditionalDeliveries(feedback.deliveryCount)
+                    } else {
+                        currentResult?.withAdditionalDeliveries(feedback.deliveryCount)
+                            ?: videoPromptOnlyResult(feedback, parsedLink, context)
+                            ?: LinkParseItemResult.Failed(parsedLink, planned.message.ifBlank { "视频无法下载或推送" })
+                    }
+                }
                 return currentResult?.withAdditionalDeliveries(feedback.deliveryCount)
                     ?: videoPromptOnlyResult(feedback, parsedLink, context)
                     ?: LinkParseItemResult.Failed(parsedLink, planned.message.ifBlank { "视频无法下载或推送" })
@@ -355,6 +390,23 @@ public class LinkParseService(
                         context = context,
                         inReplyTo = inReplyTo,
                     )
+                    val fallbackBatches = runCatching {
+                        templateRenderer.renderPlanVideoFallback(templatePlan, preview)
+                    }.getOrElse { error ->
+                        linkParseLogger.warn(error) {
+                            "链接视频模板回退渲染失败，跳过视频消息：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
+                        }
+                        emptyList()
+                    }
+                    if (fallbackBatches.isNotEmpty()) {
+                        val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context)
+                        return when (fallbackResult) {
+                            is LinkParseItemResult.Forwarded -> currentResult.withAdditionalDeliveries(
+                                fallbackResult.deliveryCount + feedback.deliveryCount,
+                            )
+                            else -> currentResult.withAdditionalDeliveries(feedback.deliveryCount)
+                        }
+                    }
                     return currentResult.withAdditionalDeliveries(feedback.deliveryCount)
                 }
             }
@@ -521,6 +573,21 @@ public class LinkParseService(
             downloadingPrompt = videoPrompt(config.prompts.downloading, preview, parsedLink),
             downloader = downloader,
         )
+    }
+
+    private suspend fun renderVideoFallbackBatches(
+        templatePlan: LinkPreviewTemplatePlan,
+        preview: LinkPreview,
+        parsedLink: ParsedLink,
+    ): List<MessageBatch> {
+        return runCatching {
+            templateRenderer.renderPlanVideoFallback(templatePlan, preview)
+        }.getOrElse { error ->
+            linkParseLogger.warn(error) {
+                "链接视频模板回退渲染失败，跳过视频消息：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
+            }
+            emptyList()
+        }
     }
 
     private suspend fun forwardMessage(

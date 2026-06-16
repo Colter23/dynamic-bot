@@ -89,6 +89,19 @@ public class LinkPreviewTemplateRenderer(
         )
     }
 
+    internal suspend fun renderPlanVideoFallback(
+        plan: LinkPreviewTemplatePlan,
+        preview: LinkPreview,
+    ): List<MessageBatch> {
+        return renderSteps(
+            steps = plan.videoSteps,
+            context = LinkPreviewTemplateContext(
+                preview = preview,
+                time = nowEpochSeconds(),
+            ),
+        )
+    }
+
     private suspend fun renderSteps(
         steps: List<LinkPreviewTemplateStep>,
         context: LinkPreviewTemplateContext,
