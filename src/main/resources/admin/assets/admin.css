@@ -881,6 +881,55 @@
       border-color: rgba(59, 130, 246, 0.3);
     }
 
+    [data-theme="dark"] .message-template-forward-card {
+      background: var(--panel);
+      border-color: rgba(59, 130, 246, 0.3);
+    }
+
+    [data-theme="dark"] .message-template-preview-body {
+      color: var(--text);
+    }
+
+    [data-theme="dark"] .message-template-content-editor,
+    [data-theme="dark"] .message-template-builder-block,
+    [data-theme="dark"] .message-template-forward-editor-node {
+      background: var(--panel-soft);
+      border-color: var(--line);
+    }
+
+    [data-theme="dark"] .message-template-builder-block.forward,
+    [data-theme="dark"] .message-template-builder-block.forward .message-template-forward-editor-node {
+      background: var(--panel);
+      border-color: rgba(20, 184, 166, 0.28);
+    }
+
+    [data-theme="dark"] .message-template-content-editor.is-dragging {
+      background: rgba(20, 184, 166, 0.08);
+      border-color: rgba(20, 184, 166, 0.4);
+    }
+
+    [data-theme="dark"] .message-template-drop-caret {
+      background: #5eead4;
+      box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.92), 0 0 0 4px rgba(94, 234, 212, 0.28);
+    }
+
+    [data-theme="dark"] .message-template-field-chip,
+    [data-theme="dark"] button.message-template-token-button {
+      background: rgba(20, 184, 166, 0.12);
+      border-color: rgba(20, 184, 166, 0.35);
+      color: var(--accent);
+    }
+
+    [data-theme="dark"] .message-template-token-title {
+      color: var(--text);
+    }
+
+    [data-theme="dark"] .message-template-source-panel > summary,
+    [data-theme="dark"] .message-template-source-panel .message-template-editor-input {
+      background: var(--panel);
+      border-color: var(--line);
+    }
+
     [data-theme="dark"] .readonly-table-note {
       background: rgba(99, 102, 241, 0.1);
       border-color: rgba(99, 102, 241, 0.3);
@@ -5154,15 +5203,28 @@
     .message-template-preview {
       min-width: 0;
       display: grid;
-      gap: 8px;
+      gap: 10px;
     }
     .message-template-preview-message {
       min-width: 0;
-      padding: 9px 10px;
+      padding: 10px 11px;
       border: 1px solid var(--line);
       border-radius: 7px;
-      background: var(--panel-soft);
+      background: #fff;
       line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+    .message-template-preview-message:nth-child(odd) {
+      border-left: 3px solid #3b82f6;
+    }
+    .message-template-preview-message:nth-child(even) {
+      border-left: 3px solid #14b8a6;
+    }
+    .message-template-preview-body {
+      min-width: 0;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.6;
       overflow-wrap: anywhere;
     }
     .message-template-preview-index {
@@ -5174,7 +5236,26 @@
     }
     .message-template-preview-forward {
       border-style: dashed;
-      background: #f7fbff;
+      background: #f5f9ff;
+    }
+    .message-template-preview-forward::before {
+      content: "转发";
+      display: inline-flex;
+      align-items: center;
+      margin-bottom: 8px;
+      padding: 1px 6px;
+      border-radius: 999px;
+      background: rgba(29, 78, 216, 0.1);
+      color: #1d4ed8;
+      font-size: 11px;
+      font-weight: 850;
+    }
+    .message-template-forward-card {
+      min-width: 0;
+      padding: 8px;
+      border: 1px solid #d9e6ff;
+      border-radius: 8px;
+      background: #fff;
     }
     .message-template-forward-summary {
       margin-bottom: 8px;
@@ -5189,10 +5270,10 @@
     }
     .message-template-forward-node {
       min-width: 0;
-      padding: 7px 8px;
+      padding: 8px 9px;
       border: 1px solid #d9e6ff;
       border-radius: 7px;
-      background: #fff;
+      background: #f8fbff;
       overflow-wrap: anywhere;
     }
     .message-template-forward-node-title {
@@ -5204,9 +5285,17 @@
     }
     .message-template-editor-modal {
       display: grid;
-      grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.95fr);
+      grid-template-columns: minmax(0, 1.08fr) minmax(0, 0.92fr);
       gap: 12px;
       min-width: 0;
+      align-items: start;
+    }
+    .message-template-editor-modal.is-chip-delete-ready .message-template-builder-hint {
+      color: #b91c1c;
+      font-weight: 800;
+    }
+    .message-template-editor-modal.is-chip-delete-ready .message-template-builder-hint::after {
+      content: "  松开即可删除拖出的字段";
     }
     .message-template-editor-pane,
     .message-template-preview-pane,
@@ -5216,10 +5305,250 @@
       gap: 10px;
       align-content: start;
     }
+    .message-template-builder-head,
+    .message-template-section-head {
+      min-width: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 10px;
+    }
+    .message-template-builder-actions {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      gap: 6px;
+    }
+    .message-template-add-message-button {
+      border-color: #b9cffc;
+      background: #eef4ff;
+      color: #1d4ed8;
+    }
+    .message-template-add-forward-button {
+      border-color: #b9ded8;
+      background: #eef8f6;
+      color: #15675f;
+    }
+    .message-template-builder-hint {
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      overflow-wrap: anywhere;
+    }
+    .message-template-block-list {
+      position: relative;
+      min-width: 0;
+      display: grid;
+      gap: 10px;
+    }
+    .message-template-builder-block {
+      min-width: 0;
+      display: grid;
+      gap: 8px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-soft);
+      border-left: 3px solid #3b82f6;
+    }
+    .message-template-builder-block.forward {
+      border-style: dashed;
+      background: #f7fbff;
+      border-left-color: #14b8a6;
+    }
+    .message-template-builder-block-head,
+    .message-template-forward-editor-node-head {
+      min-width: 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    .message-template-builder-block-title,
+    .message-template-forward-editor-node-head > span {
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 900;
+    }
+    .message-template-builder-block-actions,
+    .message-template-forward-editor-node-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+    .message-template-builder-block-actions .compact,
+    .message-template-forward-editor-node-actions .compact {
+      min-height: 24px;
+      padding: 2px 7px;
+      font-size: 11px;
+    }
+    .message-template-builder-block-actions .message-template-move-button,
+    .message-template-forward-editor-node-actions .message-template-move-button {
+      border-color: #d4dde7;
+      background: #f8fafc;
+      color: var(--muted);
+    }
+    .message-template-builder-block-actions .message-template-delete-button,
+    .message-template-forward-editor-node-actions .message-template-delete-button {
+      border-color: #fecaca;
+      background: #fff1f2;
+      color: #be123c;
+    }
+    .message-template-builder-block-actions .message-template-add-node-button,
+    .message-template-forward-editor-node-actions .message-template-add-node-button {
+      border-color: #c7d2fe;
+      background: #eef2ff;
+      color: #4338ca;
+    }
+    .message-template-builder-block-actions .compact:disabled,
+    .message-template-forward-editor-node-actions .compact:disabled {
+      opacity: 0.42;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .message-template-content-editor {
+      min-width: 0;
+      min-height: 72px;
+      max-height: 260px;
+      overflow: auto;
+      padding: 8px 9px;
+      border: 1px solid #d8e4ef;
+      border-radius: 7px;
+      background: #fff;
+      color: var(--text);
+      font-size: 13px;
+      line-height: 1.65;
+      outline: none;
+      overflow-wrap: normal;
+      word-break: normal;
+      white-space: pre;
+      tab-size: 2;
+    }
+    .message-template-content-editor[data-template-content][contenteditable="true"] {
+      cursor: text;
+    }
+    .message-template-content-editor:empty::before {
+      content: attr(data-placeholder);
+      color: var(--muted);
+      font-weight: 650;
+    }
+    .message-template-content-editor:focus {
+      border-color: #b9cffc;
+      box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
+    }
+    .message-template-content-editor.is-dragging {
+      border-color: var(--accent);
+      background: #eef8f6;
+      caret-color: #14b8a6;
+      box-shadow: inset 0 0 0 1px rgba(20, 184, 166, 0.18);
+    }
+    .message-template-drop-caret {
+      position: absolute;
+      z-index: 8;
+      width: 3px;
+      min-height: 18px;
+      border-radius: 999px;
+      background: #14b8a6;
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.95), 0 0 0 4px rgba(20, 184, 166, 0.18);
+      pointer-events: none;
+    }
+    .message-template-field-chip {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      margin: 0 2px;
+      padding: 1px 6px;
+      border: 1px solid #b9ded8;
+      border-radius: 999px;
+      background: #eef8f6;
+      color: #15675f;
+      font-size: 12px;
+      font-weight: 850;
+      vertical-align: baseline;
+      user-select: none;
+      white-space: nowrap;
+      cursor: grab;
+    }
+    .message-template-field-chip:active {
+      cursor: grabbing;
+    }
+    .message-template-field-chip.is-moving {
+      opacity: 0;
+    }
+    .message-template-forward-editor-nodes {
+      min-width: 0;
+      display: grid;
+      gap: 8px;
+    }
+    .message-template-forward-editor-node {
+      min-width: 0;
+      display: grid;
+      gap: 6px;
+      padding: 8px;
+      border: 1px solid #d9e6ff;
+      border-radius: 7px;
+      background: #fff;
+    }
+    .message-template-source-panel {
+      min-width: 0;
+      display: grid;
+      gap: 10px;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 7px;
+      background: var(--panel-soft);
+      overflow: hidden;
+    }
+    .message-template-source-panel > summary {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      cursor: pointer;
+      padding: 8px 10px;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 900;
+      list-style: none;
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+    }
+    .message-template-source-panel[open] > summary {
+      border-bottom-color: var(--line);
+    }
+    .message-template-source-panel > summary::-webkit-details-marker {
+      display: none;
+    }
+    .message-template-source-panel > summary small {
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 800;
+    }
+    .message-template-source-panel .message-template-editor-input {
+      min-height: 180px;
+      border: 0;
+      border-radius: 0;
+      background: #fff;
+    }
     .message-template-editor-input {
       min-height: 280px;
       font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
       line-height: 1.5;
+    }
+    .message-template-source-input[hidden] {
+      display: none;
+    }
+    .message-template-token-group {
+      min-width: 0;
+      display: grid;
+      gap: 6px;
+    }
+    .message-template-token-group-title {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 850;
     }
     .message-template-token-bar {
       min-width: 0;
@@ -5228,24 +5557,24 @@
       gap: 6px;
     }
     .message-template-token-button {
-      min-height: 26px;
+      min-height: 32px;
       display: inline-flex;
       align-items: center;
-      gap: 6px;
-      padding: 3px 8px;
+      padding: 5px 9px;
       border-color: #b9ded8;
       background: #eef8f6;
       color: var(--accent);
-      font-size: 12px;
-      font-weight: 800;
+      text-align: left;
+      cursor: grab;
+      border-radius: 7px;
     }
-    .message-template-token-code {
-      font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
-      font-weight: 900;
+    .message-template-token-button:active {
+      cursor: grabbing;
     }
     .message-template-token-title {
-      color: #2f6f68;
-      font-weight: 700;
+      color: var(--text);
+      font-size: 12px;
+      font-weight: 850;
     }
     .message-routing-policy-field,
     .onebot-connection-field,
@@ -5882,8 +6211,8 @@
     .testing-template-actions button {
       min-height: 30px;
     }
-    .testing-template-editor-modal .message-template-editor-input {
-      min-height: 340px;
+    .testing-template-editor-modal .message-template-source-panel .message-template-editor-input {
+      min-height: 180px;
     }
     .testing-json-toggle {
       width: fit-content;

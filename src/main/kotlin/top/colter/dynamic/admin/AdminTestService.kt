@@ -51,6 +51,7 @@ import top.colter.dynamic.core.link.ParsedLink
 import top.colter.dynamic.draw.DefaultDynamicDrawService
 import top.colter.dynamic.draw.DefaultLinkPreviewRenderer
 import top.colter.dynamic.draw.DynamicDrawService
+import top.colter.dynamic.link.LinkPreviewTemplateDiagnostics
 import top.colter.dynamic.link.LinkPreviewTemplateRenderResult
 import top.colter.dynamic.link.LinkPreviewTemplateRenderer
 import top.colter.dynamic.listener.PushTemplateRenderer
@@ -233,6 +234,7 @@ public class AdminTestService(
             warnings += "链接预览模板渲染结果为空，已回退为文本"
             listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText()))))
         }
+        warnings += renderResult.diagnostics.toAdminWarnings()
 
         return response(
             mode = mode,
@@ -260,6 +262,17 @@ public class AdminTestService(
         }.getOrElse { error ->
             warnings += "绘图失败，已继续渲染文本模板：${error.message ?: error::class.simpleName.orEmpty()}"
             null
+        }
+    }
+
+    private fun LinkPreviewTemplateDiagnostics.toAdminWarnings(): List<String> {
+        return buildList {
+            if (missingPlaceholders.isNotEmpty()) {
+                add("链接预览模板中 ${missingPlaceholders.sorted().joinToString("、") { "{$it}" }} 没有可用数据，已自动清理")
+            }
+            if (previewSkippedVideoPlaceholders) {
+                add("测试台链接预览不会下载视频，{video}/{size} 只会在真实视频下载阶段渲染")
+            }
         }
     }
 
@@ -773,7 +786,7 @@ public class AdminTestService(
             key = UpdateKey.of(
                 publisherKey = publisher.key,
                 eventType = SourceEventType.DYNAMIC_CREATED,
-                externalId = "$presetId-$now",
+                externalId = presetId,
             ),
             publisher = publisher,
             occurredAtEpochSeconds = now,
@@ -801,7 +814,7 @@ public class AdminTestService(
             key = UpdateKey.of(
                 publisherKey = publisher.key,
                 eventType = eventType,
-                externalId = "$presetId-$now",
+                externalId = presetId,
             ),
             publisher = publisher,
             occurredAtEpochSeconds = now,

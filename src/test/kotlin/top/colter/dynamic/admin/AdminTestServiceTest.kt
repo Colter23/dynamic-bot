@@ -22,6 +22,7 @@ import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.PushTemplates
 import top.colter.dynamic.core.data.DynamicBlockRole
 import top.colter.dynamic.core.data.DynamicMediaCardKind
+import top.colter.dynamic.core.data.DynamicMetric
 import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.ImageGridBlock
 import top.colter.dynamic.core.data.MediaCardBlock
@@ -120,6 +121,29 @@ class AdminTestServiceTest {
         assertTrue(videoPayload.blocks.any {
             it is MediaCardBlock && it.role == DynamicBlockRole.BODY && it.card.kind == DynamicMediaCardKind.VIDEO
         })
+    }
+
+    @Test
+    fun mockPresetShouldUseStableUpdateIdSoDrawImageCanBeOverwritten() = runBlocking {
+        val drawService = StablePathDrawService()
+        val service = AdminTestService(
+            configProvider = {
+                MainDynamicConfig(
+                    templates = PushTemplates(dynamic = "{draw}"),
+                )
+            },
+            drawService = drawService,
+            storedPublisherResolver = { null },
+            nowEpochSeconds = sequenceOf(1_000L, 2_000L).iterator()::next,
+        )
+
+        val first = service.preview(AdminTestPreviewRequest(mode = "MOCK", presetId = "combo-daily-rich"))
+        val second = service.preview(AdminTestPreviewRequest(mode = "MOCK", presetId = "combo-daily-rich"))
+
+        assertEquals("combo-daily-rich", first.update?.key?.externalId)
+        assertEquals(first.update?.key?.externalId, second.update?.key?.externalId)
+        assertEquals(first.drawImage?.uri, second.drawImage?.uri)
+        assertEquals("data/rendered/bilibili/000000000/combo-daily-rich.webp", second.drawImage?.uri)
     }
 
     @Test
@@ -241,7 +265,7 @@ class AdminTestServiceTest {
             configProvider = {
                 MainDynamicConfig(
                     linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{draw}\n{title}"),
+                        templates = LinkParseTemplates(message = "{draw}\n{stats}"),
                     ),
                 )
             },
@@ -265,8 +289,52 @@ class AdminTestServiceTest {
         assertEquals(0, baseDrawService.renderCalls)
         assertEquals(1, themedDrawService.renderCalls)
         assertTrue(response.media.any { it.uri == "D:/tmp/admin-test-themed-draw.png" })
+        assertEquals(
+            listOf("play", "danmaku", "like", "coin", "favorite", "comment", "share"),
+            response.preview?.metrics?.map { it.key },
+        )
         val image = response.batches.single().content.first() as MessageContent.Image
         assertEquals("D:/tmp/admin-test-themed-draw.png", image.image.uri)
+        val text = response.batches.single().content.filterIsInstance<MessageContent.Text>().single()
+        assertEquals(
+            "12.3万播放 / 234弹幕 / 56点赞 / 9投币 / 8收藏 / 7评论 / 10转发",
+            text.fallbackText.trim(),
+        )
+
+        val drawPayload = assertIs<DynamicPayload>(themedDrawService.renderedUpdates.single().payload)
+        val card = assertIs<MediaCardBlock>(drawPayload.blocks.single { it is MediaCardBlock }).card
+        assertEquals("12.3万播放 / 234弹幕 / 56点赞", card.info)
+        assertEquals(7, card.metrics.size)
+    }
+
+    @Test
+    fun realLinkPreviewShouldWarnWhenTemplateUsesUnavailablePreviewFields() = runBlocking {
+        val service = AdminTestService(
+            resolversProvider = { listOf(FakePreviewLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(
+                            message = "标题：{title}\\n大小：{size}\\n未知：{not_exists}\\r{video}",
+                        ),
+                    ),
+                )
+            },
+            drawService = FakeDrawService(),
+            storedPublisherResolver = { null },
+        )
+
+        val response = service.preview(
+            AdminTestPreviewRequest(
+                mode = "REAL_LINK",
+                link = "https://example.com/video/1",
+            )
+        )
+
+        assertEquals("WARN", response.status)
+        assertEquals("标题：Preview video", (response.batches.single().content.single() as MessageContent.Text).fallbackText)
+        assertTrue(response.warnings.any { "{not_exists}" in it && "{size}" in it })
+        assertTrue(response.warnings.any { "不会下载视频" in it })
     }
 
     @Test
@@ -331,10 +399,21 @@ class AdminTestServiceTest {
         private val uri: String = "D:/tmp/admin-test-draw.png",
     ) : DynamicDrawService {
         var renderCalls: Int = 0
+        val renderedUpdates: MutableList<SourceUpdate> = mutableListOf()
 
         override suspend fun render(update: SourceUpdate, storedPublisher: Publisher?): MediaRef {
             renderCalls += 1
+            renderedUpdates += update
             return MediaRef(uri, MediaKind.IMAGE)
+        }
+    }
+
+    private class StablePathDrawService : DynamicDrawService {
+        override suspend fun render(update: SourceUpdate, storedPublisher: Publisher?): MediaRef {
+            return MediaRef(
+                uri = "data/rendered/${update.platformId.value}/${update.publisher.externalId}/${update.key.externalId}.webp",
+                kind = MediaKind.IMAGE,
+            )
         }
     }
 
@@ -403,6 +482,15 @@ class AdminTestServiceTest {
                     title = "Preview video",
                     description = "preview content",
                     cover = MediaRef("https://example.com/cover.jpg", MediaKind.COVER),
+                    metrics = listOf(
+                        DynamicMetric("play", raw = 123_000, display = "12.3万"),
+                        DynamicMetric("danmaku", raw = 234, display = "234"),
+                        DynamicMetric("like", raw = 56, display = "56"),
+                        DynamicMetric("coin", raw = 9, display = "9"),
+                        DynamicMetric("favorite", raw = 8, display = "8"),
+                        DynamicMetric("comment", raw = 7, display = "7"),
+                        DynamicMetric("share", raw = 10, display = "10"),
+                    ),
                 ),
             )
         }

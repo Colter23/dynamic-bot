@@ -26,6 +26,7 @@ import top.colter.dynamic.core.data.UpdateKey
 import top.colter.dynamic.core.link.LinkKinds
 import top.colter.dynamic.core.link.LinkPreview
 import top.colter.dynamic.repository.PublisherRepository
+import top.colter.dynamic.util.formatMetricInfo
 import top.colter.skiko.data.Ratio
 
 public fun interface LinkPreviewRenderer {
@@ -152,7 +153,7 @@ private fun buildLinkPreviewBlocks(
                     cover = preview.cover?.takeIf { it.uri.isNotBlank() },
                     coverRatio = preview.coverRatio(),
                     durationSeconds = preview.durationSeconds,
-                    info = preview.metrics.infoText().takeIf { it.isNotBlank() },
+                    info = preview.metrics.formatMetricInfo(MAX_MEDIA_CARD_INFO_METRICS).takeIf { it.isNotBlank() },
                     metrics = preview.metrics,
                     link = preview.url.takeIf { it.isNotBlank() },
                 ),
@@ -207,7 +208,7 @@ private fun LinkPreview.cardDescription(
 ): String {
     if (!longNoCover) return description
     return listOfNotNull(
-        metrics.infoText().takeIf { it.isNotBlank() },
+        metrics.formatMetricInfo(MAX_MEDIA_CARD_INFO_METRICS).takeIf { it.isNotBlank() },
         url.hostLabel(),
         url.takeIf { it.isNotBlank() },
     ).distinct().joinToString(" / ")
@@ -256,25 +257,6 @@ private fun String?.toLiveStatus(): LiveStatus? {
     }
 }
 
-private fun List<DynamicMetric>.infoText(): String {
-    return mapNotNull { metric ->
-        metric.display?.takeIf { it.isNotBlank() }?.let { display ->
-            when (metric.key) {
-                "play" -> "${display}播放"
-                "danmaku" -> "${display}弹幕"
-                "like" -> "${display}点赞"
-                "coin" -> "${display}投币"
-                "favorite" -> "${display}收藏"
-                "comment" -> "${display}评论"
-                "forward", "share" -> "${display}转发"
-                "online" -> "${display}在线"
-                "follow", "attention" -> "${display}关注"
-                else -> display
-            }
-        }
-    }.joinToString(" / ")
-}
-
 private fun mergePublisherInfo(primary: PublisherInfo, fallback: PublisherInfo): PublisherInfo {
     return primary.copy(
         name = primary.name.ifBlank { fallback.name },
@@ -298,3 +280,4 @@ private fun String.hostLabel(): String? {
 }
 
 private const val LONG_NO_COVER_DESCRIPTION_CHARS = 120
+private const val MAX_MEDIA_CARD_INFO_METRICS = 3

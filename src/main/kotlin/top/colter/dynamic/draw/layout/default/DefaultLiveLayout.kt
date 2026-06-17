@@ -1,7 +1,6 @@
 package top.colter.dynamic.draw.layout.default
 
 import org.jetbrains.skia.Image as SkiaImage
-import top.colter.dynamic.core.data.DynamicMetric
 import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.LiveStatus
 import top.colter.dynamic.core.data.SourceUpdate
@@ -9,6 +8,7 @@ import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.draw.layout.default.component.Media
 import top.colter.dynamic.draw.layout.default.component.MediaSmall
 import top.colter.dynamic.draw.layout.default.component.mediaCardColors
+import top.colter.dynamic.util.formatMetricInfo
 import top.colter.dynamic.util.formatTime
 import top.colter.skiko.Dp
 import top.colter.skiko.Modifier
@@ -78,7 +78,7 @@ internal fun Layout.drawLiveMediaCard(
     modifier: Modifier = Modifier().fillMaxWidth(),
 ) {
     val title = live.title.ifBlank { "直播" }
-    val info = live.metrics.infoText()
+    val info = live.metrics.formatMetricInfo()
     val subtitle = listOfNotNull(
         live.area?.takeIf { it.isNotBlank() },
         info.takeIf { cover == null && it.isNotBlank() },
@@ -115,16 +115,4 @@ private fun LivePayload.statusLabel(): String {
         LiveStatus.ROUND -> "轮播中"
         LiveStatus.CLOSE -> if (endedAtEpochSeconds == null) "未开播" else "已结束"
     }
-}
-
-private fun List<DynamicMetric>.infoText(): String {
-    return mapNotNull { metric ->
-        metric.display?.takeIf { it.isNotBlank() }?.let { display ->
-            when (metric.key) {
-                "online" -> "${display}在线"
-                "follow", "attention" -> "${display}关注"
-                else -> display
-            }
-        }
-    }.joinToString(" / ")
 }

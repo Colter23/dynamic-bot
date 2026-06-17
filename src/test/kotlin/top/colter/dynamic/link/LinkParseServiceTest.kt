@@ -26,6 +26,7 @@ import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandStatus
+import top.colter.dynamic.core.data.DynamicMetric
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageContent
@@ -512,6 +513,101 @@ class LinkParseServiceTest {
         val video = videoMessage.batches.single().content.single() as MessageContent.Video
         assertEquals(videoFile.toString(), video.video.uri)
         assertEquals(MediaKind.VIDEO, video.video.kind)
+    }
+
+    @Test
+    fun `video preview stats placeholder should render metrics`() = runBlocking {
+        initDb("video-preview-stats")
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeVideoLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{stats}"),
+                    ),
+                )
+            },
+            previewRenderer = LinkPreviewRenderer {
+                MediaRef("https://example.com/preview.png", MediaKind.IMAGE)
+            },
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://www.bilibili.com/video/BV1xx411c7mD",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(1, result.forwarded.size)
+        val delivery = MessageDeliveryRepository.findRecent(limit = 1).single()
+        val message = MessageDeliveryRepository.findMessage(delivery.messageId)!!
+        val text = message.batches.single().content.single() as MessageContent.Text
+        assertEquals("12.3万播放 / 234弹幕 / 56点赞 / 9投币 / 8收藏 / 7评论 / 10转发", text.fallbackText)
+    }
+
+    @Test
+    fun `missing preview placeholders should be removed from rendered text`() = runBlocking {
+        initDb("live-preview-missing-placeholders")
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeLiveLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(
+                            message = "标题：{title} 大小：{size}\\n未知：{not_exists}\\n{stats}\\r{video}",
+                        ),
+                    ),
+                )
+            },
+            previewRenderer = LinkPreviewRenderer {
+                error("缺失占位符清理不应触发绘图")
+            },
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://live.bilibili.com/14375476",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(1, result.forwarded.size)
+        val message = MessageDeliveryRepository.findRecent(limit = 1)
+            .mapNotNull { MessageDeliveryRepository.findMessage(it.messageId) }
+            .single()
+        val text = message.batches.single().content.single() as MessageContent.Text
+        assertEquals("标题：demo live\n42在线", text.fallbackText)
+        assertTrue(text.fallbackText.startsWith("标题：demo live"))
+        assertFalse(text.fallbackText.contains("{"))
+        assertFalse(text.fallbackText.contains("大小"))
+        assertFalse(text.fallbackText.contains("未知"))
+    }
+
+    @Test
+    fun `preview template diagnostics should report skipped video fields`() = runBlocking {
+        initDb("video-preview-diagnostics")
+        val renderer = LinkPreviewTemplateRenderer(
+            LinkPreviewRenderer {
+                error("preview-only rendering should not request draw here")
+            },
+        )
+        val result = renderer.renderPreviewResult(
+            "{title}\\n{size}\\n{stats}\\r{video}",
+            LinkPreview(
+                platformId = PlatformId.of("bilibili"),
+                kind = LinkKinds.VIDEO,
+                id = "BV1xx411c7mD",
+                url = "https://www.bilibili.com/video/BV1xx411c7mD",
+                title = "demo video",
+                description = "demo description",
+                metrics = listOf(DynamicMetric("play", display = "12.3万")),
+            ),
+        )
+
+        assertEquals("demo video\n12.3万播放", result.batches.single().content.single().fallbackText)
+        assertTrue(result.diagnostics.missingPlaceholders.contains("size"))
+        assertTrue(result.diagnostics.missingPlaceholders.contains("video"))
+        assertTrue(result.diagnostics.previewSkippedVideoPlaceholders)
+        assertTrue(result.diagnostics.clearedFragments >= 1)
     }
 
     @Test
@@ -1264,6 +1360,15 @@ class LinkParseServiceTest {
                     title = "demo video",
                     description = "demo description",
                     cover = MediaRef("https://example.com/cover.png", MediaKind.IMAGE),
+                    metrics = listOf(
+                        DynamicMetric("play", raw = 123_456, display = "12.3万"),
+                        DynamicMetric("danmaku", raw = 234, display = "234"),
+                        DynamicMetric("like", raw = 56, display = "56"),
+                        DynamicMetric("coin", raw = 9, display = "9"),
+                        DynamicMetric("favorite", raw = 8, display = "8"),
+                        DynamicMetric("comment", raw = 7, display = "7"),
+                        DynamicMetric("share", raw = 10, display = "10"),
+                    ),
                     durationSeconds = 120,
                 ),
             )

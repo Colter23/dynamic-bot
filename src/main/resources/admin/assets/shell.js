@@ -487,7 +487,8 @@ const $ = id => document.getElementById(id);
           const blob = await apiBlob("/media/image" + query({
             uri,
             platformId: image.dataset.mediaPlatform || "admin",
-            kind: image.dataset.mediaKind || "OTHER"
+            kind: image.dataset.mediaKind || "OTHER",
+            v: image.dataset.mediaVersion || ""
           }));
           const url = URL.createObjectURL(blob);
           if (generation !== state.mediaGeneration || !image.isConnected) {

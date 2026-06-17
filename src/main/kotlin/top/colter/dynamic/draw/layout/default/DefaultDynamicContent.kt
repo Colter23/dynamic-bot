@@ -1,6 +1,5 @@
 ﻿package top.colter.dynamic.draw.layout.default
 
-import org.jetbrains.skia.FontStyle
 import org.jetbrains.skia.Image
 import org.jetbrains.skia.paragraph.Alignment
 import org.jetbrains.skia.paragraph.TextStyle
@@ -79,7 +78,6 @@ internal fun Layout.drawDynamicTitle(
         val style = TextStyle()
             .setColor(config.theme.textColor)
             .setFontSize(fontSize.px)
-            .setFontStyle(FontStyle.BOLD)
         RichParagraphBuilder(style)
             .addText(title, style)
             .build()

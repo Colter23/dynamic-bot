@@ -1,9 +1,12 @@
+import { createMessageTemplateEditor } from "../assets/message-template-editor.js";
+
 let ctx;
 let root;
 let api;
 let esc;
 let attr;
 let mediaImage;
+let messageTemplateEditor;
 let hydrateMediaImages;
 let releaseMediaObjectUrls;
 let notify;
@@ -25,6 +28,7 @@ function bindContext(nextCtx) {
     openModal,
     closeModal,
   } = ctx.ui);
+  messageTemplateEditor = createMessageTemplateEditor({ esc, attr, document });
   hydrateMediaImages = ctx.hydrateMediaImages;
   releaseMediaObjectUrls = ctx.releaseMediaObjectUrls;
   handleError = ctx.handleError;
@@ -53,6 +57,7 @@ function pageState() {
       loading: false,
       activeView: "preview",
       lastRunAt: "",
+      mediaVersion: "",
     };
   }
   return ctx.state.adminTesting;
@@ -447,6 +452,7 @@ async function runPreview() {
     state.result = result;
     state.activeView = "preview";
     state.lastRunAt = new Date().toLocaleString("zh-CN", { hour12: false });
+    state.mediaVersion = String(Date.now());
     renderResult();
     notify("测试预览已生成", false);
   } finally {
@@ -563,63 +569,18 @@ function openTestingTemplateModal() {
   const state = pageState();
   const kind = currentTemplateKind();
   const value = testingTemplateEditorInitialValue();
-  openModal("编辑测试模板", `
-    <div class="message-template-editor-modal testing-template-editor-modal">
-      <div class="message-template-editor-pane">
-        <div class="field full">
-          <label>模板内容</label>
-          <textarea id="messageTemplateEditorInput" class="message-template-editor-input">${esc(value)}</textarea>
-        </div>
-        <div class="message-template-token-section">
-          <span class="sub-line">占位符 · ${esc(templateKindLabel(kind))}</span>
-          <div class="message-template-token-bar">${messageTemplateTokenButtonsHtml(kind)}</div>
-        </div>
-      </div>
-      <div class="message-template-preview-pane">
-        <div class="message-template-preview-head">
-          <span class="primary-line">实时预览</span>
-          <span id="messageTemplateEditorStats" class="sub-line">${esc(messageTemplateStats(value, kind))}</span>
-        </div>
-        <div id="messageTemplateEditorPreview" class="message-template-preview">${renderMessageTemplatePreview(value, kind)}</div>
-      </div>
-    </div>
-  `, async () => {
+  openModal("编辑测试模板", messageTemplateEditor.editorHtml({
+    value,
+    kind,
+    extraClass: "testing-template-editor-modal",
+  }), async () => {
     const input = document.getElementById("messageTemplateEditorInput");
     state.template = input?.value || "";
     syncTemplateControls();
     closeModal();
     notify("模板覆盖已更新，重新运行后生效", false);
   }, { size: "wide", confirmText: "应用到测试" });
-  wireMessageTemplateEditor(kind);
-}
-
-function wireMessageTemplateEditor(kind) {
-  const input = document.getElementById("messageTemplateEditorInput");
-  const preview = document.getElementById("messageTemplateEditorPreview");
-  const stats = document.getElementById("messageTemplateEditorStats");
-  if (!input || !preview) return;
-  const refresh = () => {
-    preview.innerHTML = renderMessageTemplatePreview(input.value, kind);
-    if (stats) stats.textContent = messageTemplateStats(input.value, kind);
-  };
-  input.addEventListener("input", refresh);
-  document.querySelectorAll("[data-template-token]").forEach(button => {
-    button.onclick = () => {
-      insertTemplateEditorText(button.dataset.templateToken || "");
-      refresh();
-    };
-  });
-  refresh();
-}
-
-function insertTemplateEditorText(text) {
-  const input = document.getElementById("messageTemplateEditorInput");
-  if (!input) return;
-  const start = input.selectionStart ?? input.value.length;
-  const end = input.selectionEnd ?? input.value.length;
-  input.setRangeText(text, start, end, "end");
-  input.focus();
-  input.dispatchEvent(new Event("input", { bubbles: true }));
+  messageTemplateEditor.bindEditor({ kind });
 }
 
 function testingTemplateCompactHtml() {
@@ -646,7 +607,7 @@ function testingTemplateInlineTextForCard() {
     return state.template ? "空模板" : "运行时使用当前配置模板";
   }
   const prefix = state.template ? "覆盖：" : "当前：";
-  return `${prefix}${messageTemplateInlineText(value)}`;
+  return `${prefix}${messageTemplateInlineText(value, currentTemplateKind())}`;
 }
 
 function testingTemplateSourceText() {
@@ -693,291 +654,15 @@ function linkTemplateKind(parsedLink) {
 }
 
 function templateKindLabel(kind) {
-  const map = {
-    DYNAMIC: "动态推送模板",
-    LIVE_STARTED: "开播推送模板",
-    LIVE_ENDED: "下播推送模板",
-    LINK_VIDEO: "链接解析模板",
-    LINK_LIVE: "直播链接模板",
-    LINK_USER: "用户链接模板",
-  };
-  return map[kind] || "动态推送模板";
-}
-
-function messageTemplateTokenButtonsHtml(kind) {
-  return messageTemplatePlaceholders(kind).map(item =>
-    `<button type="button" class="message-template-token-button" data-template-token="${attr(item.value)}">
-      <span class="message-template-token-code">${esc(item.label)}</span>
-      <span class="message-template-token-title">${esc(item.title || item.label)}</span>
-    </button>`
-  ).join("");
-}
-
-function messageTemplatePlaceholders(kind) {
-  const common = [
-    { value: "{name}", label: "{name}", title: "发布者名称" },
-    { value: "{uid}", label: "{uid}", title: "发布者 ID" },
-    { value: "{link}", label: "{link}", title: "主链接" },
-  ];
-  if (kind && kind.startsWith("LINK_")) {
-    return [
-      { value: "{draw}", label: "{draw}", title: "预览绘图" },
-      { value: "{cover}", label: "{cover}", title: "封面图" },
-      { value: "{name}", label: "{name}", title: "发布者 / 账号名称" },
-      { value: "{uid}", label: "{uid}", title: "发布者 / 账号 ID" },
-      { value: "{id}", label: "{id}", title: "链接对象 ID" },
-      { value: "{kind}", label: "{kind}", title: "链接类型" },
-      { value: "{title}", label: "{title}", title: "标题" },
-      { value: "{content}", label: "{content}", title: "描述 / 正文" },
-      { value: "{link}", label: "{link}", title: "链接" },
-      { value: "{stats}", label: "{stats}", title: "数据指标" },
-      { value: "{duration}", label: "{duration}", title: "时长" },
-      { value: "{video}", label: "{video}", title: "下载后的视频" },
-      { value: "{size}", label: "{size}", title: "视频大小" },
-      { value: "\\r", label: "\\r", title: "拆分为下一条消息" },
-      messageTemplateForwardToken(kind),
-      { value: "\\n", label: "\\n", title: "换行" },
-    ];
-  }
-  if (kind === "LIVE_STARTED") {
-    return [
-      { value: "{draw}", label: "{draw}", title: "直播绘图" },
-      ...common,
-      { value: "{rid}", label: "{rid}", title: "直播间 ID" },
-      { value: "{time}", label: "{time}", title: "开播时间" },
-      { value: "{title}", label: "{title}", title: "直播标题" },
-      { value: "{area}", label: "{area}", title: "直播分区" },
-      { value: "{cover}", label: "{cover}", title: "封面图" },
-      { value: "\\r", label: "\\r", title: "拆分为下一条消息" },
-      messageTemplateForwardToken(kind),
-      { value: "\\n", label: "\\n", title: "换行" },
-    ];
-  }
-  if (kind === "LIVE_ENDED") {
-    return [
-      ...common,
-      { value: "{rid}", label: "{rid}", title: "直播间 ID" },
-      { value: "{title}", label: "{title}", title: "直播标题" },
-      { value: "{area}", label: "{area}", title: "直播分区" },
-      { value: "{startTime}", label: "{startTime}", title: "开始时间" },
-      { value: "{endTime}", label: "{endTime}", title: "结束时间" },
-      { value: "{duration}", label: "{duration}", title: "直播时长" },
-      messageTemplateForwardToken(kind),
-      { value: "\\n", label: "\\n", title: "换行" },
-    ];
-  }
-  return [
-    { value: "{draw}", label: "{draw}", title: "动态绘图" },
-    ...common,
-    { value: "{did}", label: "{did}", title: "动态 ID" },
-    { value: "{time}", label: "{time}", title: "发布时间" },
-    { value: "{content}", label: "{content}", title: "动态正文" },
-    { value: "{images}", label: "{images}", title: "动态图片" },
-    { value: "{links}", label: "{links}", title: "附加链接" },
-    { value: "\\r", label: "\\r", title: "拆分为下一条消息" },
-    messageTemplateForwardToken(kind),
-    { value: "\\n", label: "\\n", title: "换行" },
-  ];
-}
-
-function messageTemplateForwardToken(kind) {
-  if (kind && kind.startsWith("LINK_")) {
-    return {
-      value: "{>>}{title}\\n{content}\\r{cover}\\r{link}{<<}",
-      label: "{>>}...{<<}",
-      title: "合并转发块",
-    };
-  }
-  if (kind === "LIVE_STARTED") {
-    return {
-      value: "{>>}\\n直播标题：{title}\\n分区：{area}\\r封面：\\n{cover}\\r直播间：{link}\\n{<<}",
-      label: "{>>}...{<<}",
-      title: "合并转发块",
-    };
-  }
-  if (kind === "LIVE_ENDED") {
-    return {
-      value: "{>>}\\n直播标题：{title}\\n直播时长：{duration}\\r直播间：{link}\\n{<<}",
-      label: "{>>}...{<<}",
-      title: "合并转发块",
-    };
-  }
-  return {
-    value: "{>>}{name}@{uid}\\n{time}\\n\\n{content}\\n\\n{links}\\r{images}{<<}",
-    label: "{>>}...{<<}",
-    title: "合并转发块",
-  };
+  return messageTemplateEditor.templateKindLabel(kind);
 }
 
 function messageTemplateStats(template, kind) {
-  const batches = messageTemplatePreviewBatches(template, kind);
-  const normalized = String(template || "").replace(/\\n/g, "\n");
-  const lines = normalized ? normalized.split("\n").length : 0;
-  return `${batches.length} 条消息 / ${lines} 行`;
+  return messageTemplateEditor.messageTemplateStats(template, kind);
 }
 
-function renderMessageTemplatePreview(template, kind) {
-  const batches = messageTemplatePreviewBatches(template, kind);
-  if (!batches.length) return `<div class="empty">预览为空</div>`;
-  return batches.map((item, index) => renderMessageTemplatePreviewItem(item, index)).join("");
-}
-
-function messageTemplatePreviewBatches(template, kind) {
-  const source = String(template || "");
-  const segments = parseMessageTemplatePreviewSegments(source);
-  if (!segments) {
-    return messageTemplatePlainPreviewBatches(source, kind);
-  }
-
-  const batches = [];
-  let current = "";
-  const flush = () => {
-    const text = current.trim();
-    if (text) batches.push({ type: "text", text });
-    current = "";
-  };
-
-  segments.forEach(segment => {
-    if (segment.type === "forward") {
-      flush();
-      const nodes = segment.value.split("\\r")
-        .map(fragment => renderMessageTemplateFragment(fragment.replace(/\\n/g, "\n"), kind).trim())
-        .filter(Boolean);
-      if (nodes.length) batches.push({ type: "forward", nodes });
-      return;
-    }
-    const fragments = kind === "LIVE_ENDED" ? [segment.value] : segment.value.split("\\r");
-    fragments.forEach((fragment, index) => {
-      if (index > 0) flush();
-      current += renderMessageTemplateFragment(fragment.replace(/\\n/g, "\n"), kind);
-    });
-  });
-  flush();
-  return batches;
-}
-
-function renderMessageTemplateFragment(fragment, kind) {
-  const sample = messageTemplateSampleValues(kind);
-  return String(fragment || "").replace(/\{([a-zA-Z0-9_]+)\}/g, (match, key) => {
-    return sample[key] === undefined ? match : sample[key];
-  });
-}
-
-function messageTemplatePlainPreviewBatches(source, kind) {
-  const fragments = kind === "LIVE_ENDED" ? [source] : source.split("\\r");
-  return fragments
-    .map(fragment => renderMessageTemplateFragment(fragment.replace(/\\n/g, "\n"), kind).trim())
-    .filter(Boolean)
-    .map(text => ({ type: "text", text }));
-}
-
-function parseMessageTemplatePreviewSegments(source) {
-  const segments = [];
-  let index = 0;
-  while (index < source.length) {
-    const start = source.indexOf("{>>}", index);
-    const end = source.indexOf("{<<}", index);
-    if (end !== -1 && (start === -1 || end < start)) return null;
-    if (start === -1) {
-      segments.push({ type: "text", value: source.slice(index) });
-      break;
-    }
-    if (start > index) segments.push({ type: "text", value: source.slice(index, start) });
-    const contentStart = start + 4;
-    const close = source.indexOf("{<<}", contentStart);
-    if (close === -1) return null;
-    const nested = source.indexOf("{>>}", contentStart);
-    if (nested !== -1 && nested < close) return null;
-    segments.push({ type: "forward", value: source.slice(contentStart, close) });
-    index = close + 4;
-  }
-  return segments;
-}
-
-function renderMessageTemplatePreviewItem(item, index) {
-  const labelText = item.type === "forward" ? `合并转发 ${index + 1}` : `预览消息 ${index + 1}`;
-  if (item.type !== "forward") {
-    return `<div class="message-template-preview-message">
-      <span class="message-template-preview-index">${esc(labelText)}</span>
-      <div>${esc(item.text).replace(/\n/g, "<br>")}</div>
-    </div>`;
-  }
-  return `<div class="message-template-preview-message message-template-preview-forward">
-    <span class="message-template-preview-index">${esc(labelText)}</span>
-    <div class="message-template-forward-summary">合并转发节点：${item.nodes.length} 条</div>
-    <div class="message-template-forward-nodes">
-      ${item.nodes.map((node, nodeIndex) => `<div class="message-template-forward-node">
-        <span class="message-template-forward-node-title">节点 ${nodeIndex + 1}</span>
-        <div>${esc(node).replace(/\n/g, "<br>")}</div>
-      </div>`).join("")}
-    </div>
-  </div>`;
-}
-
-function messageTemplateSampleValues(kind) {
-  if (kind && kind.startsWith("LINK_")) {
-    return {
-      draw: "【链接预览图】",
-      cover: "【封面图】",
-      video: "【视频文件】",
-      name: "示例 UP",
-      uid: "000000000",
-      id: kind === "LINK_LIVE" ? "230001" : (kind === "LINK_USER" ? "000000000" : "BV1xx411c7mD"),
-      kind: kind === "LINK_LIVE" ? "直播" : (kind === "LINK_USER" ? "用户" : "视频"),
-      title: kind === "LINK_LIVE" ? "今晚一起写代码" : (kind === "LINK_USER" ? "示例 UP 的主页" : "示例视频标题"),
-      content: kind === "LINK_USER" ? "Bilibili 用户 000000000" : "这里是链接解析拿到的简介内容。",
-      link: kind === "LINK_LIVE" ? "https://live.bilibili.com/230001" : (kind === "LINK_USER" ? "https://space.bilibili.com/000000000" : "https://www.bilibili.com/video/BV1xx411c7mD"),
-      stats: "12.3万播放 / 456弹幕 / 789点赞",
-      duration: "3m 21s",
-      size: "18.5 MB",
-    };
-  }
-  if (kind === "LIVE_STARTED") {
-    return {
-      draw: "【直播绘图】",
-      name: "示例主播",
-      uid: "000000000",
-      rid: "230001",
-      time: "2026年06月16日 20:30:00",
-      title: "今晚一起写代码",
-      area: "科技 / 编程",
-      cover: "【直播封面】",
-      link: "https://live.bilibili.com/230001",
-    };
-  }
-  if (kind === "LIVE_ENDED") {
-    return {
-      name: "示例主播",
-      uid: "000000000",
-      rid: "230001",
-      title: "今晚一起写代码",
-      area: "科技 / 编程",
-      startTime: "2026年06月16日 20:30:00",
-      endTime: "2026年06月16日 22:04:00",
-      duration: "1h 34m",
-      link: "https://live.bilibili.com/230001",
-    };
-  }
-  return {
-    draw: "【动态绘图】",
-    name: "示例发布者",
-    uid: "000000000",
-    did: "987654321",
-    time: "2026年06月16日 20:30:00",
-    content: "今天更新了一组开发进度，顺便整理了几张截图。",
-    images: "【图片 1】\n【图片 2】",
-    link: "https://t.bilibili.com/987654321",
-    links: "https://example.com/post\nhttps://example.com/detail",
-  };
-}
-
-function messageTemplateInlineText(value) {
-  const text = String(value || "")
-    .split(/\r?\n/)
-    .map(line => line.trim())
-    .filter(Boolean)
-    .join(" / ");
-  return text || "空模板";
+function messageTemplateInlineText(value, kind) {
+  return messageTemplateEditor.messageTemplateInlineText(value, kind);
 }
 
 function renderStatus() {
@@ -1445,5 +1130,6 @@ function contentCount(batches) {
 function previewMediaImage(uri, className, platformId, kind, title) {
   const html = mediaImage(uri, className, platformId, kind);
   if (!uri || !html.startsWith("<img ")) return html;
-  return html.replace("<img ", `<img data-preview-image="true" data-preview-title="${attr(title || "图片预览")}" title="点击预览" tabindex="0" `);
+  const versionAttr = pageState().mediaVersion ? ` data-media-version="${attr(pageState().mediaVersion)}"` : "";
+  return html.replace("<img ", `<img data-preview-image="true" data-preview-title="${attr(title || "图片预览")}" title="点击预览" tabindex="0"${versionAttr} `);
 }
