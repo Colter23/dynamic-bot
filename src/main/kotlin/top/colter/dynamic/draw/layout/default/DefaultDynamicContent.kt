@@ -36,6 +36,7 @@ private const val NORMAL_EMOJI_ONLY_COUNT = 12
 private const val MAX_EMOJI_ONLY_FONT_SIZE = 96f
 private const val NORMAL_EMOJI_ONLY_FONT_SIZE = 76f
 private const val MIN_EMOJI_ONLY_FONT_SIZE = 56f
+private const val IMAGE_EMOJI_FONT_SIZE_SCALE = 1.16f
 private const val TITLE_TO_CONTENT_RATIO = 1.2f
 private const val FONT_SIZE_STEP = 0.5f
 private val minTitleFontSize = 38.dp
@@ -103,7 +104,7 @@ private fun buildDynamicContentParagraph(
     parts.forEach { part ->
         when (part) {
             is DynamicContentPart.Text -> paragraph.addText(part.text, if (part.link) linkStyle else style)
-            is DynamicContentPart.Emoji -> paragraph.addEmoji(part.text, part.image, linkStyle)
+            is DynamicContentPart.Emoji -> paragraph.addEmoji(part.text, part.image, linkStyle, IMAGE_EMOJI_FONT_SIZE_SCALE)
             is DynamicContentPart.Icon -> {
                 paragraph.addEmoji(part.alt, part.image, linkStyle)
                 paragraph.addText(" ", linkStyle)
