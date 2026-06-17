@@ -5,6 +5,7 @@ import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.LiveStatus
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.draw.DrawConfig
+import top.colter.dynamic.draw.DRAW_BASE_WIDTH_DP
 import top.colter.dynamic.draw.layout.default.component.Media
 import top.colter.dynamic.draw.layout.default.component.MediaSmall
 import top.colter.dynamic.draw.layout.default.component.mediaCardColors
@@ -32,7 +33,7 @@ internal fun renderDefaultLive(update: SourceUpdate, config: DrawConfig): SkiaIm
     return View(
         fontRegistry = config.fontRegistry,
         modifier = Modifier()
-            .width(config.settings.width.dp)
+            .width(DRAW_BASE_WIDTH_DP)
             .padding(liveScenePadding)
             .background(
                 gradient = Gradient(

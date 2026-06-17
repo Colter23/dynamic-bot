@@ -1,6 +1,8 @@
 package top.colter.dynamic
 
 import kotlin.io.path.createTempDirectory
+import kotlin.io.path.readText
+import kotlin.io.path.writeText
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -55,6 +57,7 @@ class MainConfigStoreTest {
         val paths = MainConfigForms.formSpec.fields.map { it.path }
 
         assertEquals(DrawOutputFormat.PNG, config.draw.outputFormat)
+        assertEquals(1.0, config.draw.scale)
         assertEquals("{draw}", config.linkParsing.templates.message)
         assertEquals(0.0, config.linkParsing.videoDownload.maxFileMegabytes)
 
@@ -62,6 +65,7 @@ class MainConfigStoreTest {
             paths,
             listOf(
                 "draw.outputFormat",
+                "draw.scale",
                 "draw.themeColors",
                 "draw.autoTheme",
                 "draw.font.typography.autoNormalize",
@@ -86,6 +90,7 @@ class MainConfigStoreTest {
                 "draw.themeColor",
                 "draw.backgroundStartColor",
                 "draw.backgroundEndColor",
+                "draw.width",
                 "linkParsing.replyOnFailure",
                 "linkParsing.progressReply.enabled",
                 "linkParsing.videoDownload.enabled",
@@ -102,6 +107,43 @@ class MainConfigStoreTest {
                 "outboundMedia.enabled",
             ),
         )
+    }
+
+    @Test
+    fun legacyDrawWidthShouldMigrateToScale() {
+        val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-config"))
+        val path = configService.resolvePath(MainDynamicConfig.CONFIG_ID)
+        path.parent.toFile().mkdirs()
+        path.writeText(
+            """
+            draw:
+              width: 1500
+            webAdmin:
+              token: token
+            """.trimIndent(),
+        )
+
+        val loaded = MainConfigStore(configService).loadOrCreate { "new-token" }
+        val rewritten = path.readText()
+        val rewrittenAgain = MainConfigStore(configService).loadOrCreate { "another-token" }
+        val rewrittenAfterSecondLoad = path.readText()
+
+        assertEquals(1.5, loaded.draw.scale)
+        assertEquals(1.5, rewrittenAgain.draw.scale)
+        assertTrue(rewritten.contains("scale: 1.5"))
+        assertFalse(rewritten.contains("width:"))
+        assertEquals(rewritten, rewrittenAfterSecondLoad)
+    }
+
+    @Test
+    fun drawScaleShouldRejectTooLargeValues() {
+        val error = assertFailsWith<IllegalArgumentException> {
+            MainConfigForms.validate(
+                MainDynamicConfig(draw = DrawSettings(scale = 1e40)),
+            )
+        }
+
+        assertTrue(error.message!!.contains("绘图倍率不能大于"))
     }
 
     @Test

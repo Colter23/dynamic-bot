@@ -201,9 +201,9 @@ private fun defaultAuthorContentStyle(
                 textSpacing = 18.dp,
             ),
             text = AuthorTextBlockStyle(
-                top = (-5).dp,
+                top = 2.dp,
                 rightSpacing = 12.dp,
-                timeTopSpacing = 12.dp,
+                timeTopSpacing = 10.dp,
                 name = AuthorTextLineStyle(
                     left = (-21).dp,
                     fontSize = 50.dp,
@@ -211,7 +211,7 @@ private fun defaultAuthorContentStyle(
                     color = Color.WHITE.withAlpha(0.9f),
                     strokeWidth = 8.dp,
                     strokeColor = accentColor,
-                    bleedVertical = 14.dp,
+                    bleedVertical = 20.dp,
                     shadows = nameShadows,
                 ),
                 time = AuthorTextLineStyle(
@@ -221,7 +221,7 @@ private fun defaultAuthorContentStyle(
                     color = Color.WHITE.withAlpha(0.8f),
                     strokeWidth = 5.dp,
                     strokeColor = accentColor.withAlpha(0.6f),
-                    bleedVertical = 8.dp,
+                    bleedVertical = 10.dp,
                     shadows = authorTimeShadows,
                 ),
             ),
@@ -237,9 +237,9 @@ private fun defaultAuthorContentStyle(
                 textSpacing = 18.dp,
             ),
             text = AuthorTextBlockStyle(
-                top = (-12).dp,
+                top = (-6).dp,
                 rightSpacing = 12.dp,
-                timeTopSpacing = 15.dp,
+                timeTopSpacing = 12.dp,
                 name = AuthorTextLineStyle(
                     left = (-21).dp,
                     fontSize = 43.dp,
@@ -247,7 +247,7 @@ private fun defaultAuthorContentStyle(
                     color = Color.WHITE.withAlpha(0.9f),
                     strokeWidth = 8.dp,
                     strokeColor = accentColor,
-                    bleedVertical = 14.dp,
+                    bleedVertical = 20.dp,
                     shadows = nameShadows,
                 ),
                 time = AuthorTextLineStyle(
@@ -257,7 +257,7 @@ private fun defaultAuthorContentStyle(
                     color = Color.WHITE.withAlpha(0.8f),
                     strokeWidth = 5.dp,
                     strokeColor = accentColor.withAlpha(0.6f),
-                    bleedVertical = 8.dp,
+                    bleedVertical = 10.dp,
                     shadows = authorTimeShadows,
                 ),
             ),

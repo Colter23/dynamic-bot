@@ -109,7 +109,7 @@ private fun Layout.DynamicImageTile(
 ) = Box(modifier = modifier) {
     val imgModifier = Modifier().border(2.dp, 10.dp, colors.coverBorderColor)
 
-    // 图片限高，最高为绘图宽度的两倍 2000dp
+    // 图片限高，最高为 1000dp 基准宽度的两倍。
     if (image.height > image.width * 2) imgModifier.maxHeight(2000.dp)
 
     // 绘制图片：长图取顶部，普通图片居中裁剪。

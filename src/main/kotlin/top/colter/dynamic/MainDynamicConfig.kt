@@ -258,13 +258,17 @@ public data class MessagePlatformRoutingPolicy(
     val policy: MessageSinkRoutingPolicy = MessageSinkRoutingPolicy(),
 )
 
+public const val DRAW_BASE_WIDTH: Int = 1000
+public const val DRAW_SCALE_MIN: Double = 0.32
+public const val DRAW_SCALE_MAX: Double = 4.0
+
 public data class DrawSettings(
     val layout: String = "default",
     val outputFormat: DrawOutputFormat = DrawOutputFormat.PNG,
     val themeColors: String = "#FE65A6",
     val autoTheme: Boolean = true,
     val ornament: DrawOrnament = DrawOrnament.LOGO,
-    val width: Int = 1000,
+    val scale: Double = 1.0,
     val font: DrawFontSettings = DrawFontSettings(),
 )
 

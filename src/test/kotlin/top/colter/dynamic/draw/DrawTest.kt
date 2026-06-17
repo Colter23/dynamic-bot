@@ -2,6 +2,8 @@ package top.colter.dynamic.draw
 
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 import org.jetbrains.skia.Color
 import org.jetbrains.skia.Image
 import top.colter.dynamic.DrawFontSettings
@@ -86,7 +88,7 @@ class DrawTest {
 
     @BeforeTest
     fun init() {
-        Dp.factor = 1f
+        Dp.factor = 1.5f
     }
 
     @Test
@@ -103,6 +105,19 @@ class DrawTest {
     fun `test theme previews`() {
         renderThemeOverviewToOutput()
         themeDynamicPreviews().forEach(::renderPreview)
+    }
+
+    @Test
+    fun `draw layout should scale dp factor with draw scale`() {
+        val config = drawConfig(
+            layout = "default",
+            ornament = DrawOrnament.LOGO,
+            themeColors = DEFAULT_THEME_COLORS,
+        ).let { it.copy(settings = it.settings.copy(scale = 1.5)) }
+        val image = renderDynamicImage(titleShortTextDynamic(), config)
+
+        assertEquals(1.5f, Dp.factor)
+        assertTrue(image.width > 1000)
     }
 
     private fun dynamicPreviews(): List<PreviewCase> {

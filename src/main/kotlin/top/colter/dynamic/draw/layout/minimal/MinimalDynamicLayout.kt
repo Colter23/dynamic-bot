@@ -7,6 +7,7 @@ import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.plugin.PlatformDrawAssetKeys
 import top.colter.dynamic.draw.DrawConfig
+import top.colter.dynamic.draw.DRAW_BASE_WIDTH_DP
 import top.colter.dynamic.draw.layout.default.DynamicRenderMode
 import top.colter.dynamic.draw.layout.default.component.AuthorContent
 import top.colter.dynamic.draw.layout.default.component.minimalAuthorContentStyle
@@ -48,7 +49,7 @@ internal fun renderMinimalDynamic(update: SourceUpdate, config: DrawConfig): Ima
     return View(
         fontRegistry = config.fontRegistry,
         modifier = Modifier()
-            .width(config.settings.width.dp)
+            .width(DRAW_BASE_WIDTH_DP)
             .padding(scenePadding)
             .background(
                 gradient = Gradient(
@@ -66,7 +67,7 @@ internal fun renderMinimalLive(update: SourceUpdate, config: DrawConfig): Image 
     return View(
         fontRegistry = config.fontRegistry,
         modifier = Modifier()
-            .width(config.settings.width.dp)
+            .width(DRAW_BASE_WIDTH_DP)
             .padding(scenePadding)
             .background(
                 gradient = Gradient(

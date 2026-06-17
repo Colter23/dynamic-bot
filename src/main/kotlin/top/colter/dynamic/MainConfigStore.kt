@@ -184,7 +184,18 @@ private fun String.trimChainSeparators(): String {
 }
 
 public object MainConfigForms {
-    public val migrations: List<ConfigMigration> = listOf()
+    public val migrations: List<ConfigMigration> = listOf(
+        ConfigMigration(
+            id = "main-draw-width-to-scale",
+            description = "draw.width 改为 draw.scale，并按 1000dp 基准宽度换算",
+        ) {
+            val width = (get("draw.width") as? Number)?.toDouble()
+            if (width != null && !contains("draw.scale")) {
+                set("draw.scale", width / DRAW_BASE_WIDTH)
+            }
+            remove("draw.width")
+        },
+    )
 
     public val formSpec: ConfigFormSpec
         get() = ConfigFormSpec(
@@ -723,13 +734,12 @@ public object MainConfigForms {
                     required = true,
                 ),
                 ConfigFieldSpec(
-                    path = "draw.width",
-                    label = "绘图宽度",
+                    path = "draw.scale",
+                    label = "绘图倍率",
                     type = ConfigFieldType.NUMBER,
                     section = "绘图",
-                    description = "生成动态图片的基础宽度。\n太小会显得拥挤，太大可能增加渲染耗时。",
-                    min = 320,
-                    numberKind = ConfigNumberKind.INTEGER,
+                    description = "生成动态图片的整体缩放倍率。\n默认 1.0 表示 1000dp 基准宽度；例如 1.5 会生成约 1500px 宽的图片，并同步放大文字、间距和媒体内容。可填写 $DRAW_SCALE_MIN 到 $DRAW_SCALE_MAX 之间的小数。",
+                    max = DRAW_SCALE_MAX.toLong(),
                 ),
                 ConfigFieldSpec(
                     path = "draw.font.text",
@@ -873,7 +883,7 @@ public object MainConfigForms {
         "notifications.minSeverity",
         "notifications.dedupeSeconds",
         "notifications.routeMonitorIntervalSeconds",
-        "draw.width",
+        "draw.scale",
         "draw.font.text",
         "draw.font.emoji",
         "draw.font.typography.autoNormalize",
@@ -968,7 +978,7 @@ public object MainConfigForms {
             "draw.themeColors",
             "draw.autoTheme",
             "draw.ornament",
-            "draw.width",
+            "draw.scale",
             "draw.font.text",
             "draw.font.emoji",
             "draw.font.typography.autoNormalize",
@@ -1132,7 +1142,10 @@ public object MainConfigForms {
             "绘图布局必须是 ${DrawLayoutRegistry.options().joinToString("|") { it.value }} 之一"
         }
         DrawThemeFactory.parseThemeColors(config.draw.themeColors)
-        require(config.draw.width >= 320) { "绘图宽度至少为 320" }
+        require(config.draw.scale.isFiniteNumber()) { "绘图倍率必须是有效数字" }
+        require(config.draw.scale >= DRAW_SCALE_MIN) { "绘图倍率至少为 $DRAW_SCALE_MIN" }
+        require(config.draw.scale <= DRAW_SCALE_MAX) { "绘图倍率不能大于 $DRAW_SCALE_MAX" }
+        require(config.draw.scale.toFloat().isFinite()) { "绘图倍率过大" }
         require(config.draw.font.typography.lineHeightScale.isFiniteNumber()) { "行高微调系数必须是有效数字" }
         require(config.draw.font.typography.lineHeightScale in 0.75..1.5) {
             "行高微调系数必须在 0.75 到 1.5 之间"
