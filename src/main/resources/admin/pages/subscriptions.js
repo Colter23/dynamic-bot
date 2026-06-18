@@ -33,6 +33,7 @@ let notify;
 let openModal;
 let closeModal;
 let confirmDanger;
+let loadingRow;
 let uniqueValues;
 let filterOptions;
 let matchesExact;
@@ -99,6 +100,7 @@ function bindContext(nextCtx) {
     openModal,
     closeModal,
     confirmDanger,
+    loadingRow,
     uniqueValues,
     filterOptions,
     matchesExact,
@@ -1060,7 +1062,7 @@ function setCreateSubscriptionTargetLoading(text) {
   $("subNewTargetCandidateWrap").hidden = false;
   $("subNewTargetCandidateActions").hidden = true;
   $("subNewTargetManualWrap").hidden = true;
-  $("subNewTargetCandidateList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
+  $("subNewTargetCandidateList").innerHTML = loadingRow(text);
   setCreateSubscriptionTargetStatus("");
 }
 
@@ -1209,7 +1211,7 @@ function subscriptionTargetLinkParseMode() {
 function setCreateSubscriptionPublisherLoading(text) {
   if (!$("subNewPublisherResultList")) return;
   $("subNewPublisherResultWrap").hidden = false;
-  $("subNewPublisherResultList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
+  $("subNewPublisherResultList").innerHTML = loadingRow(text);
   $("subNewPublisherStatus").textContent = text;
 }
 

@@ -17,6 +17,7 @@ let label;
 let notify;
 let openModal;
 let confirmDanger;
+let loadingRow;
 let loadSubscriberTargetCandidates;
 let messageTargetChoiceHtml;
 let bindTargetSourceToggles;
@@ -47,6 +48,7 @@ function bindContext(nextCtx) {
     notify,
     openModal,
     confirmDanger,
+    loadingRow,
     loadSubscriberTargetCandidates,
     messageTargetChoiceHtml,
     bindTargetSourceToggles,
@@ -342,7 +344,7 @@ function renderForwardTargetCandidates(result) {
 
 function setForwardTargetLoading(text) {
   $("forwardTargetCandidateActions").hidden = true;
-  $("forwardTargetCandidateList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
+  $("forwardTargetCandidateList").innerHTML = loadingRow(text);
   setForwardTargetStatus("");
 }
 

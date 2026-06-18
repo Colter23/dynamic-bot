@@ -134,6 +134,59 @@ const $ = id => document.getElementById(id);
     function cell(title, sub) {
       return `<span class="primary-line">${esc(title || "-")}</span><span class="sub-line">${esc(sub || "")}</span>`;
     }
+    function option(value, text, selected) {
+      return `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(text)}</option>`;
+    }
+    function detailItem(title, value, mono = false) {
+      return `<div class="plugin-detail-item">
+        <span>${esc(title)}</span>
+        <strong class="${mono ? "mono" : ""}">${esc(value === null || value === undefined || value === "" ? "-" : value)}</strong>
+      </div>`;
+    }
+    function prettyJson(value, fallback = "") {
+      if (value == null) return fallback;
+      try {
+        return JSON.stringify(value, null, 2);
+      } catch (error) {
+        return String(value);
+      }
+    }
+    function dataBlock(title, value, open = false, className = "testing-data-block") {
+      return `<details class="${attr(className)}"${open ? " open" : ""}>
+        <summary>${esc(title)}</summary>
+        <pre>${esc(value || "")}</pre>
+      </details>`;
+    }
+    function loadingRow(text, className = "target-loading") {
+      return `<div class="${attr(className)}"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
+    }
+    function jsonBlock(title, value, open = false, className = "testing-data-block") {
+      if (!value) return "";
+      return dataBlock(title, prettyJson(value), open, className);
+    }
+    async function withButtonLoading(button, loadingText, task) {
+      const originalHtml = button?.innerHTML;
+      if (button) {
+        button.disabled = true;
+        button.textContent = loadingText;
+      }
+      try {
+        return await task();
+      } finally {
+        if (button?.isConnected) {
+          button.disabled = false;
+          if (originalHtml !== undefined) button.innerHTML = originalHtml;
+        }
+      }
+    }
+    function setControlValue(selector, value, container = document) {
+      const node = container.querySelector(selector);
+      if (node) node.value = value ?? "";
+    }
+    function setControlChecked(selector, checked, container = document) {
+      const node = container.querySelector(selector);
+      if (node) node.checked = checked === true;
+    }
     function previewImageAttrs(className) {
       const tokens = String(className || "").split(/\s+/);
       const title = tokens.includes("header-image") ? "头图预览"
@@ -698,6 +751,15 @@ const $ = id => document.getElementById(id);
       pill,
       tags,
       cell,
+      option,
+      detailItem,
+      prettyJson,
+      dataBlock,
+      loadingRow,
+      jsonBlock,
+      withButtonLoading,
+      setControlValue,
+      setControlChecked,
       mediaImage,
       identity,
       identityMeta,

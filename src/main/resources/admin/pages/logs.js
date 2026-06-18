@@ -14,6 +14,7 @@ let fmtTime;
 let pill;
 let renderTable;
 let notify;
+let withButtonLoading;
 let handleError;
 let logRequestSeq = 0;
 
@@ -24,7 +25,7 @@ function bindContext(nextCtx) {
   state = ctx.state;
   query = ctx.query;
   handleError = ctx.handleError;
-  ({ esc, attr, fmtTime, pill, renderTable, notify } = ctx.ui);
+  ({ esc, attr, fmtTime, pill, renderTable, notify, withButtonLoading } = ctx.ui);
 }
 
 function pageRoot() {
@@ -210,43 +211,36 @@ async function refreshLogs(force, button) {
   };
   if (!force && state.logSince) params.since = state.logSince;
 
-  const originalText = button?.textContent;
-  if (button) {
-    button.disabled = true;
-    button.textContent = "刷新中...";
-  }
   state.logsLoading = true;
   renderLogStatus();
 
   try {
-    const response = await api("/logs" + query(params));
-    if (!isCurrentLogRequest(seq)) return;
+    await withButtonLoading(button, "刷新中...", async () => {
+      const response = await api("/logs" + query(params));
+      if (!isCurrentLogRequest(seq)) return;
 
-    state.logSince = Math.max(Number(state.logSince || 0), Number(response.nextSince || 0));
-    state.logCapacity = Number(response.capacity || 0);
-    state.logRetainedCount = Number(response.retainedCount || 0);
-    if (force) {
-      state.logRows = (response.entries || []).slice(-LOG_KEEP_LIMIT);
-    } else {
-      const known = new Set((state.logRows || []).map(row => row.seq));
-      state.logRows = (state.logRows || [])
-        .concat((response.entries || []).filter(row => !known.has(row.seq)))
-        .slice(-LOG_KEEP_LIMIT);
-    }
-    renderLogs();
-    if (autoTop) {
-      scrollLogTableToTop();
-    } else if (scrollState) {
-      restoreLogScrollState(scrollState);
-    }
+      state.logSince = Math.max(Number(state.logSince || 0), Number(response.nextSince || 0));
+      state.logCapacity = Number(response.capacity || 0);
+      state.logRetainedCount = Number(response.retainedCount || 0);
+      if (force) {
+        state.logRows = (response.entries || []).slice(-LOG_KEEP_LIMIT);
+      } else {
+        const known = new Set((state.logRows || []).map(row => row.seq));
+        state.logRows = (state.logRows || [])
+          .concat((response.entries || []).filter(row => !known.has(row.seq)))
+          .slice(-LOG_KEEP_LIMIT);
+      }
+      renderLogs();
+      if (autoTop) {
+        scrollLogTableToTop();
+      } else if (scrollState) {
+        restoreLogScrollState(scrollState);
+      }
+    });
   } finally {
     if (isCurrentLogRequest(seq)) {
       state.logsLoading = false;
       renderLogStatus();
-    }
-    if (button?.isConnected) {
-      button.disabled = false;
-      if (originalText) button.textContent = originalText;
     }
     updateToolbarButtons();
   }

@@ -19,6 +19,8 @@ let notify;
 let openModal;
 let closeModal;
 let confirmDanger;
+let withButtonLoading;
+let loadingRow;
 let loadSubscriberTargetCandidates;
 let hydrateMediaImages;
 let messageTargetChoiceHtml;
@@ -48,6 +50,8 @@ function bindContext(nextCtx) {
     openModal,
     closeModal,
     confirmDanger,
+    withButtonLoading,
+    loadingRow,
     loadSubscriberTargetCandidates,
     messageTargetChoiceHtml,
     bindTargetSourceToggles,
@@ -62,22 +66,6 @@ function bindContext(nextCtx) {
 
 function pageRoot() {
   return root;
-}
-
-async function withButtonLoading(button, loadingText, task) {
-  const originalHtml = button?.innerHTML;
-  if (button) {
-    button.disabled = true;
-    button.textContent = loadingText;
-  }
-  try {
-    return await task();
-  } finally {
-    if (button?.isConnected) {
-      button.disabled = false;
-      if (originalHtml !== undefined) button.innerHTML = originalHtml;
-    }
-  }
 }
 
 export async function mount(nextCtx) {
@@ -1857,7 +1845,7 @@ function defaultNotificationTarget(targetPlatforms) {
 
 function setNotificationTargetLoading(text) {
   $("notifyTargetStatus").textContent = "";
-  $("notifyTargetCandidateList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
+  $("notifyTargetCandidateList").innerHTML = loadingRow(text);
 }
 
 function setNotificationTargetStatus(text) {
@@ -2188,7 +2176,7 @@ function setPermissionTargetLoading(text) {
   $("permTargetCandidateWrap").hidden = false;
   $("permTargetManualWrap").hidden = true;
   $("permTargetInlineStatus").textContent = "";
-  $("permTargetCandidateList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
+  $("permTargetCandidateList").innerHTML = loadingRow(text);
 }
 
 function permissionAllTargetChoiceHtml() {

@@ -12,10 +12,12 @@ let fmtTime;
 let label;
 let pill;
 let cell;
+let detailItem;
 let renderTable;
 let notify;
 let openModal;
 let confirmDanger;
+let withButtonLoading;
 let beginPageRequest;
 let isCurrentPageRequest;
 let invalidatePageRequests;
@@ -35,10 +37,12 @@ function bindContext(nextCtx) {
     label,
     pill,
     cell,
+    detailItem,
     renderTable,
     notify,
     openModal,
     confirmDanger,
+    withButtonLoading,
   } = ctx.ui);
   beginPageRequest = ctx.beginPageRequest;
   isCurrentPageRequest = ctx.isCurrentPageRequest;
@@ -246,28 +250,21 @@ function resetTaskFilterControls() {
 
 async function refreshTasks(button, force) {
   const request = beginPageRequest("tasks");
-  const originalText = button?.textContent;
-  if (button) {
-    button.disabled = true;
-    button.textContent = "加载中...";
-  }
   state.tasksLoading = true;
   renderTaskStatus();
   try {
-    const response = await api("/tasks");
-    if (!isCurrentPageRequest(request)) return;
-    state.cache.tasks = response;
-    state.taskResponse = response;
-    state.taskRows = response.tasks || [];
-    renderTasks();
+    await withButtonLoading(button, "加载中...", async () => {
+      const response = await api("/tasks");
+      if (!isCurrentPageRequest(request)) return;
+      state.cache.tasks = response;
+      state.taskResponse = response;
+      state.taskRows = response.tasks || [];
+      renderTasks();
+    });
   } finally {
     if (isCurrentPageRequest(request)) {
       state.tasksLoading = false;
       renderTaskStatus();
-    }
-    if (button?.isConnected) {
-      button.disabled = false;
-      if (originalText) button.textContent = originalText;
     }
     updateTaskFilterButtons();
   }
@@ -386,12 +383,7 @@ async function operateTask(action, key, button) {
     if (!confirmed) return;
   }
 
-  const originalText = button?.textContent;
-  if (button) {
-    button.disabled = true;
-    button.textContent = "处理中...";
-  }
-  try {
+  await withButtonLoading(button, "处理中...", async () => {
     const result = await api(`/tasks/${operation}` + query({
       ownerType: row.ownerType,
       ownerId: row.ownerId,
@@ -399,12 +391,7 @@ async function operateTask(action, key, button) {
     }), { method: "POST" });
     notify(result.message, false);
     await refreshTasks(null, true);
-  } finally {
-    if (button?.isConnected) {
-      button.disabled = false;
-      if (originalText) button.textContent = originalText;
-    }
-  }
+  });
 }
 
 function renderTaskSummary() {
@@ -482,13 +469,6 @@ function openTaskDetail(key) {
     size: "medium",
     cancelText: "关闭",
   });
-}
-
-function detailItem(title, value, mono = false) {
-  return `<div class="plugin-detail-item">
-    <span>${esc(title)}</span>
-    <strong class="${mono ? "mono" : ""}">${esc(value ?? "-")}</strong>
-  </div>`;
 }
 
 function scheduleLabel(value) {

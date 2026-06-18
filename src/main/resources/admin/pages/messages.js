@@ -12,10 +12,13 @@ let fmtTime;
 let label;
 let pill;
 let cell;
+let detailItem;
+let prettyJson;
 let renderTable;
 let notify;
 let openModal;
 let platformTag;
+let withButtonLoading;
 let beginPageRequest;
 let isCurrentPageRequest;
 let invalidatePageRequests;
@@ -34,10 +37,13 @@ function bindContext(nextCtx) {
     label,
     pill,
     cell,
+    detailItem,
+    prettyJson,
     renderTable,
     notify,
     openModal,
     platformTag,
+    withButtonLoading,
   } = ctx.ui);
   beginPageRequest = ctx.beginPageRequest;
   isCurrentPageRequest = ctx.isCurrentPageRequest;
@@ -248,33 +254,26 @@ async function refreshDeliveries(button, force) {
   const request = beginPageRequest("messages");
   readDeliveryFilterControls();
   const filters = deliveryFilters();
-  const originalText = button?.textContent;
-  if (button) {
-    button.disabled = true;
-    button.textContent = "加载中...";
-  }
   state.deliveriesLoading = true;
   renderDeliveryStatus();
   try {
-    const rows = await api("/deliveries" + query({
-      status: filters.status,
-      platformId: filters.platformId,
-      targetKind: filters.targetKind,
-      q: filters.q,
-      limit: filters.limit,
-    }));
-    if (!isCurrentPageRequest(request)) return;
-    state.deliveryRows = rows || [];
-    state.cache.deliveries = state.deliveryRows;
-    renderDeliveries();
+    await withButtonLoading(button, "加载中...", async () => {
+      const rows = await api("/deliveries" + query({
+        status: filters.status,
+        platformId: filters.platformId,
+        targetKind: filters.targetKind,
+        q: filters.q,
+        limit: filters.limit,
+      }));
+      if (!isCurrentPageRequest(request)) return;
+      state.deliveryRows = rows || [];
+      state.cache.deliveries = state.deliveryRows;
+      renderDeliveries();
+    });
   } finally {
     if (isCurrentPageRequest(request)) {
       state.deliveriesLoading = false;
       renderDeliveryStatus();
-    }
-    if (button?.isConnected) {
-      button.disabled = false;
-      if (originalText) button.textContent = originalText;
     }
     updateDeliveryFilterButtons();
   }
@@ -370,24 +369,14 @@ function renderDeliveryStatus() {
 async function openDeliveryDetail(id, button) {
   const fallback = (state.deliveryRows || []).find(item => String(item.id) === String(id));
   if (!fallback) throw new Error("消息记录不存在");
-  const originalText = button?.textContent;
-  if (button) {
-    button.disabled = true;
-    button.textContent = "读取中...";
-  }
-  try {
+  await withButtonLoading(button, "读取中...", async () => {
     const detail = await api(`/deliveries/${encodeURIComponent(id)}`);
     const row = detail.delivery || fallback;
     openModal("消息记录详情", renderDeliveryDetail(row, detail.message), null, {
       size: "wide",
       cancelText: "关闭",
     });
-  } finally {
-    if (button?.isConnected) {
-      button.disabled = false;
-      if (originalText) button.textContent = originalText;
-    }
-  }
+  });
 }
 
 function renderDeliveryDetail(row, message) {
@@ -421,23 +410,7 @@ function renderDeliveryDetail(row, message) {
       </div>
       <div class="plugin-detail-section">
         <h3>原始消息</h3>
-        <pre class="delivery-json-text">${esc(prettyJson(message))}</pre>
+        <pre class="delivery-json-text">${esc(prettyJson(message, "未找到原始消息，可能已被历史清理任务移除。"))}</pre>
       </div>
     </div>`;
-}
-
-function detailItem(title, value, mono = false) {
-  return `<div class="plugin-detail-item">
-    <span>${esc(title)}</span>
-    <strong class="${mono ? "mono" : ""}">${esc(value ?? "-")}</strong>
-  </div>`;
-}
-
-function prettyJson(value) {
-  if (value == null) return "未找到原始消息，可能已被历史清理任务移除。";
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch (error) {
-    return String(value);
-  }
 }

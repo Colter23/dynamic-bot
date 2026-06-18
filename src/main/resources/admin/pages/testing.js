@@ -6,6 +6,12 @@ let api;
 let esc;
 let attr;
 let mediaImage;
+let option;
+let detailItem;
+let dataBlock;
+let jsonBlock;
+let setControlValue;
+let setControlChecked;
 let messageTemplateEditor;
 let hydrateMediaImages;
 let releaseMediaObjectUrls;
@@ -24,6 +30,12 @@ function bindContext(nextCtx) {
     esc,
     attr,
     mediaImage,
+    option,
+    detailItem,
+    dataBlock,
+    jsonBlock,
+    setControlValue,
+    setControlChecked,
     notify,
     openModal,
     closeModal,
@@ -362,20 +374,20 @@ function readControls() {
 
 function syncPresetControls() {
   const state = pageState();
-  setControlValue("#testingPreset", state.presetId);
-  setControlValue("#testingTextVariant", state.textVariant);
-  setControlValue("#testingImageCount", state.imageCount);
-  setControlValue("#testingImageRatio", state.imageRatio);
-  setControlValue("#testingThemeColors", state.themeColors);
-  setControlChecked("#testingIncludeVideoCard", state.includeVideoCard);
-  setControlChecked("#testingIncludeArticleCard", state.includeArticleCard);
-  setControlChecked("#testingIncludeAdditionalCard", state.includeAdditionalCard);
-  setControlChecked("#testingIncludeRepost", state.includeRepost);
+  setControlValue("#testingPreset", state.presetId, root);
+  setControlValue("#testingTextVariant", state.textVariant, root);
+  setControlValue("#testingImageCount", state.imageCount, root);
+  setControlValue("#testingImageRatio", state.imageRatio, root);
+  setControlValue("#testingThemeColors", state.themeColors, root);
+  setControlChecked("#testingIncludeVideoCard", state.includeVideoCard, root);
+  setControlChecked("#testingIncludeArticleCard", state.includeArticleCard, root);
+  setControlChecked("#testingIncludeAdditionalCard", state.includeAdditionalCard, root);
+  setControlChecked("#testingIncludeRepost", state.includeRepost, root);
 }
 
 function syncTemplateControls() {
   const state = pageState();
-  setControlValue("#testingTemplate", state.template);
+  setControlValue("#testingTemplate", state.template, root);
   const stats = root.querySelector("#testingTemplateStats");
   if (stats) stats.textContent = testingTemplateStatsText();
   const inline = root.querySelector("#testingTemplateInline");
@@ -390,16 +402,6 @@ function syncTemplateControls() {
   if (adopt) adopt.hidden = !(resultTemplateAvailable() && !state.template);
   const reset = root.querySelector("#testingResetTemplateButton");
   if (reset) reset.disabled = !state.template;
-}
-
-function setControlValue(selector, value) {
-  const node = root.querySelector(selector);
-  if (node) node.value = value ?? "";
-}
-
-function setControlChecked(selector, checked) {
-  const node = root.querySelector(selector);
-  if (node) node.checked = checked === true;
 }
 
 function updateModeVisibility() {
@@ -999,10 +1001,6 @@ function switchOption(id, title, desc, checked) {
   </label>`;
 }
 
-function option(value, text, selected) {
-  return `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(text)}</option>`;
-}
-
 function statusPill(value) {
   const normalized = String(value || "").toUpperCase();
   const cls = normalized === "OK" ? "ok"
@@ -1041,33 +1039,6 @@ function templateSourceLabel(value) {
     NONE: "未使用模板",
   };
   return map[value] || value || "-";
-}
-
-function detailItem(title, value, mono = false) {
-  return `<div class="plugin-detail-item">
-    <span>${esc(title)}</span>
-    <strong class="${mono ? "mono" : ""}">${esc(value ?? "-")}</strong>
-  </div>`;
-}
-
-function dataBlock(title, value, open = false) {
-  return `<details class="testing-data-block"${open ? " open" : ""}>
-    <summary>${esc(title)}</summary>
-    <pre>${esc(value || "")}</pre>
-  </details>`;
-}
-
-function jsonBlock(title, value) {
-  if (!value) return "";
-  return dataBlock(title, prettyJson(value));
-}
-
-function prettyJson(value) {
-  try {
-    return JSON.stringify(value, null, 2);
-  } catch (error) {
-    return String(value);
-  }
 }
 
 function contentType(content) {

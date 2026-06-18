@@ -28,6 +28,8 @@ let identity;
 let identityMeta;
 let platformTag;
 let themeSwatch;
+let detailItem;
+let loadingRow;
 let renderTable;
 let notify;
 let openModal;
@@ -90,6 +92,8 @@ function bindContext(nextCtx) {
     identityMeta,
     platformTag,
     themeSwatch,
+    detailItem,
+    loadingRow,
     renderTable,
     notify,
     openModal,
@@ -697,13 +701,6 @@ function entityDetailEmpty(title, description) {
   </div>`;
 }
 
-function detailItem(title, value, mono = false) {
-  return `<div class="plugin-detail-item">
-    <span>${esc(title)}</span>
-    <strong class="${mono ? "mono" : ""}">${esc(value ?? "-")}</strong>
-  </div>`;
-}
-
 async function openCreatePublisher() {
   const modalSeq = ++createPublisherModalSeq;
   let modalClosed = false;
@@ -812,7 +809,7 @@ async function openCreatePublisher() {
 function setCreatePublisherLoading(text) {
   if (!$("newPublisherResultList")) return;
   $("newPublisherResultWrap").hidden = false;
-  $("newPublisherResultList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
+  $("newPublisherResultList").innerHTML = loadingRow(text);
   $("newPublisherStatus").textContent = text;
 }
 
@@ -977,7 +974,7 @@ function setCreateSubscriberTargetLoading(text) {
   $("newTargetCandidateWrap").hidden = false;
   $("newTargetCandidateActions").hidden = true;
   $("newTargetManualWrap").hidden = true;
-  $("newTargetCandidateList").innerHTML = `<div class="target-loading"><span class="loading-spinner" aria-hidden="true"></span>${esc(text)}</div>`;
+  $("newTargetCandidateList").innerHTML = loadingRow(text);
   setTargetInlineStatus("");
 }
 

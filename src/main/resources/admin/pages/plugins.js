@@ -13,10 +13,12 @@ let fmtTime;
 let fmtBytes;
 let cell;
 let tags;
+let detailItem;
 let renderTable;
 let notify;
 let openModal;
 let closeModal;
+let withButtonLoading;
 let uniqueValues;
 let filterOptions;
 let matchesContains;
@@ -50,10 +52,12 @@ function bindContext(nextCtx) {
     fmtBytes,
     cell,
     tags,
+    detailItem,
     renderTable,
     notify,
     openModal,
     closeModal,
+    withButtonLoading,
     uniqueValues,
     filterOptions,
     matchesContains,
@@ -367,39 +371,40 @@ async function refreshCatalog(button) {
     return;
   }
   const seq = catalogModalSeq;
-  if (button) button.disabled = true;
   catalogModalLoading = true;
   catalogModalError = null;
   renderCatalogModalBody();
-  const result = await fetchCatalog(true);
-  if (seq !== catalogModalSeq || !$("pluginCatalogModalBody")) return;
-  catalogModalLoading = false;
-  catalogModalError = result.error;
-  renderPage();
-  renderCatalogModalBody();
-  if (button && button.isConnected) button.disabled = false;
-  if (result.error) throw result.error;
-  notify("官方插件目录已刷新", false);
+  try {
+    await withButtonLoading(button, "刷新中", async () => {
+      const result = await fetchCatalog(true);
+      if (seq !== catalogModalSeq || !$("pluginCatalogModalBody")) return;
+      catalogModalError = result.error;
+      renderPage();
+      renderCatalogModalBody();
+      if (result.error) throw result.error;
+      notify("官方插件目录已刷新", false);
+    });
+  } finally {
+    if (seq === catalogModalSeq) {
+      catalogModalLoading = false;
+      if ($("pluginCatalogModalBody")) {
+        renderPage();
+        renderCatalogModalBody();
+      }
+    }
+  }
 }
 
 async function checkPluginUpdates(button) {
-  const originalText = button?.textContent;
-  if (button) button.disabled = true;
-  if (button) button.textContent = "检查中...";
-  catalogModalError = null;
-  try {
+  await withButtonLoading(button, "检查中...", async () => {
+    catalogModalError = null;
     const result = await fetchCatalog(true);
     catalogModalError = result.error;
     renderPage();
     if (result.error) throw result.error;
     const updateCount = catalogEntriesFromCache().filter(item => item.catalogStatus === "UPDATE_AVAILABLE").length;
     notify(updateCount ? `发现 ${updateCount} 个可更新插件` : "当前没有可更新插件", false);
-  } finally {
-    if (button && button.isConnected) {
-      button.disabled = false;
-      if (originalText) button.textContent = originalText;
-    }
-  }
+  });
 }
 
 function renderCatalogModalBody() {
@@ -546,17 +551,14 @@ function catalogOperationButton(item) {
 async function runPluginLifecycleAction(action, id, button) {
   const verb = action.replace("plugin-", "");
   const text = { start: "启动", stop: "停止", reload: "重启" }[verb] || "操作";
-  if (button) button.disabled = true;
-  try {
+  await withButtonLoading(button, `${text}中...`, async () => {
     const result = await api(`/plugins/${encodeURIComponent(id)}/${verb}`, { method: "POST" });
     if (verb === "reload") delete state.pendingConfigRestarts[id];
     invalidate("plugins", "dashboard", "platformLogins", "configs");
     await reloadAfterOperation(false);
     const message = result.message ? result.message.replaceAll("重载", "重启") : `插件已${text}`;
     notify(message, false);
-  } finally {
-    if (button && button.isConnected) button.disabled = false;
-  }
+  });
 }
 
 async function openCatalogOperation(id, mode) {
@@ -680,13 +682,6 @@ function openCatalogPluginDetail(id) {
       </div>
     </div>
   `, null, { size: "medium", cancelText: "关闭" });
-}
-
-function detailItem(title, value, mono = false) {
-  return `<div class="plugin-detail-item">
-    <span>${esc(title)}</span>
-    <strong class="${mono ? "mono" : ""}">${esc(value || "-")}</strong>
-  </div>`;
 }
 
 function catalogEntriesFromCache() {
