@@ -1296,7 +1296,11 @@ class AdminServerTest {
         assertNotNull(directSubscription)
         assertEquals(
             SubscriptionPolicy(
-                enabledEvents = setOf(SubscriptionEventKind.DYNAMIC),
+                enabledEvents = setOf(
+                    SubscriptionEventKind.DYNAMIC,
+                    SubscriptionEventKind.LIVE_STARTED,
+                    SubscriptionEventKind.LIVE_ENDED,
+                ),
                 mentionAllEvents = setOf(SubscriptionEventKind.DYNAMIC),
             ),
             directSubscription.policy,
@@ -1317,8 +1321,154 @@ class AdminServerTest {
         )
         val globalSubscription = SubscriptionRepository.findBySubscriberAndPublisher(globalGroup.id, publisher.id)
         assertNotNull(globalSubscription)
+        assertEquals(
+            SubscriptionPolicy(enabledEvents = setOf(SubscriptionEventKind.DYNAMIC)),
+            globalSubscription.policy,
+        )
         assertTrue(DynamicFilterRuleRepository.findBySubscriptionId(globalSubscription.id).isEmpty())
-        assertTrue(result.warnings.any { it.contains("旧版普通动态过滤无法精确迁移") })
+        val userSubscription = SubscriptionRepository.findBySubscriberAndPublisher(user.id, publisher.id)
+        assertNotNull(userSubscription)
+        assertEquals(
+            SubscriptionPolicy(
+                enabledEvents = setOf(
+                    SubscriptionEventKind.DYNAMIC,
+                    SubscriptionEventKind.LIVE_STARTED,
+                    SubscriptionEventKind.LIVE_ENDED,
+                ),
+            ),
+            userSubscription.policy,
+        )
+        assertFalse(result.warnings.any { it.contains("旧版普通动态过滤无法精确迁移") })
+    }
+
+    @Test
+    fun importLegacyDynamicSubscriptionsShouldDisableLiveEventsWhenLiveIsBlacklisted() = runBlocking {
+        initDb("admin-subscription-import-legacy-live-filter")
+        val service = service(
+            plugin = FakePublisherFollowPlugin(),
+            config = MainDynamicConfig(
+                subscription = SubscriptionConfig(autoFollowPublisherOnSubscribe = false),
+            ),
+        )
+        val content = """
+            dynamic:
+              91352:
+                name: 心羽萝妮Official
+                contacts:
+                  - '-465134752'
+            filter:
+              '-465134752':
+                91352:
+                  typeSelect:
+                    mode: BLACK_LIST
+                    list:
+                      - LIVE
+            atAll:
+              '-465134752':
+                91352:
+                  - LIVE
+        """.trimIndent()
+
+        val result = service.importLegacyDynamicSubscriptions(LegacyDynamicSubscriptionImportRequest(content))
+        val publisher = PublisherRepository.findByKey(PublisherKey.of("bilibili", PublisherKind.USER, "91352"))
+        val group = SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "465134752"))
+        assertNotNull(publisher)
+        assertNotNull(group)
+        val subscription = SubscriptionRepository.findBySubscriberAndPublisher(group.id, publisher.id)
+
+        assertEquals(1, result.created)
+        assertNotNull(subscription)
+        assertEquals(
+            SubscriptionPolicy(enabledEvents = setOf(SubscriptionEventKind.DYNAMIC)),
+            subscription.policy,
+        )
+        assertTrue(DynamicFilterRuleRepository.findBySubscriptionId(subscription.id).isEmpty())
+    }
+
+    @Test
+    fun importLegacyDynamicSubscriptionsShouldDisableDynamicWhenOnlyLiveIsWhitelisted() = runBlocking {
+        initDb("admin-subscription-import-legacy-live-whitelist")
+        val service = service(
+            plugin = FakePublisherFollowPlugin(),
+            config = MainDynamicConfig(
+                subscription = SubscriptionConfig(autoFollowPublisherOnSubscribe = false),
+            ),
+        )
+        val content = """
+            dynamic:
+              91352:
+                name: 心羽萝妮Official
+                contacts:
+                  - '-465134752'
+            filter:
+              '-465134752':
+                91352:
+                  typeSelect:
+                    mode: WHITE_LIST
+                    list:
+                      - LIVE
+        """.trimIndent()
+
+        val result = service.importLegacyDynamicSubscriptions(LegacyDynamicSubscriptionImportRequest(content))
+        val publisher = PublisherRepository.findByKey(PublisherKey.of("bilibili", PublisherKind.USER, "91352"))
+        val group = SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "465134752"))
+        assertNotNull(publisher)
+        assertNotNull(group)
+        val subscription = SubscriptionRepository.findBySubscriberAndPublisher(group.id, publisher.id)
+
+        assertEquals(1, result.created)
+        assertNotNull(subscription)
+        assertEquals(
+            SubscriptionPolicy(
+                enabledEvents = setOf(SubscriptionEventKind.LIVE_STARTED, SubscriptionEventKind.LIVE_ENDED),
+            ),
+            subscription.policy,
+        )
+        assertTrue(DynamicFilterRuleRepository.findBySubscriptionId(subscription.id).isEmpty())
+    }
+
+    @Test
+    fun importLegacyDynamicSubscriptionsShouldAllowDefaultLiveWhenBilibiliPluginUnavailable() = runBlocking {
+        initDb("admin-subscription-import-legacy-no-plugin")
+        val service = AdminService(
+            pluginProvider = { emptyList() },
+            publisherLookupResolver = { null },
+            publisherFollowResolver = { null },
+            configProvider = {
+                MainDynamicConfig(
+                    subscription = SubscriptionConfig(autoFollowPublisherOnSubscribe = false),
+                )
+            },
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+        val content = """
+            dynamic:
+              91352:
+                name: 心羽萝妮Official
+                contacts:
+                  - '-465134752'
+        """.trimIndent()
+
+        val result = service.importLegacyDynamicSubscriptions(LegacyDynamicSubscriptionImportRequest(content))
+        val publisher = PublisherRepository.findByKey(PublisherKey.of("bilibili", PublisherKind.USER, "91352"))
+        val group = SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "465134752"))
+        assertNotNull(publisher)
+        assertNotNull(group)
+        val subscription = SubscriptionRepository.findBySubscriberAndPublisher(group.id, publisher.id)
+
+        assertEquals(1, result.created)
+        assertEquals(0, result.failed)
+        assertNotNull(subscription)
+        assertEquals(
+            SubscriptionPolicy(
+                enabledEvents = setOf(
+                    SubscriptionEventKind.DYNAMIC,
+                    SubscriptionEventKind.LIVE_STARTED,
+                    SubscriptionEventKind.LIVE_ENDED,
+                ),
+            ),
+            subscription.policy,
+        )
     }
 
     @Test

@@ -1180,7 +1180,7 @@ public class AdminService(
         val parseResult = parseLegacyDynamicSubscriptionYaml(request.content)
         val document = parseResult.document
             .copy(importOptions = request.importOptions)
-        val response = importSubscriptions(document, skipAutoFollow = false)
+        val response = importSubscriptions(document, skipAutoFollow = false, assumeBilibiliLiveSupport = true)
         return response.copy(warnings = (parseResult.warnings + response.warnings).distinct())
     }
 
@@ -1191,6 +1191,7 @@ public class AdminService(
     private suspend fun importSubscriptions(
         document: SubscriptionExportDocument,
         skipAutoFollow: Boolean,
+        assumeBilibiliLiveSupport: Boolean = false,
     ): SubscriptionImportResponse {
         require(document.schemaVersion == 2) { "订阅导入文件版本不支持：${document.schemaVersion}" }
         val options = document.importOptions ?: SubscriptionImportOptions()
@@ -1227,12 +1228,13 @@ public class AdminService(
             val targetKey = item.targetKeyText()
             try {
                 val filterRules = item.filterRules
-                validateSubscriptionImportItemBeforeMutation(item, filterRules)
+                validateSubscriptionImportItemBeforeMutation(item, filterRules, assumeBilibiliLiveSupport)
                 val response = createSubscriptionInternal(
                     request = item.toCreateSubscriptionRequest(),
                     replacementFilterRules = filterRules,
                     skipAutoFollow = true,
                     importContext = importContext,
+                    assumeBilibiliLiveSupport = assumeBilibiliLiveSupport,
                 )
                 val status = if (response.subscriptionCreated) "CREATED" else "UPDATED"
                 if (response.subscriptionCreated) created += 1 else updated += 1
@@ -1292,6 +1294,7 @@ public class AdminService(
     private fun validateSubscriptionImportItemBeforeMutation(
         item: SubscriptionExportItem,
         filterRules: List<SubscriptionExportFilterRule>,
+        assumeBilibiliLiveSupport: Boolean = false,
     ) {
         filterRules.forEach { DynamicFilterRuleRepository.validateCondition(it.condition) }
         parseLinkParseTriggerModeOrNull(item.linkParseTriggerMode)
@@ -1330,7 +1333,7 @@ public class AdminService(
                 createUser = 0,
             ),
             policy = item.policy,
-            liveSupport = publisherPlatformLiveSupport(publisherKey.platformId.value),
+            liveSupport = publisherPlatformLiveSupport(publisherKey.platformId.value, assumeBilibiliLiveSupport),
             previousPolicy = existingSubscription?.policy,
         )
     }
@@ -1340,6 +1343,7 @@ public class AdminService(
         replacementFilterRules: List<SubscriptionExportFilterRule>?,
         skipAutoFollow: Boolean,
         importContext: SubscriptionImportContext? = null,
+        assumeBilibiliLiveSupport: Boolean = false,
     ): CreateSubscriptionResponse {
         val warnings = mutableListOf<String>()
         val publisherUpsert = if (request.publisherId != null) {
@@ -1472,7 +1476,7 @@ public class AdminService(
             subscriber = subscriberUpsert.value,
             publisher = publisherUpsert.value,
             policy = request.policy,
-            liveSupport = publisherPlatformLiveSupport(publisherPlatform),
+            liveSupport = publisherPlatformLiveSupport(publisherPlatform, assumeBilibiliLiveSupport),
             previousPolicy = existingSubscription?.policy,
         )
         replacementFilterRules?.forEach { DynamicFilterRuleRepository.validateCondition(it.condition) }
@@ -2260,7 +2264,8 @@ public class AdminService(
         }
     }
 
-    private fun publisherPlatformLiveSupport(platformId: String): Boolean? {
+    private fun publisherPlatformLiveSupport(platformId: String, assumeBilibiliLiveSupport: Boolean = false): Boolean? {
+        if (assumeBilibiliLiveSupport && platformId.equals("bilibili", ignoreCase = true)) return true
         val normalized = PlatformId.of(platformId)
         val providerPlugin = publisherLookupProvider()
             .firstOrNull { it.instance.platformId == normalized }
@@ -2857,7 +2862,14 @@ private fun parseLegacyDynamicSubscriptionYaml(content: String): LegacyDynamicSu
                     targetKind = targetKind.name,
                     externalId = targetId,
                 ),
-                policy = legacySubscriptionPolicy(root.path("atAll"), contact, normalizedUid, targetKind, warnings),
+                policy = legacySubscriptionPolicy(
+                    atAllRoot = root.path("atAll"),
+                    filterRoot = root.path("filter"),
+                    contact = contact,
+                    uid = normalizedUid,
+                    targetKind = targetKind,
+                    warnings = warnings,
+                ),
                 filterRules = legacyFilterRules(root.path("filter"), contact, normalizedUid, warnings),
                 publisherLookupMode = PUBLISHER_LOOKUP_MODE_PLACEHOLDER,
             )
@@ -2935,22 +2947,24 @@ private fun legacyFilterRules(
 
 private fun legacySubscriptionPolicy(
     atAllRoot: JsonNode,
+    filterRoot: JsonNode,
     contact: String,
     uid: String,
     targetKind: TargetKind,
     warnings: MutableList<String>,
 ): SubscriptionPolicy {
-    if (targetKind != TargetKind.GROUP) return SubscriptionPolicy.default()
-    val atAllTypes = legacyListText(legacyScopedNode(atAllRoot, contact, uid) ?: return SubscriptionPolicy.default())
+    val enabledEvents = legacyEnabledEvents(filterRoot, contact, uid)
+    if (targetKind != TargetKind.GROUP) {
+        return SubscriptionPolicy(enabledEvents = enabledEvents)
+    }
+
+    val atAllTypes = legacyListText(legacyScopedNode(atAllRoot, contact, uid) ?: return SubscriptionPolicy(enabledEvents = enabledEvents))
         .mapNotNull(::legacyAtAllType)
         .toSet()
-    if (atAllTypes.isEmpty()) return SubscriptionPolicy.default()
+    if (atAllTypes.isEmpty()) return SubscriptionPolicy(enabledEvents = enabledEvents)
 
-    val enabledEvents = linkedSetOf(SubscriptionEventKind.DYNAMIC)
     val mentionAllEvents = linkedSetOf<SubscriptionEventKind>()
     if ("ALL" in atAllTypes) {
-        enabledEvents += SubscriptionEventKind.LIVE_STARTED
-        enabledEvents += SubscriptionEventKind.LIVE_ENDED
         mentionAllEvents += SubscriptionEventKind.DYNAMIC
         mentionAllEvents += SubscriptionEventKind.LIVE_STARTED
         mentionAllEvents += SubscriptionEventKind.LIVE_ENDED
@@ -2959,7 +2973,6 @@ private fun legacySubscriptionPolicy(
         mentionAllEvents += SubscriptionEventKind.DYNAMIC
     }
     if ("LIVE" in atAllTypes) {
-        enabledEvents += SubscriptionEventKind.LIVE_STARTED
         mentionAllEvents += SubscriptionEventKind.LIVE_STARTED
     }
 
@@ -2973,6 +2986,46 @@ private fun legacySubscriptionPolicy(
         mentionAllEvents = mentionAllEvents.filterTo(linkedSetOf()) { it in enabledEvents },
     )
 }
+
+private fun legacyEnabledEvents(
+    filterRoot: JsonNode,
+    contact: String,
+    uid: String,
+): LinkedHashSet<SubscriptionEventKind> {
+    val typeSelect = legacyScopedNode(filterRoot, contact, uid)?.path("typeSelect") ?: return legacyAllEvents()
+    val selectedTypes = legacyListText(typeSelect.path("list"))
+        .mapNotNull(::legacyFilterTypeName)
+        .toSet()
+    if (selectedTypes.isEmpty()) return legacyAllEvents()
+    val dynamicSelected = selectedTypes.any { it in LEGACY_DYNAMIC_FILTER_TYPES }
+    val liveSelected = "LIVE" in selectedTypes
+    return when (legacyFilterAction(typeSelect.path("mode")) ?: DynamicFilterAction.BLOCK) {
+        DynamicFilterAction.BLOCK -> legacyAllEvents().apply {
+            if ("ALL" in selectedTypes || "DYNAMIC" in selectedTypes) remove(SubscriptionEventKind.DYNAMIC)
+            if ("ALL" in selectedTypes || liveSelected) {
+                remove(SubscriptionEventKind.LIVE_STARTED)
+                remove(SubscriptionEventKind.LIVE_ENDED)
+            }
+        }
+        DynamicFilterAction.ALLOW -> linkedSetOf<SubscriptionEventKind>().apply {
+            if ("ALL" in selectedTypes || dynamicSelected) add(SubscriptionEventKind.DYNAMIC)
+            if ("ALL" in selectedTypes || liveSelected) {
+                add(SubscriptionEventKind.LIVE_STARTED)
+                add(SubscriptionEventKind.LIVE_ENDED)
+            }
+        }
+    }
+}
+
+private fun legacyAllEvents(): LinkedHashSet<SubscriptionEventKind> {
+    return linkedSetOf(
+        SubscriptionEventKind.DYNAMIC,
+        SubscriptionEventKind.LIVE_STARTED,
+        SubscriptionEventKind.LIVE_ENDED,
+    )
+}
+
+private val LEGACY_DYNAMIC_FILTER_TYPES = setOf("ALL", "DYNAMIC", "FORWARD", "VIDEO", "MUSIC", "ARTICLE")
 
 private fun legacyScopedNode(root: JsonNode, contact: String, uid: String): JsonNode? {
     if (!root.isObject) return null
@@ -2998,20 +3051,31 @@ private fun legacyFilterAction(node: JsonNode): DynamicFilterAction? {
 }
 
 private fun legacyFilterTypeToBlockKinds(typeText: String, warnings: MutableList<String>): List<DynamicBlockKind> {
-    return when (typeText.trim().uppercase()) {
-        "DYNAMIC", "动态" -> {
-            warnings += "旧版普通动态过滤无法精确迁移，已跳过：$typeText"
-            emptyList()
-        }
-        "FORWARD", "REPOST", "转发动态", "转发" -> listOf(DynamicBlockKind.REPOST)
-        "VIDEO", "视频" -> listOf(DynamicBlockKind.VIDEO)
-        "MUSIC", "音乐",
-        "ARTICLE", "专栏",
-        "LIVE", "直播" -> listOf(DynamicBlockKind.CARD)
+    return when (legacyFilterTypeName(typeText)) {
+        "DYNAMIC" -> emptyList()
+        "FORWARD" -> listOf(DynamicBlockKind.REPOST)
+        "VIDEO" -> listOf(DynamicBlockKind.VIDEO)
+        "MUSIC",
+        "ARTICLE" -> listOf(DynamicBlockKind.CARD)
+        "LIVE",
+        "ALL" -> emptyList()
         else -> {
             warnings += "旧版过滤类型无法识别，已跳过：$typeText"
             emptyList()
         }
+    }
+}
+
+private fun legacyFilterTypeName(typeText: String): String? {
+    return when (typeText.trim().uppercase()) {
+        "ALL", "全部" -> "ALL"
+        "DYNAMIC", "动态" -> "DYNAMIC"
+        "FORWARD", "REPOST", "转发动态", "转发" -> "FORWARD"
+        "VIDEO", "视频" -> "VIDEO"
+        "MUSIC", "音乐" -> "MUSIC"
+        "ARTICLE", "专栏" -> "ARTICLE"
+        "LIVE", "直播" -> "LIVE"
+        else -> null
     }
 }
 
