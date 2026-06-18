@@ -217,6 +217,7 @@ public data class NotificationConfig(
     val minSeverity: SystemNotificationSeverity = SystemNotificationSeverity.WARN,
     val dedupeSeconds: Int = 300,
     val routeMonitorIntervalSeconds: Int = 30,
+    val routeUnavailableNotifyDelaySeconds: Int = 120,
     val adminTargets: List<NotificationTargetConfig> = emptyList(),
 )
 

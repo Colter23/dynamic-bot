@@ -576,6 +576,15 @@ public object MainConfigForms {
                     restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
+                    path = "notifications.routeUnavailableNotifyDelaySeconds",
+                    label = "Bot 掉线通知确认时间（秒）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "系统通知",
+                    description = "消息出口账号持续不可用超过这个时间后才通知管理员。\n用于过滤 OneBot 客户端定时重启或短暂网络抖动。",
+                    min = 0,
+                    numberKind = ConfigNumberKind.INTEGER,
+                ),
+                ConfigFieldSpec(
                     path = "notifications.adminTargets",
                     label = "系统通知目标",
                     type = ConfigFieldType.JSON,
@@ -883,6 +892,7 @@ public object MainConfigForms {
         "notifications.minSeverity",
         "notifications.dedupeSeconds",
         "notifications.routeMonitorIntervalSeconds",
+        "notifications.routeUnavailableNotifyDelaySeconds",
         "draw.scale",
         "draw.font.text",
         "draw.font.emoji",
@@ -970,6 +980,7 @@ public object MainConfigForms {
             "notifications.minSeverity",
             "notifications.dedupeSeconds",
             "notifications.routeMonitorIntervalSeconds",
+            "notifications.routeUnavailableNotifyDelaySeconds",
             "templates.dynamic",
             "templates.liveStarted",
             "templates.liveEnded",
@@ -1101,6 +1112,7 @@ public object MainConfigForms {
         validateMediaDelivery(config)
         require(config.notifications.dedupeSeconds >= 0) { "通知去重时间不能为负数" }
         require(config.notifications.routeMonitorIntervalSeconds >= 1) { "Bot 状态检查间隔至少为 1 秒" }
+        require(config.notifications.routeUnavailableNotifyDelaySeconds >= 0) { "Bot 掉线通知确认时间不能为负数" }
         val notificationTargetKeys = config.notifications.adminTargets
             .filter { it.enabled }
             .mapIndexed { index, target ->

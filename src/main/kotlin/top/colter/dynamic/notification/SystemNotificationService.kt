@@ -28,19 +28,20 @@ public class SystemNotificationService(
         val notification = event.notification
         if (!notification.severity.satisfies(config.minSeverity)) return
 
-        val targets = config.adminTargets
-            .filter { it.enabled }
-            .map { target ->
-                TargetAddress.of(
-                    platformId = target.platformId,
-                    kind = target.targetKind,
-                    externalId = target.externalId,
-                    scopeId = target.scopeId,
-                    threadId = target.threadId,
-                    accountId = target.accountId,
-                )
-            }
-            .distinctBy { it.stableValue() }
+        val targets = event.targets?.distinctBy { it.stableValue() }
+            ?: config.adminTargets
+                .filter { it.enabled }
+                .map { target ->
+                    TargetAddress.of(
+                        platformId = target.platformId,
+                        kind = target.targetKind,
+                        externalId = target.externalId,
+                        scopeId = target.scopeId,
+                        threadId = target.threadId,
+                        accountId = target.accountId,
+                    )
+                }
+                .distinctBy { it.stableValue() }
         if (targets.isEmpty()) {
             notificationLogger.warn {
                 "系统通知没有可用管理员目标：source=${event.sourcePlugin}，type=${notification.type}，severity=${notification.severity}"

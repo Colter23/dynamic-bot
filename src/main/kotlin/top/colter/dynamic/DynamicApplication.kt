@@ -209,6 +209,7 @@ public object DynamicApplication : CoroutineScope {
         )
         messageSinkRouteMonitor = MessageSinkRouteMonitor(
             sinkProvider = { pluginManager.getMessageSinkPlugins() },
+            notificationConfigProvider = { configStore.current().notifications },
             eventBus = eventBus,
         )
         registerDeliveryDispatchTask(config)
