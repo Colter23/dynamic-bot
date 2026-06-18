@@ -475,6 +475,13 @@ public data class SubscriptionExportDocument(
     val schemaVersion: Int = 1,
     val exportedAtEpochSeconds: Long,
     val subscriptions: List<SubscriptionExportItem>,
+    val importOptions: SubscriptionImportOptions? = null,
+)
+
+@Serializable
+public data class SubscriptionImportOptions(
+    val fetchProfiles: Boolean = true,
+    val autoFollowPublishers: Boolean = true,
 )
 
 @Serializable
@@ -524,6 +531,7 @@ public data class SubscriptionImportResponse(
 @Serializable
 public data class LegacyDynamicSubscriptionImportRequest(
     val content: String,
+    val importOptions: SubscriptionImportOptions? = null,
 )
 
 @Serializable

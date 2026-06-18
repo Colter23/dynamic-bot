@@ -54,6 +54,7 @@ import top.colter.dynamic.plugin.PluginManager
 import top.colter.dynamic.plugin.PluginReloadResult
 import top.colter.dynamic.plugin.PluginState
 import top.colter.dynamic.plugin.PluginTaskInfo
+import top.colter.dynamic.core.plugin.PublisherBatchLookupPlugin
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.plugin.PublisherLoginProvider
@@ -1161,7 +1162,8 @@ public class AdminService(
 
     public suspend fun importLegacyDynamicSubscriptions(request: LegacyDynamicSubscriptionImportRequest): SubscriptionImportResponse {
         val document = parseLegacyDynamicSubscriptionYaml(request.content)
-        return importSubscriptions(document, skipAutoFollow = true)
+            .copy(importOptions = request.importOptions)
+        return importSubscriptions(document, skipAutoFollow = false)
     }
 
     public suspend fun createSubscription(request: CreateSubscriptionRequest): CreateSubscriptionResponse {
@@ -1173,6 +1175,11 @@ public class AdminService(
         skipAutoFollow: Boolean,
     ): SubscriptionImportResponse {
         require(document.schemaVersion == 1) { "订阅导入文件版本不支持：${document.schemaVersion}" }
+        val options = document.importOptions ?: SubscriptionImportOptions()
+        val fetchProfiles = options.fetchProfiles
+        val autoFollowEnabled = options.autoFollowPublishers &&
+            !skipAutoFollow &&
+            configProvider().subscription.autoFollowPublisherOnSubscribe
 
         val warnings = mutableListOf<String>()
         val latestByRelation = linkedMapOf<String, IndexedValue<SubscriptionExportItem>>()
@@ -1186,6 +1193,11 @@ public class AdminService(
             }
             latestByRelation[key] = IndexedValue(index, item)
         }
+        val importContext = prepareSubscriptionImportContext(
+            items = latestByRelation.values.map { it.value },
+            fetchProfiles = fetchProfiles,
+        )
+        warnings += importContext.warnings
 
         var created = 0
         var updated = 0
@@ -1202,10 +1214,11 @@ public class AdminService(
                     request = item.toCreateSubscriptionRequest(),
                     replacementFilterConditions = filterConditions,
                     skipAutoFollow = true,
+                    importContext = importContext,
                 )
                 val status = if (response.subscriptionCreated) "CREATED" else "UPDATED"
                 if (response.subscriptionCreated) created += 1 else updated += 1
-                if (!skipAutoFollow && response.subscriptionCreated) {
+                if (autoFollowEnabled && response.subscriptionCreated) {
                     response.subscription.publisher?.let { publisher ->
                         autoFollowCandidates
                             .getOrPut(publisher.platformId) { linkedSetOf() }
@@ -1236,7 +1249,7 @@ public class AdminService(
                 )
             }
         }
-        val autoFollowWarnings = if (!skipAutoFollow && configProvider().subscription.autoFollowPublisherOnSubscribe) {
+        val autoFollowWarnings = if (autoFollowEnabled) {
             ensureImportedPublishersFollowed(autoFollowCandidates)
         } else {
             emptyList()
@@ -1304,6 +1317,7 @@ public class AdminService(
         request: CreateSubscriptionRequest,
         replacementFilterConditions: List<FilterCondition>?,
         skipAutoFollow: Boolean,
+        importContext: SubscriptionImportContext? = null,
     ): CreateSubscriptionResponse {
         val warnings = mutableListOf<String>()
         val publisherUpsert = if (request.publisherId != null) {
@@ -1328,12 +1342,14 @@ public class AdminService(
             )
             val existedPublisher = PublisherRepository.findByKey(publisherKey)
             if (existedPublisher != null) {
-                val cachedPublisherInfo = cachedPublisherCandidate(publisherKey)
+                val cachedPublisherInfo = importContext?.publisherProfile(publisherKey)
+                    ?: cachedPublisherCandidate(publisherKey)
                 if (cachedPublisherInfo != null) {
                     PublisherRepository.upsertInfo(cachedPublisherInfo)
                 } else if (
                     publisherLookupMode == PUBLISHER_LOOKUP_MODE_VERIFY &&
-                    existedPublisher.isPlaceholderPublisher()
+                    existedPublisher.isPlaceholderPublisher() &&
+                    importContext == null
                 ) {
                     val publisherInfo = fetchPublisherInfo(platform, externalId, useCache = false)
                         .first
@@ -1344,13 +1360,25 @@ public class AdminService(
                     UpsertResult(existedPublisher, created = false, updated = false)
                 }
             } else {
-                val publisherInfo = cachedPublisherCandidate(publisherKey)
-                    ?: if (publisherLookupMode == PUBLISHER_LOOKUP_MODE_PLACEHOLDER) {
+                val cachedPublisherInfo = cachedPublisherCandidate(publisherKey)
+                val publisherInfo = when {
+                    importContext?.publisherProfile(publisherKey) != null -> {
+                        importContext.publisherProfile(publisherKey)!!
+                    }
+                    cachedPublisherInfo != null -> cachedPublisherInfo
+                    publisherLookupMode == PUBLISHER_LOOKUP_MODE_PLACEHOLDER -> {
                         warnings += "未查询平台资料，已使用发布者 ID 创建占位发布者：$platform:$externalId"
                         placeholderPublisherInfo(publisherKey)
-                    } else {
+                    }
+                    importContext != null -> {
+                        val reason = if (importContext.fetchProfiles) "批量资料未返回" else "导入已关闭资料拉取"
+                        warnings += "$reason，已使用发布者 ID 创建占位发布者：$platform:$externalId"
+                        placeholderPublisherInfo(publisherKey)
+                    }
+                    else -> {
                         fetchPublisherInfo(platform, externalId).first.normalized().copy(key = publisherKey)
                     }
+                }
                 PublisherRepository.upsertInfo(publisherInfo)
             }
         }
@@ -1381,8 +1409,13 @@ public class AdminService(
                     avatar = existedSubscriber.avatar,
                 )
             } else {
-                val targetProfile = cachedMessageTargetCandidate(subscriberAddress)
-                    ?: resolveSubscriberTarget(subscriberAddress)
+                val cachedTargetProfile = cachedMessageTargetCandidate(subscriberAddress)
+                val targetProfile = when {
+                    importContext?.targetProfile(subscriberAddress) != null -> importContext.targetProfile(subscriberAddress)
+                    cachedTargetProfile != null -> cachedTargetProfile
+                    importContext == null -> resolveSubscriberTarget(subscriberAddress)
+                    else -> null
+                }
                 SubscriberRepository.upsert(
                     address = subscriberAddress,
                     name = targetProfile?.name?.trim()?.takeIf { it.isNotBlank() }
@@ -2028,6 +2061,147 @@ public class AdminService(
         }
     }
 
+    private suspend fun prepareSubscriptionImportContext(
+        items: List<SubscriptionExportItem>,
+        fetchProfiles: Boolean,
+    ): SubscriptionImportContext {
+        if (!fetchProfiles || items.isEmpty()) {
+            return SubscriptionImportContext(
+                fetchProfiles = false,
+                publisherProfiles = emptyMap(),
+                targetProfiles = emptyMap(),
+                warnings = emptyList(),
+            )
+        }
+
+        val warnings = mutableListOf<String>()
+        val publisherKeys = items.mapNotNull { item ->
+            item.importPublisherKeyOrNull()
+        }
+            .filter { it.kind == PublisherKind.USER }
+            .filter { cachedPublisherCandidate(it) == null }
+            .distinctBy { it.stableValue() }
+        val targetAddresses = items.mapNotNull { item ->
+            item.importTargetAddressOrNull()
+        }
+            .filter { cachedMessageTargetCandidate(it) == null }
+            .distinctBy { it.stableValue() }
+
+        val publisherInfos = coroutineScope {
+            publisherKeys
+                .groupBy { it.platformId.value }
+                .entries
+                .map { (platformId, keys) ->
+                    async {
+                        runImportPrefetchCatching(
+                            warning = "发布者资料预取失败，已跳过批量查询：platform=$platformId",
+                            defaultValue = emptyMap<PublisherKey, PublisherInfo?>(),
+                        ) {
+                            val plugin = publisherLookupResolver(platformId)
+                            val infoById = fetchPublisherInfos(platformId, keys.map { it.externalId }, plugin)
+                            keys.associateWith { key ->
+                                infoById[key.externalId]?.normalized()?.copy(key = key)
+                            }
+                        }
+                    }
+                }
+                .awaitAll()
+        }.fold(emptyMap<PublisherKey, PublisherInfo>()) { acc, result ->
+            warnings += result.warnings
+            acc + result.value.filterValues { it != null }.mapValues { it.value!! }
+        }
+        rememberPublisherCandidates(publisherInfos.values)
+
+        val targetSinkHandles = if (targetAddresses.isEmpty()) {
+            emptyList()
+        } else {
+            runImportPrefetchCatching(
+                warning = "消息出口列表获取失败，已跳过目标资料预取",
+                defaultValue = emptyList<PluginHandle<MessageSinkPlugin>>(),
+            ) {
+                messageSinkProvider()
+            }.also { result ->
+                warnings += result.warnings
+            }.value
+        }
+        val targetInfos = coroutineScope {
+            targetAddresses
+                .groupBy { it.platformId.value }
+                .entries
+                .map { (platformId, addresses) ->
+                    async {
+                        val kinds = addresses.map { it.kind }.distinct()
+                        val listedTargets = mutableListOf<MessageTargetCandidate>()
+                        val targetWarnings = mutableListOf<String>()
+                        targetSinkHandles
+                            .asSequence()
+                            .filter { handle ->
+                                handle.instance.supportedTargetPlatforms.any { it.value.equals(platformId, ignoreCase = true) }
+                            }
+                            .forEach { handle ->
+                                val sink = handle.instance
+                                val result = runImportPrefetchCatching(
+                                    warning = "消息目标资料预取失败，已跳过目标列表：platform=$platformId，plugin=${handle.info.descriptor.id}",
+                                    defaultValue = emptyList<MessageTargetCandidate>(),
+                                ) {
+                                    val supportedKinds = if (sink.supportedTargetKinds.isEmpty()) {
+                                        kinds
+                                    } else {
+                                        kinds.filter { kind -> kind in sink.supportedTargetKinds }
+                                    }
+                                    if (kinds.isEmpty()) {
+                                        sink.listMessageTargets(null)
+                                    } else if (supportedKinds.isEmpty()) {
+                                        emptyList()
+                                    } else {
+                                        supportedKinds.flatMap { kind -> sink.listMessageTargets(kind) }
+                                    }
+                                }
+                                targetWarnings += result.warnings
+                                listedTargets += result.value.filter { candidate ->
+                                    candidate.address.platformId.value.equals(platformId, ignoreCase = true)
+                                }
+                            }
+                        val distinctTargets = listedTargets.distinctBy { it.address.stableValue() }
+                        SubscriptionImportPrefetchResult(
+                            value = addresses.associateWith { address ->
+                                distinctTargets.firstOrNull { it.address.stableValue() == address.stableValue() }
+                            },
+                            warnings = targetWarnings,
+                        )
+                    }
+                }
+                .awaitAll()
+        }.fold(emptyMap<TargetAddress, MessageTargetCandidate>()) { acc, result ->
+            warnings += result.warnings
+            acc + result.value.filterValues { it != null }.mapValues { it.value!! }
+        }
+        rememberMessageTargetCandidates(targetInfos.values)
+
+        return SubscriptionImportContext(
+            fetchProfiles = true,
+            publisherProfiles = publisherInfos,
+            targetProfiles = targetInfos,
+            warnings = warnings.distinct(),
+        )
+    }
+
+    private suspend fun fetchPublisherInfos(
+        platform: String,
+        externalIds: Collection<String>,
+        plugin: PublisherLookupPlugin?,
+    ): Map<String, PublisherInfo> {
+        val ids = externalIds
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .distinct()
+        if (ids.isEmpty()) return emptyMap()
+        val lookupPlugin = plugin ?: publisherLookupResolver(platform)
+            ?: return emptyMap()
+        val batchPlugin = lookupPlugin as? PublisherBatchLookupPlugin ?: return emptyMap()
+        return batchPlugin.fetchPublisherInfos(ids)
+    }
+
     private fun pruneMessageTargetCandidateCacheLocked(now: Long = System.currentTimeMillis()) {
         subscriberTargetCandidateCache.entries.removeIf { (_, value) ->
             now - value.cachedAtEpochMillis > ADMIN_CANDIDATE_CACHE_TTL_MS
@@ -2532,6 +2706,26 @@ private data class AutoFollowOutcome(
     val warning: String? = null,
 )
 
+private data class SubscriptionImportPrefetchResult<T>(
+    val value: T,
+    val warnings: List<String> = emptyList(),
+)
+
+private data class SubscriptionImportContext(
+    val fetchProfiles: Boolean,
+    val publisherProfiles: Map<PublisherKey, PublisherInfo>,
+    val targetProfiles: Map<TargetAddress, MessageTargetCandidate>,
+    val warnings: List<String>,
+) {
+    fun publisherProfile(key: PublisherKey): PublisherInfo? {
+        return publisherProfiles[key]
+    }
+
+    fun targetProfile(address: TargetAddress): MessageTargetCandidate? {
+        return targetProfiles[address]
+    }
+}
+
 private data class SinkPlatformEntry(
     val platformId: String,
     val pluginId: String,
@@ -2671,6 +2865,24 @@ private fun Publisher.isPlaceholderPublisher(): Boolean {
         pendant == null
 }
 
+private suspend inline fun <T> runImportPrefetchCatching(
+    warning: String,
+    defaultValue: T,
+    block: suspend () -> T,
+): SubscriptionImportPrefetchResult<T> {
+    return try {
+        SubscriptionImportPrefetchResult(block())
+    } catch (error: CancellationException) {
+        throw error
+    } catch (error: Throwable) {
+        logger.warn(error) { "$warning，原因=${error.message ?: error.javaClass.name}" }
+        SubscriptionImportPrefetchResult(
+            value = defaultValue,
+            warnings = listOf("$warning：${error.message ?: error.javaClass.simpleName}"),
+        )
+    }
+}
+
 private fun SubscriptionExportItem.importPublisherKey(): PublisherKey {
     return PublisherKey.of(
         platformId = publisher.platformId,
@@ -2683,6 +2895,10 @@ private fun SubscriptionExportItem.importPublisherKey(): PublisherKey {
     )
 }
 
+private fun SubscriptionExportItem.importPublisherKeyOrNull(): PublisherKey? {
+    return runCatching { importPublisherKey() }.getOrNull()
+}
+
 private fun SubscriptionExportItem.importTargetAddress(): TargetAddress {
     return TargetAddress.of(
         platformId = normalizeImportedTargetPlatformId(target.platformId),
@@ -2692,6 +2908,10 @@ private fun SubscriptionExportItem.importTargetAddress(): TargetAddress {
         threadId = target.threadId,
         accountId = target.accountId,
     )
+}
+
+private fun SubscriptionExportItem.importTargetAddressOrNull(): TargetAddress? {
+    return runCatching { importTargetAddress() }.getOrNull()
 }
 
 private fun SubscriptionExportItem.publisherKeyText(): String {

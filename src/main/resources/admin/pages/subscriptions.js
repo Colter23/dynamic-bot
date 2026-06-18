@@ -423,6 +423,10 @@ function openSubscriptionImportModal() {
           </div>
         </div>
         <div class="form-grid single">
+          <div class="field full subscription-import-options">
+            <label class="check"><input type="checkbox" id="subscriptionImportFetchProfiles" checked>导入时拉取发布者和目标资料</label>
+            <label class="check"><input type="checkbox" id="subscriptionImportAutoFollow" checked>导入后自动关注发布者</label>
+          </div>
           <div class="field full">
             <label>导入格式</label>
             <select id="subscriptionImportFormat">
@@ -438,7 +442,6 @@ function openSubscriptionImportModal() {
             <label id="subscriptionImportTextLabel">粘贴 JSON</label>
             <textarea id="subscriptionImportText" class="subscription-import-text" placeholder="可以粘贴导出的 dynamic-bot 订阅 JSON"></textarea>
           </div>
-          <label class="check" id="subscriptionImportPlaceholderWrap"><input type="checkbox" id="subscriptionImportPlaceholderPublishers" checked>直接导入发布者 ID</label>
         </div>
         <div id="subscriptionImportSummary" class="batch-result" hidden></div>
         <div id="subscriptionImportNote" class="inline-note">导入不是全局事务：单条失败不会影响其他订阅。</div>
@@ -488,13 +491,11 @@ async function submitSubscriptionImport() {
     const content = subscriptionImportRawText();
     return api("/subscriptions/import/legacy-dynamic-yaml", {
       method: "POST",
-      body: JSON.stringify({ content }),
+      body: JSON.stringify({ content, importOptions: subscriptionImportOptions() }),
     });
   }
   const parsedDocument = parseSubscriptionImportText();
-  const documentData = $("subscriptionImportPlaceholderPublishers")?.checked
-    ? withPublisherLookupMode(parsedDocument, "PLACEHOLDER")
-    : parsedDocument;
+  const documentData = withSubscriptionImportOptions(parsedDocument);
   return api("/subscriptions/import", {
     method: "POST",
     body: JSON.stringify(documentData),
@@ -515,15 +516,14 @@ function refreshSubscriptionImportFormatUi() {
   const legacy = subscriptionImportFormat() === "LEGACY_DYNAMIC_YAML";
   const labelNode = $("subscriptionImportTextLabel");
   const input = $("subscriptionImportText");
-  const placeholderWrap = $("subscriptionImportPlaceholderWrap");
+  const autoFollow = $("subscriptionImportAutoFollow");
   const note = $("subscriptionImportNote");
   if (labelNode) labelNode.textContent = legacy ? "粘贴旧版 YAML" : "粘贴 JSON";
   if (input) input.placeholder = legacy
     ? "粘贴 bilibili-dynamic-mirai-plugin 的订阅 YAML，只会导入 dynamic 数据"
     : "可以粘贴导出的 dynamic-bot 订阅 JSON";
-  if (placeholderWrap) placeholderWrap.hidden = legacy;
   if (note) note.textContent = legacy
-    ? "旧版 miari YAML 只解析 dynamic 字段，跳过 0；负数 QQ 号导入为群，正数导入为好友，不会请求 B 站接口。"
+    ? "旧版 miari YAML 只解析 dynamic 字段，跳过 0；负数 QQ 号导入为群，正数导入为好友。"
     : "导入不是全局事务：单条失败不会影响其他订阅。";
 }
 
@@ -548,6 +548,26 @@ function withPublisherLookupMode(documentData, mode) {
       ...item,
       publisherLookupMode: item.publisherLookupMode || mode,
     })),
+  };
+}
+
+function withSubscriptionImportOptions(documentData) {
+  const { fetchProfiles, autoFollowPublishers } = subscriptionImportOptions();
+  const next = {
+    ...documentData,
+    importOptions: {
+      ...(documentData.importOptions || {}),
+      fetchProfiles,
+      autoFollowPublishers,
+    },
+  };
+  return fetchProfiles ? next : withPublisherLookupMode(next, "PLACEHOLDER");
+}
+
+function subscriptionImportOptions() {
+  return {
+    fetchProfiles: $("subscriptionImportFetchProfiles")?.checked !== false,
+    autoFollowPublishers: $("subscriptionImportAutoFollow")?.checked !== false,
   };
 }
 
@@ -588,6 +608,7 @@ function renderSubscriptionImportSummary() {
   node.innerHTML = `<strong>解析成功</strong><ul>
     <li>订阅 ${summary.subscriptionCount} 条，发布者 ${summary.publisherCount} 个，消息目标 ${summary.targetCount} 个</li>
     <li>动态过滤规则 ${summary.filterRuleCount} 条</li>
+    <li>${$("subscriptionImportFetchProfiles")?.checked === false ? "不会拉取资料，缺失的发布者和目标会使用 ID 占位" : "会批量拉取发布者和目标资料"}</li>
     <li>导入后已有订阅会更新规则，并替换对应过滤规则</li>
   </ul>`;
 }
