@@ -49,6 +49,18 @@ class PersistenceManagerSchemaTest {
                     VALUES (1, '{"type":"HAS_REFERENCE","kind":"ORIGIN"}', '2026-01-01T00:00:00Z')
                     """.trimIndent(),
                 )
+                statement.executeUpdate(
+                    """
+                    INSERT INTO dynamic_filter_rule (subscription_id, condition_json, created_at)
+                    VALUES (1, '{"type":"TEXT_CONTAINS","value":"抽奖","ignoreCase":true}', '2026-01-01T00:00:00Z')
+                    """.trimIndent(),
+                )
+                statement.executeUpdate(
+                    """
+                    INSERT INTO dynamic_filter_rule (subscription_id, condition_json, created_at)
+                    VALUES (1, '{"type":"TEXT_REGEX","pattern":"foo\\s+bar"}', '2026-01-01T00:00:00Z')
+                    """.trimIndent(),
+                )
             }
         }
 
@@ -65,6 +77,18 @@ class PersistenceManagerSchemaTest {
                     assertTrue(result.next())
                     assertEquals("BLOCK", result.getString("action"))
                     assertEquals("""{"type":"HAS_ELEMENT","kind":"REPOST"}""", result.getString("condition_json"))
+                    assertTrue(result.next())
+                    assertEquals("BLOCK", result.getString("action"))
+                    assertEquals(
+                        """{"type":"TEXT_MATCH","mode":"CONTAINS","text":"抽奖","ignoreCase":true}""",
+                        result.getString("condition_json"),
+                    )
+                    assertTrue(result.next())
+                    assertEquals("BLOCK", result.getString("action"))
+                    assertEquals(
+                        """{"type":"TEXT_MATCH","mode":"REGEX","ignoreCase":false,"text":"foo\\s+bar"}""",
+                        result.getString("condition_json"),
+                    )
                 }
             }
         }

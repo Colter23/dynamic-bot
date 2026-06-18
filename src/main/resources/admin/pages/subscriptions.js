@@ -901,8 +901,9 @@ async function openCreateSubscription() {
         </div>
         <div class="form-grid create-filter-form">
           <div class="field"><label>名单</label><select id="subCreateFilterAction"><option value="BLOCK">黑名单</option><option value="ALLOW">白名单</option></select></div>
-          <div class="field"><label>类型</label><select id="subCreateFilterType"><option value="HAS_ELEMENT">内容元素</option><option value="TEXT_CONTAINS">关键词</option><option value="TEXT_REGEX">正则</option></select></div>
+          <div class="field"><label>类型</label><select id="subCreateFilterType"><option value="HAS_ELEMENT">内容元素</option><option value="TEXT_MATCH">文本匹配</option></select></div>
           <div class="field" id="subCreateFilterElementWrap"><label>元素</label><select id="subCreateFilterElement">${blockKinds.map(([v,t]) => `<option value="${v}">${t}</option>`).join("")}</select></div>
+          <div class="field" id="subCreateFilterMatchModeWrap" hidden><label>方式</label><select id="subCreateFilterMatchMode"><option value="CONTAINS">包含关键词</option><option value="REGEX">正则表达式</option></select></div>
           <div class="field full" id="subCreateFilterTextWrap" hidden><label>内容</label><input id="subCreateFilterText" placeholder="关键词或正则表达式"></div>
           <div class="field filter-add-field"><button type="button" id="subCreateFilterAdd">添加规则</button></div>
         </div>
@@ -1145,7 +1146,8 @@ async function openCreateSubscription() {
   const refreshCreateFilterForm = () => {
     const type = $("subCreateFilterType").value;
     $("subCreateFilterElementWrap").hidden = type !== "HAS_ELEMENT";
-    $("subCreateFilterTextWrap").hidden = !["TEXT_CONTAINS", "TEXT_REGEX"].includes(type);
+    $("subCreateFilterMatchModeWrap").hidden = type !== "TEXT_MATCH";
+    $("subCreateFilterTextWrap").hidden = type !== "TEXT_MATCH";
   };
   $("subCreateFilterType").onchange = refreshCreateFilterForm;
   $("subCreateFilterAdd").onclick = () => {
@@ -1788,17 +1790,23 @@ function filterActionPill(rule) {
 function filterConditionTypeText(condition) {
   if (!condition) return "-";
   if (condition.type === "HAS_ELEMENT") return "内容元素";
-  if (condition.type === "TEXT_CONTAINS") return "关键词";
-  if (condition.type === "TEXT_REGEX") return "正则";
+  if (condition.type === "TEXT_MATCH") return "文本匹配";
+  if (condition.type === "TEXT_CONTAINS") return "文本匹配";
+  if (condition.type === "TEXT_REGEX") return "文本匹配";
   return condition.type || "-";
 }
 
 function filterConditionText(condition) {
   if (!condition) return "-";
   if (condition.type === "HAS_ELEMENT") return label(condition.kind);
-  if (condition.type === "TEXT_CONTAINS") return condition.value;
-  if (condition.type === "TEXT_REGEX") return condition.pattern;
+  if (condition.type === "TEXT_MATCH") return `${textMatchModeText(condition.mode)}：${condition.text || ""}`;
+  if (condition.type === "TEXT_CONTAINS") return `包含关键词：${condition.value || ""}`;
+  if (condition.type === "TEXT_REGEX") return `正则表达式：${condition.pattern || ""}`;
   return condition.type || JSON.stringify(condition);
+}
+
+function textMatchModeText(mode) {
+  return String(mode || "CONTAINS").toUpperCase() === "REGEX" ? "正则表达式" : "包含关键词";
 }
 
 function renderCreateSubscriptionFilterList(rules) {
@@ -1830,8 +1838,8 @@ function collectFilterConditionFrom(prefix) {
   if (type === "HAS_ELEMENT") return { type, kind: elementInput.value };
   const text = textInput.value.trim();
   if (!text) throw new Error("请填写过滤内容");
-  if (type === "TEXT_REGEX") return { type, pattern: text };
-  return { type, value: text, ignoreCase: true };
+  const mode = ($(`${prefix}FilterMatchMode`)?.value || "CONTAINS").toUpperCase();
+  return { type: "TEXT_MATCH", mode, text, ignoreCase: mode !== "REGEX" };
 }
 
 function createFilterRuleKey(rule) {
@@ -1842,8 +1850,9 @@ function openFilterRuleModal(subscriptionId) {
   openModal("添加过滤规则", `
     <div class="form-grid">
       <div class="field"><label>名单</label><select id="filterAction"><option value="BLOCK">黑名单</option><option value="ALLOW">白名单</option></select></div>
-      <div class="field"><label>类型</label><select id="filterType"><option value="HAS_ELEMENT">内容元素</option><option value="TEXT_CONTAINS">关键词</option><option value="TEXT_REGEX">正则</option></select></div>
+      <div class="field"><label>类型</label><select id="filterType"><option value="HAS_ELEMENT">内容元素</option><option value="TEXT_MATCH">文本匹配</option></select></div>
       <div class="field" id="filterElementWrap"><label>元素</label><select id="filterElement">${blockKinds.map(([v,t]) => `<option value="${v}">${t}</option>`).join("")}</select></div>
+      <div class="field" id="filterMatchModeWrap" hidden><label>方式</label><select id="filterMatchMode"><option value="CONTAINS">包含关键词</option><option value="REGEX">正则表达式</option></select></div>
       <div class="field full" id="filterTextWrap" hidden><label>内容</label><input id="filterText"></div>
     </div>
   `, async () => {
@@ -1859,7 +1868,8 @@ function openFilterRuleModal(subscriptionId) {
   const refresh = () => {
     const type = $("filterType").value;
     $("filterElementWrap").hidden = type !== "HAS_ELEMENT";
-    $("filterTextWrap").hidden = !["TEXT_CONTAINS", "TEXT_REGEX"].includes(type);
+    $("filterMatchModeWrap").hidden = type !== "TEXT_MATCH";
+    $("filterTextWrap").hidden = type !== "TEXT_MATCH";
   };
   $("filterType").onchange = refresh;
   refresh();
@@ -1870,6 +1880,6 @@ function collectFilterCondition() {
   if (type === "HAS_ELEMENT") return { type, kind: $("filterElement").value };
   const text = $("filterText").value.trim();
   if (!text) throw new Error("请填写过滤内容");
-  if (type === "TEXT_REGEX") return { type, pattern: text };
-  return { type, value: text, ignoreCase: true };
+  const mode = ($("filterMatchMode")?.value || "CONTAINS").toUpperCase();
+  return { type: "TEXT_MATCH", mode, text, ignoreCase: mode !== "REGEX" };
 }

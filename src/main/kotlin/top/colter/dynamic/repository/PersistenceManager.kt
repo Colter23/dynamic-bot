@@ -247,6 +247,53 @@ private val DATABASE_MIGRATIONS: List<DatabaseMigration> = listOf(
                 """.trimIndent(),
             )
         }
+    },
+    DatabaseMigration(
+        id = "dynamic-filter-rule-text-match-condition",
+        description = "动态过滤文本条件迁移为统一文本匹配条件",
+    ) {
+        if (tableExists("dynamic_filter_rule")) {
+            exec(
+                """
+                UPDATE ${quoteIdentifier("dynamic_filter_rule")}
+                SET ${quoteIdentifier("condition_json")} =
+                    REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                ${quoteIdentifier("condition_json")},
+                                '"TEXT_CONTAINS"',
+                                '"TEXT_MATCH"'
+                            ),
+                            '{"type":"TEXT_MATCH",',
+                            '{"type":"TEXT_MATCH","mode":"CONTAINS",'
+                        ),
+                        '"value":',
+                        '"text":'
+                    )
+                WHERE ${quoteIdentifier("condition_json")} LIKE '%TEXT_CONTAINS%'
+                """.trimIndent(),
+            )
+            exec(
+                """
+                UPDATE ${quoteIdentifier("dynamic_filter_rule")}
+                SET ${quoteIdentifier("condition_json")} =
+                    REPLACE(
+                        REPLACE(
+                            REPLACE(
+                                ${quoteIdentifier("condition_json")},
+                                '"TEXT_REGEX"',
+                                '"TEXT_MATCH"'
+                            ),
+                            '{"type":"TEXT_MATCH",',
+                            '{"type":"TEXT_MATCH","mode":"REGEX","ignoreCase":false,'
+                        ),
+                        '"pattern":',
+                        '"text":'
+                    )
+                WHERE ${quoteIdentifier("condition_json")} LIKE '%TEXT_REGEX%'
+                """.trimIndent(),
+            )
+        }
     }
 )
 

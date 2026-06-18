@@ -11,6 +11,7 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import top.colter.dynamic.core.data.DynamicFilterAction
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.FilterCondition
+import top.colter.dynamic.core.data.TextMatchMode
 import top.colter.dynamic.core.tools.nowInstant
 import top.colter.dynamic.table.DynamicFilterRuleTable
 import top.colter.dynamic.table.SubscriptionTable
@@ -101,10 +102,14 @@ public object DynamicFilterRuleRepository {
 
     public fun validateCondition(condition: FilterCondition) {
         when (condition) {
-            is FilterCondition.TextContains -> require(condition.value.isNotBlank()) {
-                "文本过滤条件不能为空"
+            is FilterCondition.TextMatch -> {
+                require(condition.text.isNotBlank()) {
+                    "文本过滤条件不能为空"
+                }
+                if (condition.mode == TextMatchMode.REGEX) {
+                    Regex(condition.text)
+                }
             }
-            is FilterCondition.TextRegex -> Regex(condition.pattern)
             is FilterCondition.HasElement -> Unit
         }
     }

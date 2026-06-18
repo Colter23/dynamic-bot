@@ -8,6 +8,7 @@ import top.colter.dynamic.core.data.DynamicBlockKind
 import top.colter.dynamic.core.data.DynamicFilterAction
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.data.TextMatchMode
 import top.colter.dynamic.initTestDatabase
 import top.colter.dynamic.testPublisher
 import top.colter.dynamic.testTargetAddress
@@ -24,19 +25,19 @@ class DynamicFilterRuleRepositoryTest {
         )
         val keywordRule = DynamicFilterRuleRepository.addRule(
             subscriptionId,
-            FilterCondition.TextContains("spoiler"),
+            FilterCondition.TextMatch("spoiler"),
             DynamicFilterAction.ALLOW,
         )
         val regexRule = DynamicFilterRuleRepository.addRule(
             subscriptionId,
-            FilterCondition.TextRegex("foo\\s+bar"),
+            FilterCondition.TextMatch("foo\\s+bar", TextMatchMode.REGEX, ignoreCase = false),
         )
 
         assertTrue(imageRule.created)
         assertEquals(DynamicFilterAction.BLOCK, imageRule.value.action)
         assertEquals(DynamicFilterAction.ALLOW, keywordRule.value.action)
-        assertEquals(FilterCondition.TextContains("spoiler"), keywordRule.value.condition)
-        assertEquals(FilterCondition.TextRegex("foo\\s+bar"), regexRule.value.condition)
+        assertEquals(FilterCondition.TextMatch("spoiler"), keywordRule.value.condition)
+        assertEquals(FilterCondition.TextMatch("foo\\s+bar", TextMatchMode.REGEX, ignoreCase = false), regexRule.value.condition)
         assertEquals(3, DynamicFilterRuleRepository.findBySubscriptionId(subscriptionId).size)
         assertEquals(
             listOf(imageRule.value.id, keywordRule.value.id, regexRule.value.id).sorted(),
@@ -64,10 +65,13 @@ class DynamicFilterRuleRepositoryTest {
             )
         }
         assertFailsWith<IllegalArgumentException> {
-            DynamicFilterRuleRepository.addRule(subscriptionId, FilterCondition.TextRegex("["))
+            DynamicFilterRuleRepository.addRule(
+                subscriptionId,
+                FilterCondition.TextMatch("[", TextMatchMode.REGEX, ignoreCase = false),
+            )
         }
         assertFailsWith<IllegalArgumentException> {
-            DynamicFilterRuleRepository.addRule(subscriptionId, FilterCondition.TextContains(" "))
+            DynamicFilterRuleRepository.addRule(subscriptionId, FilterCondition.TextMatch(" "))
         }
     }
 
@@ -78,7 +82,7 @@ class DynamicFilterRuleRepositoryTest {
         val subscription = SubscriptionRepository.findById(subscriptionId)!!
         DynamicFilterRuleRepository.addRule(
             subscriptionId,
-            FilterCondition.TextContains("spoiler"),
+            FilterCondition.TextMatch("spoiler"),
         )
 
         assertTrue(SubscriptionRepository.unsubscribe(subscription.subscriberId, subscription.publisherId).changed)

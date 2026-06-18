@@ -250,7 +250,7 @@ class SourceUpdateDynamicTest {
         val filteredSubscription = SubscriptionRepository.findBySubscriberAndPublisher(filteredSubscriber.id, publisher.id)!!
         DynamicFilterRuleRepository.addRule(
             filteredSubscription.id,
-            FilterCondition.TextContains("Demo content"),
+            FilterCondition.TextMatch("Demo content"),
         )
         var renderCalls = 0
         val listener = SourceUpdateProcessor(

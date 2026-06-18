@@ -61,6 +61,7 @@ import top.colter.dynamic.core.data.SubscriptionEventKind
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.data.TextMatchMode
 import top.colter.dynamic.core.event.SubscriptionChangedEvent
 import top.colter.dynamic.core.event.SubscriptionChangeType
 import top.colter.dynamic.core.plugin.PluginDescriptor
@@ -1167,7 +1168,7 @@ class AdminServerTest {
                     filterRules = listOf(
                         SubscriptionExportFilterRule(
                             action = DynamicFilterAction.ALLOW,
-                            condition = FilterCondition.TextContains("广告"),
+                            condition = FilterCondition.TextMatch("广告"),
                         ),
                     ),
                     linkParseTriggerMode = "ALWAYS",
@@ -1187,7 +1188,7 @@ class AdminServerTest {
         assertEquals(LinkParseTriggerMode.ALWAYS, LinkParseTargetConfigRepository.findByAddress(subscriber!!.address)?.triggerMode)
         val rule = DynamicFilterRuleRepository.findBySubscriptionId(subscription.id).single()
         assertEquals(DynamicFilterAction.ALLOW, rule.action)
-        assertEquals(FilterCondition.TextContains("广告"), rule.condition)
+        assertEquals(FilterCondition.TextMatch("广告"), rule.condition)
     }
 
     @Test
@@ -1304,7 +1305,11 @@ class AdminServerTest {
             setOf(
                 DynamicFilterAction.BLOCK to FilterCondition.HasElement(DynamicBlockKind.VIDEO),
                 DynamicFilterAction.BLOCK to FilterCondition.HasElement(DynamicBlockKind.REPOST),
-                DynamicFilterAction.ALLOW to FilterCondition.TextRegex("萝妮"),
+                DynamicFilterAction.ALLOW to FilterCondition.TextMatch(
+                    "萝妮",
+                    TextMatchMode.REGEX,
+                    ignoreCase = false,
+                ),
             ),
             DynamicFilterRuleRepository.findBySubscriptionId(directSubscription.id)
                 .map { it.action to it.condition }
@@ -1413,7 +1418,7 @@ class AdminServerTest {
                     publisher = SubscriptionExportPublisher("bilibili", "USER", "123"),
                     target = SubscriptionExportTarget("qq", "GROUP", "100"),
                     policy = nextPolicy,
-                    filterRules = listOf(SubscriptionExportFilterRule(condition = FilterCondition.TextContains("抽奖"))),
+                    filterRules = listOf(SubscriptionExportFilterRule(condition = FilterCondition.TextMatch("抽奖"))),
                 ),
             ),
         )
@@ -1425,7 +1430,7 @@ class AdminServerTest {
         assertEquals(0, result.created)
         assertEquals(1, result.updated)
         assertEquals(nextPolicy, updated.policy)
-        assertEquals(listOf(FilterCondition.TextContains("抽奖")), rules.map { it.condition })
+        assertEquals(listOf(FilterCondition.TextMatch("抽奖")), rules.map { it.condition })
         assertEquals(1, plugin.followPublisherCalls)
     }
 
@@ -1505,7 +1510,7 @@ class AdminServerTest {
         )
         DynamicFilterRuleRepository.addRule(
             created.subscription.id,
-            FilterCondition.TextContains("保留"),
+            FilterCondition.TextMatch("保留"),
         )
         val document = SubscriptionExportDocument(
             exportedAtEpochSeconds = 1,
@@ -1513,7 +1518,11 @@ class AdminServerTest {
                 SubscriptionExportItem(
                     publisher = SubscriptionExportPublisher("bilibili", "USER", "123"),
                     target = SubscriptionExportTarget("qq", "GROUP", "100"),
-                    filterRules = listOf(SubscriptionExportFilterRule(condition = FilterCondition.TextRegex("("))),
+                    filterRules = listOf(
+                        SubscriptionExportFilterRule(
+                            condition = FilterCondition.TextMatch("(", TextMatchMode.REGEX, ignoreCase = false),
+                        ),
+                    ),
                 ),
             ),
         )
@@ -1523,7 +1532,7 @@ class AdminServerTest {
         assertEquals(0, result.updated)
         assertEquals(1, result.failed)
         assertEquals(
-            listOf(FilterCondition.TextContains("保留")),
+            listOf(FilterCondition.TextMatch("保留")),
             DynamicFilterRuleRepository.findBySubscriptionId(created.subscription.id).map { it.condition },
         )
     }

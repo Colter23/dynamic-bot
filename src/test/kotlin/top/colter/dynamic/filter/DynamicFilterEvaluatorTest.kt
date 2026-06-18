@@ -23,6 +23,7 @@ import top.colter.dynamic.core.data.PollBlock
 import top.colter.dynamic.core.data.PollOption
 import top.colter.dynamic.core.data.RepostBlock
 import top.colter.dynamic.core.data.TextBlock
+import top.colter.dynamic.core.data.TextMatchMode
 import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testMedia
 
@@ -40,28 +41,45 @@ class DynamicFilterEvaluatorTest {
             ),
         )
 
-        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.TextContains("hello world")))
-        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.TextContains("origin secret")))
-        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.TextRegex("Video\\s+Secret")))
-        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.TextContains("card secret")))
-        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.TextContains("poll option")))
+        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.TextMatch("hello world")))
+        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.TextMatch("origin secret")))
+        assertTrue(
+            DynamicFilterEvaluator.matches(
+                update,
+                FilterCondition.TextMatch("Video\\s+Secret", TextMatchMode.REGEX),
+            ),
+        )
+        assertFalse(DynamicFilterEvaluator.matches(update, FilterCondition.TextMatch("video\\s+secret", TextMatchMode.REGEX)))
+        assertTrue(
+            DynamicFilterEvaluator.matches(
+                update,
+                FilterCondition.TextMatch("video\\s+secret", TextMatchMode.REGEX, ignoreCase = true),
+            ),
+        )
+        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.TextMatch("card secret")))
+        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.TextMatch("poll option")))
         assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.HasElement(DynamicBlockKind.VIDEO)))
         assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.HasElement(DynamicBlockKind.POLL)))
         assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.HasElement(DynamicBlockKind.REPOST)))
-        assertFalse(DynamicFilterEvaluator.matches(update, FilterCondition.TextContains("Publisher Name")))
-        assertFalse(DynamicFilterEvaluator.matches(update, FilterCondition.TextContains("dynamic-link")))
-        assertFalse(DynamicFilterEvaluator.matches(update, FilterCondition.TextRegex("[")))
-        assertFalse(DynamicFilterEvaluator.matches(mediaOnlyUpdate, FilterCondition.TextContains("hello world")))
+        assertFalse(DynamicFilterEvaluator.matches(update, FilterCondition.TextMatch("Publisher Name")))
+        assertFalse(DynamicFilterEvaluator.matches(update, FilterCondition.TextMatch("dynamic-link")))
+        assertFalse(
+            DynamicFilterEvaluator.matches(
+                update,
+                FilterCondition.TextMatch("[", TextMatchMode.REGEX, ignoreCase = false),
+            ),
+        )
+        assertFalse(DynamicFilterEvaluator.matches(mediaOnlyUpdate, FilterCondition.TextMatch("hello world")))
         assertTrue(DynamicFilterEvaluator.matches(mediaOnlyUpdate, FilterCondition.HasElement(DynamicBlockKind.VIDEO)))
     }
 
     @Test
     fun isBlockedShouldApplyBlockAndAllowRules() {
         val update = demoUpdate()
-        val missedBlock = rule(FilterCondition.TextContains("missing"), DynamicFilterAction.BLOCK)
+        val missedBlock = rule(FilterCondition.TextMatch("missing"), DynamicFilterAction.BLOCK)
         val videoBlock = rule(FilterCondition.HasElement(DynamicBlockKind.VIDEO), DynamicFilterAction.BLOCK)
-        val missedAllow = rule(FilterCondition.TextContains("missing"), DynamicFilterAction.ALLOW)
-        val textAllow = rule(FilterCondition.TextContains("Video Secret"), DynamicFilterAction.ALLOW)
+        val missedAllow = rule(FilterCondition.TextMatch("missing"), DynamicFilterAction.ALLOW)
+        val textAllow = rule(FilterCondition.TextMatch("Video Secret"), DynamicFilterAction.ALLOW)
 
         assertFalse(DynamicFilterEvaluator.isBlocked(update, emptyList()))
         assertFalse(DynamicFilterEvaluator.isBlocked(update, listOf(missedBlock)))

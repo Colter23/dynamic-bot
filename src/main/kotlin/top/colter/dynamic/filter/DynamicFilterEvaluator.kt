@@ -12,6 +12,7 @@ import top.colter.dynamic.core.data.PollBlock
 import top.colter.dynamic.core.data.RepostBlock
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.TextBlock
+import top.colter.dynamic.core.data.TextMatchMode
 
 public object DynamicFilterEvaluator {
     public fun isBlocked(update: SourceUpdate, rules: Iterable<DynamicFilterRule>): Boolean {
@@ -31,12 +32,20 @@ public object DynamicFilterEvaluator {
     public fun matches(update: SourceUpdate, condition: FilterCondition): Boolean {
         return when (condition) {
             is FilterCondition.HasElement -> hasBlockKind(update, condition.kind)
-            is FilterCondition.TextContains -> filterableTextFields(update).any {
-                it.contains(condition.value, ignoreCase = condition.ignoreCase)
+            is FilterCondition.TextMatch -> matchesText(update, condition)
+        }
+    }
+
+    private fun matchesText(update: SourceUpdate, condition: FilterCondition.TextMatch): Boolean {
+        val fields = filterableTextFields(update)
+        return when (condition.mode) {
+            TextMatchMode.CONTAINS -> fields.any {
+                it.contains(condition.text, ignoreCase = condition.ignoreCase)
             }
-            is FilterCondition.TextRegex -> runCatching {
-                val regex = Regex(condition.pattern)
-                filterableTextFields(update).any { regex.containsMatchIn(it) }
+            TextMatchMode.REGEX -> runCatching {
+                val options = if (condition.ignoreCase) setOf(RegexOption.IGNORE_CASE) else emptySet()
+                val regex = Regex(condition.text, options)
+                fields.any { regex.containsMatchIn(it) }
             }.getOrDefault(false)
         }
     }

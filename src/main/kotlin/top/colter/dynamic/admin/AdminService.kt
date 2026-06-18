@@ -38,6 +38,7 @@ import top.colter.dynamic.core.data.SubscriptionEventKind
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.data.TextMatchMode
 import top.colter.dynamic.core.data.coreJson
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.core.event.SubscriptionChangedEvent
@@ -2925,7 +2926,7 @@ private fun legacyFilterRules(
     regexList.forEach { pattern ->
         rules += SubscriptionExportFilterRule(
             action = regexAction,
-            condition = FilterCondition.TextRegex(pattern),
+            condition = FilterCondition.TextMatch(pattern, TextMatchMode.REGEX, ignoreCase = false),
         )
     }
 

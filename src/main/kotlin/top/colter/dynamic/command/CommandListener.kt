@@ -42,6 +42,7 @@ import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.Subscription
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.data.TextMatchMode
 import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
@@ -255,8 +256,8 @@ private fun parseDynamicElementType(value: String): DynamicBlockKind? {
 
 private fun parseContentCondition(value: String, pattern: String): FilterCondition? {
     return when (value.lowercase()) {
-        "keyword" -> FilterCondition.TextContains(pattern)
-        "regex" -> FilterCondition.TextRegex(pattern)
+        "keyword" -> FilterCondition.TextMatch(pattern, TextMatchMode.CONTAINS, ignoreCase = true)
+        "regex" -> FilterCondition.TextMatch(pattern, TextMatchMode.REGEX, ignoreCase = false)
         else -> null
     }
 }
