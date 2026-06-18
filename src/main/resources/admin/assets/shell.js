@@ -114,7 +114,7 @@ const $ = id => document.getElementById(id);
         DYNAMIC: "动态", LIVE_STARTED: "开播", LIVE_ENDED: "下播",
         OPEN: "直播中", CLOSE: "未开播", ROUND: "轮播中",
         BLOCK: "阻止", ALLOW: "允许", MENTION_ALL: "@全体", NONE: "无",
-        IMAGE: "图片", VIDEO: "视频", CARD: "卡片", POLL: "投票", ORIGIN: "转发",
+        TEXT: "文字", IMAGE: "图片", VIDEO: "视频", CARD: "卡片", POLL: "投票", REPOST: "转发", ORIGIN: "转发",
         READY: "可用", UNAVAILABLE: "不可用",
         ROUND_ROBIN: "轮询", PRIMARY_BACKUP: "主备"
       };

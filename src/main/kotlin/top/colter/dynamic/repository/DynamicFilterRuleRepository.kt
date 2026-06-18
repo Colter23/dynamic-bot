@@ -8,6 +8,7 @@ import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.insertAndGetId
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import top.colter.dynamic.core.data.DynamicFilterAction
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.tools.nowInstant
@@ -18,6 +19,7 @@ public object DynamicFilterRuleRepository {
     public fun addRule(
         subscriptionId: Int,
         condition: FilterCondition,
+        action: DynamicFilterAction = DynamicFilterAction.BLOCK,
     ): UpsertResult<DynamicFilterRule> {
         require(SubscriptionRepository.findById(subscriptionId) != null) {
             "订阅不存在：subscriptionId=$subscriptionId"
@@ -28,6 +30,7 @@ public object DynamicFilterRuleRepository {
             val now = nowInstant()
             val id = DynamicFilterRuleTable.insertAndGetId {
                 it[DynamicFilterRuleTable.subscriptionId] = EntityID(subscriptionId, SubscriptionTable)
+                it[DynamicFilterRuleTable.action] = action
                 it[DynamicFilterRuleTable.condition] = condition
                 it[createdAt] = now
             }.value
@@ -35,6 +38,7 @@ public object DynamicFilterRuleRepository {
                 value = DynamicFilterRule(
                     id = id,
                     subscriptionId = subscriptionId,
+                    action = action,
                     condition = condition,
                     createdAtEpochSeconds = now.epochSeconds,
                 ),
@@ -101,8 +105,7 @@ public object DynamicFilterRuleRepository {
                 "文本过滤条件不能为空"
             }
             is FilterCondition.TextRegex -> Regex(condition.pattern)
-            is FilterCondition.HasBlockKind,
-            is FilterCondition.HasReference -> Unit
+            is FilterCondition.HasElement -> Unit
         }
     }
 }
@@ -110,6 +113,7 @@ public object DynamicFilterRuleRepository {
 public fun ResultRow.toDynamicFilterRule(): DynamicFilterRule = DynamicFilterRule(
     id = this[DynamicFilterRuleTable.id].value,
     subscriptionId = this[DynamicFilterRuleTable.subscriptionId].value,
+    action = this[DynamicFilterRuleTable.action],
     condition = this[DynamicFilterRuleTable.condition],
     createdAtEpochSeconds = this[DynamicFilterRuleTable.createdAt].epochSeconds,
 )

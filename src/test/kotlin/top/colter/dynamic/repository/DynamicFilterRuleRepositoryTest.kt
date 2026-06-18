@@ -5,6 +5,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import top.colter.dynamic.core.data.DynamicBlockKind
+import top.colter.dynamic.core.data.DynamicFilterAction
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.initTestDatabase
@@ -19,11 +20,12 @@ class DynamicFilterRuleRepositoryTest {
 
         val imageRule = DynamicFilterRuleRepository.addRule(
             subscriptionId,
-            FilterCondition.HasBlockKind(DynamicBlockKind.IMAGE),
+            FilterCondition.HasElement(DynamicBlockKind.IMAGE),
         )
         val keywordRule = DynamicFilterRuleRepository.addRule(
             subscriptionId,
             FilterCondition.TextContains("spoiler"),
+            DynamicFilterAction.ALLOW,
         )
         val regexRule = DynamicFilterRuleRepository.addRule(
             subscriptionId,
@@ -31,6 +33,8 @@ class DynamicFilterRuleRepositoryTest {
         )
 
         assertTrue(imageRule.created)
+        assertEquals(DynamicFilterAction.BLOCK, imageRule.value.action)
+        assertEquals(DynamicFilterAction.ALLOW, keywordRule.value.action)
         assertEquals(FilterCondition.TextContains("spoiler"), keywordRule.value.condition)
         assertEquals(FilterCondition.TextRegex("foo\\s+bar"), regexRule.value.condition)
         assertEquals(3, DynamicFilterRuleRepository.findBySubscriptionId(subscriptionId).size)
@@ -56,7 +60,7 @@ class DynamicFilterRuleRepositoryTest {
         assertFailsWith<IllegalArgumentException> {
             DynamicFilterRuleRepository.addRule(
                 404,
-                FilterCondition.HasBlockKind(DynamicBlockKind.IMAGE),
+                FilterCondition.HasElement(DynamicBlockKind.IMAGE),
             )
         }
         assertFailsWith<IllegalArgumentException> {

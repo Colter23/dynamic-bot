@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
 import top.colter.dynamic.core.config.ConfigFormSpec
+import top.colter.dynamic.core.data.DynamicFilterAction
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageBatch
@@ -461,6 +462,7 @@ public data class SubscriptionDto(
 public data class DynamicFilterRuleDto(
     val id: Int,
     val subscriptionId: Int,
+    val action: DynamicFilterAction = DynamicFilterAction.BLOCK,
     val condition: FilterCondition,
     val createdAtEpochSeconds: Long,
 )
@@ -472,7 +474,7 @@ public data class SubscriptionExportRequest(
 
 @Serializable
 public data class SubscriptionExportDocument(
-    val schemaVersion: Int = 1,
+    val schemaVersion: Int = 2,
     val exportedAtEpochSeconds: Long,
     val subscriptions: List<SubscriptionExportItem>,
     val importOptions: SubscriptionImportOptions? = null,
@@ -499,6 +501,8 @@ public data class SubscriptionExportPublisher(
     val platformId: String,
     val kind: String = "USER",
     val externalId: String,
+    val name: String? = null,
+    val themeColors: String? = null,
 )
 
 @Serializable
@@ -513,6 +517,7 @@ public data class SubscriptionExportTarget(
 
 @Serializable
 public data class SubscriptionExportFilterRule(
+    val action: DynamicFilterAction = DynamicFilterAction.BLOCK,
     val condition: FilterCondition,
 )
 
@@ -774,6 +779,8 @@ public data class CreateSubscriptionRequest(
     val publisherPlatform: String? = null,
     val publisherKind: String? = null,
     val publisherExternalId: String? = null,
+    val publisherName: String? = null,
+    val publisherThemeColors: String? = null,
     val publisherId: Int? = null,
     val policy: SubscriptionPolicy = SubscriptionPolicy.default(),
     val publisherLookupMode: String? = null,
@@ -798,6 +805,7 @@ public data class UpdateSubscriptionRequest(
 
 @Serializable
 public data class CreateFilterRuleRequest(
+    val action: DynamicFilterAction = DynamicFilterAction.BLOCK,
     val condition: FilterCondition,
 )
 

@@ -14,6 +14,8 @@ import top.colter.dynamic.core.config.ConfigurablePlugin
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.data.DeliveryStatus
+import top.colter.dynamic.core.data.DynamicBlockKind
+import top.colter.dynamic.core.data.DynamicFilterAction
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.FilterCondition
@@ -68,6 +70,7 @@ import top.colter.dynamic.core.task.TaskSnapshot
 import top.colter.dynamic.core.task.TaskStatus
 import top.colter.dynamic.draw.DefaultPublisherThemeInitializer
 import top.colter.dynamic.draw.DrawThemePalette
+import top.colter.dynamic.draw.DrawThemeFactory
 import top.colter.dynamic.draw.PublisherDrawThemeService
 import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
@@ -1133,6 +1136,7 @@ public class AdminService(
         val publishers = PublisherRepository.findAll().associateBy { it.id }
         val subscribers = SubscriberRepository.findAll().associateBy { it.id }
         val rules = DynamicFilterRuleRepository.findBySubscriptionIds(selectedSubscriptions.map { it.id })
+        val drawThemes = PublisherDrawThemeRepository.findAll().associateBy { it.publisherId }
         return SubscriptionExportDocument(
             exportedAtEpochSeconds = System.currentTimeMillis() / 1_000,
             subscriptions = selectedSubscriptions.map { subscription ->
@@ -1146,6 +1150,8 @@ public class AdminService(
                         platformId = publisher.platformId.value,
                         kind = publisher.kind.name,
                         externalId = publisher.externalId,
+                        name = publisher.name,
+                        themeColors = drawThemes[publisher.id]?.palette?.backgroundColors?.joinToString(";"),
                     ),
                     target = SubscriptionExportTarget(
                         platformId = subscriber.platformId.value,
@@ -1158,7 +1164,7 @@ public class AdminService(
                     policy = subscription.policy,
                     filterRules = rules[subscription.id].orEmpty()
                         .sortedBy { it.id }
-                        .map { SubscriptionExportFilterRule(it.condition) },
+                        .map { SubscriptionExportFilterRule(action = it.action, condition = it.condition) },
                     linkParseTriggerMode = linkParseConfig?.triggerMode?.name,
                 )
             },
@@ -1170,20 +1176,22 @@ public class AdminService(
     }
 
     public suspend fun importLegacyDynamicSubscriptions(request: LegacyDynamicSubscriptionImportRequest): SubscriptionImportResponse {
-        val document = parseLegacyDynamicSubscriptionYaml(request.content)
+        val parseResult = parseLegacyDynamicSubscriptionYaml(request.content)
+        val document = parseResult.document
             .copy(importOptions = request.importOptions)
-        return importSubscriptions(document, skipAutoFollow = false)
+        val response = importSubscriptions(document, skipAutoFollow = false)
+        return response.copy(warnings = (parseResult.warnings + response.warnings).distinct())
     }
 
     public suspend fun createSubscription(request: CreateSubscriptionRequest): CreateSubscriptionResponse {
-        return createSubscriptionInternal(request, replacementFilterConditions = null, skipAutoFollow = false)
+        return createSubscriptionInternal(request, replacementFilterRules = null, skipAutoFollow = false)
     }
 
     private suspend fun importSubscriptions(
         document: SubscriptionExportDocument,
         skipAutoFollow: Boolean,
     ): SubscriptionImportResponse {
-        require(document.schemaVersion == 1) { "订阅导入文件版本不支持：${document.schemaVersion}" }
+        require(document.schemaVersion == 2) { "订阅导入文件版本不支持：${document.schemaVersion}" }
         val options = document.importOptions ?: SubscriptionImportOptions()
         val fetchProfiles = options.fetchProfiles
         val autoFollowEnabled = options.autoFollowPublishers &&
@@ -1217,11 +1225,11 @@ public class AdminService(
             val publisherKey = item.publisherKeyText()
             val targetKey = item.targetKeyText()
             try {
-                val filterConditions = item.filterRules.map { it.condition }
-                validateSubscriptionImportItemBeforeMutation(item, filterConditions)
+                val filterRules = item.filterRules
+                validateSubscriptionImportItemBeforeMutation(item, filterRules)
                 val response = createSubscriptionInternal(
                     request = item.toCreateSubscriptionRequest(),
-                    replacementFilterConditions = filterConditions,
+                    replacementFilterRules = filterRules,
                     skipAutoFollow = true,
                     importContext = importContext,
                 )
@@ -1240,7 +1248,7 @@ public class AdminService(
                     message = if (response.subscriptionCreated) "订阅已创建" else "订阅已更新",
                     publisherKey = publisherKey,
                     targetKey = targetKey,
-                    filterRuleCount = filterConditions.size,
+                    filterRuleCount = filterRules.size,
                     subscription = response.subscription,
                     warnings = response.warnings,
                 )
@@ -1282,10 +1290,14 @@ public class AdminService(
 
     private fun validateSubscriptionImportItemBeforeMutation(
         item: SubscriptionExportItem,
-        filterConditions: List<FilterCondition>,
+        filterRules: List<SubscriptionExportFilterRule>,
     ) {
-        filterConditions.forEach(DynamicFilterRuleRepository::validateCondition)
+        filterRules.forEach { DynamicFilterRuleRepository.validateCondition(it.condition) }
         parseLinkParseTriggerModeOrNull(item.linkParseTriggerMode)
+        item.publisher.themeColors
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { DrawThemeFactory.parseThemeColors(it) }
 
         val publisherKey = item.importPublisherKey()
         val targetAddress = item.importTargetAddress()
@@ -1324,7 +1336,7 @@ public class AdminService(
 
     private suspend fun createSubscriptionInternal(
         request: CreateSubscriptionRequest,
-        replacementFilterConditions: List<FilterCondition>?,
+        replacementFilterRules: List<SubscriptionExportFilterRule>?,
         skipAutoFollow: Boolean,
         importContext: SubscriptionImportContext? = null,
     ): CreateSubscriptionResponse {
@@ -1349,6 +1361,7 @@ public class AdminService(
                 kind = publisherKind,
                 externalId = externalId,
             )
+            val legacyPublisherInfo = legacyPublisherInfo(publisherKey, request.publisherName)
             val existedPublisher = PublisherRepository.findByKey(publisherKey)
             if (existedPublisher != null) {
                 val cachedPublisherInfo = importContext?.publisherProfile(publisherKey)
@@ -1365,6 +1378,8 @@ public class AdminService(
                         .normalized()
                         .copy(key = publisherKey)
                     PublisherRepository.upsertInfo(publisherInfo)
+                } else if (legacyPublisherInfo != null && existedPublisher.isPlaceholderPublisher()) {
+                    PublisherRepository.upsertInfo(legacyPublisherInfo)
                 } else {
                     UpsertResult(existedPublisher, created = false, updated = false)
                 }
@@ -1377,12 +1392,12 @@ public class AdminService(
                     cachedPublisherInfo != null -> cachedPublisherInfo
                     publisherLookupMode == PUBLISHER_LOOKUP_MODE_PLACEHOLDER -> {
                         warnings += "未查询平台资料，已使用发布者 ID 创建占位发布者：$platform:$externalId"
-                        placeholderPublisherInfo(publisherKey)
+                        legacyPublisherInfo ?: placeholderPublisherInfo(publisherKey)
                     }
                     importContext != null -> {
                         val reason = if (importContext.fetchProfiles) "批量资料未返回" else "导入已关闭资料拉取"
                         warnings += "$reason，已使用发布者 ID 创建占位发布者：$platform:$externalId"
-                        placeholderPublisherInfo(publisherKey)
+                        legacyPublisherInfo ?: placeholderPublisherInfo(publisherKey)
                     }
                     else -> {
                         fetchPublisherInfo(platform, externalId).first.normalized().copy(key = publisherKey)
@@ -1391,6 +1406,12 @@ public class AdminService(
                 PublisherRepository.upsertInfo(publisherInfo)
             }
         }
+        request.publisherThemeColors
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { themeColors ->
+                publisherDrawThemeService.setTheme(publisherUpsert.value.id, themeColors)
+            }
         val subscriberUpsert = if (request.subscriberId != null) {
             val subscriber = SubscriberRepository.findById(request.subscriberId)
                 ?: throw NoSuchElementException("消息目标不存在：subscriberId=${request.subscriberId}")
@@ -1453,7 +1474,7 @@ public class AdminService(
             liveSupport = publisherPlatformLiveSupport(publisherPlatform),
             previousPolicy = existingSubscription?.policy,
         )
-        replacementFilterConditions?.forEach(DynamicFilterRuleRepository::validateCondition)
+        replacementFilterRules?.forEach { DynamicFilterRuleRepository.validateCondition(it.condition) }
         val previousSubscriptionCount = SubscriptionRepository.countByPublisherId(publisherUpsert.value.id)
         val subscriptionResult = SubscriptionRepository.subscribe(
             subscriberId = subscriberUpsert.value.id,
@@ -1480,10 +1501,14 @@ public class AdminService(
             publisherId = publisherUpsert.value.id,
         ) ?: throw IllegalStateException("订阅创建失败")
 
-        if (replacementFilterConditions != null) {
+        if (replacementFilterRules != null) {
             DynamicFilterRuleRepository.clearBySubscriptionId(subscription.id)
-            replacementFilterConditions.forEach { condition ->
-                DynamicFilterRuleRepository.addRule(subscription.id, condition)
+            replacementFilterRules.forEach { rule ->
+                DynamicFilterRuleRepository.addRule(
+                    subscriptionId = subscription.id,
+                    condition = rule.condition,
+                    action = rule.action,
+                )
             }
         }
         val autoFollowOutcome = if (
@@ -1577,6 +1602,7 @@ public class AdminService(
         val result = DynamicFilterRuleRepository.addRule(
             subscriptionId = subscriptionId,
             condition = request.condition,
+            action = request.action,
         )
         logger.info {
             "后台过滤规则已${if (result.created) "创建" else "确认"}：ruleId=${result.value.id}，subscriptionId=$subscriptionId"
@@ -2597,6 +2623,7 @@ private fun Subscription.toDto(
 private fun DynamicFilterRule.toDto(): DynamicFilterRuleDto = DynamicFilterRuleDto(
     id = id,
     subscriptionId = subscriptionId,
+    action = action,
     condition = condition,
     createdAtEpochSeconds = createdAtEpochSeconds,
 )
@@ -2780,7 +2807,12 @@ private fun parseLinkParseTriggerModeOrNull(value: String?): LinkParseTriggerMod
     return parseEnum<LinkParseTriggerMode>(normalized, "linkParseTriggerMode")
 }
 
-private fun parseLegacyDynamicSubscriptionYaml(content: String): SubscriptionExportDocument {
+private data class LegacyDynamicSubscriptionParseResult(
+    val document: SubscriptionExportDocument,
+    val warnings: List<String> = emptyList(),
+)
+
+private fun parseLegacyDynamicSubscriptionYaml(content: String): LegacyDynamicSubscriptionParseResult {
     val trimmed = content.trim()
     require(trimmed.isNotBlank()) { "请填写旧版订阅 YAML 内容" }
     val root = runCatching { legacySubscriptionYamlMapper.readTree(trimmed) }
@@ -2791,6 +2823,8 @@ private fun parseLegacyDynamicSubscriptionYaml(content: String): SubscriptionExp
     require(dynamic.isObject) { "旧版订阅 YAML 缺少 dynamic 数据" }
 
     val items = mutableListOf<SubscriptionExportItem>()
+    val warnings = mutableListOf<String>()
+    val globalContacts = legacyContacts(dynamic.path("0").path("contacts"))
     val fields = dynamic.properties().iterator()
     while (fields.hasNext()) {
         val (uid, node) = fields.next()
@@ -2798,42 +2832,203 @@ private fun parseLegacyDynamicSubscriptionYaml(content: String): SubscriptionExp
         if (normalizedUid == "0") continue
         if (normalizedUid.isBlank()) continue
         require(normalizedUid.all(Char::isDigit)) { "dynamic 中存在无效 Bilibili UID：$uid" }
-        val contacts = node.path("contacts")
-        if (!contacts.isArray) continue
-        contacts.forEach { contactNode ->
-            val contact = legacyContactText(contactNode)
-            if (contact == null) return@forEach
+        val publisherName = node.path("name").asTrimmedTextOrNull()
+        val themeColors = legacyPublisherThemeColors(node.path("color"), normalizedUid, warnings)
+        val contacts = linkedSetOf<String>().apply {
+            addAll(globalContacts)
+            addAll(legacyContacts(node.path("contacts")))
+        }
+        contacts.forEach { contact ->
             val targetKind = if (contact.startsWith("-")) TargetKind.GROUP else TargetKind.USER
             val targetId = contact.trimStart('-')
             if (targetId.isBlank()) return@forEach
-            require(targetId.all(Char::isDigit)) {
-                "UID $normalizedUid 的 contacts 中存在无效 QQ 号：${contactNode.asText()}"
-            }
+            require(targetId.all(Char::isDigit)) { "UID $normalizedUid 的 contacts 中存在无效 QQ 号：$contact" }
             items += SubscriptionExportItem(
                 publisher = SubscriptionExportPublisher(
                     platformId = "bilibili",
                     kind = PublisherKind.USER.name,
                     externalId = normalizedUid,
+                    name = publisherName,
+                    themeColors = themeColors,
                 ),
                 target = SubscriptionExportTarget(
                     platformId = "qq",
                     targetKind = targetKind.name,
                     externalId = targetId,
                 ),
+                policy = legacySubscriptionPolicy(root.path("atAll"), contact, normalizedUid, targetKind, warnings),
+                filterRules = legacyFilterRules(root.path("filter"), contact, normalizedUid, warnings),
                 publisherLookupMode = PUBLISHER_LOOKUP_MODE_PLACEHOLDER,
             )
         }
     }
     require(items.isNotEmpty()) { "旧版订阅 YAML 中没有可导入的 dynamic 订阅" }
-    return SubscriptionExportDocument(
-        exportedAtEpochSeconds = System.currentTimeMillis() / 1000,
-        subscriptions = items,
+    return LegacyDynamicSubscriptionParseResult(
+        document = SubscriptionExportDocument(
+            exportedAtEpochSeconds = System.currentTimeMillis() / 1000,
+            subscriptions = items,
+        ),
+        warnings = warnings.distinct(),
     )
+}
+
+private fun legacyContacts(node: JsonNode): List<String> {
+    if (!node.isArray) return emptyList()
+    return node.mapNotNull(::legacyContactText)
 }
 
 private fun legacyContactText(node: JsonNode): String? {
     if (node.isNull) return null
     return if (node.isNumber) node.asLong().toString() else node.asText("").trim()
+}
+
+private fun legacyPublisherThemeColors(node: JsonNode, uid: String, warnings: MutableList<String>): String? {
+    val color = node.asTrimmedTextOrNull()
+        ?.takeUnless { it.equals("#d3edfa", ignoreCase = true) }
+        ?: return null
+    return runCatching {
+        DrawThemeFactory.parseThemeColors(color)
+        color
+    }.getOrElse { error ->
+        warnings += "旧版 UID $uid 的主题色无效，已跳过：$color，原因=${error.message ?: error.javaClass.simpleName}"
+        null
+    }
+}
+
+private fun legacyFilterRules(
+    filterRoot: JsonNode,
+    contact: String,
+    uid: String,
+    warnings: MutableList<String>,
+): List<SubscriptionExportFilterRule> {
+    val filterNode = legacyScopedNode(filterRoot, contact, uid) ?: return emptyList()
+    val rules = mutableListOf<SubscriptionExportFilterRule>()
+
+    val typeSelect = filterNode.path("typeSelect")
+    val typeAction = legacyFilterAction(typeSelect.path("mode")) ?: DynamicFilterAction.BLOCK
+    legacyListText(typeSelect.path("list")).forEach { typeText ->
+        val kinds = legacyFilterTypeToBlockKinds(typeText, warnings)
+        kinds.forEach { kind ->
+            rules += SubscriptionExportFilterRule(
+                action = typeAction,
+                condition = FilterCondition.HasElement(kind),
+            )
+        }
+    }
+
+    val regularSelect = filterNode.path("regularSelect")
+    val regexAction = legacyFilterAction(regularSelect.path("mode")) ?: DynamicFilterAction.BLOCK
+    val regexList = legacyListText(regularSelect.path("list"))
+    if (regexAction == DynamicFilterAction.ALLOW && regexList.size > 1) {
+        warnings += "旧版正则白名单包含多条规则，导入后按任意一条命中放行"
+    }
+    regexList.forEach { pattern ->
+        rules += SubscriptionExportFilterRule(
+            action = regexAction,
+            condition = FilterCondition.TextRegex(pattern),
+        )
+    }
+
+    return rules.distinctBy { "${it.action}:${it.condition}" }
+}
+
+private fun legacySubscriptionPolicy(
+    atAllRoot: JsonNode,
+    contact: String,
+    uid: String,
+    targetKind: TargetKind,
+    warnings: MutableList<String>,
+): SubscriptionPolicy {
+    if (targetKind != TargetKind.GROUP) return SubscriptionPolicy.default()
+    val atAllTypes = legacyListText(legacyScopedNode(atAllRoot, contact, uid) ?: return SubscriptionPolicy.default())
+        .mapNotNull(::legacyAtAllType)
+        .toSet()
+    if (atAllTypes.isEmpty()) return SubscriptionPolicy.default()
+
+    val enabledEvents = linkedSetOf(SubscriptionEventKind.DYNAMIC)
+    val mentionAllEvents = linkedSetOf<SubscriptionEventKind>()
+    if ("ALL" in atAllTypes) {
+        enabledEvents += SubscriptionEventKind.LIVE_STARTED
+        enabledEvents += SubscriptionEventKind.LIVE_ENDED
+        mentionAllEvents += SubscriptionEventKind.DYNAMIC
+        mentionAllEvents += SubscriptionEventKind.LIVE_STARTED
+        mentionAllEvents += SubscriptionEventKind.LIVE_ENDED
+    }
+    if ("DYNAMIC" in atAllTypes) {
+        mentionAllEvents += SubscriptionEventKind.DYNAMIC
+    }
+    if ("LIVE" in atAllTypes) {
+        enabledEvents += SubscriptionEventKind.LIVE_STARTED
+        mentionAllEvents += SubscriptionEventKind.LIVE_STARTED
+    }
+
+    val unsupportedDynamicSubTypes = atAllTypes intersect setOf("VIDEO", "MUSIC", "ARTICLE")
+    if (unsupportedDynamicSubTypes.isNotEmpty()) {
+        warnings += "旧版 @全体的动态子类型无法精确迁移，已跳过：${unsupportedDynamicSubTypes.joinToString(", ")}"
+    }
+
+    return SubscriptionPolicy(
+        enabledEvents = enabledEvents,
+        mentionAllEvents = mentionAllEvents.filterTo(linkedSetOf()) { it in enabledEvents },
+    )
+}
+
+private fun legacyScopedNode(root: JsonNode, contact: String, uid: String): JsonNode? {
+    if (!root.isObject) return null
+    val contactNode = root.get(contact) ?: root.get(contact.trimStart('-')) ?: return null
+    if (!contactNode.isObject) return null
+    return contactNode.get(uid) ?: contactNode.get("0")
+}
+
+private fun legacyListText(node: JsonNode): List<String> {
+    return when {
+        node.isMissingNode || node.isNull -> emptyList()
+        node.isArray -> node.mapNotNull { it.asTrimmedTextOrNull() }
+        else -> listOfNotNull(node.asTrimmedTextOrNull())
+    }
+}
+
+private fun legacyFilterAction(node: JsonNode): DynamicFilterAction? {
+    return when (node.asTrimmedTextOrNull()?.uppercase()) {
+        "WHITE_LIST", "WHITELIST", "WHITE", "ALLOW", "白名单" -> DynamicFilterAction.ALLOW
+        "BLACK_LIST", "BLACKLIST", "BLACK", "BLOCK", "黑名单" -> DynamicFilterAction.BLOCK
+        else -> null
+    }
+}
+
+private fun legacyFilterTypeToBlockKinds(typeText: String, warnings: MutableList<String>): List<DynamicBlockKind> {
+    return when (typeText.trim().uppercase()) {
+        "DYNAMIC", "动态" -> {
+            warnings += "旧版普通动态过滤无法精确迁移，已跳过：$typeText"
+            emptyList()
+        }
+        "FORWARD", "REPOST", "转发动态", "转发" -> listOf(DynamicBlockKind.REPOST)
+        "VIDEO", "视频" -> listOf(DynamicBlockKind.VIDEO)
+        "MUSIC", "音乐",
+        "ARTICLE", "专栏",
+        "LIVE", "直播" -> listOf(DynamicBlockKind.CARD)
+        else -> {
+            warnings += "旧版过滤类型无法识别，已跳过：$typeText"
+            emptyList()
+        }
+    }
+}
+
+private fun legacyAtAllType(typeText: String): String? {
+    return when (typeText.trim().uppercase()) {
+        "ALL", "全部" -> "ALL"
+        "DYNAMIC", "全部动态", "动态" -> "DYNAMIC"
+        "VIDEO", "视频" -> "VIDEO"
+        "MUSIC", "音乐" -> "MUSIC"
+        "ARTICLE", "专栏" -> "ARTICLE"
+        "LIVE", "直播" -> "LIVE"
+        else -> null
+    }
+}
+
+private fun JsonNode.asTrimmedTextOrNull(): String? {
+    if (isMissingNode || isNull) return null
+    return if (isNumber) asLong().toString() else asText("").trim().takeIf { it.isNotBlank() }
 }
 
 private fun SubscriptionExportItem.toCreateSubscriptionRequest(): CreateSubscriptionRequest {
@@ -2850,6 +3045,8 @@ private fun SubscriptionExportItem.toCreateSubscriptionRequest(): CreateSubscrip
         publisherPlatform = publisherKey.platformId.value,
         publisherKind = publisherKey.kind.name,
         publisherExternalId = publisherKey.externalId,
+        publisherName = publisher.name,
+        publisherThemeColors = publisher.themeColors,
         policy = policy,
         publisherLookupMode = publisherLookupMode,
     )
@@ -2867,10 +3064,15 @@ private fun parsePublisherLookupMode(value: String?): String {
     }
 }
 
-private fun placeholderPublisherInfo(key: PublisherKey): PublisherInfo {
+private fun legacyPublisherInfo(key: PublisherKey, name: String?): PublisherInfo? {
+    val displayName = name?.trim()?.takeIf { it.isNotBlank() && it != key.externalId } ?: return null
+    return placeholderPublisherInfo(key, displayName)
+}
+
+private fun placeholderPublisherInfo(key: PublisherKey, displayName: String = key.externalId): PublisherInfo {
     return PublisherInfo(
         key = key,
-        name = key.externalId,
+        name = displayName,
         avatar = MediaRef("", MediaKind.AVATAR),
     )
 }

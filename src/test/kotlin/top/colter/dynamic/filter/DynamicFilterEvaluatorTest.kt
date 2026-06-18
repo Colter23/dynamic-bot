@@ -6,6 +6,7 @@ import kotlin.test.assertTrue
 import top.colter.dynamic.core.data.DynamicBlockKind
 import top.colter.dynamic.core.data.DynamicContent
 import top.colter.dynamic.core.data.DynamicContentNodeText
+import top.colter.dynamic.core.data.DynamicFilterAction
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.DynamicLabel
 import top.colter.dynamic.core.data.DynamicMediaCard
@@ -44,32 +45,40 @@ class DynamicFilterEvaluatorTest {
         assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.TextRegex("Video\\s+Secret")))
         assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.TextContains("card secret")))
         assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.TextContains("poll option")))
-        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO)))
-        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.HasBlockKind(DynamicBlockKind.POLL)))
-        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.HasReference(DynamicReferenceKind.ORIGIN)))
+        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.HasElement(DynamicBlockKind.VIDEO)))
+        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.HasElement(DynamicBlockKind.POLL)))
+        assertTrue(DynamicFilterEvaluator.matches(update, FilterCondition.HasElement(DynamicBlockKind.REPOST)))
         assertFalse(DynamicFilterEvaluator.matches(update, FilterCondition.TextContains("Publisher Name")))
         assertFalse(DynamicFilterEvaluator.matches(update, FilterCondition.TextContains("dynamic-link")))
         assertFalse(DynamicFilterEvaluator.matches(update, FilterCondition.TextRegex("[")))
         assertFalse(DynamicFilterEvaluator.matches(mediaOnlyUpdate, FilterCondition.TextContains("hello world")))
-        assertTrue(DynamicFilterEvaluator.matches(mediaOnlyUpdate, FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO)))
+        assertTrue(DynamicFilterEvaluator.matches(mediaOnlyUpdate, FilterCondition.HasElement(DynamicBlockKind.VIDEO)))
     }
 
     @Test
-    fun isBlockedShouldBlockWhenAnyRuleMatches() {
+    fun isBlockedShouldApplyBlockAndAllowRules() {
         val update = demoUpdate()
-        val missed = blockRule(FilterCondition.TextContains("missing"))
-        val attachmentBlock = blockRule(FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO))
-        val textBlock = blockRule(FilterCondition.TextContains("Video Secret"))
+        val missedBlock = rule(FilterCondition.TextContains("missing"), DynamicFilterAction.BLOCK)
+        val videoBlock = rule(FilterCondition.HasElement(DynamicBlockKind.VIDEO), DynamicFilterAction.BLOCK)
+        val missedAllow = rule(FilterCondition.TextContains("missing"), DynamicFilterAction.ALLOW)
+        val textAllow = rule(FilterCondition.TextContains("Video Secret"), DynamicFilterAction.ALLOW)
 
-        assertTrue(DynamicFilterEvaluator.isBlocked(update, listOf(missed, attachmentBlock)))
-        assertTrue(DynamicFilterEvaluator.isBlocked(update, listOf(textBlock)))
-        assertFalse(DynamicFilterEvaluator.isBlocked(update, listOf(missed)))
+        assertFalse(DynamicFilterEvaluator.isBlocked(update, emptyList()))
+        assertFalse(DynamicFilterEvaluator.isBlocked(update, listOf(missedBlock)))
+        assertTrue(DynamicFilterEvaluator.isBlocked(update, listOf(videoBlock)))
+        assertTrue(DynamicFilterEvaluator.isBlocked(update, listOf(missedAllow)))
+        assertFalse(DynamicFilterEvaluator.isBlocked(update, listOf(textAllow)))
+        assertTrue(DynamicFilterEvaluator.isBlocked(update, listOf(videoBlock, textAllow)))
     }
 
-    private fun blockRule(condition: FilterCondition): DynamicFilterRule {
+    private fun rule(
+        condition: FilterCondition,
+        action: DynamicFilterAction = DynamicFilterAction.BLOCK,
+    ): DynamicFilterRule {
         return DynamicFilterRule(
             id = condition.hashCode(),
             subscriptionId = 1,
+            action = action,
             condition = condition,
             createdAtEpochSeconds = 1L,
         )

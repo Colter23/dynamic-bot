@@ -596,8 +596,12 @@ function subscriptionMentionTags(policy) {
 }
 
 function subscriptionFilterCell(subscription) {
-  const count = Number(subscription.filterRuleCount || 0);
-  return cell(count ? `${count} 条规则` : "无过滤", count ? "命中任一规则会阻止动态" : "动态直接投递");
+  const rules = subscription.filterRules || [];
+  const count = Number(subscription.filterRuleCount || rules.length || 0);
+  if (!count) return cell("无过滤", "动态直接投递");
+  const block = rules.filter(rule => (rule.action || "BLOCK") === "BLOCK").length;
+  const allow = rules.filter(rule => (rule.action || "BLOCK") === "ALLOW").length;
+  return cell(`黑 ${block} / 白 ${allow}`, allow ? "黑名单优先；白名单命中才投递" : "命中黑名单会阻止投递");
 }
 
 function renderPublisherLiveStatuses(rows, platformId) {

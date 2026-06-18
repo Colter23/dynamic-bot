@@ -288,7 +288,7 @@ private fun resolveFilterTarget(
 
 private fun formatFilterRule(rule: DynamicFilterRule, publisher: Publisher? = null): String {
     val owner = publisher?.let { "${it.platformId.value}:${it.externalId}" } ?: "subscriptionId=${rule.subscriptionId}"
-    return "#${rule.id} $owner block ${rule.condition}"
+    return "#${rule.id} $owner ${rule.action.name.lowercase()} ${rule.condition}"
 }
 
 private data class ResolvedFilterTarget(
@@ -941,7 +941,7 @@ private class FilterAddElementCommandHandler(
 
         val result = DynamicFilterRuleRepository.addRule(
             subscriptionId = target.subscription.id,
-            condition = FilterCondition.HasBlockKind(element),
+            condition = FilterCondition.HasElement(element),
         )
         val state = if (result.created) "已创建" else "已存在"
         return success("过滤规则$state：${formatFilterRule(result.value, target.publisher)}")

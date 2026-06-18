@@ -112,7 +112,7 @@ class CommandListenerTest {
 
         assertEquals(CommandStatus.SUCCESS, result.status)
         val rule = DynamicFilterRuleRepository.findAll().single()
-        assertEquals(FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO), rule.condition)
+        assertEquals(FilterCondition.HasElement(DynamicBlockKind.VIDEO), rule.condition)
     }
 
     @Test

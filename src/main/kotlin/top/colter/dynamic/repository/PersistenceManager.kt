@@ -211,6 +211,42 @@ private val DATABASE_MIGRATIONS: List<DatabaseMigration> = listOf(
                 """.trimIndent(),
             )
         }
+    },
+    DatabaseMigration(
+        id = "dynamic-filter-rule-action-and-element-condition",
+        description = "动态过滤规则迁移为黑白名单动作和内容元素条件",
+    ) {
+        if (tableExists("dynamic_filter_rule")) {
+            if (!columnExists("dynamic_filter_rule", "action")) {
+                exec(
+                    "ALTER TABLE ${quoteIdentifier("dynamic_filter_rule")} " +
+                        "ADD COLUMN ${quoteIdentifier("action")} VARCHAR(20) NOT NULL DEFAULT 'BLOCK'",
+                )
+            }
+            exec(
+                """
+                UPDATE ${quoteIdentifier("dynamic_filter_rule")}
+                SET ${quoteIdentifier("action")} = 'BLOCK'
+                WHERE ${quoteIdentifier("action")} IS NULL
+                   OR TRIM(${quoteIdentifier("action")}) = ''
+                """.trimIndent(),
+            )
+            exec(
+                """
+                UPDATE ${quoteIdentifier("dynamic_filter_rule")}
+                SET ${quoteIdentifier("condition_json")} =
+                    REPLACE(${quoteIdentifier("condition_json")}, '"HAS_BLOCK_KIND"', '"HAS_ELEMENT"')
+                WHERE ${quoteIdentifier("condition_json")} LIKE '%HAS_BLOCK_KIND%'
+                """.trimIndent(),
+            )
+            exec(
+                """
+                UPDATE ${quoteIdentifier("dynamic_filter_rule")}
+                SET ${quoteIdentifier("condition_json")} = '{"type":"HAS_ELEMENT","kind":"REPOST"}'
+                WHERE ${quoteIdentifier("condition_json")} LIKE '%HAS_REFERENCE%'
+                """.trimIndent(),
+            )
+        }
     }
 )
 

@@ -43,6 +43,7 @@ import top.colter.dynamic.core.command.CommandSpec
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicBlockKind
+import top.colter.dynamic.core.data.DynamicFilterAction
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.Message
@@ -1062,13 +1063,14 @@ class AdminServerTest {
         val rule = service.createFilterRule(
             subscription.id,
             CreateFilterRuleRequest(
-                condition = FilterCondition.HasBlockKind(DynamicBlockKind.POLL),
+                condition = FilterCondition.HasElement(DynamicBlockKind.POLL),
             ),
         )
 
         assertEquals("new-up", updated.name)
         assertEquals("https://example.com/banner.png", updated.bannerUri)
-        assertEquals(FilterCondition.HasBlockKind(DynamicBlockKind.POLL), rule.condition)
+        assertEquals(DynamicFilterAction.BLOCK, rule.action)
+        assertEquals(FilterCondition.HasElement(DynamicBlockKind.POLL), rule.condition)
         assertEquals(1, DynamicFilterRuleRepository.findBySubscriptionId(subscription.id).size)
     }
 
@@ -1081,7 +1083,7 @@ class AdminServerTest {
         val subscription = SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)!!
         DynamicFilterRuleRepository.addRule(
             subscription.id,
-            FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO),
+            FilterCondition.HasElement(DynamicBlockKind.VIDEO),
         )
         val service = service(FakePublisherFollowPlugin())
 
@@ -1090,7 +1092,8 @@ class AdminServerTest {
         val subscriberDto = service.subscribers().single()
 
         assertEquals(1, dto.filterRuleCount)
-        assertEquals(FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO), dto.filterRules.single().condition)
+        assertEquals(DynamicFilterAction.BLOCK, dto.filterRules.single().action)
+        assertEquals(FilterCondition.HasElement(DynamicBlockKind.VIDEO), dto.filterRules.single().condition)
         assertEquals(1, publisherDto.subscriptionCount)
         assertEquals(1, subscriberDto.subscriptionCount)
     }
@@ -1118,14 +1121,15 @@ class AdminServerTest {
             ),
         )
         DynamicFilterRuleRepository.addRule(
-            created.subscription.id,
-            FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO),
+            subscriptionId = created.subscription.id,
+            condition = FilterCondition.HasElement(DynamicBlockKind.VIDEO),
+            action = DynamicFilterAction.ALLOW,
         )
 
         val document = service.exportSubscriptions(SubscriptionExportRequest(listOf(created.subscription.id)))
         val item = document.subscriptions.single()
 
-        assertEquals(1, document.schemaVersion)
+        assertEquals(2, document.schemaVersion)
         assertEquals("bilibili", item.publisher.platformId)
         assertEquals("USER", item.publisher.kind)
         assertEquals("123", item.publisher.externalId)
@@ -1136,7 +1140,8 @@ class AdminServerTest {
         assertEquals("account", item.target.accountId)
         assertEquals(policy, item.policy)
         assertEquals("ALWAYS", item.linkParseTriggerMode)
-        assertEquals(FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO), item.filterRules.single().condition)
+        assertEquals(DynamicFilterAction.ALLOW, item.filterRules.single().action)
+        assertEquals(FilterCondition.HasElement(DynamicBlockKind.VIDEO), item.filterRules.single().condition)
     }
 
     @Test
@@ -1159,7 +1164,12 @@ class AdminServerTest {
                         enabledEvents = setOf(SubscriptionEventKind.DYNAMIC),
                         mentionAllEvents = emptySet(),
                     ),
-                    filterRules = listOf(SubscriptionExportFilterRule(FilterCondition.TextContains("广告"))),
+                    filterRules = listOf(
+                        SubscriptionExportFilterRule(
+                            action = DynamicFilterAction.ALLOW,
+                            condition = FilterCondition.TextContains("广告"),
+                        ),
+                    ),
                     linkParseTriggerMode = "ALWAYS",
                 ),
             ),
@@ -1175,7 +1185,9 @@ class AdminServerTest {
         assertEquals("测试群", subscriber?.name)
         assertEquals(avatar, subscriber?.avatar)
         assertEquals(LinkParseTriggerMode.ALWAYS, LinkParseTargetConfigRepository.findByAddress(subscriber!!.address)?.triggerMode)
-        assertEquals(FilterCondition.TextContains("广告"), DynamicFilterRuleRepository.findBySubscriptionId(subscription.id).single().condition)
+        val rule = DynamicFilterRuleRepository.findBySubscriptionId(subscription.id).single()
+        assertEquals(DynamicFilterAction.ALLOW, rule.action)
+        assertEquals(FilterCondition.TextContains("广告"), rule.condition)
     }
 
     @Test
@@ -1228,29 +1240,80 @@ class AdminServerTest {
                   - '-1'
               91352:
                 name: 心羽萝妮Official
+                color: '#66CCFF'
                 contacts:
                   - '-465134752'
                   - 3375582524
               1340190821:
                 name: 崩坏星穹铁道
                 contacts: []
+            filter:
+              '-465134752':
+                91352:
+                  typeSelect:
+                    mode: BLACK_LIST
+                    list:
+                      - VIDEO
+                      - FORWARD
+                  regularSelect:
+                    mode: WHITE_LIST
+                    list:
+                      - 萝妮
+              '-1':
+                0:
+                  typeSelect:
+                    mode: WHITE_LIST
+                    list:
+                      - DYNAMIC
+            atAll:
+              '-465134752':
+                91352:
+                  - DYNAMIC
         """.trimIndent()
 
         val result = service.importLegacyDynamicSubscriptions(LegacyDynamicSubscriptionImportRequest(content))
         val publisher = PublisherRepository.findByKey(PublisherKey.of("bilibili", PublisherKind.USER, "91352"))
+        val globalPublisher = PublisherRepository.findByKey(PublisherKey.of("bilibili", PublisherKind.USER, "1340190821"))
         val group = SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "465134752"))
+        val globalGroup = SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "1"))
         val user = SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.USER, "3375582524"))
 
-        assertEquals(2, result.total)
-        assertEquals(2, result.created)
+        assertEquals(4, result.total)
+        assertEquals(4, result.created)
         assertEquals(0, result.failed)
         assertEquals(0, plugin.fetchPublisherInfoCalls)
         assertEquals(0, plugin.followPublisherCalls)
-        assertEquals("91352", publisher?.name)
+        assertEquals("心羽萝妮Official", publisher?.name)
+        assertEquals("崩坏星穹铁道", globalPublisher?.name)
         assertNotNull(group)
+        assertNotNull(globalGroup)
         assertNotNull(user)
-        assertEquals(2, SubscriptionRepository.findAll().size)
-        assertNull(SubscriberRepository.findByAddress(TargetAddress.of("qq", TargetKind.GROUP, "1")))
+        assertEquals(4, SubscriptionRepository.findAll().size)
+        assertNotNull(publisher)
+        assertNotNull(PublisherDrawThemeRepository.findByPublisherId(publisher.id))
+        val directSubscription = SubscriptionRepository.findBySubscriberAndPublisher(group.id, publisher.id)
+        assertNotNull(directSubscription)
+        assertEquals(
+            SubscriptionPolicy(
+                enabledEvents = setOf(SubscriptionEventKind.DYNAMIC),
+                mentionAllEvents = setOf(SubscriptionEventKind.DYNAMIC),
+            ),
+            directSubscription.policy,
+        )
+        assertEquals(
+            setOf(
+                DynamicFilterAction.BLOCK to FilterCondition.HasElement(DynamicBlockKind.VIDEO),
+                DynamicFilterAction.BLOCK to FilterCondition.HasElement(DynamicBlockKind.REPOST),
+                DynamicFilterAction.ALLOW to FilterCondition.TextRegex("萝妮"),
+            ),
+            DynamicFilterRuleRepository.findBySubscriptionId(directSubscription.id)
+                .map { it.action to it.condition }
+                .toSet(),
+        )
+        val globalSubscription = SubscriptionRepository.findBySubscriberAndPublisher(globalGroup.id, publisher.id)
+        assertNotNull(globalSubscription)
+        assertTrue(DynamicFilterRuleRepository.findBySubscriptionId(globalSubscription.id).isEmpty())
+        assertTrue(result.warnings.any { it.contains("旧版普通动态过滤无法精确迁移") })
     }
 
     @Test
@@ -1338,7 +1401,7 @@ class AdminServerTest {
         )
         DynamicFilterRuleRepository.addRule(
             created.subscription.id,
-            FilterCondition.HasBlockKind(DynamicBlockKind.VIDEO),
+            FilterCondition.HasElement(DynamicBlockKind.VIDEO),
         )
         val nextPolicy = SubscriptionPolicy(
             enabledEvents = setOf(SubscriptionEventKind.DYNAMIC, SubscriptionEventKind.LIVE_STARTED),
@@ -1350,7 +1413,7 @@ class AdminServerTest {
                     publisher = SubscriptionExportPublisher("bilibili", "USER", "123"),
                     target = SubscriptionExportTarget("qq", "GROUP", "100"),
                     policy = nextPolicy,
-                    filterRules = listOf(SubscriptionExportFilterRule(FilterCondition.TextContains("抽奖"))),
+                    filterRules = listOf(SubscriptionExportFilterRule(condition = FilterCondition.TextContains("抽奖"))),
                 ),
             ),
         )
@@ -1450,7 +1513,7 @@ class AdminServerTest {
                 SubscriptionExportItem(
                     publisher = SubscriptionExportPublisher("bilibili", "USER", "123"),
                     target = SubscriptionExportTarget("qq", "GROUP", "100"),
-                    filterRules = listOf(SubscriptionExportFilterRule(FilterCondition.TextRegex("("))),
+                    filterRules = listOf(SubscriptionExportFilterRule(condition = FilterCondition.TextRegex("("))),
                 ),
             ),
         )
@@ -1514,7 +1577,7 @@ class AdminServerTest {
         val importResponse = client.post("/api/subscriptions/import") {
             header(HttpHeaders.Authorization, "Bearer test-token")
             contentType(ContentType.Application.Json)
-            setBody("""{"schemaVersion":1,"exportedAtEpochSeconds":1,"subscriptions":[]}""")
+            setBody("""{"schemaVersion":2,"exportedAtEpochSeconds":1,"subscriptions":[]}""")
         }
         val legacyImportResponse = client.post("/api/subscriptions/import/legacy-dynamic-yaml") {
             header(HttpHeaders.Authorization, "Bearer test-token")
@@ -1524,7 +1587,7 @@ class AdminServerTest {
 
         assertEquals(HttpStatusCode.Unauthorized, unauthorized.status)
         assertEquals(HttpStatusCode.OK, exportResponse.status)
-        assertTrue(exportResponse.bodyAsText().contains("\"schemaVersion\":1"))
+        assertTrue(exportResponse.bodyAsText().contains("\"schemaVersion\":2"))
         assertEquals(HttpStatusCode.OK, importResponse.status)
         assertTrue(importResponse.bodyAsText().contains("\"total\":0"))
         assertEquals(HttpStatusCode.OK, legacyImportResponse.status)

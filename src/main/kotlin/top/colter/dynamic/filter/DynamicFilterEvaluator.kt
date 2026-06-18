@@ -2,6 +2,7 @@
 
 import top.colter.dynamic.core.data.DynamicBlock
 import top.colter.dynamic.core.data.DynamicBlockKind
+import top.colter.dynamic.core.data.DynamicFilterAction
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.FilterCondition
@@ -14,7 +15,13 @@ import top.colter.dynamic.core.data.TextBlock
 
 public object DynamicFilterEvaluator {
     public fun isBlocked(update: SourceUpdate, rules: Iterable<DynamicFilterRule>): Boolean {
-        return rules.any { matches(update, it.condition) }
+        if (update.payload !is DynamicPayload) return false
+        val ruleList = rules.toList()
+        if (ruleList.any { it.action == DynamicFilterAction.BLOCK && matches(update, it.condition) }) {
+            return true
+        }
+        val allowRules = ruleList.filter { it.action == DynamicFilterAction.ALLOW }
+        return allowRules.isNotEmpty() && allowRules.none { matches(update, it.condition) }
     }
 
     public fun matches(update: SourceUpdate, rule: DynamicFilterRule): Boolean {
@@ -23,7 +30,7 @@ public object DynamicFilterEvaluator {
 
     public fun matches(update: SourceUpdate, condition: FilterCondition): Boolean {
         return when (condition) {
-            is FilterCondition.HasBlockKind -> hasBlockKind(update, condition.kind)
+            is FilterCondition.HasElement -> hasBlockKind(update, condition.kind)
             is FilterCondition.TextContains -> filterableTextFields(update).any {
                 it.contains(condition.value, ignoreCase = condition.ignoreCase)
             }
@@ -31,11 +38,6 @@ public object DynamicFilterEvaluator {
                 val regex = Regex(condition.pattern)
                 filterableTextFields(update).any { regex.containsMatchIn(it) }
             }.getOrDefault(false)
-            is FilterCondition.HasReference -> {
-                val payload = update.payload as? DynamicPayload ?: return false
-                payload.blocks.filterIsInstance<RepostBlock>()
-                    .any { reference -> condition.kind == null || reference.referenceKind == condition.kind }
-            }
         }
     }
 

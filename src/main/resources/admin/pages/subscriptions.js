@@ -237,10 +237,33 @@ function subscriptionTableHtml(rows) {
     { title: "消息目标", render: s => subscriptionTargetCell(s.subscriber) },
     { title: "接收事件", render: s => tags(policyEvents(s.policy).map(eventLabel)) },
     { title: "@全体", render: s => tags(mentionEvents(s.policy).map(eventLabel)) },
-    { title: "动态过滤", render: s => cell(`${s.filterRuleCount || 0} 条阻止规则`, "仅作用于动态内容") },
+    { title: "动态过滤", render: s => subscriptionFilterSummaryCell(s) },
     { title: "更新时间", render: s => `<span class="sub-line">${fmtTime(s.updatedAtEpochSeconds)}</span>` },
     { title: "操作", render: s => `<div class="row-actions"><button data-action="subscription-detail" data-id="${s.id}">编辑</button><button class="danger" data-action="delete-subscription" data-id="${s.id}">删除</button></div>` }
   ]);
+}
+
+function subscriptionFilterSummaryCell(subscription) {
+  const summary = filterRuleSummary(subscription.filterRules || []);
+  if (!summary.total) return cell("无过滤", "动态直接投递");
+  const main = `黑 ${summary.block} / 白 ${summary.allow}`;
+  const detail = summary.allow
+    ? "黑名单优先；白名单命中才投递"
+    : "命中黑名单会阻止投递";
+  return cell(main, detail);
+}
+
+function filterRuleSummary(rules) {
+  const values = rules || [];
+  return {
+    total: values.length,
+    block: values.filter(rule => filterRuleAction(rule) === "BLOCK").length,
+    allow: values.filter(rule => filterRuleAction(rule) === "ALLOW").length,
+  };
+}
+
+function filterRuleAction(rule) {
+  return (rule && rule.action) || "BLOCK";
 }
 
 function subscriptionPublisherCell(publisher) {
@@ -520,10 +543,10 @@ function refreshSubscriptionImportFormatUi() {
   const note = $("subscriptionImportNote");
   if (labelNode) labelNode.textContent = legacy ? "粘贴旧版 YAML" : "粘贴 JSON";
   if (input) input.placeholder = legacy
-    ? "粘贴 bilibili-dynamic-mirai-plugin 的订阅 YAML，只会导入 dynamic 数据"
+    ? "粘贴 bilibili-dynamic-mirai-plugin 的订阅 YAML"
     : "可以粘贴导出的 dynamic-bot 订阅 JSON";
   if (note) note.textContent = legacy
-    ? "旧版 miari YAML 只解析 dynamic 字段，跳过 0；负数 QQ 号导入为群，正数导入为好友。"
+    ? "旧版 mirai YAML 会导入 dynamic 订阅、过滤和群 @全体；dynamic.0 会作为全局联系人展开。"
     : "导入不是全局事务：单条失败不会影响其他订阅。";
 }
 
@@ -535,7 +558,7 @@ function parseSubscriptionImportText() {
   } catch (error) {
     throw new Error("JSON 格式无效，请检查后重试");
   }
-  if (!documentData || documentData.schemaVersion !== 1 || !Array.isArray(documentData.subscriptions)) {
+  if (!documentData || documentData.schemaVersion !== 2 || !Array.isArray(documentData.subscriptions)) {
     throw new Error("订阅导入文件格式无效");
   }
   return documentData;
@@ -589,7 +612,7 @@ function renderSubscriptionImportSummary() {
       ? `<strong>${esc(summary.error)}</strong>`
       : `<strong>旧版 YAML 待导入</strong><ul>
           <li>预计订阅 ${summary.subscriptionCount} 条，发布者 ${summary.publisherCount} 个，QQ 群 ${summary.groupCount} 个，QQ 好友 ${summary.userCount} 个</li>
-          <li>导入时会跳过 dynamic.0，并使用发布者 UID 创建占位发布者</li>
+          <li>dynamic.0 会展开到每个发布者；旧名称和主题色会作为占位资料导入</li>
         </ul>`;
     return;
   }
@@ -619,9 +642,9 @@ function summarizeLegacyDynamicYamlText(text) {
   let currentUid = "";
   let inContacts = false;
   const publisherIds = new Set();
+  const contactsByUid = new Map();
   const groupIds = new Set();
   const userIds = new Set();
-  let subscriptionCount = 0;
   for (const line of lines) {
     if (/^dynamic\s*:\s*$/.test(line)) {
       inDynamic = true;
@@ -637,9 +660,10 @@ function summarizeLegacyDynamicYamlText(text) {
       currentUid = uidMatch[1];
       inContacts = false;
       if (currentUid !== "0") publisherIds.add(currentUid);
+      if (!contactsByUid.has(currentUid)) contactsByUid.set(currentUid, new Set());
       continue;
     }
-    if (!currentUid || currentUid === "0") continue;
+    if (!currentUid) continue;
     if (/^\s{4}contacts\s*:\s*$/.test(line)) {
       inContacts = true;
       continue;
@@ -650,14 +674,24 @@ function summarizeLegacyDynamicYamlText(text) {
         const contact = contactMatch[1];
         const targetId = contact.replace(/^-/, "");
         if (!targetId) continue;
-        subscriptionCount += 1;
-        if (contact.startsWith("-")) groupIds.add(targetId); else userIds.add(targetId);
+        contactsByUid.get(currentUid)?.add(contact);
       } else if (/^\s{4}\S/.test(line)) {
         inContacts = false;
       }
     }
   }
-  if (!publisherIds.size && !subscriptionCount) {
+  let subscriptionCount = 0;
+  const globalContacts = contactsByUid.get("0") || new Set();
+  publisherIds.forEach(uid => {
+    const contacts = new Set([...(globalContacts || []), ...((contactsByUid.get(uid) || new Set()))]);
+    contacts.forEach(contact => {
+      const targetId = contact.replace(/^-/, "");
+      if (!targetId) return;
+      subscriptionCount += 1;
+      if (contact.startsWith("-")) groupIds.add(targetId); else userIds.add(targetId);
+    });
+  });
+  if (!publisherIds.size || !subscriptionCount) {
     return { error: "没有识别到可导入的 dynamic 订阅" };
   }
   return {
@@ -760,7 +794,7 @@ async function openCreateSubscription() {
   const initialSupportsLive = publisherPlatformSupportsLive(initialPublisherPlatform);
   let targetCandidates = [];
   let publisherCandidates = [];
-  let createFilterConditions = [];
+  let createFilterRules = [];
 
   openModal("添加订阅", `
     <div class="subscription-create subscription-create-subscription">
@@ -861,14 +895,14 @@ async function openCreateSubscription() {
         <div class="panel-head">
           <div>
             <h2>动态内容过滤</h2>
-            <p>命中任意规则的动态会被阻止投递；不填写则不添加过滤规则。</p>
+            <p>黑名单命中会阻止；存在白名单时，动态需命中白名单才投递。</p>
           </div>
           <div class="row-actions"><button type="button" class="danger compact" id="subCreateFilterClear">清空</button></div>
         </div>
         <div class="form-grid create-filter-form">
-          <div class="field"><label>类型</label><select id="subCreateFilterType"><option value="HAS_BLOCK_KIND">元素</option><option value="TEXT_CONTAINS">关键词</option><option value="TEXT_REGEX">正则</option><option value="HAS_REFERENCE">引用</option></select></div>
+          <div class="field"><label>名单</label><select id="subCreateFilterAction"><option value="BLOCK">黑名单</option><option value="ALLOW">白名单</option></select></div>
+          <div class="field"><label>类型</label><select id="subCreateFilterType"><option value="HAS_ELEMENT">内容元素</option><option value="TEXT_CONTAINS">关键词</option><option value="TEXT_REGEX">正则</option></select></div>
           <div class="field" id="subCreateFilterElementWrap"><label>元素</label><select id="subCreateFilterElement">${blockKinds.map(([v,t]) => `<option value="${v}">${t}</option>`).join("")}</select></div>
-          <div class="field" id="subCreateFilterReferenceWrap" hidden><label>引用</label><select id="subCreateFilterReference"><option value="">任意引用</option><option value="REPOST">转发</option><option value="QUOTE">引用</option><option value="ORIGIN">原动态</option></select></div>
           <div class="field full" id="subCreateFilterTextWrap" hidden><label>内容</label><input id="subCreateFilterText" placeholder="关键词或正则表达式"></div>
           <div class="field filter-add-field"><button type="button" id="subCreateFilterAdd">添加规则</button></div>
         </div>
@@ -889,7 +923,7 @@ async function openCreateSubscription() {
       selectedPublishers,
       selectedTargets,
       collectPolicy("subPolicy"),
-      createFilterConditions,
+      createFilterRules,
     );
     if (documentData.subscriptions.length === 0) {
       throw new Error("选择的订阅组合都已经存在，无需重复创建");
@@ -1100,28 +1134,27 @@ async function openCreateSubscription() {
   const renderCreateFilters = () => {
     const list = $("subCreateFilterList");
     if (!list) return;
-    list.innerHTML = renderCreateSubscriptionFilterList(createFilterConditions);
+    list.innerHTML = renderCreateSubscriptionFilterList(createFilterRules);
     list.querySelectorAll("[data-create-filter-remove]").forEach(button => {
       button.onclick = () => {
-        createFilterConditions.splice(Number(button.dataset.createFilterRemove), 1);
+        createFilterRules.splice(Number(button.dataset.createFilterRemove), 1);
         renderCreateFilters();
       };
     });
   };
   const refreshCreateFilterForm = () => {
     const type = $("subCreateFilterType").value;
-    $("subCreateFilterElementWrap").hidden = type !== "HAS_BLOCK_KIND";
-    $("subCreateFilterReferenceWrap").hidden = type !== "HAS_REFERENCE";
+    $("subCreateFilterElementWrap").hidden = type !== "HAS_ELEMENT";
     $("subCreateFilterTextWrap").hidden = !["TEXT_CONTAINS", "TEXT_REGEX"].includes(type);
   };
   $("subCreateFilterType").onchange = refreshCreateFilterForm;
   $("subCreateFilterAdd").onclick = () => {
     try {
-      const condition = collectCreateSubscriptionFilterCondition();
-      if (createFilterConditions.some(item => createFilterConditionKey(item) === createFilterConditionKey(condition))) {
+      const rule = collectCreateSubscriptionFilterRule();
+      if (createFilterRules.some(item => createFilterRuleKey(item) === createFilterRuleKey(rule))) {
         throw new Error("这条过滤规则已经添加过了");
       }
-      createFilterConditions.push(condition);
+      createFilterRules.push(rule);
       $("subCreateFilterText").value = "";
       renderCreateFilters();
       setCreateSubscriptionFooterMessage("");
@@ -1130,7 +1163,7 @@ async function openCreateSubscription() {
     }
   };
   $("subCreateFilterClear").onclick = () => {
-    createFilterConditions = [];
+    createFilterRules = [];
     renderCreateFilters();
   };
   refreshCreateFilterForm();
@@ -1433,11 +1466,10 @@ function setCreateSubscriptionTargetChecked(checked) {
   });
 }
 
-function buildCreateSubscriptionImportDocument(publishers, targets, policy, filterConditions = []) {
+function buildCreateSubscriptionImportDocument(publishers, targets, policy, filterRules = []) {
   const subscriptions = [];
   const existingPairs = existingSubscriptionPairSet();
   const addedPairs = new Set();
-  const filterRules = filterConditions.map(condition => ({ condition }));
   publishers.forEach(publisher => {
     targets.forEach(target => {
       const existingPair = publisher.publisherId && target.subscriberId
@@ -1469,7 +1501,7 @@ function buildCreateSubscriptionImportDocument(publishers, targets, policy, filt
     });
   });
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     exportedAtEpochSeconds: Math.floor(Date.now() / 1000),
     subscriptions,
   };
@@ -1734,10 +1766,11 @@ function renderFilterList(subscription) {
   if (!rules.length) return `<div class="empty">暂无过滤规则</div>`;
   return `<div class="filter-rule-table-wrap">
     <table class="filter-rule-table">
-      <thead><tr><th>类型</th><th>条件</th><th>创建时间</th><th>操作</th></tr></thead>
+      <thead><tr><th>名单</th><th>类型</th><th>条件</th><th>创建时间</th><th>操作</th></tr></thead>
       <tbody>${rules.map(rule => `<tr>
+        <td>${filterActionPill(rule)}</td>
         <td><span class="primary-line">${esc(filterConditionTypeText(rule.condition))}</span></td>
-        <td>${cell(filterConditionText(rule.condition), "命中即阻止")}</td>
+        <td>${cell(filterConditionText(rule.condition), filterRuleAction(rule) === "ALLOW" ? "命中白名单才投递" : "命中黑名单会阻止")}</td>
         <td><span class="sub-line">${fmtTime(rule.createdAtEpochSeconds)}</span></td>
         <td><button class="danger compact" data-action="delete-filter" data-id="${rule.id}" data-subscription="${subscription.id}">删除</button></td>
       </tr>`).join("")}</tbody>
@@ -1745,64 +1778,78 @@ function renderFilterList(subscription) {
   </div>`;
 }
 
+function filterActionPill(rule) {
+  const action = filterRuleAction(rule);
+  const cls = action === "ALLOW" ? "ok" : "bad";
+  const text = action === "ALLOW" ? "白名单" : "黑名单";
+  return `<span class="pill ${cls}">${text}</span>`;
+}
+
 function filterConditionTypeText(condition) {
   if (!condition) return "-";
-  if (condition.type === "HAS_BLOCK_KIND") return "元素";
+  if (condition.type === "HAS_ELEMENT") return "内容元素";
   if (condition.type === "TEXT_CONTAINS") return "关键词";
   if (condition.type === "TEXT_REGEX") return "正则";
-  if (condition.type === "HAS_REFERENCE") return "引用";
   return condition.type || "-";
 }
 
 function filterConditionText(condition) {
   if (!condition) return "-";
-  if (condition.type === "HAS_BLOCK_KIND") return label(condition.kind);
+  if (condition.type === "HAS_ELEMENT") return label(condition.kind);
   if (condition.type === "TEXT_CONTAINS") return condition.value;
   if (condition.type === "TEXT_REGEX") return condition.pattern;
-  if (condition.type === "HAS_REFERENCE") return condition.kind ? label(condition.kind) : "任意引用";
   return condition.type || JSON.stringify(condition);
 }
 
-function renderCreateSubscriptionFilterList(conditions) {
-  if (!conditions.length) {
+function renderCreateSubscriptionFilterList(rules) {
+  if (!rules.length) {
     return `<div class="empty create-filter-empty">暂无过滤规则</div>`;
   }
-  return `<div class="create-filter-items">${conditions.map((condition, index) => `
+  return `<div class="create-filter-items">${rules.map((rule, index) => `
     <div class="create-filter-item">
       <div>
-        <strong>${esc(filterConditionTypeText(condition))}</strong>
-        <span>${esc(filterConditionText(condition))}</span>
+        <strong>${filterRuleAction(rule) === "ALLOW" ? "白名单" : "黑名单"} · ${esc(filterConditionTypeText(rule.condition))}</strong>
+        <span>${esc(filterConditionText(rule.condition))}</span>
       </div>
       <button type="button" class="danger compact" data-create-filter-remove="${attr(index)}">删除</button>
     </div>
   `).join("")}</div>`;
 }
 
-function collectCreateSubscriptionFilterCondition() {
-  const type = $("subCreateFilterType").value;
-  if (type === "HAS_BLOCK_KIND") return { type, kind: $("subCreateFilterElement").value };
-  if (type === "HAS_REFERENCE") return { type, kind: $("subCreateFilterReference").value || null };
-  const text = $("subCreateFilterText").value.trim();
+function collectCreateSubscriptionFilterRule() {
+  return {
+    action: $("subCreateFilterAction").value || "BLOCK",
+    condition: collectFilterConditionFrom("subCreate"),
+  };
+}
+
+function collectFilterConditionFrom(prefix) {
+  const type = $(`${prefix}FilterType`).value;
+  const textInput = $(`${prefix}FilterText`);
+  const elementInput = $(`${prefix}FilterElement`);
+  if (type === "HAS_ELEMENT") return { type, kind: elementInput.value };
+  const text = textInput.value.trim();
   if (!text) throw new Error("请填写过滤内容");
   if (type === "TEXT_REGEX") return { type, pattern: text };
   return { type, value: text, ignoreCase: true };
 }
 
-function createFilterConditionKey(condition) {
-  return JSON.stringify(condition || {});
+function createFilterRuleKey(rule) {
+  return JSON.stringify(rule || {});
 }
 
 function openFilterRuleModal(subscriptionId) {
   openModal("添加过滤规则", `
     <div class="form-grid">
-      <div class="field"><label>类型</label><select id="filterType"><option value="HAS_BLOCK_KIND">元素</option><option value="TEXT_CONTAINS">关键词</option><option value="TEXT_REGEX">正则</option><option value="HAS_REFERENCE">引用</option></select></div>
+      <div class="field"><label>名单</label><select id="filterAction"><option value="BLOCK">黑名单</option><option value="ALLOW">白名单</option></select></div>
+      <div class="field"><label>类型</label><select id="filterType"><option value="HAS_ELEMENT">内容元素</option><option value="TEXT_CONTAINS">关键词</option><option value="TEXT_REGEX">正则</option></select></div>
       <div class="field" id="filterElementWrap"><label>元素</label><select id="filterElement">${blockKinds.map(([v,t]) => `<option value="${v}">${t}</option>`).join("")}</select></div>
-      <div class="field" id="filterReferenceWrap" hidden><label>引用</label><select id="filterReference"><option value="">任意引用</option><option value="REPOST">转发</option><option value="QUOTE">引用</option><option value="ORIGIN">原动态</option></select></div>
       <div class="field full" id="filterTextWrap" hidden><label>内容</label><input id="filterText"></div>
     </div>
   `, async () => {
     const condition = collectFilterCondition();
-    await api(`/subscriptions/${subscriptionId}/filter-rules`, { method: "POST", body: JSON.stringify({ condition }) });
+    const action = $("filterAction").value || "BLOCK";
+    await api(`/subscriptions/${subscriptionId}/filter-rules`, { method: "POST", body: JSON.stringify({ action, condition }) });
     closeModal();
     invalidate("subscriptions", "dashboard");
     await loadSubscriptions(true);
@@ -1811,8 +1858,7 @@ function openFilterRuleModal(subscriptionId) {
   }, { size: "small" });
   const refresh = () => {
     const type = $("filterType").value;
-    $("filterElementWrap").hidden = type !== "HAS_BLOCK_KIND";
-    $("filterReferenceWrap").hidden = type !== "HAS_REFERENCE";
+    $("filterElementWrap").hidden = type !== "HAS_ELEMENT";
     $("filterTextWrap").hidden = !["TEXT_CONTAINS", "TEXT_REGEX"].includes(type);
   };
   $("filterType").onchange = refresh;
@@ -1821,8 +1867,7 @@ function openFilterRuleModal(subscriptionId) {
 
 function collectFilterCondition() {
   const type = $("filterType").value;
-  if (type === "HAS_BLOCK_KIND") return { type, kind: $("filterElement").value };
-  if (type === "HAS_REFERENCE") return { type, kind: $("filterReference").value || null };
+  if (type === "HAS_ELEMENT") return { type, kind: $("filterElement").value };
   const text = $("filterText").value.trim();
   if (!text) throw new Error("请填写过滤内容");
   if (type === "TEXT_REGEX") return { type, pattern: text };
