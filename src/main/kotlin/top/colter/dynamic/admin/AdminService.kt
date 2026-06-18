@@ -785,7 +785,7 @@ public class AdminService(
         return filteredPublisherInfos.map { it.toCandidateDto(pluginInfo) }
     }
 
-    public suspend fun createPublisher(request: CreatePublisherRequest): PublisherDto {
+    public suspend fun createPublisher(request: CreatePublisherRequest): CreatePublisherResponse {
         val platform = request.platformId.trim().lowercase().also {
             require(it.isNotBlank()) { "发布者平台不能为空" }
         }
@@ -799,9 +799,18 @@ public class AdminService(
         logger.info {
             "后台发布者已${upsert.operationLabel()}：publisherId=${publisher.id}，platform=$platform，externalId=$externalId"
         }
-        return PublisherRepository.findById(publisher.id)?.toDto(
-            drawTheme = PublisherDrawThemeRepository.findByPublisherId(publisher.id),
-        ) ?: publisher.toDto()
+        val autoFollowOutcome = if (request.autoFollow) {
+            tryEnsureFollowed(platform, externalId)
+        } else {
+            AutoFollowOutcome(followed = false)
+        }
+        return CreatePublisherResponse(
+            publisher = PublisherRepository.findById(publisher.id)?.toDto(
+                drawTheme = PublisherDrawThemeRepository.findByPublisherId(publisher.id),
+            ) ?: publisher.toDto(),
+            autoFollowed = autoFollowOutcome.followed,
+            warnings = listOfNotNull(autoFollowOutcome.warning),
+        )
     }
 
     public fun updatePublisher(id: Int, request: UpdatePublisherRequest): PublisherDto {
@@ -1801,7 +1810,16 @@ public class AdminService(
                 followed = false,
                 warning = "未找到发布者关注插件，已跳过自动关注：$platform",
             )
-        return ensureFollowed(plugin, platform, externalId)
+        return try {
+            ensureFollowed(plugin, platform, externalId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            AutoFollowOutcome(
+                followed = false,
+                warning = "关注发布者失败，已跳过自动关注：$platform:$externalId，原因=${error.message ?: error.javaClass.name}",
+            )
+        }
     }
 
     private suspend fun ensureImportedPublishersFollowed(

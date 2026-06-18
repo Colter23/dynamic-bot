@@ -730,6 +730,14 @@ public data class UpdatePublisherRequest(
 public data class CreatePublisherRequest(
     val platformId: String,
     val externalId: String,
+    val autoFollow: Boolean = false,
+)
+
+@Serializable
+public data class CreatePublisherResponse(
+    val publisher: PublisherDto,
+    val autoFollowed: Boolean = false,
+    val warnings: List<String> = emptyList(),
 )
 
 @Serializable

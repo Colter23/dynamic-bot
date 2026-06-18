@@ -22,6 +22,9 @@ const $ = id => document.getElementById(id);
       cache: {},
       modalSubmit: null,
       modalCleanup: null,
+      modalBusy: false,
+      modalConfirmHtml: null,
+      modalLoadingText: "处理中...",
       logsPaused: false,
       logsAutoTop: true,
       logTimer: null,
@@ -843,6 +846,9 @@ const $ = id => document.getElementById(id);
       if (state.modalCleanup) state.modalCleanup();
       state.modalCleanup = options.cleanup || null;
       state.modalSubmit = onSubmit || null;
+      state.modalBusy = false;
+      state.modalConfirmHtml = null;
+      state.modalLoadingText = options.loadingText || "处理中...";
       $("modalTitle").textContent = title;
       $("modalBody").innerHTML = body;
       $("modalBox").className = "modal " + (options.size || "");
@@ -857,6 +863,9 @@ const $ = id => document.getElementById(id);
       if (state.modalCleanup) state.modalCleanup();
       state.modalCleanup = null;
       state.modalSubmit = null;
+      state.modalBusy = false;
+      state.modalConfirmHtml = null;
+      state.modalLoadingText = "处理中...";
       $("modalBackdrop").hidden = true;
       $("modalBody").innerHTML = "";
       setModalMessage("", false);
@@ -889,13 +898,42 @@ const $ = id => document.getElementById(id);
     }
     async function submitModal() {
       if (!state.modalSubmit) return closeModal();
-      $("modalConfirm").disabled = true;
       try {
-        await state.modalSubmit();
+        const result = state.modalSubmit();
+        if (result && typeof result.then === "function") {
+          setModalBusy(true, state.modalLoadingText);
+          await result;
+        }
       } catch (error) {
         setModalMessage(error.message || String(error), true);
       } finally {
-        $("modalConfirm").disabled = false;
+        setModalBusy(false);
+      }
+    }
+
+    function setModalBusy(busy, text = "处理中...") {
+      state.modalBusy = !!busy;
+      const modalBox = $("modalBox");
+      const modalBody = $("modalBody");
+      const confirm = $("modalConfirm");
+      modalBox.classList.toggle("modal-busy", !!busy);
+      if (modalBody) {
+        modalBody.querySelectorAll("input, select, textarea, button").forEach(control => {
+          control.disabled = !!busy;
+        });
+      }
+      ["modalCancel", "modalClose"].forEach(id => {
+        const control = $(id);
+        if (control) control.disabled = !!busy;
+      });
+      if (!confirm) return;
+      confirm.disabled = !!busy;
+      if (busy) {
+        state.modalConfirmHtml = confirm.innerHTML;
+        confirm.innerHTML = `<span class="loading-spinner" aria-hidden="true"></span>${esc(text)}`;
+      } else if (state.modalConfirmHtml !== null) {
+        confirm.innerHTML = state.modalConfirmHtml;
+        state.modalConfirmHtml = null;
       }
     }
 

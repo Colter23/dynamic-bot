@@ -756,31 +756,31 @@ async function openCreateSubscription() {
   const existingPublishers = state.cache.publishers || [];
   const targetMode = existingTargets.length ? "existing" : "new";
   const publisherMode = existingPublishers.length ? "existing" : "new";
-  const initialPublisherPlatform = publisherMode === "existing"
-    ? existingPublishers[0]?.platformId
-    : publisherPlatforms[0]?.platformId;
+  const initialPublisherPlatform = publisherMode === "existing" ? "" : publisherPlatforms[0]?.platformId;
   const initialSupportsLive = publisherPlatformSupportsLive(initialPublisherPlatform);
   let targetCandidates = [];
   let publisherCandidates = [];
+  let createFilterConditions = [];
 
   openModal("添加订阅", `
     <div class="subscription-create subscription-create-subscription">
-      <section class="panel subscription-card">
+      <section class="panel subscription-card subscription-target-card">
         <div class="panel-head">
           <div>
             <h2>消息目标</h2>
-            <p>可直接使用已有目标，也可以从插件枚举的目标中批量选择。</p>
           </div>
         </div>
-        ${subscriptionModeSwitch("subTargetMode", [
-          { value: "existing", text: "选择已有目标", checked: targetMode === "existing", disabled: existingTargets.length === 0 },
-          { value: "new", text: "新增目标", checked: targetMode === "new" },
-        ])}
+        <div class="subscription-mode-row">
+          ${subscriptionModeSwitch("subTargetMode", [
+            { value: "existing", text: "选择已有目标", checked: targetMode === "existing", disabled: existingTargets.length === 0 },
+            { value: "new", text: "新增目标", checked: targetMode === "new" },
+          ])}
+          <button type="button" class="secondary compact choice-tool-button choice-clear-button" id="subExistingTargetClear">清空</button>
+        </div>
         <div id="subExistingTargetBlock" class="form-grid single">
           <div class="field full">
-            <div class="field-head"><label>已有消息目标</label><span class="inline-note">选择一个已添加的消息目标。</span></div>
             <div id="subExistingTargetList" class="target-choice-list">${existingTargets.length
-              ? existingTargets.map((target, index) => existingTargetChoiceHtml(target, index, index === 0 && targetMode === "existing")).join("")
+              ? existingTargets.map((target, index) => existingTargetChoiceHtml(target, index, false)).join("")
               : `<div class="empty">还没有消息目标，请切换到新增目标。</div>`}</div>
           </div>
         </div>
@@ -806,22 +806,23 @@ async function openCreateSubscription() {
         </div>
       </section>
 
-      <section class="panel subscription-card">
+      <section class="panel subscription-card subscription-publisher-card">
         <div class="panel-head">
           <div>
             <h2>发布者</h2>
-            <p>可直接选择已有发布者，也可以按平台和 UID / 用户名搜索后添加订阅。</p>
           </div>
         </div>
-        ${subscriptionModeSwitch("subPublisherMode", [
-          { value: "existing", text: "选择已有发布者", checked: publisherMode === "existing", disabled: existingPublishers.length === 0 },
-          { value: "new", text: "新增发布者", checked: publisherMode === "new" },
-        ])}
+        <div class="subscription-mode-row">
+          ${subscriptionModeSwitch("subPublisherMode", [
+            { value: "existing", text: "选择已有发布者", checked: publisherMode === "existing", disabled: existingPublishers.length === 0 },
+            { value: "new", text: "新增发布者", checked: publisherMode === "new" },
+          ])}
+          <button type="button" class="secondary compact choice-tool-button choice-clear-button" id="subExistingPublisherClear">清空</button>
+        </div>
         <div id="subExistingPublisherBlock" class="form-grid single">
           <div class="field full">
-            <div class="field-head"><label>已有发布者</label><span class="inline-note">选择一个已添加的发布者。</span></div>
             <div id="subExistingPublisherList" class="target-choice-list">${existingPublishers.length
-              ? existingPublishers.map((publisher, index) => existingPublisherChoiceHtml(publisher, index, index === 0 && publisherMode === "existing")).join("")
+              ? existingPublishers.map((publisher, index) => existingPublisherChoiceHtml(publisher, index, false)).join("")
               : `<div class="empty">还没有发布者，请切换到新增发布者。</div>`}</div>
           </div>
         </div>
@@ -837,14 +838,17 @@ async function openCreateSubscription() {
             </div>
           </div>
           <div class="field full" id="subNewPublisherResultWrap" hidden>
-            <div class="field-head"><label>搜索结果</label></div>
+            <div class="field-head">
+              <label>搜索结果</label>
+              <div class="row-actions"><button type="button" class="secondary compact choice-tool-button choice-clear-button" id="subNewPublisherResultClear">清空</button></div>
+            </div>
             <div id="subNewPublisherResultList" class="target-choice-list"></div>
           </div>
           <div class="field full"><span id="subNewPublisherStatus" class="inline-note">填写 UID 时创建前会自动查询资料；用户名搜索成功后请选择结果。</span></div>
         </div>
       </section>
 
-      <section class="panel subscription-card">
+      <section class="panel subscription-card subscription-policy-card">
         <div class="panel-head">
           <div>
             <h2>订阅类型</h2>
@@ -853,23 +857,47 @@ async function openCreateSubscription() {
         </div>
         ${policyForm("subPolicy", null, "GROUP", initialSupportsLive)}
       </section>
+      <section class="panel subscription-card subscription-filter-card">
+        <div class="panel-head">
+          <div>
+            <h2>动态内容过滤</h2>
+            <p>命中任意规则的动态会被阻止投递；不填写则不添加过滤规则。</p>
+          </div>
+          <div class="row-actions"><button type="button" class="danger compact" id="subCreateFilterClear">清空</button></div>
+        </div>
+        <div class="form-grid create-filter-form">
+          <div class="field"><label>类型</label><select id="subCreateFilterType"><option value="HAS_BLOCK_KIND">元素</option><option value="TEXT_CONTAINS">关键词</option><option value="TEXT_REGEX">正则</option><option value="HAS_REFERENCE">引用</option></select></div>
+          <div class="field" id="subCreateFilterElementWrap"><label>元素</label><select id="subCreateFilterElement">${blockKinds.map(([v,t]) => `<option value="${v}">${t}</option>`).join("")}</select></div>
+          <div class="field" id="subCreateFilterReferenceWrap" hidden><label>引用</label><select id="subCreateFilterReference"><option value="">任意引用</option><option value="REPOST">转发</option><option value="QUOTE">引用</option><option value="ORIGIN">原动态</option></select></div>
+          <div class="field full" id="subCreateFilterTextWrap" hidden><label>内容</label><input id="subCreateFilterText" placeholder="关键词或正则表达式"></div>
+          <div class="field filter-add-field"><button type="button" id="subCreateFilterAdd">添加规则</button></div>
+        </div>
+        <div id="subCreateFilterList" class="create-filter-list"></div>
+      </section>
       <div id="subCreateResult" class="batch-result" hidden></div>
     </div>
   `, async () => {
     setCreateSubscriptionResult("");
     const selectedTargets = collectCreateSubscriptionTargets(targetCandidates);
-    const selectedPublisher = collectCreateSubscriptionPublisher(publisherCandidates);
-    if (!selectedPublisher) throw new Error("请选择发布者；如果填写的是用户名，请先搜索并选择结果");
+    const selectedPublishers = collectCreateSubscriptionPublishers(publisherCandidates);
+    if (selectedPublishers.length === 0) throw new Error("请选择发布者；如果填写的是用户名，请先搜索并选择结果");
     if (selectedTargets.length === 0) throw new Error("请选择或填写消息目标");
+    if (selectedPublishers.length > 1 && selectedTargets.length > 1) {
+      throw new Error("消息目标和发布者不能同时多选，请只批量选择其中一侧");
+    }
     const documentData = buildCreateSubscriptionImportDocument(
-      selectedPublisher,
+      selectedPublishers,
       selectedTargets,
       collectPolicy("subPolicy"),
+      createFilterConditions,
     );
+    if (documentData.subscriptions.length === 0) {
+      throw new Error("选择的订阅组合都已经存在，无需重复创建");
+    }
     const result = await importSubscriptionDocument(documentData);
     const failures = (result.items || [])
       .filter(item => item.status === "FAILED")
-      .map(item => `第 ${Number(item.index) + 1} 个目标：${item.message || "创建失败"}`);
+      .map(item => `第 ${Number(item.index) + 1} 条订阅：${item.message || "创建失败"}`);
     if (failures.length) {
       setCreateSubscriptionResult(`已创建 ${result.created} 个订阅，更新 ${result.updated} 个订阅，失败 ${failures.length} 个。`, failures, true);
       throw new Error(`批量订阅部分失败：失败 ${failures.length} 个`);
@@ -877,14 +905,16 @@ async function openCreateSubscription() {
     const warningLines = subscriptionImportWarnings(result);
     if (warningLines.length) {
       setCreateSubscriptionResult(`已创建 ${result.created} 个订阅，更新 ${result.updated} 个订阅，存在 ${warningLines.length} 条提示。`, warningLines.slice(0, 8), false);
+      setCreateSubscriptionFooterMessage("订阅已处理，存在提示信息");
       notify("订阅已处理，存在提示信息", false);
       return;
     }
     closeModal();
     notify(`订阅已处理：创建 ${result.created}，更新 ${result.updated}`, false);
   }, {
-    size: "subscription",
+    size: "subscription subscription-create-modal",
     confirmText: "创建",
+    loadingText: "创建中...",
     cleanup: () => {
       modalClosed = true;
     },
@@ -893,11 +923,14 @@ async function openCreateSubscription() {
   const policyUpdater = wirePolicyForm(
     "subPolicy",
     currentCreateSubscriptionTargetKind,
-    () => publisherPlatformSupportsLive(currentCreateSubscriptionPublisherPlatform()),
+    currentCreateSubscriptionLiveSupport,
   );
-  bindCreateSubscriptionMode(policyUpdater);
-  document.querySelectorAll(`input[name="subExistingTarget"]`).forEach(input => input.onchange = policyUpdater);
-  document.querySelectorAll(`input[name="subExistingPublisher"]`).forEach(input => input.onchange = policyUpdater);
+  const syncSelections = (changedSide = "", changedInput = null) => {
+    syncCreateSubscriptionSelections(targetCandidates, publisherCandidates, changedSide, changedInput);
+    policyUpdater();
+  };
+  bindCreateSubscriptionMode(syncSelections);
+  bindCreateSubscriptionSelectionInputs(syncSelections);
   const refreshTargetKinds = async () => {
     if (!isModalActive()) return;
     const platformId = $("subNewTargetPlatform").value;
@@ -920,6 +953,7 @@ async function openCreateSubscription() {
     $("subNewTargetSelectAll").disabled = true;
     $("subNewTargetClearAll").disabled = true;
     setCreateSubscriptionTargetStatus(status);
+    syncSelections("target");
   };
   const refreshTargetCandidates = async (force = false) => {
     if (!isModalActive()) return;
@@ -946,6 +980,7 @@ async function openCreateSubscription() {
       $("subNewTargetSelectAll").disabled = true;
       $("subNewTargetClearAll").disabled = true;
       setCreateSubscriptionTargetStatus("目标列表获取失败，请手动填写目标 ID");
+      syncSelections("target");
       return;
     }
     if (targetCandidates.length) {
@@ -958,9 +993,11 @@ async function openCreateSubscription() {
       if (!candidateList) return;
       candidateList.innerHTML = targetCandidates.map((target, index) => subscriptionTargetChoiceHtml(target, index, false)).join("");
       bindTargetSourceToggles(candidateList);
+      bindCreateSubscriptionSelectionInputs(syncSelections);
       await hydrateMediaImages(candidateList);
       if (!isModalActive()) return;
       setCreateSubscriptionTargetStatus(`${targetCandidates.length} 个可添加目标，已添加目标不显示，来自${source}`);
+      syncSelections("target");
     } else {
       $("subNewTargetCandidateWrap").hidden = false;
       $("subNewTargetCandidateActions").hidden = false;
@@ -969,6 +1006,7 @@ async function openCreateSubscription() {
       $("subNewTargetSelectAll").disabled = true;
       $("subNewTargetClearAll").disabled = true;
       setCreateSubscriptionTargetStatus(allCandidates.length ? `已添加过的目标已排除，可手动填写目标 ID，来自${source}` : `未获取到目标，请手动填写目标 ID，来自${source}`);
+      syncSelections("target");
     }
   };
   const searchPublisher = async () => {
@@ -984,28 +1022,57 @@ async function openCreateSubscription() {
     publisherCandidates = result;
     if (publisherCandidates.length) {
       $("subNewPublisherResultWrap").hidden = false;
-      $("subNewPublisherResultList").innerHTML = publisherCandidates.map((publisher, index) => subscriptionPublisherCandidateHtml(publisher, index, index === 0)).join("");
+      $("subNewPublisherResultList").innerHTML = publisherCandidates.map((publisher, index) => subscriptionPublisherCandidateHtml(publisher, index, false)).join("");
+      bindCreateSubscriptionSelectionInputs(syncSelections);
       await hydrateMediaImages($("subNewPublisherResultList"));
       if (!isModalActive()) return;
-      $("subNewPublisherStatus").textContent = `已找到 ${publisherCandidates.length} 个发布者，已默认选择第一个`;
+      $("subNewPublisherStatus").textContent = `已找到 ${publisherCandidates.length} 个发布者，请选择一个结果`;
+      syncSelections("publisher");
     } else {
       $("subNewPublisherResultWrap").hidden = false;
       $("subNewPublisherResultList").innerHTML = `<div class="empty">未找到发布者</div>`;
       $("subNewPublisherStatus").textContent = "未找到发布者，请确认 UID 或关键词后重试";
+      syncSelections("publisher");
     }
   };
   $("subNewTargetPlatform").onchange = refreshTargetKinds;
   $("subNewTargetKind").onchange = async () => {
-    policyUpdater();
     resetTargetCandidates();
   };
   $("subNewTargetRefresh").onclick = () => refreshTargetCandidates(true).catch(handleError);
-  $("subNewTargetSelectAll").onclick = () => setCreateSubscriptionTargetChecked(true);
-  $("subNewTargetClearAll").onclick = () => setCreateSubscriptionTargetChecked(false);
+  $("subExistingTargetClear").onclick = () => {
+    document.querySelectorAll(`input[name="subExistingTarget"]`).forEach(input => input.checked = false);
+    setCreateSubscriptionTargetChecked(false);
+    if ($("subNewTargetManual")) $("subNewTargetManual").value = "";
+    syncSelections("target");
+  };
+  $("subNewTargetSelectAll").onclick = () => {
+    setCreateSubscriptionTargetChecked(true);
+    syncSelections("target");
+  };
+  $("subNewTargetClearAll").onclick = () => {
+    setCreateSubscriptionTargetChecked(false);
+    syncSelections("target");
+  };
+  $("subExistingPublisherClear").onclick = () => {
+    document.querySelectorAll(`input[name="subExistingPublisher"]`).forEach(input => input.checked = false);
+    document.querySelectorAll(`input[name="subNewPublisherCandidate"]`).forEach(input => input.checked = false);
+    publisherCandidates = [];
+    $("subNewPublisherResultWrap").hidden = true;
+    $("subNewPublisherResultList").innerHTML = "";
+    $("subNewPublisherId").value = "";
+    $("subNewPublisherStatus").textContent = "填写 UID 时创建前会自动查询资料；用户名搜索成功后请选择结果。";
+    syncSelections("publisher");
+  };
+  $("subNewPublisherResultClear").onclick = () => {
+    document.querySelectorAll(`input[name="subNewPublisherCandidate"]`).forEach(input => input.checked = false);
+    syncSelections("publisher");
+  };
   $("subNewPublisherSearch").onclick = () => searchPublisher().catch(error => {
     if (!isModalActive()) return;
     $("subNewPublisherResultWrap").hidden = true;
     $("subNewPublisherStatus").textContent = error.message || String(error);
+    syncSelections("publisher");
   });
   $("subNewPublisherId").onkeydown = event => {
     if (event.key !== "Enter") return;
@@ -1014,21 +1081,62 @@ async function openCreateSubscription() {
       if (!isModalActive()) return;
       $("subNewPublisherResultWrap").hidden = true;
       $("subNewPublisherStatus").textContent = error.message || String(error);
+      syncSelections("publisher");
     });
   };
   $("subNewPublisherId").oninput = () => {
     publisherCandidates = [];
     $("subNewPublisherResultWrap").hidden = true;
     $("subNewPublisherStatus").textContent = "填写 UID 时创建前会自动查询资料；用户名搜索成功后请选择结果。";
+    syncSelections("publisher");
   };
   $("subNewPublisherPlatform").onchange = () => {
     if (!isModalActive()) return;
     publisherCandidates = [];
     $("subNewPublisherResultWrap").hidden = true;
     $("subNewPublisherStatus").textContent = "填写 UID 时创建前会自动查询资料；用户名搜索成功后请选择结果。";
-    policyUpdater();
+    syncSelections("publisher");
   };
+  const renderCreateFilters = () => {
+    const list = $("subCreateFilterList");
+    if (!list) return;
+    list.innerHTML = renderCreateSubscriptionFilterList(createFilterConditions);
+    list.querySelectorAll("[data-create-filter-remove]").forEach(button => {
+      button.onclick = () => {
+        createFilterConditions.splice(Number(button.dataset.createFilterRemove), 1);
+        renderCreateFilters();
+      };
+    });
+  };
+  const refreshCreateFilterForm = () => {
+    const type = $("subCreateFilterType").value;
+    $("subCreateFilterElementWrap").hidden = type !== "HAS_BLOCK_KIND";
+    $("subCreateFilterReferenceWrap").hidden = type !== "HAS_REFERENCE";
+    $("subCreateFilterTextWrap").hidden = !["TEXT_CONTAINS", "TEXT_REGEX"].includes(type);
+  };
+  $("subCreateFilterType").onchange = refreshCreateFilterForm;
+  $("subCreateFilterAdd").onclick = () => {
+    try {
+      const condition = collectCreateSubscriptionFilterCondition();
+      if (createFilterConditions.some(item => createFilterConditionKey(item) === createFilterConditionKey(condition))) {
+        throw new Error("这条过滤规则已经添加过了");
+      }
+      createFilterConditions.push(condition);
+      $("subCreateFilterText").value = "";
+      renderCreateFilters();
+      setCreateSubscriptionFooterMessage("");
+    } catch (error) {
+      setCreateSubscriptionFooterMessage(error.message || String(error), true);
+    }
+  };
+  $("subCreateFilterClear").onclick = () => {
+    createFilterConditions = [];
+    renderCreateFilters();
+  };
+  refreshCreateFilterForm();
+  renderCreateFilters();
   await hydrateMediaImages($("modalBody"));
+  syncSelections();
   await refreshTargetKinds();
 }
 
@@ -1039,7 +1147,7 @@ function subscriptionModeSwitch(name, options) {
   </label>`).join("")}</div>`;
 }
 
-function bindCreateSubscriptionMode(policyUpdater) {
+function bindCreateSubscriptionMode(selectionUpdater) {
   const refresh = () => {
     const targetMode = selectedSubscriptionMode("subTargetMode");
     const publisherMode = selectedSubscriptionMode("subPublisherMode");
@@ -1047,7 +1155,7 @@ function bindCreateSubscriptionMode(policyUpdater) {
     $("subNewTargetBlock").hidden = targetMode !== "new";
     $("subExistingPublisherBlock").hidden = publisherMode !== "existing";
     $("subNewPublisherBlock").hidden = publisherMode !== "new";
-    policyUpdater();
+    selectionUpdater("mode");
   };
   document.querySelectorAll(`input[name="subTargetMode"], input[name="subPublisherMode"]`).forEach(input => input.onchange = refresh);
   refresh();
@@ -1060,9 +1168,11 @@ function selectedSubscriptionMode(name) {
 
 function currentCreateSubscriptionTargetKind() {
   if (selectedSubscriptionMode("subTargetMode") === "existing") {
-    const input = document.querySelector(`input[name="subExistingTarget"]:checked`);
-    const target = input ? (state.cache.subscribers || [])[Number(input.dataset.index)] : null;
-    return target && target.targetKind || "OTHER";
+    const targets = Array.from(document.querySelectorAll(`input[name="subExistingTarget"]:checked`))
+      .map(input => (state.cache.subscribers || [])[Number(input.dataset.index)])
+      .filter(Boolean);
+    if (!targets.length) return "GROUP";
+    return targets.every(target => target.targetKind === "GROUP") ? "GROUP" : "OTHER";
   }
   const kindSelect = $("subNewTargetKind");
   return kindSelect && kindSelect.value || "OTHER";
@@ -1076,6 +1186,20 @@ function currentCreateSubscriptionPublisherPlatform() {
   }
   const platformSelect = $("subNewPublisherPlatform");
   return platformSelect && platformSelect.value || "";
+}
+
+function currentCreateSubscriptionLiveSupport() {
+  if (selectedSubscriptionMode("subPublisherMode") !== "existing") {
+    return publisherPlatformSupportsLive(currentCreateSubscriptionPublisherPlatform());
+  }
+  const publishers = Array.from(document.querySelectorAll(`input[name="subExistingPublisher"]:checked`))
+    .map(input => (state.cache.publishers || [])[Number(input.dataset.index)])
+    .filter(Boolean);
+  if (!publishers.length) return true;
+  const supportValues = publishers.map(publisher => publisherPlatformSupportsLive(publisher.platformId));
+  if (supportValues.some(value => value === false)) return false;
+  if (supportValues.every(value => value === true)) return true;
+  return null;
 }
 
 function setCreateSubscriptionTargetLoading(text) {
@@ -1108,6 +1232,150 @@ function setCreateSubscriptionResult(summary, details = [], isError = false) {
     : ""}`;
 }
 
+function bindCreateSubscriptionSelectionInputs(selectionUpdater) {
+  [
+    ["subExistingTarget", "target"],
+    ["subNewTargetCandidate", "target"],
+    ["subExistingPublisher", "publisher"],
+    ["subNewPublisherCandidate", "publisher"],
+  ].forEach(([name, side]) => {
+    document.querySelectorAll(`input[name="${name}"]`).forEach(input => {
+      input.onchange = event => selectionUpdater(side, event.currentTarget);
+    });
+  });
+}
+
+function syncCreateSubscriptionSelections(targetCandidates, publisherCandidates, changedSide = "", changedInput = null) {
+  enforceCreateSubscriptionSelectionLimit(targetCandidates, publisherCandidates, changedSide, changedInput);
+  let selectedTargets = collectCreateSubscriptionTargets(targetCandidates);
+  let selectedPublishers = collectCreateSubscriptionPublishers(publisherCandidates);
+  updateExistingSubscriptionChoiceVisibility(selectedTargets, selectedPublishers);
+  selectedTargets = collectCreateSubscriptionTargets(targetCandidates);
+  selectedPublishers = collectCreateSubscriptionPublishers(publisherCandidates);
+  updateCreateSubscriptionChoiceDisabled(selectedTargets, selectedPublishers);
+  updateCreateSubscriptionSelectionHint(selectedTargets, selectedPublishers);
+}
+
+function enforceCreateSubscriptionSelectionLimit(targetCandidates, publisherCandidates, changedSide, changedInput) {
+  const selectedTargets = collectCreateSubscriptionTargets(targetCandidates);
+  const selectedPublishers = collectCreateSubscriptionPublishers(publisherCandidates);
+  if (selectedTargets.length <= 1 || selectedPublishers.length <= 1) return;
+  if (changedSide === "publisher") {
+    clampCreateSubscriptionTargetSelection(changedInput);
+  } else {
+    clampCreateSubscriptionPublisherSelection(changedInput);
+  }
+}
+
+function clampCreateSubscriptionTargetSelection(changedInput = null) {
+  if (selectedSubscriptionMode("subTargetMode") !== "existing") {
+    clampCheckedInputs("subNewTargetCandidate", changedInput);
+    return;
+  }
+  clampCheckedInputs("subExistingTarget", changedInput);
+}
+
+function clampCreateSubscriptionPublisherSelection(changedInput = null) {
+  if (selectedSubscriptionMode("subPublisherMode") === "existing") {
+    clampCheckedInputs("subExistingPublisher", changedInput);
+  }
+}
+
+function clampCheckedInputs(name, changedInput = null) {
+  const checked = Array.from(document.querySelectorAll(`input[name="${name}"]:checked`));
+  if (checked.length <= 1) return;
+  const keep = checked.includes(changedInput) ? changedInput : checked[0];
+  checked.forEach(input => {
+    if (input !== keep) input.checked = false;
+  });
+}
+
+function updateExistingSubscriptionChoiceVisibility(selectedTargets, selectedPublishers) {
+  const pairs = existingSubscriptionPairSet();
+  const publisherIds = selectedPublishers.map(publisher => publisher.publisherId).filter(Boolean);
+  updateSubscriptionChoiceVisibilitySide({
+    selector: "[data-sub-existing-target-id]",
+    inputName: "subExistingTarget",
+    ownSelectedCount: selectedTargets.length,
+    oppositeIds: publisherIds,
+    isFullyDuplicated: (targetId, publisherId) => pairs.has(subscriptionPairKey(targetId, publisherId)),
+    idOf: choice => Number(choice.dataset.subExistingTargetId),
+  });
+
+  const targetIds = selectedTargets.map(target => target.subscriberId).filter(Boolean);
+  updateSubscriptionChoiceVisibilitySide({
+    selector: "[data-sub-existing-publisher-id]",
+    inputName: "subExistingPublisher",
+    ownSelectedCount: selectedPublishers.length,
+    oppositeIds: targetIds,
+    isFullyDuplicated: (publisherId, targetId) => pairs.has(subscriptionPairKey(targetId, publisherId)),
+    idOf: choice => Number(choice.dataset.subExistingPublisherId),
+  });
+}
+
+function updateSubscriptionChoiceVisibilitySide(options) {
+  const hasOwnSelection = options.ownSelectedCount > 0;
+  const hasOppositeSelection = options.oppositeIds.length > 0;
+  document.querySelectorAll(options.selector).forEach(choice => {
+    const input = choice.querySelector(`input[name="${options.inputName}"]`);
+    if (input && input.checked) {
+      choice.hidden = false;
+      return;
+    }
+    if (!hasOppositeSelection) {
+      choice.hidden = false;
+      return;
+    }
+    const ownId = options.idOf(choice);
+    const fullyDuplicated = options.oppositeIds.every(oppositeId =>
+      options.isFullyDuplicated(ownId, oppositeId)
+    );
+    choice.hidden = hasOwnSelection
+      ? choice.hidden || fullyDuplicated
+      : fullyDuplicated;
+  });
+}
+
+function updateCreateSubscriptionChoiceDisabled(selectedTargets, selectedPublishers) {
+  const targetMulti = selectedTargets.length > 1;
+  const publisherMulti = selectedPublishers.length > 1;
+  const publisherLocked = targetMulti && selectedPublishers.length >= 1;
+  const targetLocked = publisherMulti && selectedTargets.length >= 1;
+  setChoiceInputsDisabled("subExistingPublisher", publisherLocked);
+  setChoiceInputsDisabled("subExistingTarget", targetLocked);
+  setChoiceInputsDisabled("subNewTargetCandidate", targetLocked);
+}
+
+function setChoiceInputsDisabled(name, lockUnselected) {
+  document.querySelectorAll(`input[name="${name}"]`).forEach(input => {
+    const disabled = !!lockUnselected && !input.checked;
+    input.disabled = disabled;
+    const choice = input.closest(".target-choice");
+    if (choice) choice.classList.toggle("disabled", disabled);
+  });
+}
+
+function updateCreateSubscriptionSelectionHint(selectedTargets, selectedPublishers) {
+  const node = $("modalMessage");
+  if (!node) return;
+  node.classList.remove("error");
+  if (!selectedTargets.length || !selectedPublishers.length) {
+    node.textContent = "请选择消息目标和发布者";
+    return;
+  }
+  const total = selectedTargets.length * selectedPublishers.length;
+  const existed = countExistingSubscriptionPairs(selectedTargets, selectedPublishers);
+  const creatable = Math.max(0, total - existed);
+  node.textContent = `将新增 ${creatable} 个订阅组合${existed ? `，跳过 ${existed} 个已有组合` : ""}`;
+}
+
+function setCreateSubscriptionFooterMessage(message, isError = false) {
+  const node = $("modalMessage");
+  if (!node) return;
+  node.textContent = message || "";
+  node.classList.toggle("error", !!isError);
+}
+
 function existingTargetChoiceHtml(target, index, checked) {
   const title = target.name || target.externalId;
   const parts = [
@@ -1117,10 +1385,16 @@ function existingTargetChoiceHtml(target, index, checked) {
     target.externalId,
     target.accountId ? `优先账号 ${target.accountId}` : "",
   ].filter(Boolean).join(" · ");
-  return `<label class="target-choice">
-    <input type="radio" name="subExistingTarget" value="${attr(target.id)}" data-index="${attr(index)}"${checked ? " checked" : ""}>
+  return `<label class="target-choice" data-sub-existing-target-id="${attr(target.id)}">
+    <input type="checkbox" name="subExistingTarget" value="${attr(target.id)}" data-index="${attr(index)}"${checked ? " checked" : ""}>
     ${mediaImage(target.avatarUri, "target-choice-avatar", target.platformId, "AVATAR")}
-    <span class="target-choice-text" title="${attr(parts)}">${esc(parts)}</span>
+    <span class="target-choice-text target-choice-meta-line" title="${attr(parts)}">
+      ${platformTag(target.platformId, target.platformId)}
+      <span class="target-choice-name">${esc(title)}</span>
+      <span class="target-choice-sub">${esc(label(target.targetKind))}</span>
+      <span class="target-choice-sub">${esc(target.externalId || "-")}</span>
+      ${target.accountId ? `<span class="target-choice-sub">${esc(`优先账号 ${target.accountId}`)}</span>` : ""}
+    </span>
   </label>`;
 }
 
@@ -1132,10 +1406,15 @@ function existingPublisherChoiceHtml(publisher, index, checked) {
     label(publisher.kind),
     publisher.externalId,
   ].filter(Boolean).join(" · ");
-  return `<label class="target-choice">
-    <input type="radio" name="subExistingPublisher" value="${attr(publisher.id)}" data-index="${attr(index)}"${checked ? " checked" : ""}>
+  return `<label class="target-choice" data-sub-existing-publisher-id="${attr(publisher.id)}">
+    <input type="checkbox" name="subExistingPublisher" value="${attr(publisher.id)}" data-index="${attr(index)}"${checked ? " checked" : ""}>
     ${mediaImage(publisher.avatarUri, "target-choice-avatar", publisher.platformId, "AVATAR")}
-    <span class="target-choice-text" title="${attr(parts)}">${esc(parts)}</span>
+    <span class="target-choice-text target-choice-meta-line" title="${attr(parts)}">
+      ${platformTag(publisher.platformId, publisher.platformId)}
+      <span class="target-choice-name">${esc(title)}</span>
+      <span class="target-choice-sub">${esc(label(publisher.kind))}</span>
+      <span class="target-choice-sub">${esc(publisher.externalId || "-")}</span>
+    </span>
   </label>`;
 }
 
@@ -1149,51 +1428,69 @@ function subscriptionTargetChoiceHtml(target, index, checked) {
 }
 
 function setCreateSubscriptionTargetChecked(checked) {
-  document.querySelectorAll(`input[name="subNewTargetCandidate"]`).forEach(input => input.checked = checked);
+  document.querySelectorAll(`input[name="subNewTargetCandidate"]`).forEach(input => {
+    if (!checked || !input.disabled) input.checked = checked;
+  });
 }
 
-function buildCreateSubscriptionImportDocument(publisher, targets, policy) {
+function buildCreateSubscriptionImportDocument(publishers, targets, policy, filterConditions = []) {
+  const subscriptions = [];
+  const existingPairs = existingSubscriptionPairSet();
+  const addedPairs = new Set();
+  const filterRules = filterConditions.map(condition => ({ condition }));
+  publishers.forEach(publisher => {
+    targets.forEach(target => {
+      const existingPair = publisher.publisherId && target.subscriberId
+        ? subscriptionPairKey(target.subscriberId, publisher.publisherId)
+        : "";
+      if (existingPair && existingPairs.has(existingPair)) return;
+      const dedupeKey = createSubscriptionImportPairKey(publisher, target);
+      if (addedPairs.has(dedupeKey)) return;
+      addedPairs.add(dedupeKey);
+      subscriptions.push({
+        publisher: {
+          platformId: publisher.platformId,
+          kind: publisher.kind || "USER",
+          externalId: publisher.externalId,
+        },
+        target: {
+          platformId: target.platformId,
+          targetKind: target.targetKind,
+          externalId: target.externalId,
+          scopeId: target.scopeId || null,
+          threadId: target.threadId || null,
+          accountId: target.accountId || null,
+        },
+        policy,
+        filterRules,
+        linkParseTriggerMode: target.linkParseTriggerMode || null,
+        publisherLookupMode: publisher.publisherLookupMode || null,
+      });
+    });
+  });
   return {
     schemaVersion: 1,
     exportedAtEpochSeconds: Math.floor(Date.now() / 1000),
-    subscriptions: targets.map(target => ({
-      publisher: {
-        platformId: publisher.platformId,
-        kind: publisher.kind || "USER",
-        externalId: publisher.externalId,
-      },
-      target: {
-        platformId: target.platformId,
-        targetKind: target.targetKind,
-        externalId: target.externalId,
-        scopeId: target.scopeId || null,
-        threadId: target.threadId || null,
-        accountId: target.accountId || null,
-      },
-      policy,
-      filterRules: [],
-      linkParseTriggerMode: target.linkParseTriggerMode || null,
-      publisherLookupMode: publisher.publisherLookupMode || null,
-    })),
+    subscriptions,
   };
 }
 
 function collectCreateSubscriptionTargets(candidates) {
   if (selectedSubscriptionMode("subTargetMode") === "existing") {
-    const input = document.querySelector(`input[name="subExistingTarget"]:checked`);
-    if (!input) return [];
-    const target = (state.cache.subscribers || [])[Number(input.dataset.index)];
-    return target ? [{
-      subscriberId: target.id,
-      platformId: target.platformId,
-      targetKind: target.targetKind,
-      externalId: target.externalId,
-      scopeId: target.scopeId,
-      threadId: target.threadId,
-      accountId: target.accountId,
-      linkParseTriggerMode: target.linkParseTriggerMode,
-      label: target.name || target.externalId,
-    }] : [];
+    return Array.from(document.querySelectorAll(`input[name="subExistingTarget"]:checked`))
+      .map(input => (state.cache.subscribers || [])[Number(input.dataset.index)])
+      .filter(Boolean)
+      .map(target => ({
+        subscriberId: target.id,
+        platformId: target.platformId,
+        targetKind: target.targetKind,
+        externalId: target.externalId,
+        scopeId: target.scopeId,
+        threadId: target.threadId,
+        accountId: target.accountId,
+        linkParseTriggerMode: target.linkParseTriggerMode,
+        label: target.name || target.externalId,
+      }));
   }
   const platformId = $("subNewTargetPlatform").value.trim();
   const targetKind = $("subNewTargetKind").value;
@@ -1251,18 +1548,23 @@ function subscriptionPublisherCandidateHtml(publisher, index, checked) {
 }
 
 function collectCreateSubscriptionPublisher(candidates) {
+  const publishers = collectCreateSubscriptionPublishers(candidates);
+  return publishers.length ? publishers[0] : null;
+}
+
+function collectCreateSubscriptionPublishers(candidates) {
   if (selectedSubscriptionMode("subPublisherMode") === "existing") {
-    const input = document.querySelector(`input[name="subExistingPublisher"]:checked`);
-    if (!input) return null;
-    const publisher = (state.cache.publishers || [])[Number(input.dataset.index)];
-    return publisher ? {
-      publisherId: publisher.id,
-      platformId: publisher.platformId,
-      kind: publisher.kind || "USER",
-      externalId: publisher.externalId,
-      label: publisher.name || publisher.externalId,
-      publisherLookupMode: "VERIFY",
-    } : null;
+    return Array.from(document.querySelectorAll(`input[name="subExistingPublisher"]:checked`))
+      .map(input => (state.cache.publishers || [])[Number(input.dataset.index)])
+      .filter(Boolean)
+      .map(publisher => ({
+        publisherId: publisher.id,
+        platformId: publisher.platformId,
+        kind: publisher.kind || "USER",
+        externalId: publisher.externalId,
+        label: publisher.name || publisher.externalId,
+        publisherLookupMode: "VERIFY",
+      }));
   }
   const selected = !$("subNewPublisherResultWrap").hidden
     ? document.querySelector(`input[name="subNewPublisherCandidate"]:checked`)
@@ -1271,17 +1573,48 @@ function collectCreateSubscriptionPublisher(candidates) {
   const platformId = $("subNewPublisherPlatform").value.trim();
   const inputExternalId = $("subNewPublisherId").value.trim();
   if (!candidate && inputExternalId && !isLikelyPublisherUid(inputExternalId)) {
-    return null;
+    return [];
   }
   const externalId = candidate ? candidate.externalId : inputExternalId;
-  if (!platformId || !externalId) return null;
-  return {
+  if (!platformId || !externalId) return [];
+  return [{
     platformId,
     kind: candidate && candidate.kind || "USER",
     externalId,
     label: candidate && candidate.name || externalId,
     publisherLookupMode: "VERIFY",
-  };
+  }];
+}
+
+function subscriptionPairKey(subscriberId, publisherId) {
+  return `${subscriberId}\u001F${publisherId}`;
+}
+
+function existingSubscriptionPairSet() {
+  return new Set((state.cache.subscriptions || [])
+    .filter(subscription => subscription && subscription.subscriberId != null && subscription.publisherId != null)
+    .map(subscription => subscriptionPairKey(subscription.subscriberId, subscription.publisherId)));
+}
+
+function countExistingSubscriptionPairs(targets, publishers) {
+  const pairs = existingSubscriptionPairSet();
+  return targets.reduce((count, target) => count + publishers.filter(publisher =>
+    target.subscriberId && publisher.publisherId && pairs.has(subscriptionPairKey(target.subscriberId, publisher.publisherId))
+  ).length, 0);
+}
+
+function createSubscriptionImportPairKey(publisher, target) {
+  return [
+    publisher.platformId,
+    publisher.kind || "USER",
+    publisher.externalId,
+    target.platformId,
+    target.targetKind,
+    target.externalId,
+    target.scopeId || "",
+    target.threadId || "",
+    target.accountId || "",
+  ].join("\u001F");
 }
 
 function isLikelyPublisherUid(value) {
@@ -1428,6 +1761,35 @@ function filterConditionText(condition) {
   if (condition.type === "TEXT_REGEX") return condition.pattern;
   if (condition.type === "HAS_REFERENCE") return condition.kind ? label(condition.kind) : "任意引用";
   return condition.type || JSON.stringify(condition);
+}
+
+function renderCreateSubscriptionFilterList(conditions) {
+  if (!conditions.length) {
+    return `<div class="empty create-filter-empty">暂无过滤规则</div>`;
+  }
+  return `<div class="create-filter-items">${conditions.map((condition, index) => `
+    <div class="create-filter-item">
+      <div>
+        <strong>${esc(filterConditionTypeText(condition))}</strong>
+        <span>${esc(filterConditionText(condition))}</span>
+      </div>
+      <button type="button" class="danger compact" data-create-filter-remove="${attr(index)}">删除</button>
+    </div>
+  `).join("")}</div>`;
+}
+
+function collectCreateSubscriptionFilterCondition() {
+  const type = $("subCreateFilterType").value;
+  if (type === "HAS_BLOCK_KIND") return { type, kind: $("subCreateFilterElement").value };
+  if (type === "HAS_REFERENCE") return { type, kind: $("subCreateFilterReference").value || null };
+  const text = $("subCreateFilterText").value.trim();
+  if (!text) throw new Error("请填写过滤内容");
+  if (type === "TEXT_REGEX") return { type, pattern: text };
+  return { type, value: text, ignoreCase: true };
+}
+
+function createFilterConditionKey(condition) {
+  return JSON.stringify(condition || {});
 }
 
 function openFilterRuleModal(subscriptionId) {

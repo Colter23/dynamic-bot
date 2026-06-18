@@ -619,12 +619,13 @@ class AdminServerTest {
             },
         )
 
-        val publisher = service.createPublisher(
+        val response = service.createPublisher(
             CreatePublisherRequest(
                 platformId = "bilibili",
                 externalId = "123",
             ),
         )
+        val publisher = response.publisher
 
         assertEquals(publisher.id, initializedPublisherId)
         assertEquals(0L, previousSubscriptionCount)
@@ -645,17 +646,77 @@ class AdminServerTest {
         val service = service(plugin)
 
         val candidate = service.searchPublishers("bilibili", "demo").single()
-        val publisher = service.createPublisher(
+        val response = service.createPublisher(
             CreatePublisherRequest(
                 platformId = candidate.platformId,
                 externalId = candidate.externalId,
             ),
         )
+        val publisher = response.publisher
 
         assertEquals("demo-up", publisher.name)
         assertEquals("https://example.com/header.png", publisher.bannerUri)
         assertEquals(1, plugin.searchPublisherInfoCalls)
         assertEquals(1, plugin.fetchPublisherInfoCalls)
+    }
+
+    @Test
+    fun createPublisherShouldNotAutoFollowByDefault() = runBlocking {
+        initDb("admin-create-publisher-follow-default-off")
+        val plugin = FakePublisherFollowPlugin()
+        val service = service(plugin)
+
+        val response = service.createPublisher(
+            CreatePublisherRequest(
+                platformId = "bilibili",
+                externalId = "123",
+            ),
+        )
+
+        assertFalse(response.autoFollowed)
+        assertEquals(emptyList<String>(), response.warnings)
+        assertEquals(0, plugin.followPublisherCalls)
+    }
+
+    @Test
+    fun createPublisherShouldAutoFollowWhenRequested() = runBlocking {
+        initDb("admin-create-publisher-follow-enabled")
+        val plugin = FakePublisherFollowPlugin()
+        val service = service(plugin)
+
+        val response = service.createPublisher(
+            CreatePublisherRequest(
+                platformId = "bilibili",
+                externalId = "123",
+                autoFollow = true,
+            ),
+        )
+
+        assertTrue(response.autoFollowed)
+        assertEquals(emptyList<String>(), response.warnings)
+        assertEquals(1, plugin.followPublisherCalls)
+    }
+
+    @Test
+    fun createPublisherShouldReturnWarningWhenAutoFollowThrows() = runBlocking {
+        initDb("admin-create-publisher-follow-warning")
+        val plugin = FakePublisherFollowPlugin().apply {
+            followPublisherError = IllegalStateException("登录已失效")
+        }
+        val service = service(plugin)
+
+        val response = service.createPublisher(
+            CreatePublisherRequest(
+                platformId = "bilibili",
+                externalId = "123",
+                autoFollow = true,
+            ),
+        )
+
+        assertFalse(response.autoFollowed)
+        assertEquals(1, plugin.followPublisherCalls)
+        assertTrue(response.warnings.single().contains("登录已失效"))
+        assertNotNull(PublisherRepository.findByKey(PublisherKey.of("bilibili", PublisherKind.USER, "123")))
     }
 
     @Test
@@ -2028,6 +2089,7 @@ class AdminServerTest {
         var searchPublisherInfoCalls: Int = 0
         var queryFollowStateCalls: Int = 0
         var followPublisherCalls: Int = 0
+        var followPublisherError: Exception? = null
         val followPublisherBatches: MutableList<List<String>> = mutableListOf()
         val searchResultsByQuery: MutableMap<String, List<PublisherInfo>> = linkedMapOf()
 
@@ -2055,6 +2117,7 @@ class AdminServerTest {
 
         override suspend fun followPublisher(userId: String): FollowActionResult {
             followPublisherCalls += 1
+            followPublisherError?.let { throw it }
             followed = true
             return FollowActionResult(FollowActionStatus.DONE)
         }

@@ -708,13 +708,10 @@ async function openCreatePublisher() {
   const platforms = await api("/publisher-platforms").catch(() => []);
   let publisherCandidates = [];
   openModal("添加发布者", `
-    <div class="subscription-create">
+    <div class="subscription-create publisher-create-modal">
       <section class="panel subscription-card">
         <div class="panel-head">
-          <div>
-            <h2>发布者</h2>
-            <p>先按平台和 UID / 用户名搜索发布者，再从结果中选择添加。</p>
-          </div>
+          <div><h2>发布者</h2></div>
         </div>
         <div class="form-grid single publisher-create-form">
           <div class="field"><label>发布者平台</label><select id="newPublisherPlatform">${platforms.length
@@ -727,11 +724,23 @@ async function openCreatePublisher() {
               <button type="button" class="publisher-search-button" id="newPublisherSearch">搜索</button>
             </div>
           </div>
+          <div class="field full">
+            <div class="publisher-follow-option">
+              <div class="publisher-follow-copy">
+                <strong>添加后关注</strong>
+                <span>只关注平台账号，不会创建订阅</span>
+              </div>
+              <label class="config-switch-control publisher-follow-switch" for="newPublisherAutoFollow">
+                <input id="newPublisherAutoFollow" type="checkbox">
+                <span class="config-switch-track" aria-hidden="true"><span class="config-switch-thumb"></span></span>
+              </label>
+            </div>
+          </div>
           <div class="field full" id="newPublisherResultWrap" hidden>
             <div class="field-head"><label>搜索结果</label></div>
             <div id="newPublisherResultList" class="target-choice-list"></div>
           </div>
-          <div class="field full"><span id="newPublisherStatus" class="inline-note">可填写 UID 手动添加；用户名搜索成功后请选择结果。</span></div>
+          <div class="field full"><div id="newPublisherFeedback" class="batch-result publisher-create-feedback" hidden></div></div>
         </div>
       </section>
     </div>
@@ -744,16 +753,37 @@ async function openCreatePublisher() {
     }
     const externalId = selected ? selected.externalId : inputExternalId;
     if (!platformId || !externalId) throw new Error("请选择平台并填写发布者 UID 或用户名");
-    await api("/publishers", { method: "POST", body: JSON.stringify({ platformId, externalId }) });
-    closeModal();
-    invalidate("dashboard", "publishers", "subscriptions");
-    await loadEntities(true);
-    notify("发布者已添加", false);
+    const autoFollow = $("newPublisherAutoFollow").checked;
+    setCreatePublisherBusy(true, autoFollow ? "正在获取发布者资料并关注..." : "正在获取发布者资料...");
+    try {
+      const result = await api("/publishers", {
+        method: "POST",
+        body: JSON.stringify({ platformId, externalId, autoFollow })
+      });
+      invalidate("dashboard", "publishers", "subscriptions");
+      await loadEntities(true);
+      const warnings = result && Array.isArray(result.warnings) ? result.warnings.filter(Boolean) : [];
+      if (warnings.length) {
+        setCreatePublisherBusy(false);
+        setCreatePublisherFeedback("发布者已添加，但存在提示", warnings, "warning");
+        notify("发布者已添加，存在提示", false);
+        return;
+      }
+      closeModal();
+      notify(result && result.autoFollowed ? "发布者已添加并关注" : "发布者已添加", false);
+    } catch (error) {
+      if (isModalActive()) {
+        setCreatePublisherBusy(false);
+        setCreatePublisherFeedback("添加发布者失败", [error.message || String(error)], "error");
+      }
+      throw error;
+    }
   }, {
     size: "narrow",
     confirmText: "添加",
     cleanup: () => {
       modalClosed = true;
+      setCreatePublisherBusy(false, "", true);
     },
   });
 
@@ -764,7 +794,8 @@ async function openCreatePublisher() {
     if (!platformId) throw new Error("没有可用的发布者平台");
     if (!queryText) throw new Error("请填写发布者 UID 或用户名");
     publisherCandidates = [];
-    setCreatePublisherLoading("正在搜索发布者...");
+    setCreatePublisherFeedback("正在搜索发布者...", [], "loading");
+    $("newPublisherResultWrap").hidden = true;
     const result = await api(`/publisher-search?platformId=${encodeURIComponent(platformId)}&q=${encodeURIComponent(queryText)}`);
     if (!isModalActive()) return;
     publisherCandidates = result;
@@ -773,17 +804,17 @@ async function openCreatePublisher() {
       $("newPublisherResultList").innerHTML = publisherCandidates.map((publisher, index) => publisherCandidateHtml(publisher, index, index === 0)).join("");
       await hydrateMediaImages($("newPublisherResultList"));
       if (!isModalActive()) return;
-      $("newPublisherStatus").textContent = `已找到 ${publisherCandidates.length} 个发布者，已默认选择第一个`;
+      setCreatePublisherFeedback(`已找到 ${publisherCandidates.length} 个发布者，已默认选择第一个`, [], "info");
     } else {
       $("newPublisherResultWrap").hidden = false;
       $("newPublisherResultList").innerHTML = `<div class="empty">未找到发布者</div>`;
-      $("newPublisherStatus").textContent = "未找到发布者；如果填写的是 UID，可以直接添加";
+      setCreatePublisherFeedback("未找到发布者；如果填写的是 UID，可以直接添加", [], "warning");
     }
   };
   $("newPublisherSearch").onclick = () => search().catch(error => {
     if (!isModalActive()) return;
     $("newPublisherResultWrap").hidden = true;
-    $("newPublisherStatus").textContent = error.message || String(error);
+    setCreatePublisherFeedback("搜索发布者失败", [error.message || String(error)], "error");
   });
   $("newPublisherId").onkeydown = event => {
     if (event.key !== "Enter") return;
@@ -791,26 +822,55 @@ async function openCreatePublisher() {
     search().catch(error => {
       if (!isModalActive()) return;
       $("newPublisherResultWrap").hidden = true;
-      $("newPublisherStatus").textContent = error.message || String(error);
+      setCreatePublisherFeedback("搜索发布者失败", [error.message || String(error)], "error");
     });
   };
   $("newPublisherId").oninput = () => {
     publisherCandidates = [];
     $("newPublisherResultWrap").hidden = true;
-    $("newPublisherStatus").textContent = "可填写 UID 手动添加；用户名搜索成功后请选择结果。";
+    setCreatePublisherFeedback("", [], "info");
   };
   $("newPublisherPlatform").onchange = () => {
     publisherCandidates = [];
     $("newPublisherResultWrap").hidden = true;
-    $("newPublisherStatus").textContent = "可填写 UID 手动添加；用户名搜索成功后请选择结果。";
+    setCreatePublisherFeedback("", [], "info");
   };
 }
 
-function setCreatePublisherLoading(text) {
-  if (!$("newPublisherResultList")) return;
-  $("newPublisherResultWrap").hidden = false;
-  $("newPublisherResultList").innerHTML = loadingRow(text);
-  $("newPublisherStatus").textContent = text;
+function setCreatePublisherBusy(busy, text = "", force = false) {
+  const modalBody = $("modalBody");
+  if (!modalBody && !force) return;
+  if (modalBody) {
+    modalBody.classList.toggle("publisher-create-busy", !!busy);
+    modalBody.querySelectorAll(".publisher-create-modal input, .publisher-create-modal select, .publisher-create-modal button").forEach(control => {
+      control.disabled = !!busy;
+    });
+  }
+  const cancel = $("modalCancel");
+  const close = $("modalClose");
+  if (cancel) cancel.disabled = !!busy;
+  if (close) close.disabled = !!busy;
+  if (busy && text) {
+    setCreatePublisherFeedback(text, [], "loading");
+  }
+}
+
+function setCreatePublisherFeedback(message, details = [], type = "info") {
+  const node = $("newPublisherFeedback");
+  if (!node) return;
+  const normalizedDetails = (details || []).filter(Boolean);
+  if (!message && normalizedDetails.length === 0) {
+    node.hidden = true;
+    node.innerHTML = "";
+    node.className = "batch-result publisher-create-feedback";
+    return;
+  }
+  node.hidden = false;
+  node.className = `batch-result publisher-create-feedback ${type === "error" ? "error" : type === "success" ? "success" : ""}`;
+  const prefix = type === "loading" ? `<span class="loading-spinner" aria-hidden="true"></span>` : "";
+  node.innerHTML = `${prefix}<span>${esc(message || "")}</span>${normalizedDetails.length
+    ? `<ul>${normalizedDetails.map(item => `<li>${esc(item)}</li>`).join("")}</ul>`
+    : ""}`;
 }
 
 function publisherCandidateHtml(publisher, index, checked) {
