@@ -756,8 +756,6 @@ public object MainConfigForms {
                     type = ConfigFieldType.TEXT,
                     section = "绘图",
                     description = "正文使用的字体。\n可以按顺序填写多个字体，用英文分号分隔；支持绝对路径、相对路径、字体文件名和字体家族名。\n同时会自动加载 data/fonts 里的字体作为回退；留空时使用内置字体作为主字体。",
-                    restartRequired = true,
-                    restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
                     path = "draw.font.emoji",
@@ -765,8 +763,6 @@ public object MainConfigForms {
                     type = ConfigFieldType.TEXT,
                     section = "绘图",
                     description = "文本中 Unicode Emoji 使用的字体。\n可以按顺序填写多个字体，用英文分号分隔；支持绝对路径、相对路径、字体文件名和字体家族名。\ndata/fonts 中只有文件名包含 emoji 的字体会自动作为回退；留空时使用内置 Emoji 字体。\n不属于 Emoji 的特殊装饰字符仍依赖正文字体回退。",
-                    restartRequired = true,
-                    restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
                     path = "draw.font.typography.autoNormalize",
@@ -774,8 +770,6 @@ public object MainConfigForms {
                     type = ConfigFieldType.BOOLEAN,
                     section = "绘图",
                     description = "让不同字体的行高尽量接近统一体验。\n默认开启；关闭后完全使用字体自身的默认行高。",
-                    restartRequired = true,
-                    restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
                     path = "draw.font.typography.lineHeightScale",
@@ -783,8 +777,6 @@ public object MainConfigForms {
                     type = ConfigFieldType.NUMBER,
                     section = "绘图",
                     description = "在自动统一行高的基础上再做整体微调。\n1 表示不额外缩放，0.95 更紧凑，1.05 更宽松。",
-                    restartRequired = true,
-                    restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
                     path = "draw.font.typography.letterSpacingEm",
@@ -792,8 +784,6 @@ public object MainConfigForms {
                     type = ConfigFieldType.NUMBER,
                     section = "绘图",
                     description = "给正文统一加一点字间距修正。\n一般保持 0 即可；正数更松，负数更紧。",
-                    restartRequired = true,
-                    restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
                     path = "pluginCatalog.url",
@@ -1273,9 +1263,6 @@ public object MainConfigForms {
             targets += "主程序"
         }
         if (previous.notifications.routeMonitorIntervalSeconds != next.notifications.routeMonitorIntervalSeconds) {
-            targets += "主程序"
-        }
-        if (previous.draw.font != next.draw.font) {
             targets += "主程序"
         }
         return targets.toList()

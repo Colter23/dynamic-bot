@@ -147,6 +147,28 @@ class MainConfigStoreTest {
     }
 
     @Test
+    fun drawFontChangesShouldApplyWithoutRestart() {
+        val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-config"))
+        val store = MainConfigStore(configService)
+        val current = store.loadOrCreate(
+            adminTokenProvider = { "token" },
+            secretProvider = { "secret" },
+        )
+
+        val result = store.save(
+            current.copy(
+                draw = current.draw.copy(
+                    font = current.draw.font.copy(text = "NotoColorEmoji.ttf"),
+                ),
+            ),
+        )
+
+        assertTrue(result.changed)
+        assertFalse(result.restartRequired)
+        assertEquals(emptyList(), result.restartTargets)
+    }
+
+    @Test
     fun pluginCatalogConfigShouldExposeHttpsUrlAndKeepInternalLimitsHidden() {
         val paths = MainConfigForms.formSpec.fields.map { it.path }
 

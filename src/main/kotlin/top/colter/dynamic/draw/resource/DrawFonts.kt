@@ -40,6 +40,7 @@ internal object DrawFonts {
             settings = settings,
             dataFontsRoot = dataFontsRoot.toString(),
             dataFonts = dataFontFiles.map(::dataFontSnapshot),
+            configuredFontFiles = configuredFontSnapshots(settings, dataFontFiles),
         )
         cachedRegistry?.takeIf { cachedKey == cacheKey }?.let {
             logger.debug { "绘图字体使用缓存：settings=$settings，dataFontsRoot=$dataFontsRoot" }
@@ -107,7 +108,7 @@ internal object DrawFonts {
             loadFileCandidate(path, emoji, source = "data-font:${path.toAbsolutePath().normalize()}")
         }
         val bundled = loadBundledCandidate(bundledFont, emoji)
-        val configuredLookupFonts = if (emoji && setting.isNotBlank()) {
+        val configuredLookupFonts = if (setting.isNotBlank()) {
             val autoDataFontKeys = autoDataFontFiles.mapTo(linkedSetOf()) { it.toAbsolutePath().normalize() }
             dataFontFiles
                 .filterNot { it.toAbsolutePath().normalize() in autoDataFontKeys }
@@ -143,8 +144,15 @@ internal object DrawFonts {
     }
 
     private fun autoDataFontFiles(dataFontFiles: List<Path>, emoji: Boolean): List<Path> {
-        if (!emoji) return dataFontFiles
-        return dataFontFiles.filter { it.fileName.toString().contains("emoji", ignoreCase = true) }
+        return if (emoji) {
+            dataFontFiles.filter { it.isEmojiFontFile() }
+        } else {
+            dataFontFiles.filterNot { it.isEmojiFontFile() }
+        }
+    }
+
+    private fun Path.isEmojiFontFile(): Boolean {
+        return fileName.toString().contains("emoji", ignoreCase = true)
     }
 
     private fun loadConfiguredCandidates(
@@ -350,8 +358,11 @@ internal object DrawFonts {
     }
 
     private fun FontCandidate.registerAsFallback(fontRegistry: FontRegistry, emoji: Boolean) {
-        fontRegistry.registerTypeface(typeface)
-        fontRegistry.registerTypeface(typeface, if (emoji) FontRegistry.EMOJI_FAMILY else FontRegistry.TEXT_FAMILY)
+        if (emoji) {
+            fontRegistry.registerTypeface(typeface, FontRegistry.EMOJI_FAMILY)
+        } else {
+            fontRegistry.registerTextFallbackTypeface(typeface)
+        }
         aliases.forEach { alias ->
             fontRegistry.registerTypeface(typeface, alias)
         }
@@ -364,7 +375,7 @@ internal object DrawFonts {
 
         val candidates = buildList {
             resolveFontPath(text)?.let { add(it) }
-            dataFontsRoot().resolve(text).toAbsolutePath().normalize().let { add(it) }
+            resolveDataFontPath(text)?.let { add(it) }
         }
         candidates.distinct().firstOrNull { Files.isRegularFile(it) }?.let {
             return it
@@ -391,6 +402,15 @@ internal object DrawFonts {
             }.toAbsolutePath().normalize()
         }.onFailure {
             logger.debug(it) { "绘图字体配置不是有效路径，继续按字体族名尝试：value=$path" }
+        }.getOrNull()
+    }
+
+    private fun resolveDataFontPath(path: String): Path? {
+        val text = path.trim()
+        return runCatching {
+            dataFontsRoot().resolve(text).toAbsolutePath().normalize()
+        }.onFailure {
+            logger.debug(it) { "绘图字体配置不是有效 data/fonts 路径，继续按字体族名尝试：value=$path" }
         }.getOrNull()
     }
 
@@ -524,11 +544,62 @@ internal object DrawFonts {
         return extension in FONT_EXTENSIONS
     }
 
+    private fun String.looksLikeFontFileReference(): Boolean {
+        val value = trim()
+        val fileName = value.substringAfterLast('/').substringAfterLast('\\')
+        val extension = fileName.substringAfterLast('.', missingDelimiterValue = "").lowercase()
+        return extension in FONT_EXTENSIONS ||
+            value.startsWith("file:", ignoreCase = true) ||
+            value.startsWith("~/") ||
+            value.startsWith("~\\") ||
+            value.contains('/') ||
+            value.contains('\\')
+    }
+
     private fun dataFontSnapshot(path: Path): DataFontSnapshot {
+        return fontFileSnapshot(path)
+    }
+
+    private fun configuredFontSnapshots(
+        settings: DrawFontSettings,
+        dataFontFiles: List<Path>,
+    ): List<DataFontSnapshot> {
+        return buildList {
+            addConfiguredFontSnapshots(settings.text, dataFontFiles)
+            addConfiguredFontSnapshots(settings.emoji, dataFontFiles)
+        }.distinctBy { it.path }
+    }
+
+    private fun MutableList<DataFontSnapshot>.addConfiguredFontSnapshots(
+        setting: String,
+        dataFontFiles: List<Path>,
+    ) {
+        parseFontEntries(setting)
+            .flatMap { configuredFontSnapshotPaths(it, dataFontFiles) }
+            .distinct()
+            .filter { it !in dataFontFiles }
+            .forEach { add(fontFileSnapshot(it)) }
+    }
+
+    private fun configuredFontSnapshotPaths(entry: String, dataFontFiles: List<Path>): List<Path> {
+        val text = entry.trim()
+        if (text.isBlank()) return emptyList()
+        return buildList {
+            configuredFontFile(text, dataFontFiles)?.let { add(it) }
+            if (text.looksLikeFontFileReference()) {
+                resolveFontPath(text)?.let { add(it) }
+                resolveDataFontPath(text)?.let { add(it) }
+            }
+        }.map { it.toAbsolutePath().normalize() }
+    }
+
+    private fun fontFileSnapshot(path: Path): DataFontSnapshot {
+        val normalized = path.toAbsolutePath().normalize()
         return DataFontSnapshot(
-            path = path.toString(),
-            size = runCatching { Files.size(path) }.getOrDefault(0L),
-            lastModifiedMillis = runCatching { Files.getLastModifiedTime(path).toMillis() }.getOrDefault(0L),
+            path = normalized.toString(),
+            exists = Files.isRegularFile(normalized),
+            size = runCatching { Files.size(normalized) }.getOrDefault(0L),
+            lastModifiedMillis = runCatching { Files.getLastModifiedTime(normalized).toMillis() }.getOrDefault(0L),
         )
     }
 
@@ -565,10 +636,12 @@ internal object DrawFonts {
         val settings: DrawFontSettings,
         val dataFontsRoot: String,
         val dataFonts: List<DataFontSnapshot>,
+        val configuredFontFiles: List<DataFontSnapshot>,
     )
 
     private data class DataFontSnapshot(
         val path: String,
+        val exists: Boolean,
         val size: Long,
         val lastModifiedMillis: Long,
     )

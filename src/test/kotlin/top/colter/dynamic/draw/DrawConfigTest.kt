@@ -38,6 +38,22 @@ class DrawConfigTest {
     }
 
     @Test
+    fun `draw config appends normal data font fallback before emoji fallback`() {
+        withDataFontDirectory(mapOf("NotoColorEmoji.ttf" to "SymbolFallback.ttf")) {
+            val config = DrawConfig(
+                platform = PlatformDescriptor.of("bilibili", "Bilibili"),
+            )
+
+            val resolved = config.fontRegistry.resolveTextStyle(TextStyle().setFontSize(24f))
+
+            assertContentEquals(
+                arrayOf(FontRegistry.TEXT_FAMILY, FontRegistry.TEXT_FALLBACK_FAMILY, FontRegistry.EMOJI_FAMILY),
+                resolved.fontFamilies,
+            )
+        }
+    }
+
+    @Test
     fun `draw config loads bundled fonts without context classloader`() {
         val previousClassLoader = Thread.currentThread().contextClassLoader
 
@@ -160,6 +176,27 @@ class DrawConfigTest {
     }
 
     @Test
+    fun `draw config keeps primary families before data font fallbacks`() {
+        withDataFontDirectory(mapOf("NotoColorEmoji.ttf" to "CustomEmoji.ttf")) {
+            val config = DrawConfig(
+                platform = PlatformDescriptor.of("bilibili", "Bilibili"),
+            )
+            val primaryFamily = assertNotNull(config.fontRegistry.textTypeface).familyName
+            val textFamilyFirst = assertNotNull(config.fontRegistry.fontRegistryFallback(FontRegistry.TEXT_FAMILY)).familyName
+            val emojiFamily = assertNotNull(config.fontRegistry.emojiTypeface).familyName
+            val emojiFamilyFirst = assertNotNull(config.fontRegistry.fontRegistryFallback(FontRegistry.EMOJI_FAMILY)).familyName
+            val resolved = config.fontRegistry.resolveTextStyle(TextStyle().setFontSize(24f))
+
+            assertEquals(primaryFamily, textFamilyFirst)
+            assertEquals(emojiFamily, emojiFamilyFirst)
+            assertContentEquals(arrayOf(FontRegistry.TEXT_FAMILY, FontRegistry.EMOJI_FAMILY), resolved.fontFamilies)
+            assertTrue("Noto Color Emoji" !in config.fontRegistry.familyNames(FontRegistry.TEXT_FAMILY))
+            assertTrue("Noto Color Emoji" !in config.fontRegistry.familyNames(FontRegistry.TEXT_FALLBACK_FAMILY))
+            assertTrue("Noto Color Emoji" in config.fontRegistry.familyNames(FontRegistry.EMOJI_FAMILY))
+        }
+    }
+
+    @Test
     fun `draw config falls back to bundled alias when configured font file cannot be loaded`() {
         val bundledTextFamily = assertNotNull(
             DrawConfig(platform = PlatformDescriptor.of("bilibili", "Bilibili")).fontRegistry.textTypeface,
@@ -202,6 +239,27 @@ class DrawConfigTest {
     }
 
     @Test
+    fun `draw config refreshes cached registry when configured font file changes`() {
+        val fontFile = Files.createTempFile("dynamic-bot-font-test-", ".ttf")
+        Files.copy(testFontResource("NotoColorEmoji.ttf"), fontFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        val settings = DrawSettings(font = DrawFontSettings(text = fontFile.toString()))
+
+        val first = DrawConfig(
+            platform = PlatformDescriptor.of("bilibili", "Bilibili"),
+            settings = settings,
+        ).fontRegistry
+
+        Files.copy(testFontResource("HarmonyOS_SansSC_Medium.ttf"), fontFile, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        val second = DrawConfig(
+            platform = PlatformDescriptor.of("bilibili", "Bilibili"),
+            settings = settings,
+        ).fontRegistry
+
+        assertTrue(first !== second)
+        assertEquals("HarmonyOS Sans SC", assertNotNull(second.textTypeface).familyName)
+    }
+
+    @Test
     fun `draw config does not mutate explicit font registry`() {
         val fontRegistry = FontRegistry()
 
@@ -238,6 +296,14 @@ class DrawConfigTest {
         val dataFontDir = Files.createTempDirectory("dynamic-bot-font-test-")
         fontNames.forEach { name ->
             Files.copy(testFontResource(name), dataFontDir.resolve(name))
+        }
+        withDataFontDirectory(dataFontDir, block)
+    }
+
+    private fun withDataFontDirectory(fontNames: Map<String, String>, block: () -> Unit) {
+        val dataFontDir = Files.createTempDirectory("dynamic-bot-font-test-")
+        fontNames.forEach { (resourceName, fileName) ->
+            Files.copy(testFontResource(resourceName), dataFontDir.resolve(fileName))
         }
         withDataFontDirectory(dataFontDir, block)
     }
