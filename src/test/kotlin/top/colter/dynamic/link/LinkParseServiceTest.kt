@@ -53,6 +53,7 @@ import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PersistenceManager
+import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testPublisherInfo
 import top.colter.dynamic.testPublisherKey
@@ -97,9 +98,10 @@ class LinkParseServiceTest {
     @Test
     fun `link parse service should enrich missing publisher info without writing publisher database`() = runBlocking {
         initDb("publisher-enrich")
+        val publisherKey = testPublisherKey(platformId = "bilibili", externalId = "123")
         val resolver = FakeLinkResolver(
             publisher = testPublisherInfo(
-                key = testPublisherKey(platformId = "bilibili", externalId = "123"),
+                key = publisherKey,
                 name = "",
                 avatar = MediaRef("", MediaKind.AVATAR),
             ),
@@ -131,6 +133,217 @@ class LinkParseServiceTest {
         assertEquals("补全用户", request.update.publisher.name)
         assertEquals("https://example.com/avatar.png", request.update.publisher.avatar.uri)
         assertEquals("https://example.com/banner.png", request.update.publisher.banner?.uri)
+        assertNull(PublisherRepository.findByKey(publisherKey))
+    }
+
+    @Test
+    fun `link parse service should continue remote lookup when stored dynamic publisher is incomplete`() = runBlocking {
+        initDb("publisher-enrich-stored-incomplete")
+        val publisherKey = testPublisherKey(platformId = "bilibili", externalId = "123")
+        PublisherRepository.upsertInfo(
+            testPublisherInfo(
+                key = publisherKey,
+                name = "本地用户",
+                avatar = MediaRef("https://example.com/local-avatar.png", MediaKind.AVATAR),
+                banner = null,
+            ),
+        )
+        val resolver = FakeLinkResolver(
+            publisher = testPublisherInfo(
+                key = publisherKey,
+                name = "",
+                avatar = MediaRef("", MediaKind.AVATAR),
+                banner = null,
+            ),
+        )
+        val sourceUpdates = RecordingSourceUpdatePublisher()
+        val lookup = FakePublisherLookupPlugin(
+            testPublisherInfo(
+                key = publisherKey,
+                name = "远程用户",
+                avatar = MediaRef("https://example.com/remote-avatar.png", MediaKind.AVATAR),
+                banner = MediaRef("https://example.com/remote-banner.png", MediaKind.COVER),
+            )
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(resolver) },
+            sourceUpdatePublisher = sourceUpdates,
+            publisherLookupResolver = { lookup },
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://t.bilibili.com/1",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+        val request = withTimeout(3_000) { sourceUpdates.receive() }
+
+        assertEquals(1, result.forwarded.size)
+        assertEquals(1, lookup.fetchPublisherInfoCalls)
+        assertEquals("本地用户", request.update.publisher.name)
+        assertEquals("https://example.com/local-avatar.png", request.update.publisher.avatar.uri)
+        assertEquals("https://example.com/remote-banner.png", request.update.publisher.banner?.uri)
+        assertNull(PublisherRepository.findByKey(publisherKey)?.banner)
+    }
+
+    @Test
+    fun `preview publisher should prefer local banner without remote lookup`() = runBlocking {
+        initDb("preview-publisher-local-banner")
+        val publisherKey = testPublisherKey(platformId = "bilibili", externalId = "42")
+        PublisherRepository.upsertInfo(
+            testPublisherInfo(
+                key = publisherKey,
+                name = "本地 UP",
+                avatar = MediaRef("https://example.com/local-avatar.png", MediaKind.AVATAR),
+                banner = MediaRef("https://example.com/local-banner.png", MediaKind.COVER),
+            ),
+        )
+        val lookup = FakePublisherLookupPlugin(
+            testPublisherInfo(
+                key = publisherKey,
+                name = "远程 UP",
+                avatar = MediaRef("https://example.com/remote-avatar.png", MediaKind.AVATAR),
+                banner = MediaRef("https://example.com/remote-banner.png", MediaKind.COVER),
+            )
+        )
+        var renderedPreview: LinkPreview? = null
+        val service = LinkParseService(
+            resolversProvider = {
+                listOf(
+                    FakeVideoLinkResolver(
+                        publisher = testPublisherInfo(
+                            key = publisherKey,
+                            name = "视频 UP",
+                            avatar = MediaRef("https://example.com/video-avatar.png", MediaKind.AVATAR),
+                            banner = null,
+                        )
+                    )
+                )
+            },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{draw}"),
+                    ),
+                )
+            },
+            publisherLookupResolver = { lookup },
+            previewRenderer = LinkPreviewRenderer { preview ->
+                renderedPreview = preview
+                MediaRef("https://example.com/preview.png", MediaKind.IMAGE)
+            },
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://www.bilibili.com/video/BV1xx411c7mD",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(1, result.forwarded.size)
+        assertEquals(0, lookup.fetchPublisherInfoCalls)
+        assertEquals("https://example.com/local-banner.png", renderedPreview?.publisher?.banner?.uri)
+    }
+
+    @Test
+    fun `preview publisher should use remote lookup when local info is missing`() = runBlocking {
+        initDb("preview-publisher-remote-banner")
+        val publisherKey = testPublisherKey(platformId = "bilibili", externalId = "42")
+        val lookup = FakePublisherLookupPlugin(
+            testPublisherInfo(
+                key = publisherKey,
+                name = "远程 UP",
+                avatar = MediaRef("https://example.com/remote-avatar.png", MediaKind.AVATAR),
+                banner = MediaRef("https://example.com/remote-banner.png", MediaKind.COVER),
+            )
+        )
+        var renderedPreview: LinkPreview? = null
+        val service = LinkParseService(
+            resolversProvider = {
+                listOf(
+                    FakeVideoLinkResolver(
+                        publisher = testPublisherInfo(
+                            key = publisherKey,
+                            name = "视频 UP",
+                            avatar = MediaRef("https://example.com/video-avatar.png", MediaKind.AVATAR),
+                            banner = null,
+                        )
+                    )
+                )
+            },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{draw}"),
+                    ),
+                )
+            },
+            publisherLookupResolver = { lookup },
+            previewRenderer = LinkPreviewRenderer { preview ->
+                renderedPreview = preview
+                MediaRef("https://example.com/preview.png", MediaKind.IMAGE)
+            },
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://www.bilibili.com/video/BV1xx411c7mD",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(1, result.forwarded.size)
+        assertEquals(1, lookup.fetchPublisherInfoCalls)
+        assertEquals("https://example.com/remote-banner.png", renderedPreview?.publisher?.banner?.uri)
+        assertNull(PublisherRepository.findByKey(publisherKey))
+    }
+
+    @Test
+    fun `user preview should use enriched publisher banner as cover`() = runBlocking {
+        initDb("preview-user-cover")
+        val publisherKey = testPublisherKey(platformId = "bilibili", externalId = "42")
+        val lookup = FakePublisherLookupPlugin(
+            testPublisherInfo(
+                key = publisherKey,
+                name = "远程 UP",
+                avatar = MediaRef("https://example.com/remote-avatar.png", MediaKind.AVATAR),
+                banner = MediaRef("https://example.com/remote-banner.png", MediaKind.COVER),
+            )
+        )
+        val service = LinkParseService(
+            resolversProvider = {
+                listOf(
+                    FakeUserLinkResolver(
+                        publisher = testPublisherInfo(
+                            key = publisherKey,
+                            name = "用户 UP",
+                            avatar = MediaRef("https://example.com/user-avatar.png", MediaKind.AVATAR),
+                            banner = null,
+                        )
+                    )
+                )
+            },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{cover}"),
+                    ),
+                )
+            },
+            publisherLookupResolver = { lookup },
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://space.bilibili.com/42",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(1, result.forwarded.size)
+        assertEquals(1, lookup.fetchPublisherInfoCalls)
+        val delivery = MessageDeliveryRepository.findRecent(limit = 1).single()
+        val message = MessageDeliveryRepository.findMessage(delivery.messageId)!!
+        val cover = message.batches.single().content.single() as MessageContent.Image
+        assertEquals("https://example.com/remote-banner.png", cover.image.uri)
     }
 
     @Test
@@ -1217,8 +1430,11 @@ class LinkParseServiceTest {
         private val info: PublisherInfo,
     ) : PublisherLookupPlugin {
         override val platformId: PlatformId = info.platformId
+        var fetchPublisherInfoCalls: Int = 0
+            private set
 
         override suspend fun fetchPublisherInfo(userId: String): PublisherInfo? {
+            fetchPublisherInfoCalls += 1
             return info.takeIf { it.externalId == userId }
         }
     }
@@ -1331,7 +1547,9 @@ class LinkParseServiceTest {
         }
     }
 
-    private class FakeVideoLinkResolver : LinkResolver {
+    private class FakeVideoLinkResolver(
+        private val publisher: PublisherInfo? = null,
+    ) : LinkResolver {
         override val platformId: PlatformId = PlatformId.of("bilibili")
 
         override fun matchesLink(inputUrl: String): Boolean {
@@ -1360,6 +1578,7 @@ class LinkParseServiceTest {
                     title = "demo video",
                     description = "demo description",
                     cover = MediaRef("https://example.com/cover.png", MediaKind.IMAGE),
+                    publisher = publisher,
                     metrics = listOf(
                         DynamicMetric("play", raw = 123_456, display = "12.3万"),
                         DynamicMetric("danmaku", raw = 234, display = "234"),
@@ -1370,6 +1589,44 @@ class LinkParseServiceTest {
                         DynamicMetric("share", raw = 10, display = "10"),
                     ),
                     durationSeconds = 120,
+                ),
+            )
+        }
+    }
+
+    private class FakeUserLinkResolver(
+        private val publisher: PublisherInfo,
+    ) : LinkResolver {
+        override val platformId: PlatformId = PlatformId.of("bilibili")
+
+        override fun matchesLink(inputUrl: String): Boolean {
+            return inputUrl.startsWith("https://space.bilibili.com/")
+        }
+
+        override suspend fun parseLink(inputUrl: String): ParsedLink? {
+            val id = inputUrl.substringAfterLast("/").substringBefore("?").takeIf { it.isNotBlank() } ?: return null
+            return ParsedLink(
+                platformId = platformId,
+                kind = LinkKinds.USER,
+                targetId = id,
+                normalizedUrl = "https://space.bilibili.com/$id",
+                sourceUrl = inputUrl,
+            )
+        }
+
+        override suspend fun resolveLink(parsedLink: ParsedLink): LinkResolution {
+            return LinkResolution.Preview(
+                parsedLink = parsedLink,
+                preview = LinkPreview(
+                    platformId = platformId,
+                    kind = LinkKinds.USER,
+                    id = parsedLink.targetId,
+                    url = parsedLink.normalizedUrl,
+                    title = publisher.name,
+                    description = "Bilibili 用户 ${publisher.externalId}",
+                    badge = "用户",
+                    cover = null,
+                    publisher = publisher,
                 ),
             )
         }

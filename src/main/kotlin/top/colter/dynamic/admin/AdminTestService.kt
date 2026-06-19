@@ -48,9 +48,11 @@ import top.colter.dynamic.core.link.LinkPreview
 import top.colter.dynamic.core.link.LinkResolution
 import top.colter.dynamic.core.link.LinkResolver
 import top.colter.dynamic.core.link.ParsedLink
+import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.draw.DefaultDynamicDrawService
 import top.colter.dynamic.draw.DefaultLinkPreviewRenderer
 import top.colter.dynamic.draw.DynamicDrawService
+import top.colter.dynamic.link.LinkPublisherEnricher
 import top.colter.dynamic.link.LinkPreviewTemplateDiagnostics
 import top.colter.dynamic.link.LinkPreviewTemplateRenderResult
 import top.colter.dynamic.link.LinkPreviewTemplateRenderer
@@ -64,9 +66,14 @@ public class AdminTestService(
     private val drawService: DynamicDrawService = DefaultDynamicDrawService(configProvider = configProvider),
     private val drawServiceFactory: ((() -> MainDynamicConfig) -> DynamicDrawService)? = null,
     private val storedPublisherResolver: (PublisherKey) -> Publisher? = { PublisherRepository.findByKey(it) },
+    private val publisherLookupResolver: (String) -> PublisherLookupPlugin? = { null },
     private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
 ) {
     private val presetSpecs: List<MockPresetSpec> by lazy { buildPresetSpecs() }
+    private val publisherEnricher: LinkPublisherEnricher = LinkPublisherEnricher(
+        storedPublisherResolver = storedPublisherResolver,
+        publisherLookupResolver = publisherLookupResolver,
+    )
 
     public fun presets(): AdminTestPresetsResponse {
         return AdminTestPresetsResponse(
@@ -122,14 +129,14 @@ public class AdminTestService(
                 mode = TEST_MODE_REAL_LINK,
                 resolutionType = "DYNAMIC",
                 parsedLink = parsedLink,
-                update = resolution.update,
+                update = publisherEnricher.enrich(resolution.update),
                 templateOverride = request.template,
                 presetOptions = request.presetOptions,
             )
             is LinkResolution.Preview -> renderLinkPreview(
                 mode = TEST_MODE_REAL_LINK,
                 parsedLink = parsedLink,
-                preview = resolution.preview,
+                preview = publisherEnricher.enrich(resolution.preview),
                 templateOverride = request.template,
                 presetOptions = request.presetOptions,
             )

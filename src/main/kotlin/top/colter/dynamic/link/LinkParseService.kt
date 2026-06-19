@@ -19,7 +19,6 @@ import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
-import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.event.PublisherPersistenceMode
@@ -39,7 +38,6 @@ import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.DefaultLinkPreviewRenderer
 import top.colter.dynamic.draw.LinkPreviewRenderer
 import top.colter.dynamic.repository.MessageDeliveryRepository
-import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
 
 internal const val LINK_PARSE_EVENT_LABEL: String = "link-parse"
@@ -64,6 +62,14 @@ public class LinkParseService(
     private val videoDownloadSemaphores: MutableMap<Int, Semaphore> = ConcurrentHashMap()
     private val videoDownloadLocks: MutableMap<String, VideoDownloadLock> = ConcurrentHashMap()
     private val templateRenderer: LinkPreviewTemplateRenderer = LinkPreviewTemplateRenderer(previewRenderer)
+    private val publisherEnricher: LinkPublisherEnricher = LinkPublisherEnricher(
+        publisherLookupResolver = publisherLookupResolver,
+        onLookupFailure = { publisher, error ->
+            linkParseLogger.debug(error) {
+                "链接解析发布者资料补全失败：platform=${publisher.platformId.value}，publisher=${publisher.externalId}"
+            }
+        },
+    )
 
     internal suspend fun parseAndDispatch(
         text: String,
@@ -193,23 +199,11 @@ public class LinkParseService(
     }
 
     private suspend fun enrichPublisherForLinkParse(update: SourceUpdate): SourceUpdate {
-        val incoming = update.publisher
-        val stored = PublisherRepository.findByKey(incoming.key)
-        if (stored != null) {
-            return update.copy(publisher = mergePublisherInfo(incoming, stored.toInfo()))
-        }
-        if (!incoming.needsLookup()) return update
+        return publisherEnricher.enrich(update)
+    }
 
-        val plugin = publisherLookupResolver(incoming.platformId.value) ?: return update
-        val fetched = runCatching { plugin.fetchPublisherInfo(incoming.externalId) }
-            .onFailure {
-                linkParseLogger.debug(it) {
-                    "链接解析发布者资料补全失败：platform=${incoming.platformId.value}，publisher=${incoming.externalId}"
-                }
-            }
-            .getOrNull()
-            ?: return update
-        return update.copy(publisher = mergePublisherInfo(incoming, fetched))
+    private suspend fun enrichPreviewForLinkParse(preview: LinkPreview): LinkPreview {
+        return publisherEnricher.enrich(preview)
     }
 
     private suspend fun forwardPreview(
@@ -218,6 +212,7 @@ public class LinkParseService(
         context: CommandContext,
         inReplyTo: String?,
     ): LinkParseItemResult {
+        val enrichedPreview = enrichPreviewForLinkParse(preview)
         val template = configProvider().linkParsing.templates.message
         val templatePlan = runCatching {
             templateRenderer.plan(template)
@@ -225,16 +220,16 @@ public class LinkParseService(
             linkParseLogger.warn(error) {
                 "链接解析模板解析失败，回退为文本：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
             }
-            return forwardMessage(listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))), parsedLink, context)
+            return forwardMessage(listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText())))), parsedLink, context)
         }
 
         val immediateBatches = runCatching {
-            templateRenderer.renderPlanPreview(templatePlan, preview)
+            templateRenderer.renderPlanPreview(templatePlan, enrichedPreview)
         }.getOrElse { error ->
             linkParseLogger.warn(error) {
                 "链接卡片模板渲染失败，回退为文本：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
             }
-            listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText()))))
+            listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText()))))
         }
         var currentResult = when {
             immediateBatches.isEmpty() -> null
@@ -246,12 +241,12 @@ public class LinkParseService(
 
         if (!templatePlan.requiresVideo) {
             return currentResult
-                ?: forwardMessage(listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))), parsedLink, context)
+                ?: forwardMessage(listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText())))), parsedLink, context)
         }
 
-        val downloadPlan = when (val planned = videoDownloadPlan(preview, parsedLink)) {
+        val downloadPlan = when (val planned = videoDownloadPlan(enrichedPreview, parsedLink)) {
             null -> {
-                val fallbackBatches = renderVideoFallbackBatches(templatePlan, preview, parsedLink)
+                val fallbackBatches = renderVideoFallbackBatches(templatePlan, enrichedPreview, parsedLink)
                 return when {
                     fallbackBatches.isNotEmpty() -> {
                         val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context)
@@ -260,7 +255,7 @@ public class LinkParseService(
                                 ?: fallbackResult
                             else -> currentResult
                                 ?: forwardMessage(
-                                    listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))),
+                                    listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText())))),
                                     parsedLink,
                                     context,
                                 )
@@ -268,7 +263,7 @@ public class LinkParseService(
                     }
                     currentResult != null -> currentResult
                     else -> forwardMessage(
-                        listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))),
+                        listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText())))),
                         parsedLink,
                         context,
                     )
@@ -281,7 +276,7 @@ public class LinkParseService(
                     context = context,
                     inReplyTo = inReplyTo,
                 )
-                val fallbackBatches = renderVideoFallbackBatches(templatePlan, preview, parsedLink)
+                val fallbackBatches = renderVideoFallbackBatches(templatePlan, enrichedPreview, parsedLink)
                 if (fallbackBatches.isNotEmpty()) {
                     val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context)
                     return if (fallbackResult is LinkParseItemResult.Forwarded) {
@@ -314,7 +309,7 @@ public class LinkParseService(
             launchVideoDownloadFollowUp(
                 scope = scope,
                 templatePlan = templatePlan,
-                preview = preview,
+                preview = enrichedPreview,
                 parsedLink = parsedLink,
                 context = context,
                 downloader = downloadPlan.downloader,
@@ -327,7 +322,7 @@ public class LinkParseService(
 
         return forwardVideoAfterDownload(
             templatePlan = templatePlan,
-            preview = preview,
+            preview = enrichedPreview,
             parsedLink = parsedLink,
             context = context,
             downloader = downloadPlan.downloader,
@@ -887,20 +882,6 @@ public class LinkParseService(
     private fun secondsToMillis(seconds: Double, minimumMillis: Long): Long {
         if (seconds <= 0.0 && minimumMillis <= 0) return 0
         return (seconds * 1_000.0).roundToLong().coerceAtLeast(minimumMillis)
-    }
-
-    private fun PublisherInfo.needsLookup(): Boolean {
-        return name.isBlank() || avatar.uri.isBlank() || banner == null
-    }
-
-    private fun mergePublisherInfo(primary: PublisherInfo, fallback: PublisherInfo): PublisherInfo {
-        return primary.copy(
-            name = primary.name.ifBlank { fallback.name },
-            avatarBadgeKey = primary.avatarBadgeKey ?: fallback.avatarBadgeKey,
-            avatar = primary.avatar.takeIf { it.uri.isNotBlank() } ?: fallback.avatar,
-            banner = primary.banner ?: fallback.banner,
-            pendant = primary.pendant ?: fallback.pendant,
-        )
     }
 
     private data class ParsedLinkCandidate(

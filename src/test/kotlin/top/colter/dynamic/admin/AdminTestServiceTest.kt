@@ -31,6 +31,7 @@ import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.Publisher
+import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.RepostBlock
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.link.LinkPreview
@@ -38,9 +39,12 @@ import top.colter.dynamic.core.link.LinkKinds
 import top.colter.dynamic.core.link.LinkResolution
 import top.colter.dynamic.core.link.LinkResolver
 import top.colter.dynamic.core.link.ParsedLink
+import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.draw.DynamicDrawService
 import top.colter.dynamic.testDynamicUpdate
+import top.colter.dynamic.testPublisher
 import top.colter.dynamic.testPublisherInfo
+import top.colter.dynamic.testPublisherKey
 
 class AdminTestServiceTest {
     @Test
@@ -256,6 +260,117 @@ class AdminTestServiceTest {
     }
 
     @Test
+    fun realLinkPreviewShouldEnrichDynamicPublisherBeforeRenderingTemplate() = runBlocking {
+        val publisherKey = testPublisherKey(platformId = "bilibili", externalId = "42")
+        val lookup = FakePublisherLookupPlugin(
+            testPublisherInfo(
+                key = publisherKey,
+                name = "远程 UP",
+                avatar = MediaRef("https://example.com/remote-avatar.png", MediaKind.AVATAR),
+                banner = MediaRef("https://example.com/remote-banner.png", MediaKind.COVER),
+            ),
+        )
+        val service = AdminTestService(
+            resolversProvider = {
+                listOf(
+                    FakeLinkResolver(
+                        publisher = testPublisherInfo(
+                            key = publisherKey,
+                            name = "",
+                            avatar = MediaRef("", MediaKind.AVATAR),
+                        ),
+                    )
+                )
+            },
+            configProvider = {
+                MainDynamicConfig(
+                    templates = PushTemplates(dynamic = "{name}"),
+                )
+            },
+            drawService = FakeDrawService(),
+            storedPublisherResolver = { null },
+            publisherLookupResolver = { lookup },
+        )
+
+        val response = service.preview(
+            AdminTestPreviewRequest(
+                mode = "REAL_LINK",
+                link = "https://example.com/dynamic/1",
+            )
+        )
+
+        assertEquals("OK", response.status)
+        assertEquals(1, lookup.fetchPublisherInfoCalls)
+        assertEquals("远程 UP", response.update?.publisher?.name)
+        assertEquals("https://example.com/remote-banner.png", response.update?.publisher?.banner?.uri)
+        assertEquals("远程 UP", response.batches.single().content.single().fallbackText)
+    }
+
+    @Test
+    fun realLinkPreviewShouldEnrichPreviewPublisherBeforeRenderingTemplate() = runBlocking {
+        val publisherKey = testPublisherKey(platformId = "bilibili", externalId = "42")
+        val lookup = FakePublisherLookupPlugin(
+            testPublisherInfo(
+                key = publisherKey,
+                name = "远程 UP",
+                avatar = MediaRef("https://example.com/remote-avatar.png", MediaKind.AVATAR),
+                banner = MediaRef("https://example.com/remote-banner.png", MediaKind.COVER),
+            ),
+        )
+        val service = AdminTestService(
+            resolversProvider = {
+                listOf(
+                    FakePreviewLinkResolver(
+                        kind = LinkKinds.USER,
+                        cover = null,
+                        publisher = testPublisherInfo(
+                            key = publisherKey,
+                            name = "Preview UP",
+                            avatar = MediaRef("https://example.com/preview-avatar.png", MediaKind.AVATAR),
+                            banner = null,
+                        ),
+                    )
+                )
+            },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{name}\\r{cover}"),
+                    ),
+                )
+            },
+            drawService = FakeDrawService(),
+            storedPublisherResolver = {
+                testPublisher(
+                    key = publisherKey,
+                    name = "本地 UP",
+                    avatar = MediaRef("https://example.com/local-avatar.png", MediaKind.AVATAR),
+                    banner = MediaRef("https://example.com/local-banner.png", MediaKind.COVER),
+                )
+            },
+            publisherLookupResolver = { lookup },
+        )
+
+        val response = service.preview(
+            AdminTestPreviewRequest(
+                mode = "REAL_LINK",
+                link = "https://example.com/video/1",
+            )
+        )
+
+        assertEquals("OK", response.status)
+        assertEquals(0, lookup.fetchPublisherInfoCalls)
+        assertEquals("Preview UP", response.preview?.publisher?.name)
+        assertEquals("https://example.com/local-banner.png", response.preview?.publisher?.banner?.uri)
+        assertEquals("https://example.com/local-banner.png", response.preview?.cover?.uri)
+        val image = response.batches
+            .flatMap { it.content }
+            .filterIsInstance<MessageContent.Image>()
+            .single()
+        assertEquals("https://example.com/local-banner.png", image.image.uri)
+    }
+
+    @Test
     fun realLinkPreviewShouldRenderDrawThroughPreviewTemplate() = runBlocking {
         val resolver = FakePreviewLinkResolver()
         val baseDrawService = FakeDrawService("D:/tmp/admin-test-base-draw.png")
@@ -395,6 +510,19 @@ class AdminTestServiceTest {
         )
     }
 
+    private class FakePublisherLookupPlugin(
+        private val info: PublisherInfo,
+    ) : PublisherLookupPlugin {
+        override val platformId: PlatformId = info.platformId
+        var fetchPublisherInfoCalls: Int = 0
+            private set
+
+        override suspend fun fetchPublisherInfo(userId: String): PublisherInfo? {
+            fetchPublisherInfoCalls += 1
+            return info.takeIf { it.externalId == userId }
+        }
+    }
+
     private class FakeDrawService(
         private val uri: String = "D:/tmp/admin-test-draw.png",
     ) : DynamicDrawService {
@@ -417,7 +545,9 @@ class AdminTestServiceTest {
         }
     }
 
-    private class FakeLinkResolver : LinkResolver {
+    private class FakeLinkResolver(
+        private val publisher: PublisherInfo = testPublisherInfo(name = "Resolver UP"),
+    ) : LinkResolver {
         override val platformId: PlatformId = PlatformId.of("bilibili")
         var parseCalls: Int = 0
         var resolveCalls: Int = 0
@@ -441,7 +571,7 @@ class AdminTestServiceTest {
             return LinkResolution.Dynamic(
                 parsedLink = parsedLink,
                 update = testDynamicUpdate(
-                    publisher = testPublisherInfo(name = "Resolver UP"),
+                    publisher = publisher,
                     externalId = parsedLink.targetId,
                     payload = top.colter.dynamic.core.data.DynamicPayload(
                         blocks = listOf(
@@ -455,7 +585,11 @@ class AdminTestServiceTest {
         }
     }
 
-    private class FakePreviewLinkResolver : LinkResolver {
+    private class FakePreviewLinkResolver(
+        private val kind: String = LinkKinds.VIDEO,
+        private val cover: MediaRef? = MediaRef("https://example.com/cover.jpg", MediaKind.COVER),
+        private val publisher: PublisherInfo? = null,
+    ) : LinkResolver {
         override val platformId: PlatformId = PlatformId.of("bilibili")
 
         override fun matchesLink(inputUrl: String): Boolean {
@@ -465,7 +599,7 @@ class AdminTestServiceTest {
         override suspend fun parseLink(inputUrl: String): ParsedLink {
             return ParsedLink(
                 platformId = platformId,
-                kind = LinkKinds.VIDEO,
+                kind = kind,
                 targetId = "1",
                 normalizedUrl = inputUrl,
             )
@@ -476,12 +610,13 @@ class AdminTestServiceTest {
                 parsedLink = parsedLink,
                 preview = LinkPreview(
                     platformId = platformId,
-                    kind = LinkKinds.VIDEO,
+                    kind = kind,
                     id = parsedLink.targetId,
                     url = parsedLink.normalizedUrl,
                     title = "Preview video",
                     description = "preview content",
-                    cover = MediaRef("https://example.com/cover.jpg", MediaKind.COVER),
+                    cover = cover,
+                    publisher = publisher,
                     metrics = listOf(
                         DynamicMetric("play", raw = 123_000, display = "12.3万"),
                         DynamicMetric("danmaku", raw = 234, display = "234"),

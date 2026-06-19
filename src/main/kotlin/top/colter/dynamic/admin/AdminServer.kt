@@ -108,6 +108,7 @@ public class AdminServer(
                 resolversProvider = { pluginManager.getLinkResolvers() },
                 configProvider = configProvider,
                 drawService = adminDrawService,
+                publisherLookupResolver = { platformId -> pluginManager.findPublisherLookupPlugin(platformId) },
                 drawServiceFactory = { effectiveConfigProvider ->
                     DefaultDynamicDrawService(
                         configProvider = effectiveConfigProvider,
