@@ -5,7 +5,10 @@ import top.colter.skiko.*
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.Ratio
 import top.colter.skiko.data.Shadow
+import top.colter.skiko.data.TextEmphasis
 import top.colter.skiko.layout.*
+
+private val mediaMiniTitleEmphasis = TextEmphasis(0.5f.dp)
 
 /**
  * 迷你媒体组件
@@ -46,6 +49,7 @@ internal fun Layout.MediaMini(
                 color = colors.titleColor,
                 maxLinesCount = 1,
                 alignment = LayoutAlignment.LEFT,
+                textEmphasis = mediaMiniTitleEmphasis,
                 modifier = Modifier().fillMaxWidth()
             )
         }
@@ -65,16 +69,17 @@ internal fun Layout.MediaMini(
         Box(
             alignment = LayoutAlignment.RIGHT_TOP,
             modifier = Modifier()
-                .padding(horizontal = 20.dp, vertical = 3.dp)
+                .padding(horizontal = 20.dp)
                 .background(color = colors.accentColor)
                 .border(2.dp, listOf(0.dp, 10.dp, 0.dp, 10.dp), colors.badgeBorderColor)
                 .shadows(Shadow.ELEVATION_2)
         ) {
-            Text(
+            MediaLabelText(
                 text = badge,
                 fontSize = 20.dp,
+                lineHeight = 32.dp,
                 color = colors.badgeTextColor,
-                modifier = Modifier().maxWidth(200.dp)
+                maxWidth = 200.dp,
             )
         }
     }

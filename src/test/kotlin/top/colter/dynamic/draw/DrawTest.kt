@@ -436,7 +436,7 @@ class DrawTest {
             kind = LinkKinds.VIDEO,
             id = "BV1Preview001",
             url = "https://www.bilibili.com/video/BV1Preview001",
-            title = "链接解析绘图模块重构记录",
+            title = "链接解析绘图模块 debug preview 记录",
             description = "这是一条通过链接解析得到的视频预览，主要观察封面、标题、简介、时长和播放数据在媒体卡片里的组合效果。",
             badge = "视频",
             cover = imageMedia("bg1.jpg", MediaKind.COVER),

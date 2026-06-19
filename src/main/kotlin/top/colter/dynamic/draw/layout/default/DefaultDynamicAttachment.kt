@@ -5,6 +5,7 @@ import top.colter.dynamic.core.data.*
 import top.colter.dynamic.draw.DrawConfig
 import top.colter.dynamic.draw.layout.default.component.Media
 import top.colter.dynamic.draw.layout.default.component.MediaCardColors
+import top.colter.dynamic.draw.layout.default.component.MediaLabelText
 import top.colter.dynamic.draw.layout.default.component.MediaMini
 import top.colter.dynamic.draw.layout.default.component.MediaSmall
 import top.colter.dynamic.draw.layout.default.component.mediaCardColors
@@ -122,19 +123,22 @@ private fun Layout.DynamicImageTile(
 
     // 绘制右下角标签
     if (!badge.isNullOrBlank()) {
+        val badgeFontSize = (36 - 6 * lineCount).dp
+        val badgeLineHeight = (48 - 8 * lineCount).dp
         Box(
             alignment = LayoutAlignment.RIGHT_BOTTOM,
             modifier = Modifier()
                 .margin((25 - 5 * lineCount).dp)
-                .padding(horizontal = (20 - 3 * lineCount).dp, vertical = (4 - 1 * lineCount).dp)
+                .padding(horizontal = (20 - 3 * lineCount).dp)
                 .background(color = colors.overlayPillColor)
                 .radius((13 - 2 * lineCount).dp)
         ) {
-            Text(
+            MediaLabelText(
                 text = badge,
-                fontSize = (36 - 6 * lineCount).dp,
+                fontSize = badgeFontSize,
+                lineHeight = badgeLineHeight,
                 color = colors.overlayTextColor,
-                modifier = Modifier().maxWidth(500.dp)
+                maxWidth = 500.dp,
             )
         }
     }

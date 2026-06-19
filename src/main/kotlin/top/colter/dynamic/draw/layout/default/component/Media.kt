@@ -6,7 +6,10 @@ import top.colter.skiko.data.Gradient
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.Ratio
 import top.colter.skiko.data.Shadow
+import top.colter.skiko.data.TextEmphasis
 import top.colter.skiko.layout.*
+
+private val mediaTitleEmphasis = TextEmphasis(0.7f.dp)
 
 
 /**
@@ -55,16 +58,17 @@ internal fun Layout.Media(
             Box(
                 alignment = LayoutAlignment.RIGHT_TOP,
                 modifier = Modifier()
-                    .padding(horizontal = 30.dp, vertical = 3.dp)
+                    .padding(horizontal = 30.dp)
                     .background(color = colors.accentColor)
                     .border(2.dp, listOf(0.dp, 10.dp, 0.dp, 10.dp), colors.badgeBorderColor)
                     .shadows(Shadow.ELEVATION_1)
             ) {
-                Text(
+                MediaLabelText(
                     text = badge,
                     fontSize = 30.dp,
+                    lineHeight = 46.dp,
                     color = colors.badgeTextColor,
-                    modifier = Modifier().maxWidth(200.dp)
+                    maxWidth = 200.dp,
                 )
             }
         }
@@ -90,15 +94,16 @@ internal fun Layout.Media(
                         alignment = LayoutAlignment.LEFT,
                         modifier = Modifier()
                             .margin(left = 40.dp)
-                            .padding(horizontal = 15.dp, vertical = 4.dp)
+                            .padding(horizontal = 15.dp)
                             .background(color = colors.overlayPillColor)
                             .radius(10.dp)
                     ) {
-                        Text(
+                        MediaLabelText(
                             text = duration,
                             fontSize = 26.dp,
+                            lineHeight = 38.dp,
                             color = colors.overlayTextColor,
-                            modifier = Modifier().maxWidth(400.dp)
+                            maxWidth = 400.dp,
                         )
                     }
                 }
@@ -124,6 +129,7 @@ internal fun Layout.Media(
         fontSize = 34.dp,
         color = colors.titleColor,
         maxLinesCount = 2,
+        textEmphasis = mediaTitleEmphasis,
         modifier = Modifier().margin(top = 15.dp, right = 15.dp, bottom = 10.dp, left = 15.dp)
     )
 

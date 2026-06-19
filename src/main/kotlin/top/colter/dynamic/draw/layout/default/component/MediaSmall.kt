@@ -4,7 +4,10 @@ import top.colter.skiko.*
 import top.colter.skiko.data.LayoutAlignment
 import top.colter.skiko.data.Ratio
 import top.colter.skiko.data.Shadow
+import top.colter.skiko.data.TextEmphasis
 import top.colter.skiko.layout.*
+
+private val mediaSmallTitleEmphasis = TextEmphasis(0.55f.dp)
 
 /**
  * 小媒体组件
@@ -42,16 +45,17 @@ internal fun Layout.MediaSmall(
                 Box(
                     alignment = LayoutAlignment.LEFT_TOP,
                     modifier = Modifier()
-                        .padding(horizontal = 24.dp, vertical = 3.dp)
+                        .padding(horizontal = 24.dp)
                         .background(color = colors.accentColor)
                         .border(2.dp, listOf(10.dp, 0.dp, 10.dp, 0.dp), colors.badgeBorderColor)
                         .shadows(Shadow.ELEVATION_1)
                 ) {
-                    Text(
+                    MediaLabelText(
                         text = badge,
                         fontSize = 22.dp,
+                        lineHeight = 34.dp,
                         color = colors.badgeTextColor,
-                        modifier = Modifier().maxWidth(200.dp)
+                        maxWidth = 200.dp,
                     )
                 }
             }
@@ -61,15 +65,16 @@ internal fun Layout.MediaSmall(
                     alignment = LayoutAlignment.RIGHT_BOTTOM,
                     modifier = Modifier()
                         .margin(right = 25.dp, bottom = 20.dp)
-                        .padding(horizontal = 15.dp, vertical = 2.dp)
+                        .padding(horizontal = 15.dp)
                         .background(color = colors.overlayPillColor)
                         .radius(10.dp)
                 ) {
-                    Text(
+                    MediaLabelText(
                         text = duration,
                         fontSize = 20.dp,
+                        lineHeight = 30.dp,
                         color = colors.overlayTextColor,
-                        modifier = Modifier().maxWidth(400.dp)
+                        maxWidth = 400.dp,
                     )
                 }
             }
@@ -78,16 +83,17 @@ internal fun Layout.MediaSmall(
         Box(
             alignment = LayoutAlignment.LEFT_TOP,
             modifier = Modifier()
-                .padding(horizontal = 24.dp, vertical = 3.dp)
+                .padding(horizontal = 24.dp)
                 .background(color = colors.accentColor)
                 .border(2.dp, listOf(10.dp, 0.dp, 10.dp, 0.dp), colors.badgeBorderColor)
                 .shadows(Shadow.ELEVATION_1)
         ) {
-            Text(
+            MediaLabelText(
                 text = badge,
                 fontSize = 22.dp,
+                lineHeight = 34.dp,
                 color = colors.badgeTextColor,
-                modifier = Modifier().maxWidth(200.dp)
+                maxWidth = 200.dp,
             )
         }
     }
@@ -100,6 +106,7 @@ internal fun Layout.MediaSmall(
             color = colors.titleColor,
             maxLinesCount = 2,
             alignment = LayoutAlignment.LEFT,
+            textEmphasis = mediaSmallTitleEmphasis,
             modifier = Modifier().fillRatioHeight(0.4f)
         )
 

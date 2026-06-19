@@ -17,6 +17,7 @@ import top.colter.dynamic.draw.DrawConfig
 import top.colter.skiko.Dp
 import top.colter.skiko.Modifier
 import top.colter.skiko.data.RichParagraphBuilder
+import top.colter.skiko.data.TextEmphasis
 import top.colter.skiko.dp
 import top.colter.skiko.fillMaxWidth
 import top.colter.skiko.layout.AutoSizeRichText
@@ -39,6 +40,7 @@ private const val MIN_EMOJI_ONLY_FONT_SIZE = 56f
 private const val IMAGE_EMOJI_FONT_SIZE_SCALE = 1.16f
 private const val TITLE_TO_CONTENT_RATIO = 1.2f
 private const val FONT_SIZE_STEP = 0.5f
+private val titleTextEmphasis = TextEmphasis(0.8f.dp)
 private val minTitleFontSize = 38.dp
 private val maxTitleFontSize = 56.dp
 
@@ -75,6 +77,7 @@ internal fun Layout.drawDynamicTitle(
         fontSizeStep = FONT_SIZE_STEP.dp,
         maxLinesCount = 2,
         modifier = Modifier().margin(bottom = bottomSpacing),
+        textEmphasis = titleTextEmphasis,
     ) { fontSize ->
         val style = TextStyle()
             .setColor(config.theme.textColor)
