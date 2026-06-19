@@ -768,6 +768,42 @@
       border-color: rgba(20, 184, 166, 0.34);
     }
 
+    [data-theme="dark"] .config-search-box {
+      background: var(--panel-soft);
+      border-color: var(--line-strong);
+    }
+
+    [data-theme="dark"] .config-search-box:focus-within {
+      background: var(--panel);
+      border-color: rgba(20, 184, 166, 0.5);
+    }
+
+    [data-theme="dark"] .config-search-box input {
+      background: transparent;
+      border-color: transparent;
+    }
+
+    [data-theme="dark"] .config-search-clear {
+      background: rgba(156, 163, 175, 0.12);
+      border-color: var(--line-strong);
+      color: var(--muted);
+    }
+
+    [data-theme="dark"] .config-field-search-row {
+      border-color: rgba(20, 184, 166, 0.18);
+    }
+
+    [data-theme="dark"] .config-field-search-row .config-search-summary {
+      background: rgba(20, 184, 166, 0.10);
+      border-color: rgba(20, 184, 166, 0.30);
+      color: var(--accent);
+    }
+
+    [data-theme="dark"] .config-search-kept {
+      border-color: rgba(245, 158, 11, 0.45);
+      background: rgba(245, 158, 11, 0.08);
+    }
+
     [data-theme="dark"] .config-composite-head {
       background: rgba(15, 20, 25, 0.52);
       border-color: var(--line-strong);
@@ -1911,6 +1947,10 @@
     .config-field-card:hover {
       border-color: #b9ded8;
       background: #fbfefd;
+    }
+    .config-search-kept {
+      border-color: #f0c98d;
+      background: #fffaf0;
     }
     .config-field-main {
       min-width: 0;
@@ -4899,10 +4939,110 @@
       position: sticky;
       top: 0px;
       display: grid;
-      grid-template-rows: auto minmax(0, 1fr);
+      grid-template-rows: auto auto minmax(0, 1fr);
       gap: 10px;
       max-height: calc(100dvh - 96px);
       overflow: hidden;
+    }
+    .config-list-tools {
+      min-width: 0;
+      display: grid;
+      gap: 7px;
+    }
+    .config-search-box {
+      min-width: 0;
+      min-height: 38px;
+      display: grid;
+      grid-template-columns: auto minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 7px;
+      padding: 5px 6px 5px 10px;
+      border: 1px solid #cfdbe7;
+      border-radius: 8px;
+      background: #f8fbfd;
+      transition: background 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+    }
+    .config-search-box:focus-within {
+      border-color: #8fcfc6;
+      background: #fff;
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.10);
+    }
+    .config-search-icon {
+      width: 18px;
+      min-width: 18px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      font-size: 15px;
+      line-height: 1;
+    }
+    .config-search-box input {
+      min-width: 0;
+      width: 100%;
+      min-height: 26px;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 750;
+      outline: none;
+    }
+    .config-search-box input:focus {
+      background: transparent;
+      box-shadow: none;
+    }
+    .config-search-clear {
+      width: 24px;
+      min-width: 24px;
+      min-height: 24px;
+      height: 24px;
+      display: inline-grid;
+      place-items: center;
+      padding: 0;
+      border-color: #d7e1ea;
+      border-radius: 999px;
+      background: #fff;
+      color: var(--muted);
+      font-size: 15px;
+      font-weight: 900;
+      line-height: 1;
+      filter: none;
+    }
+    .config-search-clear:hover {
+      border-color: #b9ded8;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+    .config-search-clear[hidden] { display: none; }
+    .config-search-summary {
+      min-width: 0;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
+    }
+    .config-search-empty-panel {
+      display: grid;
+      place-items: center;
+      gap: 6px;
+      min-height: 150px;
+      padding: 22px;
+      border-style: dashed;
+      text-align: center;
+    }
+    .config-search-empty-panel[hidden] { display: none; }
+    .config-search-empty-panel strong {
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 900;
+    }
+    .config-search-empty-panel span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 750;
     }
     .config-list {
       display: grid;
@@ -5031,6 +5171,28 @@
       color: var(--text);
       font-size: 12px;
       font-weight: 850;
+      white-space: nowrap;
+    }
+    .config-field-search-row {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(15, 118, 110, 0.14);
+    }
+    .config-field-search-box {
+      width: min(520px, 100%);
+      background: rgba(255, 255, 255, 0.82);
+    }
+    .config-field-search-row .config-search-summary {
+      flex: 0 0 auto;
+      padding: 4px 8px;
+      border: 1px solid rgba(15, 118, 110, 0.16);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.68);
+      color: var(--accent);
       white-space: nowrap;
     }
     .config-source-path {
@@ -8172,6 +8334,17 @@
       }
       .config-hero-main {
         gap: 10px;
+      }
+      .config-field-search-row {
+        align-items: stretch;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .config-field-search-box {
+        width: 100%;
+      }
+      .config-field-search-row .config-search-summary {
+        width: fit-content;
       }
       .config-hero-side {
         width: 100%;

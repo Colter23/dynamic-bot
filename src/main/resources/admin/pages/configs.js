@@ -115,6 +115,15 @@ export async function handleAction(nextCtx, { action, button, id }) {
     await withButtonLoading(button, "重置中...", () => resetAllConfig());
     return true;
   }
+  if (action === "clear-config-list-search") {
+    state.configListSearch = "";
+    refreshConfigListSearch();
+    return true;
+  }
+  if (action === "clear-config-field-search") {
+    setConfigFieldSearchValue("", true);
+    return true;
+  }
   if (action === "select-config-section") {
     selectConfigSection(button);
     return true;
@@ -228,16 +237,23 @@ async function loadConfigs(force) {
   const selected = rows.find(item => item.id === state.selectedConfigId) || rows[0] || null;
   state.selectedConfigId = selected ? selected.id : "";
   if (!selected) state.currentConfigDetail = null;
+  const listKeyword = configListSearchValue();
+  const visibleRows = rows.filter(item => configListMatches(item, listKeyword));
   pageRoot().innerHTML = `
     <section class="page">
       <div class="config-layout">
         <aside class="panel config-list-panel">
           <div class="panel-head"><h2>配置文件</h2></div>
-          <div class="config-list">
-            ${rows.map(item => `<button class="config-item${item.id === state.selectedConfigId ? " active" : ""}" data-action="select-config" data-id="${attr(item.id)}">
-              <strong>${esc(item.name)} <span>${esc(item.id)}</span></strong>
-              <span>${esc(item.description || item.sourcePath)}</span>
-            </button>`).join("") || `<div class="empty">暂无配置</div>`}
+          <div class="config-list-tools">
+            <div class="config-search-box">
+              <span class="config-search-icon" aria-hidden="true">🔍</span>
+              <input id="configListSearch" type="text" value="${attr(listKeyword)}" placeholder="搜索配置文件" aria-label="搜索配置文件" autocomplete="off" inputmode="search">
+              <button type="button" class="config-search-clear" data-action="clear-config-list-search" title="清空配置文件搜索"${listKeyword.length ? "" : " hidden"}>✖</button>
+            </div>
+            <div class="config-search-summary" id="configListSearchSummary">${esc(configListSearchSummary(rows.length, visibleRows.length, listKeyword))}</div>
+          </div>
+          <div class="config-list" id="configList">
+            ${configListHtml(rows, visibleRows, listKeyword)}
           </div>
         </aside>
         <section id="configDetail" class="config-detail">
@@ -245,7 +261,59 @@ async function loadConfigs(force) {
         </section>
       </div>
     </section>`;
+  wireConfigListSearch(rows);
   if (selected) await renderConfigDetail(selected.id, request);
+}
+
+function configListSearchValue() {
+  return String(state.configListSearch || "");
+}
+
+function configListHtml(rows, visibleRows, keyword) {
+  if (!rows.length) return `<div class="empty">暂无配置</div>`;
+  if (!visibleRows.length) return `<div class="empty config-search-empty">没有匹配的配置文件</div>`;
+  return visibleRows.map(item => `<button class="config-item${item.id === state.selectedConfigId ? " active" : ""}" data-action="select-config" data-id="${attr(item.id)}">
+    <strong>${esc(item.name)} <span>${esc(item.id)}</span></strong>
+    <span>${esc(item.description || item.sourcePath)}</span>
+  </button>`).join("");
+}
+
+function configListMatches(item, keyword) {
+  if (!configSearchHasQuery(keyword)) return true;
+  return configSearchIncludes([
+    item.id,
+    item.name,
+    item.description,
+    item.sourcePath,
+    item.pluginId,
+  ], keyword);
+}
+
+function configListSearchSummary(total, matched, keyword) {
+  if (!total) return "暂无配置";
+  return configSearchHasQuery(keyword) ? `找到 ${matched} / ${total} 个配置` : `${total} 个配置文件`;
+}
+
+function wireConfigListSearch(rows) {
+  const input = $("configListSearch");
+  if (!input) return;
+  input.addEventListener("input", () => {
+    state.configListSearch = input.value;
+    refreshConfigListSearch(rows);
+  });
+}
+
+function refreshConfigListSearch(rows = state.cache.configs || []) {
+  const input = $("configListSearch");
+  const list = $("configList");
+  const clear = pageRoot().querySelector("[data-action='clear-config-list-search']");
+  const summary = $("configListSearchSummary");
+  const keyword = configListSearchValue();
+  if (input && input.value !== keyword) input.value = keyword;
+  const visibleRows = rows.filter(item => configListMatches(item, keyword));
+  if (list) list.innerHTML = configListHtml(rows, visibleRows, keyword);
+  if (clear) clear.hidden = !keyword.length;
+  if (summary) summary.textContent = configListSearchSummary(rows.length, visibleRows.length, keyword);
 }
 
 async function renderConfigDetail(id, request = beginPageRequest("configs")) {
@@ -257,6 +325,7 @@ async function renderConfigDetail(id, request = beginPageRequest("configs")) {
   const hasRestartFields = configHasRestartFields(detail);
   const activeSection = activeConfigSectionName(detail, sectionEntries);
   const totalFields = (detail.schema.fields || []).length;
+  const fieldKeyword = configFieldSearchValue(detail);
   const configDescription = (detail.schema && detail.schema.description) || detail.description || "当前配置内容";
   const target = $("configDetail");
   if (!target) return;
@@ -311,6 +380,14 @@ async function renderConfigDetail(id, request = beginPageRequest("configs")) {
               </div>
             </div>
           </div>
+          <div class="config-field-search-row">
+            <div class="config-search-box config-field-search-box">
+              <span class="config-search-icon" aria-hidden="true">🔍</span>
+              <input id="configFieldSearch" type="text" value="${attr(fieldKeyword)}" placeholder="搜索配置项、路径或说明" aria-label="搜索配置项、路径或说明" autocomplete="off" inputmode="search">
+              <button type="button" class="config-search-clear" data-action="clear-config-field-search" title="清空配置项搜索"${fieldKeyword.length ? "" : " hidden"}>✖</button>
+            </div>
+            <span class="config-search-summary" id="configFieldSearchSummary">${esc(configFieldSearchSummaryText(detail, fieldKeyword))}</span>
+          </div>
         </section>
         ${sectionEntries.map(([name, fields], index) => `
           <section id="config-section-${index}" class="panel config-section" data-config-section data-section-name="${attr(name)}" data-config-section-available="true"${name === activeSection ? "" : " hidden"}>
@@ -323,10 +400,15 @@ async function renderConfigDetail(id, request = beginPageRequest("configs")) {
             </div>
             <div class="config-field-list" data-config-section-body>${configSectionFieldsHtml(detail, fields)}</div>
           </section>`).join("")}
+        <section id="configFieldSearchEmpty" class="panel config-search-empty-panel" hidden>
+          <strong>没有匹配的配置项</strong>
+          <span>可以换个关键词，或清空搜索后查看全部配置。</span>
+        </section>
       </div>
     </div>`;
   wireConfigRestartWatcher(detail);
   wireConfigFieldVisibility(detail);
+  wireConfigFieldSearch(detail);
   wireMediaDeliveryField(detail);
   applyConfigSectionTabs(activeSection);
   updateConfigDirtyState(detail);
@@ -367,6 +449,128 @@ function isHiddenConfigField(field) {
 
 function configHasRestartFields(detail) {
   return (detail.schema.fields || []).some(field => field.restartRequired);
+}
+
+function configSearchIncludes(values, keyword) {
+  const tokens = String(keyword || "").trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  if (!tokens.length) return true;
+  const haystack = values
+    .filter(value => value !== null && value !== undefined)
+    .map(value => String(value))
+    .join("\n")
+    .toLocaleLowerCase();
+  return tokens.every(token => haystack.includes(token));
+}
+
+function configSearchHasQuery(keyword) {
+  return String(keyword || "").trim().length > 0;
+}
+
+function configFieldSearches() {
+  if (!state.configFieldSearches) state.configFieldSearches = {};
+  return state.configFieldSearches;
+}
+
+function configFieldSearchValue(detail = state.currentConfigDetail) {
+  if (!detail) return "";
+  return String(configFieldSearches()[configActiveSectionKey(detail)] || "");
+}
+
+function setConfigFieldSearchValue(value, focus = false) {
+  const detail = state.currentConfigDetail;
+  if (!detail) return;
+  configFieldSearches()[configActiveSectionKey(detail)] = String(value || "");
+  const input = $("configFieldSearch");
+  if (input && input.value !== String(value || "")) input.value = String(value || "");
+  refreshConfigFieldSearch(detail);
+  if (focus && input) input.focus();
+}
+
+function wireConfigFieldSearch(detail) {
+  const input = $("configFieldSearch");
+  if (!input) return;
+  input.addEventListener("input", () => {
+    configFieldSearches()[configActiveSectionKey(detail)] = input.value;
+    refreshConfigFieldSearch(detail);
+  });
+  refreshConfigFieldSearch(detail);
+}
+
+function refreshConfigFieldSearch(detail) {
+  const keyword = configFieldSearchValue(detail);
+  const fields = detail.schema.fields || [];
+  fields.forEach(field => {
+    const wrapper = configFieldWrapperFor(field.path);
+    if (!wrapper) return;
+    const hasQuery = configSearchHasQuery(keyword);
+    const matched = !hasQuery || configFieldMatches(detail, field, keyword);
+    const keepChanged = hasQuery && configFieldChanged(detail, field);
+    wrapper.dataset.configFieldSearchMatch = matched || keepChanged ? "true" : "false";
+    wrapper.classList.toggle("config-search-kept", !!keepChanged && !matched);
+  });
+  applyConfigFieldVisibility(detail);
+  const clear = pageRoot().querySelector("[data-action='clear-config-field-search']");
+  if (clear) clear.hidden = !keyword.length;
+  const summary = $("configFieldSearchSummary");
+  if (summary) summary.textContent = configFieldSearchSummaryText(detail, keyword);
+  updateConfigTabState(detail);
+}
+
+function refreshConfigFiltersAfterFieldChange(detail) {
+  if (configSearchHasQuery(configFieldSearchValue(detail))) {
+    refreshConfigFieldSearch(detail);
+  } else {
+    applyConfigFieldVisibility(detail);
+  }
+}
+
+function configFieldMatches(detail, field, keyword) {
+  const optionText = (field.options || []).flatMap(option => [option.label, option.value]);
+  const value = field.type === "SECRET" ? "" : displayConfigValue(detail.values[field.path]);
+  return configSearchIncludes([
+    field.label,
+    field.path,
+    field.section || "常规",
+    field.summary,
+    field.description,
+    field.type,
+    field.component,
+    field.advanced ? "高级" : "",
+    field.restartRequired ? "需重启 重启" : "",
+    value,
+    ...optionText,
+  ], keyword);
+}
+
+function configFieldSearchableFields(detail) {
+  return (detail.schema.fields || []).filter(field => !isHiddenConfigField(field));
+}
+
+function configFieldVisibleForSearch(detail, field, keyword = configFieldSearchValue(detail)) {
+  const wrapper = configFieldWrapperFor(field.path);
+  if (!wrapper || wrapper.dataset.configFieldBaseVisible === "false") return false;
+  if (!configSearchHasQuery(keyword)) return true;
+  return wrapper.dataset.configFieldSearchMatch !== "false";
+}
+
+function configFieldSearchStats(detail) {
+  const fields = configFieldSearchableFields(detail);
+  const keyword = configFieldSearchValue(detail);
+  const visible = fields.filter(field => configFieldVisibleForSearch(detail, field, keyword)).length;
+  return { total: fields.length, visible, keyword, hasQuery: configSearchHasQuery(keyword) };
+}
+
+function configSectionSearchStats(detail, sectionName) {
+  const fields = configFieldSearchableFields(detail).filter(field => (field.section || "常规") === sectionName);
+  const keyword = configFieldSearchValue(detail);
+  const visible = fields.filter(field => configFieldVisibleForSearch(detail, field, keyword)).length;
+  return { total: fields.length, visible, keyword, hasQuery: configSearchHasQuery(keyword) };
+}
+
+function configFieldSearchSummaryText(detail, keyword = configFieldSearchValue(detail)) {
+  const stats = configFieldSearchStats(detail);
+  if (!stats.total) return "暂无配置项";
+  return configSearchHasQuery(keyword) ? `显示 ${stats.visible} / ${stats.total} 项` : `${stats.total} 个配置项`;
 }
 
 function configInputFor(field) {
@@ -445,8 +649,8 @@ async function canDiscardConfigChanges() {
 function updateConfigDirtyState(detail) {
   const dirty = configDirtyChanged(detail);
   state.currentConfigDirty = dirty;
-  updateConfigTabState(detail);
   updateConfigActionBar(detail, dirty);
+  refreshConfigFiltersAfterFieldChange(detail);
 }
 
 function configActiveSections() {
@@ -479,10 +683,11 @@ function applyConfigSectionTabs(activeName) {
   const sections = Array.from(pageRoot().querySelectorAll("[data-config-section]"));
   const tabs = Array.from(pageRoot().querySelectorAll("[data-config-section-tab]"));
   const availableTabs = tabs.filter(tab => tab.dataset.configSectionAvailable !== "false");
+  const searchActive = configSearchHasQuery(configFieldSearchValue(detail));
   let nextActive = activeName && availableTabs.some(tab => tab.dataset.sectionName === activeName)
     ? activeName
     : availableTabs[0]?.dataset.sectionName || tabs[0]?.dataset.sectionName || "";
-  if (nextActive) configActiveSections()[configActiveSectionKey(detail)] = nextActive;
+  if (nextActive && !searchActive) configActiveSections()[configActiveSectionKey(detail)] = nextActive;
   sections.forEach(section => {
     const available = section.dataset.configSectionAvailable !== "false";
     section.hidden = !available || section.dataset.sectionName !== nextActive;
@@ -504,6 +709,7 @@ function updateConfigTabState(detail) {
   pageRoot().querySelectorAll("[data-config-section-tab]").forEach(tab => {
     const sectionName = tab.dataset.sectionName || "常规";
     const sectionFields = fields.filter(field => (field.section || "常规") === sectionName);
+    const stats = configSectionSearchStats(detail, sectionName);
     const changed = sectionFields.some(field => configFieldChanged(detail, field));
     const restartChanged = sectionFields.some(field => field.restartRequired && configFieldChanged(detail, field));
     const changedCount = sectionFields.filter(field => configFieldChanged(detail, field)).length;
@@ -513,34 +719,34 @@ function updateConfigTabState(detail) {
 
     const stateNode = tab.querySelector("[data-config-tab-state]");
     if (stateNode) {
+      const countText = stats.hasQuery ? `${stats.visible}/${stats.total}` : `${stats.total}`;
       if (changed) {
-        const badge = changedCount > 0 ? ` (${changedCount})` : "";
-        stateNode.textContent = restartChanged ? `⚠️ 需重启${badge}` : `✏️ 已修改${badge}`;
+        stateNode.textContent = restartChanged ? `⚠️ ${countText} · ${changedCount}` : `✏️ ${countText} · ${changedCount}`;
       } else {
-        stateNode.textContent = `${sectionFields.length} 项`;
+        stateNode.textContent = stats.hasQuery ? `${stats.visible}/${stats.total} 项` : `${stats.total} 项`;
       }
     }
   });
 }
 
 function refreshConfigSectionAvailability(detail) {
-  const fields = detail.schema.fields || [];
-  pageRoot().querySelectorAll("[data-config-section]").forEach(section => {
+  const sections = Array.from(pageRoot().querySelectorAll("[data-config-section]"));
+  let hasAvailableSection = false;
+  sections.forEach(section => {
     const wrappers = Array.from(section.querySelectorAll("[data-config-field-path]"));
     const available = wrappers.length === 0 || wrappers.some(item => !item.hidden);
+    if (available) hasAvailableSection = true;
     section.dataset.configSectionAvailable = available ? "true" : "false";
     const sectionName = section.dataset.sectionName || "";
     const tab = Array.from(pageRoot().querySelectorAll("[data-config-section-tab]"))
       .find(item => item.dataset.sectionName === sectionName);
     if (tab) {
       tab.dataset.configSectionAvailable = available ? "true" : "false";
-      const sectionFields = fields.filter(field => (field.section || "常规") === sectionName);
-      const stateNode = tab.querySelector("[data-config-tab-state]");
-      if (stateNode && !tab.classList.contains("changed")) {
-        stateNode.textContent = available ? `${sectionFields.length} 项` : "无可用项";
-      }
     }
   });
+  const empty = $("configFieldSearchEmpty");
+  if (empty) empty.hidden = hasAvailableSection || !configSearchHasQuery(configFieldSearchValue(detail));
+  updateConfigTabState(detail);
   applyConfigSectionTabs(configActiveSections()[configActiveSectionKey(detail)]);
 }
 
@@ -592,28 +798,44 @@ function wireConfigRestartWatcher(detail) {
 
 function wireConfigFieldVisibility(detail) {
   const fields = detail.schema.fields || [];
-  const refresh = () => {
-    fields.forEach(field => {
-      const wrapper = configFieldWrapperFor(field.path);
-      if (!wrapper) return;
-      const rule = field.visibleWhen;
-      if (!rule || !rule.path) {
-        wrapper.hidden = false;
-        return;
-      }
-      const values = Array.isArray(rule.values) ? rule.values.map(String) : [];
-      const current = currentConfigValueForPath(rule.path);
-      wrapper.hidden = values.length > 0 ? !values.includes(current) : !current;
-    });
-    refreshConfigSectionAvailability(detail);
-  };
   Array.from(new Set(fields.map(field => field.visibleWhen && field.visibleWhen.path).filter(Boolean))).forEach(path => {
     const input = configInputFor({ path });
     if (!input) return;
-    input.addEventListener("input", refresh);
-    input.addEventListener("change", refresh);
+    input.addEventListener("input", () => refreshConfigFiltersAfterFieldChange(detail));
+    input.addEventListener("change", () => refreshConfigFiltersAfterFieldChange(detail));
   });
-  refresh();
+  applyConfigFieldVisibility(detail);
+}
+
+function applyConfigFieldVisibility(detail) {
+  const fields = detail.schema.fields || [];
+  fields.forEach(field => {
+    const wrapper = configFieldWrapperFor(field.path);
+    if (!wrapper) return;
+    const baseVisible = configFieldBaseVisible(field);
+    const searchVisible = wrapper.dataset.configFieldSearchMatch !== "false";
+    wrapper.dataset.configFieldBaseVisible = baseVisible ? "true" : "false";
+    wrapper.hidden = !baseVisible || !searchVisible;
+  });
+  refreshConfigAdvancedVisibility();
+  refreshConfigSectionAvailability(detail);
+}
+
+function configFieldBaseVisible(field) {
+  const rule = field.visibleWhen;
+  if (!rule || !rule.path) return true;
+  const values = Array.isArray(rule.values) ? rule.values.map(String) : [];
+  const current = currentConfigValueForPath(rule.path);
+  return values.length > 0 ? values.includes(current) : !!current;
+}
+
+function refreshConfigAdvancedVisibility() {
+  pageRoot().querySelectorAll("[data-config-advanced]").forEach(details => {
+    const fields = Array.from(details.querySelectorAll("[data-config-field-path]"));
+    const visible = fields.some(field => !field.hidden);
+    details.hidden = !visible;
+    if (visible && configSearchHasQuery(configFieldSearchValue())) details.open = true;
+  });
 }
 
 function configFieldWrapperFor(path) {
