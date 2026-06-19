@@ -32,9 +32,7 @@ class DrawConfigTest {
             platform = PlatformDescriptor.of("bilibili", "Bilibili"),
         )
 
-        val resolved = config.fontRegistry.resolveTextStyle(TextStyle().setFontSize(24f))
-
-        assertContentEquals(arrayOf(FontRegistry.TEXT_FAMILY, FontRegistry.EMOJI_FAMILY), resolved.fontFamilies)
+        assertNormalTextFallbackChain(config.fontRegistry)
     }
 
     @Test
@@ -44,12 +42,7 @@ class DrawConfigTest {
                 platform = PlatformDescriptor.of("bilibili", "Bilibili"),
             )
 
-            val resolved = config.fontRegistry.resolveTextStyle(TextStyle().setFontSize(24f))
-
-            assertContentEquals(
-                arrayOf(FontRegistry.TEXT_FAMILY, FontRegistry.TEXT_FALLBACK_FAMILY, FontRegistry.EMOJI_FAMILY),
-                resolved.fontFamilies,
-            )
+            assertNormalTextFallbackChain(config.fontRegistry, expectTextFallback = true)
         }
     }
 
@@ -185,11 +178,10 @@ class DrawConfigTest {
             val textFamilyFirst = assertNotNull(config.fontRegistry.fontRegistryFallback(FontRegistry.TEXT_FAMILY)).familyName
             val emojiFamily = assertNotNull(config.fontRegistry.emojiTypeface).familyName
             val emojiFamilyFirst = assertNotNull(config.fontRegistry.fontRegistryFallback(FontRegistry.EMOJI_FAMILY)).familyName
-            val resolved = config.fontRegistry.resolveTextStyle(TextStyle().setFontSize(24f))
 
             assertEquals(primaryFamily, textFamilyFirst)
             assertEquals(emojiFamily, emojiFamilyFirst)
-            assertContentEquals(arrayOf(FontRegistry.TEXT_FAMILY, FontRegistry.EMOJI_FAMILY), resolved.fontFamilies)
+            assertNormalTextFallbackChain(config.fontRegistry)
             assertTrue("Noto Color Emoji" !in config.fontRegistry.familyNames(FontRegistry.TEXT_FAMILY))
             assertTrue("Noto Color Emoji" !in config.fontRegistry.familyNames(FontRegistry.TEXT_FALLBACK_FAMILY))
             assertTrue("Noto Color Emoji" in config.fontRegistry.familyNames(FontRegistry.EMOJI_FAMILY))
@@ -281,6 +273,26 @@ class DrawConfigTest {
         return (0 until fontSet.count())
             .mapNotNull { fontSet.getTypeface(it)?.familyName }
             .toSet()
+    }
+
+    private fun assertNormalTextFallbackChain(
+        fontRegistry: FontRegistry,
+        expectTextFallback: Boolean? = null,
+    ) {
+        val resolved = fontRegistry.resolveTextStyle(TextStyle().setFontSize(24f))
+        val hasTextFallback = FontRegistry.TEXT_FALLBACK_FAMILY in resolved.fontFamilies
+
+        expectTextFallback?.let { assertEquals(it, hasTextFallback) }
+        assertEquals(FontRegistry.TEXT_FAMILY, resolved.fontFamilies.firstOrNull())
+        assertEquals(FontRegistry.EMOJI_FAMILY, resolved.fontFamilies.lastOrNull())
+        assertContentEquals(
+            if (hasTextFallback) {
+                arrayOf(FontRegistry.TEXT_FAMILY, FontRegistry.TEXT_FALLBACK_FAMILY, FontRegistry.EMOJI_FAMILY)
+            } else {
+                arrayOf(FontRegistry.TEXT_FAMILY, FontRegistry.EMOJI_FAMILY)
+            },
+            resolved.fontFamilies,
+        )
     }
 
     private fun testFontPath(name: String): String {
