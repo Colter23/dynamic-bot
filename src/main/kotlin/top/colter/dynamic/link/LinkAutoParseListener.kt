@@ -2,16 +2,15 @@
 
 import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.MainDynamicConfig
-import top.colter.dynamic.command.CommandParser
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.tools.loggerFor
-import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.event.IncomingTextMessageEvent
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.repository.LinkParseTargetConfigRepository
 import kotlin.math.roundToLong
@@ -25,12 +24,11 @@ internal class LinkAutoParseListener(
     private val dedupe: LinkParseDedupe = LinkParseDedupe(),
     private val progressMessenger: LinkParseProgressMessenger = NoopLinkParseProgressMessenger,
     private val primaryBotAccountResolver: suspend (CommandContext) -> String? = { null },
-) : Listener<CommandEvent> {
-    override suspend fun onMessage(event: CommandEvent) {
+) : Listener<IncomingTextMessageEvent> {
+    override suspend fun onMessage(event: IncomingTextMessageEvent) {
         val config = configProvider()
         val linkParsing = config.linkParsing
         if (!linkParsing.autoParseEnabled) return
-        if (CommandParser.parse(event.rawText, config.command.prefix) != null) return
         if (!shouldAcceptAutoParse(event)) {
             logBotBlocked(event)
             return
@@ -51,14 +49,10 @@ internal class LinkAutoParseListener(
             }
         }
         val autoDedupe = dedupe.takeIf { triggerMode == LinkParseTriggerMode.ALWAYS }
-        val hasSupportedCandidate = linkParseService.hasSupportedLinkCandidate(
-            event.rawText,
-            linkParsing.maxLinksPerMessage,
-        )
+        val hasSupportedCandidate = event.hasSupportedLinks
+        if (!hasSupportedCandidate) return
         val finalResult = try {
-            if (hasSupportedCandidate) {
-                sendProgressOnce()
-            }
+            sendProgressOnce()
             linkParseService.parseAndDispatch(
                 text = event.rawText,
                 context = event.context,
@@ -69,7 +63,7 @@ internal class LinkAutoParseListener(
                 } else {
                     secondsToMillis(linkParsing.autoDedupeTtlSeconds, minimumMillis = 0)
                 },
-                inReplyTo = event.traceId,
+                inReplyTo = event.replyToMessageId,
                 onForwardingStarted = {
                     sendProgressOnce()
                 },
@@ -101,7 +95,7 @@ internal class LinkAutoParseListener(
         logForwardResult(event, finalResult)
     }
 
-    private fun reply(event: CommandEvent, message: String, status: CommandStatus) {
+    private fun reply(event: IncomingTextMessageEvent, message: String, status: CommandStatus) {
         CommandResultEvent(
             sourcePlugin = LINK_PARSE_EVENT_SOURCE,
             target = CommandTarget(
@@ -109,7 +103,7 @@ internal class LinkAutoParseListener(
                 senderId = event.context.senderId,
             ),
             chain = listOf(MessageBatch(listOf(MessageContent.Text(message)))),
-            inReplyTo = event.traceId,
+            inReplyTo = event.replyToMessageId,
             status = status,
             errorMessage = if (status == CommandStatus.FAILED) message else null,
         ).let { eventBus.broadcast(it) }
@@ -120,7 +114,7 @@ internal class LinkAutoParseListener(
         return (seconds * 1_000.0).roundToLong().coerceAtLeast(minimumMillis)
     }
 
-    private fun LinkParseTriggerMode.allows(event: CommandEvent): Boolean {
+    private fun LinkParseTriggerMode.allows(event: IncomingTextMessageEvent): Boolean {
         return when (this) {
             LinkParseTriggerMode.DISABLED -> false
             LinkParseTriggerMode.ALWAYS -> true
@@ -128,7 +122,7 @@ internal class LinkAutoParseListener(
         }
     }
 
-    private suspend fun shouldAcceptAutoParse(event: CommandEvent): Boolean {
+    private suspend fun shouldAcceptAutoParse(event: IncomingTextMessageEvent): Boolean {
         val botAccountId = event.context.botAccountId?.trim()?.takeIf { it.isNotBlank() } ?: return true
         if (event.context.mentionedAccountIds.any { it == botAccountId }) return true
         val primaryAccountId = primaryBotAccountResolver(event.context)
@@ -138,7 +132,7 @@ internal class LinkAutoParseListener(
         return botAccountId == primaryAccountId
     }
 
-    private fun logBotBlocked(event: CommandEvent) {
+    private fun logBotBlocked(event: IncomingTextMessageEvent) {
         if (!event.rawText.contains("http://") && !event.rawText.contains("https://")) return
         val context = event.context
         autoParseLogger.debug {
@@ -146,7 +140,7 @@ internal class LinkAutoParseListener(
         }
     }
 
-    private fun logTriggerBlocked(event: CommandEvent, triggerMode: LinkParseTriggerMode) {
+    private fun logTriggerBlocked(event: IncomingTextMessageEvent, triggerMode: LinkParseTriggerMode) {
         if (!event.rawText.contains("http://") && !event.rawText.contains("https://")) return
         val context = event.context
         when (triggerMode) {
@@ -160,7 +154,7 @@ internal class LinkAutoParseListener(
         }
     }
 
-    private fun logForwardResult(event: CommandEvent, result: LinkParseBatchResult) {
+    private fun logForwardResult(event: IncomingTextMessageEvent, result: LinkParseBatchResult) {
         val target = event.context.target.stableValue()
         result.items.forEach { item ->
             when (item) {

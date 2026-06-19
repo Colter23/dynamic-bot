@@ -14,13 +14,14 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
-import top.colter.dynamic.core.command.CommandPublisher
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.config.ConfigurablePlugin
 import top.colter.dynamic.core.data.IncomingMessage
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.TargetAddress
+import top.colter.dynamic.core.plugin.IncomingMessageDispatchContext
+import top.colter.dynamic.core.plugin.IncomingMessagePublishRequest
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.config.YamlPluginDataStore
 import top.colter.dynamic.event.EventBus
@@ -82,8 +83,7 @@ public class PluginManager(
     private val eventBus: EventBus = EventBus(),
     private val configService: ConfigService = YamlConfigService(),
     private val commandRegistry: CommandRegistry = CommandRegistry(),
-    private val commandPublisher: CommandPublisher = CommandPublisher { },
-    private val incomingMessagePublisher: IncomingMessagePublisher = IncomingMessagePublisher { },
+    private val incomingMessagePublishSink: suspend (String, IncomingMessagePublishRequest) -> Unit = { _, _ -> },
     private val pluginMessagePublishSink: PluginMessagePublishSink = PluginMessagePublishSink {
         PluginMessagePublishResult.failed("主项目消息发布器未配置")
     },
@@ -443,7 +443,8 @@ public class PluginManager(
             }
     }
 
-    public fun dispatchIncomingMessageToConsumers(message: IncomingMessage) {
+    public fun dispatchIncomingMessageToConsumers(context: IncomingMessageDispatchContext) {
+        val message = context.message
         if (isShuttingDown) {
             logger.debug {
                 "应用关闭中，跳过入站消息分发：platform=${message.platformId.value} target=${message.target.stableValue()}"
@@ -454,8 +455,8 @@ public class PluginManager(
         activeIncomingMessageConsumerPlugins()
             .forEach { runtime ->
                 val consumer = runtime.instance as? IncomingMessageConsumerPlugin ?: return@forEach
-                if (!consumer.incomingMessageFilter.matches(message)) return@forEach
-                launchIncomingMessageForPlugin(runtime, consumer, message)
+                if (!consumer.incomingMessageFilter.matches(context)) return@forEach
+                launchIncomingMessageForPlugin(runtime, consumer, context)
             }
     }
 
@@ -665,8 +666,7 @@ public class PluginManager(
             dataStore = YamlPluginDataStore(descriptor.id, Paths.get(pluginDataDirPath)),
             scope = pluginScope,
             taskScheduler = runtime.taskScheduler,
-            commandPublisher = commandPublisher,
-            incomingMessagePublisher = incomingMessagePublisher,
+            incomingMessagePublisher = incomingMessagePublisherFor(descriptor.id),
             messagePublisher = messagePublisherFor(descriptor.id),
             sourceUpdatePublisher = sourceUpdatePublisher,
             sourceStateStore = sourceStateStore,
@@ -1014,11 +1014,18 @@ public class PluginManager(
         }
     }
 
+    private fun incomingMessagePublisherFor(pluginId: String): IncomingMessagePublisher {
+        return IncomingMessagePublisher { request ->
+            incomingMessagePublishSink(pluginId, request)
+        }
+    }
+
     private fun launchIncomingMessageForPlugin(
         runtime: PluginRuntime,
         consumer: IncomingMessageConsumerPlugin,
-        message: IncomingMessage,
+        context: IncomingMessageDispatchContext,
     ) {
+        val message = context.message
         val pluginId = runtime.descriptor.id
         val state = incomingDispatchStates.computeIfAbsent(pluginId) { IncomingDispatchState() }
         val pending = state.pending.incrementAndGet()
@@ -1026,7 +1033,7 @@ public class PluginManager(
         if (pending > pendingLimit) {
             state.pending.decrementAndGet()
             logger.warn {
-                "入站消息分发已丢弃：pluginId=$pluginId，pending=$pending，limit=$pendingLimit，platform=${message.platformId.value}，target=${message.target.stableValue()}"
+                "入站消息分发已丢弃：pluginId=$pluginId，pending=$pending，limit=$pendingLimit，intent=${context.intent}，platform=${message.platformId.value}，target=${message.target.stableValue()}"
             }
             return
         }
@@ -1042,10 +1049,10 @@ public class PluginManager(
             try {
                 state.semaphore.withPermit {
                     if (isShuttingDown) return@withPermit
-                    runCatching { consumer.onIncomingMessage(message) }
+                    runCatching { consumer.onIncomingMessage(context) }
                         .onFailure { error ->
                             logger.error(error) {
-                                "入站消息分发失败：pluginId=$pluginId，platform=${message.platformId.value}，target=${message.target.stableValue()}"
+                                "入站消息分发失败：pluginId=$pluginId，intent=${context.intent}，platform=${message.platformId.value}，target=${message.target.stableValue()}"
                             }
                             publishPluginFailure(
                                 pluginId = pluginId,

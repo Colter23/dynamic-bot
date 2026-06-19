@@ -27,6 +27,7 @@ import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.DynamicMetric
+import top.colter.dynamic.core.data.IncomingMessage
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageContent
@@ -50,6 +51,7 @@ import top.colter.dynamic.draw.LinkPreviewRenderer
 import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
+import top.colter.dynamic.event.IncomingTextMessageEvent
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PersistenceManager
@@ -368,11 +370,11 @@ class LinkParseServiceTest {
             progressMessenger = messenger,
         )
 
-        listener.onMessage(commandEvent("https://t.bilibili.com/1", botAccountId = "42"))
+        listener.onMessage(incomingTextEvent("https://t.bilibili.com/1", botAccountId = "42"))
         assertEquals(0, resolver.resolveCalls)
 
         listener.onMessage(
-            commandEvent(
+            incomingTextEvent(
                 "@42 https://t.bilibili.com/1",
                 botAccountId = "42",
                 mentionedAccountIds = setOf("42"),
@@ -409,7 +411,7 @@ class LinkParseServiceTest {
         )
 
         val job = async {
-            listener.onMessage(commandEvent("https://slow.example/1"))
+            listener.onMessage(incomingTextEvent("https://slow.example/1"))
         }
         withTimeout(3_000) { resolver.parseStarted.await() }
 
@@ -448,7 +450,7 @@ class LinkParseServiceTest {
         )
 
         val job = async {
-            listener.onMessage(commandEvent("https://slow.example/1"))
+            listener.onMessage(incomingTextEvent("https://slow.example/1"))
         }
         withTimeout(3_000) { resolver.parseStarted.await() }
 
@@ -485,7 +487,7 @@ class LinkParseServiceTest {
             progressMessenger = messenger,
         )
 
-        listener.onMessage(commandEvent("https://example.com/not-supported"))
+        listener.onMessage(incomingTextEvent("https://example.com/not-supported", hasSupportedLinks = false))
 
         assertEquals(emptyList(), messenger.sentTexts)
         assertEquals(0, resolver.parseCalls)
@@ -519,7 +521,7 @@ class LinkParseServiceTest {
             eventBus = eventBus,
         )
 
-        listener.onMessage(commandEvent("今天也正常聊天"))
+        listener.onMessage(incomingTextEvent("今天也正常聊天", hasSupportedLinks = false))
 
         assertNull(withTimeoutOrNull(300) { reply.await() })
         assertEquals(0, resolver.parseCalls)
@@ -553,7 +555,7 @@ class LinkParseServiceTest {
             eventBus = eventBus,
         )
 
-        listener.onMessage(commandEvent("https://example.com/not-supported"))
+        listener.onMessage(incomingTextEvent("https://example.com/not-supported", hasSupportedLinks = false))
 
         assertNull(withTimeoutOrNull(300) { reply.await() })
         assertEquals(0, resolver.parseCalls)
@@ -589,7 +591,7 @@ class LinkParseServiceTest {
             progressMessenger = messenger,
         )
 
-        listener.onMessage(commandEvent("https://fail.example/video/BV1PnV46DEP"))
+        listener.onMessage(incomingTextEvent("https://fail.example/video/BV1PnV46DEP"))
         val result = withTimeout(3_000) { reply.await() }
 
         assertEquals(CommandStatus.FAILED, result.status)
@@ -617,10 +619,10 @@ class LinkParseServiceTest {
             primaryBotAccountResolver = { "42" },
         )
 
-        listener.onMessage(commandEvent("https://t.bilibili.com/1", botAccountId = "24"))
+        listener.onMessage(incomingTextEvent("https://t.bilibili.com/1", botAccountId = "24"))
         assertEquals(0, resolver.resolveCalls)
 
-        listener.onMessage(commandEvent("https://t.bilibili.com/1", botAccountId = "42"))
+        listener.onMessage(incomingTextEvent("https://t.bilibili.com/1", botAccountId = "42"))
         val request = withTimeout(3_000) { sourceUpdates.receive() }
 
         assertEquals("1", request.update.key.externalId)
@@ -648,7 +650,7 @@ class LinkParseServiceTest {
         )
 
         listener.onMessage(
-            commandEvent(
+            incomingTextEvent(
                 "@24 https://t.bilibili.com/2",
                 botAccountId = "24",
                 mentionedAccountIds = setOf("24"),
@@ -1390,6 +1392,38 @@ class LinkParseServiceTest {
             ),
             rawText = rawText,
             traceId = "trace",
+        )
+    }
+
+    private fun incomingTextEvent(
+        rawText: String,
+        targetExternalId: String = "100",
+        botAccountId: String? = null,
+        mentionedAccountIds: Set<String> = emptySet(),
+        hasSupportedLinks: Boolean = true,
+    ): IncomingTextMessageEvent {
+        val context = CommandContext.of(
+            platform = "onebot",
+            kind = TargetKind.GROUP,
+            externalId = targetExternalId,
+            senderId = "sender",
+            botAccountId = botAccountId,
+            mentionedAccountIds = mentionedAccountIds,
+        )
+        return IncomingTextMessageEvent(
+            sourcePlugin = "test",
+            message = IncomingMessage(
+                platformId = context.target.platformId,
+                target = context.target,
+                senderId = context.senderId,
+                botAccountId = context.botAccountId,
+                text = rawText,
+                mentions = context.mentionedAccountIds,
+            ),
+            context = context,
+            rawText = rawText,
+            traceId = "trace",
+            hasSupportedLinks = hasSupportedLinks,
         )
     }
 

@@ -14,18 +14,15 @@ import top.colter.dynamic.admin.AdminLogging
 import top.colter.dynamic.admin.AdminServer
 import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.command.CommandRegistry
-import top.colter.dynamic.core.command.CommandPublisher
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.MessageDeliveryPolicy
 import top.colter.dynamic.config.YamlConfigService
-import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
-import top.colter.dynamic.event.IncomingMessageEvent
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.event.ListenerToken
-import top.colter.dynamic.core.plugin.IncomingMessagePublisher
+import top.colter.dynamic.core.plugin.IncomingMessagePublishRequest
 import top.colter.dynamic.core.plugin.PluginMessagePublishOptions
 import top.colter.dynamic.core.plugin.PluginMessagePublishResult
 import top.colter.dynamic.core.plugin.PluginMessagePublishSink
@@ -46,6 +43,7 @@ import top.colter.dynamic.draw.image.ImageFileCleaner
 import top.colter.dynamic.draw.DefaultDynamicDrawService
 import top.colter.dynamic.draw.DefaultLinkPreviewRenderer
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
+import top.colter.dynamic.incoming.IncomingMessagePipeline
 import top.colter.dynamic.listener.DeliveryDispatcher
 import top.colter.dynamic.link.LinkAutoParseListener
 import top.colter.dynamic.link.DeliveryLinkParseProgressMessenger
@@ -73,18 +71,15 @@ public object DynamicApplication : CoroutineScope {
     private lateinit var outboundMessageService: OutboundMessageService
     private lateinit var outboundMediaService: OutboundMediaService
     private lateinit var messageSinkRouteMonitor: MessageSinkRouteMonitor
-    private val commandPublisher: CommandPublisher = CommandPublisher { request ->
-        eventBus.broadcast(
-            CommandEvent(
-                sourcePlugin = request.sourcePlugin,
-                context = request.context,
-                rawText = request.rawText,
-                traceId = request.traceId,
-            ),
-        )
-    }
-    private val incomingMessagePublisher: IncomingMessagePublisher = IncomingMessagePublisher { message ->
-        eventBus.broadcast(IncomingMessageEvent(message))
+    private lateinit var incomingMessagePipeline: IncomingMessagePipeline
+    private val incomingMessagePublishSink: suspend (String, IncomingMessagePublishRequest) -> Unit = { sourcePlugin, request ->
+        if (!::incomingMessagePipeline.isInitialized) {
+            logger.warn {
+                "入站消息管线尚未初始化，已丢弃消息：sourcePlugin=$sourcePlugin，messageId=${request.message.messageId.ifBlank { "-" }}"
+            }
+        } else {
+            incomingMessagePipeline.handle(sourcePlugin, request)
+        }
     }
     private val pluginMessagePublishSink: PluginMessagePublishSink = PluginMessagePublishSink { request ->
         if (!::outboundMessageService.isInitialized) {
@@ -121,8 +116,7 @@ public object DynamicApplication : CoroutineScope {
         eventBus = eventBus,
         configService = configService,
         commandRegistry = commandRegistry,
-        commandPublisher = commandPublisher,
-        incomingMessagePublisher = incomingMessagePublisher,
+        incomingMessagePublishSink = incomingMessagePublishSink,
         pluginMessagePublishSink = pluginMessagePublishSink,
         sourceUpdatePublisher = sourceUpdatePublisher,
         drawAssetRegistry = drawAssetRegistry,
@@ -252,6 +246,12 @@ public object DynamicApplication : CoroutineScope {
             progressMessenger = linkParseProgressMessenger,
             backgroundScope = this,
         )
+        incomingMessagePipeline = IncomingMessagePipeline(
+            configProvider = configStore::current,
+            linkParseService = linkParseService,
+            eventBus = eventBus,
+            incomingConsumerDispatcher = pluginManager::dispatchIncomingMessageToConsumers,
+        )
 
         listenerTokens += eventBus.subscribe(
             CommandListener(
@@ -276,14 +276,6 @@ public object DynamicApplication : CoroutineScope {
                 progressMessenger = linkParseProgressMessenger,
                 primaryBotAccountResolver = ::resolvePrimaryCommandBotAccount,
             ),
-        )
-
-        listenerTokens += eventBus.subscribe(
-            object : Listener<IncomingMessageEvent> {
-                override suspend fun onMessage(event: IncomingMessageEvent) {
-                    pluginManager.dispatchIncomingMessageToConsumers(event.message)
-                }
-            },
         )
 
         listenerTokens += eventBus.subscribe(

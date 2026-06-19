@@ -45,7 +45,7 @@
     {
       "id": "onebot-gateway",
       "name": "OneBot 网关插件",
-      "description": "通过正向或反向 WebSocket 连接 OneBot，实现消息投递和命令接收。",
+      "description": "通过正向或反向 WebSocket 连接 OneBot，实现消息投递和入站消息接收。",
       "release": {
         "provider": "GITHUB_RELEASE",
         "repository": "Colter23/dynamic-bot-onebot",

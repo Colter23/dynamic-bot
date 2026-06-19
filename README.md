@@ -10,6 +10,7 @@ dynamic-bot 是主程序，负责运行 Web 后台、管理订阅、加载插件
 - 支持 Bilibili、微博等来源插件。
 - 支持 OneBot/QQ 等消息出口插件。
 - 支持动态推送、直播开播/下播推送和链接解析。
+- 支持平台入站消息统一处理：主程序识别命令、链接和普通消息，再分发给对应处理器或插件。
 - 支持推送图片渲染、媒体缓存和视频缓存。
 - 支持失败重试、消息记录和系统通知。
 - 支持插件提供自己的管理页面。
@@ -53,6 +54,7 @@ config/main.yml
 - `dynamic-bot-bilibili`：Bilibili 动态和直播来源。
 - `dynamic-bot-weibo`：微博动态来源。
 - `dynamic-bot-onebot`：QQ/OneBot 消息发送和消息接收。
+- `dynamic-bot-qqbot`：QQ 官方机器人消息发送和消息接收。
 
 ## 常用目录
 

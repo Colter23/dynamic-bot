@@ -16,14 +16,18 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
+import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.IncomingMessage
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION
+import top.colter.dynamic.core.plugin.IncomingMessageDispatchContext
 import top.colter.dynamic.core.plugin.IncomingMessageConsumerPlugin
 import top.colter.dynamic.core.plugin.IncomingMessageFilter
+import top.colter.dynamic.core.plugin.IncomingMessageIntent
+import top.colter.dynamic.core.plugin.IncomingMessagePublishRequest
 import top.colter.dynamic.core.plugin.Plugin
 import top.colter.dynamic.core.plugin.PluginContext
 import top.colter.dynamic.core.plugin.PluginDescriptor
@@ -54,15 +58,75 @@ class PluginManagerIncomingMessageTest {
         manager.registerPluginForTest(descriptor("filtered", filtered), filtered, state = PluginState.ACTIVE)
         manager.registerPluginForTest(descriptor("failing", failing), failing, state = PluginState.ACTIVE)
 
-        manager.dispatchIncomingMessageToConsumers(testIncomingMessage())
+        manager.dispatchIncomingMessageToConsumers(testDispatchContext())
 
         val received = withTimeout(1_000) { active.received.await() }
-        assertEquals("hello", received.text)
+        assertEquals("hello", received.message.text)
+        assertEquals("test", received.sourcePlugin)
         delay(100)
         assertFalse(loaded.received.isCompleted)
         assertFalse(failedState.received.isCompleted)
         assertFalse(filtered.received.isCompleted)
         assertEquals(1, failing.calls)
+
+        manager.shutdown()
+    }
+
+    @Test
+    fun `dispatch incoming message should respect intent filter flags`() = runBlocking {
+        val manager = PluginManager(pluginDirPath = createTempDirectory("plugin-manager-incoming-intent").toString())
+        val defaultConsumer = RecordingConsumerPlugin()
+        val commandConsumer = RecordingConsumerPlugin(
+            IncomingMessageFilter(receiveCommandMessages = true),
+        )
+        val linkConsumer = RecordingConsumerPlugin(
+            IncomingMessageFilter(receiveLinkMessages = true),
+        )
+        manager.registerPluginForTest(descriptor("default", defaultConsumer), defaultConsumer, state = PluginState.ACTIVE)
+        manager.registerPluginForTest(descriptor("command", commandConsumer), commandConsumer, state = PluginState.ACTIVE)
+        manager.registerPluginForTest(descriptor("link", linkConsumer), linkConsumer, state = PluginState.ACTIVE)
+
+        manager.dispatchIncomingMessageToConsumers(testDispatchContext("/db help", intent = IncomingMessageIntent.Command))
+
+        withTimeout(1_000) { commandConsumer.received.await() }
+        delay(100)
+        assertFalse(defaultConsumer.received.isCompleted)
+        assertFalse(linkConsumer.received.isCompleted)
+
+        manager.dispatchIncomingMessageToConsumers(testDispatchContext("https://t.bilibili.com/1", intent = IncomingMessageIntent.LinkText))
+
+        withTimeout(1_000) { linkConsumer.received.await() }
+        delay(100)
+        assertFalse(defaultConsumer.received.isCompleted)
+
+        manager.shutdown()
+    }
+
+    @Test
+    fun `context incoming publisher should force runtime plugin id as source`() = runBlocking {
+        val pluginDir = createTempDirectory("plugin-manager-incoming-publisher").toFile()
+        val captured = CompletableDeferred<Pair<String, IncomingMessagePublishRequest>>()
+        val manager = PluginManager(
+            pluginDirPath = pluginDir.path,
+            incomingMessagePublishSink = { pluginId, request ->
+                captured.complete(pluginId to request)
+            },
+        )
+        createPluginJar(
+            pluginDir = pluginDir,
+            id = "incoming-publisher",
+            mainClass = IncomingPublishingLoadPlugin::class.java.name,
+        )
+
+        val result = manager.loadAllPlugins()
+
+        assertEquals(listOf("incoming-publisher"), result.loadedPlugins)
+        assertTrue(result.failedPlugins.isEmpty())
+        val (pluginId, request) = withTimeout(1_000) { captured.await() }
+        assertEquals("incoming-publisher", pluginId)
+        assertEquals("hello", request.message.text)
+        assertEquals("trace-from-plugin", request.traceId)
+        assertEquals("reply-from-plugin", request.replyToMessageId)
 
         manager.shutdown()
     }
@@ -114,7 +178,7 @@ class PluginManagerIncomingMessageTest {
         manager.registerPluginForTest(descriptor("slow", slow), slow, state = PluginState.ACTIVE)
 
         repeat(5) { index ->
-            manager.dispatchIncomingMessageToConsumers(testIncomingMessage("message-$index"))
+            manager.dispatchIncomingMessageToConsumers(testDispatchContext("message-$index"))
         }
 
         withTimeout(1_000) { slow.firstStarted.await() }
@@ -151,6 +215,27 @@ class PluginManagerIncomingMessageTest {
         )
     }
 
+    private fun testDispatchContext(
+        text: String = "hello",
+        intent: IncomingMessageIntent = IncomingMessageIntent.PlainText,
+    ): IncomingMessageDispatchContext {
+        val message = testIncomingMessage(text)
+        return IncomingMessageDispatchContext(
+            message = message,
+            sourcePlugin = "test",
+            traceId = "trace",
+            replyToMessageId = "reply",
+            commandContext = CommandContext(
+                target = message.target,
+                senderId = message.senderId,
+                botAccountId = message.botAccountId,
+                mentionedAccountIds = message.mentions,
+            ),
+            rawText = text.trim(),
+            intent = intent,
+        )
+    }
+
     private fun createPluginJar(pluginDir: File, id: String, mainClass: String) {
         val yaml = buildString {
             appendLine("id: $id")
@@ -169,17 +254,17 @@ class PluginManagerIncomingMessageTest {
     private class RecordingConsumerPlugin(
         override val incomingMessageFilter: IncomingMessageFilter = IncomingMessageFilter(),
     ) : IncomingMessageConsumerPlugin {
-        val received: CompletableDeferred<IncomingMessage> = CompletableDeferred()
+        val received: CompletableDeferred<IncomingMessageDispatchContext> = CompletableDeferred()
 
-        override suspend fun onIncomingMessage(message: IncomingMessage) {
-            received.complete(message)
+        override suspend fun onIncomingMessage(context: IncomingMessageDispatchContext) {
+            received.complete(context)
         }
     }
 
     private class FailingConsumerPlugin : IncomingMessageConsumerPlugin {
         var calls: Int = 0
 
-        override suspend fun onIncomingMessage(message: IncomingMessage) {
+        override suspend fun onIncomingMessage(context: IncomingMessageDispatchContext) {
             calls += 1
             error("boom")
         }
@@ -190,7 +275,7 @@ class PluginManagerIncomingMessageTest {
         val release: CompletableDeferred<Unit> = CompletableDeferred()
         val calls: AtomicInteger = AtomicInteger(0)
 
-        override suspend fun onIncomingMessage(message: IncomingMessage) {
+        override suspend fun onIncomingMessage(context: IncomingMessageDispatchContext) {
             calls.incrementAndGet()
             firstStarted.complete(Unit)
             release.await()
@@ -208,7 +293,7 @@ class PublishingLoadPlugin : IncomingMessageConsumerPlugin {
         publishAccepted = result.accepted
     }
 
-    override suspend fun onIncomingMessage(message: IncomingMessage) {
+    override suspend fun onIncomingMessage(context: IncomingMessageDispatchContext) {
     }
 
     companion object {
@@ -217,5 +302,25 @@ class PublishingLoadPlugin : IncomingMessageConsumerPlugin {
         fun reset() {
             publishAccepted = null
         }
+    }
+}
+
+class IncomingPublishingLoadPlugin : IncomingMessageConsumerPlugin {
+    override suspend fun onLoad(context: PluginContext) {
+        context.incomingMessagePublisher.publish(
+            IncomingMessagePublishRequest(
+                message = IncomingMessage(
+                    platformId = PlatformId.of("qq"),
+                    target = TargetAddress.of("qq", TargetKind.GROUP, "10001"),
+                    senderId = "20001",
+                    text = "hello",
+                ),
+                traceId = "trace-from-plugin",
+                replyToMessageId = "reply-from-plugin",
+            ),
+        )
+    }
+
+    override suspend fun onIncomingMessage(context: IncomingMessageDispatchContext) {
     }
 }

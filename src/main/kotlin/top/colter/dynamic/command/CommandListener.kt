@@ -148,6 +148,7 @@ public class CommandListener(
             context = event.context,
             rawText = event.rawText,
             traceId = event.traceId,
+            replyToMessageId = event.replyToMessageId,
             tokens = tokens,
             matchedPath = match.matchedPath,
             args = match.args,
@@ -169,7 +170,7 @@ public class CommandListener(
                 senderId = event.context.senderId,
             ),
             chain = result.reply,
-            inReplyTo = event.traceId,
+            inReplyTo = event.replyToMessageId,
             status = result.status,
             errorMessage = result.errorMessage,
         ).let { eventBus.broadcast(it) }
@@ -525,7 +526,7 @@ private class LoginCommandHandler(
                 senderId = invocation.context.senderId,
             ),
             chain = commandResult.reply,
-            inReplyTo = invocation.traceId,
+            inReplyTo = invocation.replyToMessageId,
             status = commandResult.status,
             errorMessage = commandResult.errorMessage,
         ).let { eventBus.broadcast(it) }

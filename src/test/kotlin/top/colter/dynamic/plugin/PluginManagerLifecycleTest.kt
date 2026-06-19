@@ -11,7 +11,6 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
-import kotlin.test.assertSame
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -25,7 +24,6 @@ import kotlinx.coroutines.withTimeout
 import top.colter.dynamic.core.command.CommandExecutionResult
 import top.colter.dynamic.core.command.CommandHandler
 import top.colter.dynamic.core.command.CommandInvocation
-import top.colter.dynamic.core.command.CommandPublisher
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.command.CommandSpec
 import top.colter.dynamic.core.data.EntityState
@@ -77,12 +75,10 @@ class PluginManagerLifecycleTest {
         val pluginDir = createTempDirectory("plugin-manager-capability").toFile()
         val dataDir = createTempDirectory("plugin-manager-data")
         val eventBus = EventBus()
-        val commandPublisher = CommandPublisher { }
         val publisher = SourceUpdatePublisher { SourceUpdatePublishResult.ignored("test") }
         val manager = PluginManager(
             pluginDirPath = pluginDir.path,
             eventBus = eventBus,
-            commandPublisher = commandPublisher,
             sourceUpdatePublisher = publisher,
             pluginDataDirPath = dataDir.toString(),
             sourceStateStore = RepositorySourceStateStore,
@@ -101,11 +97,10 @@ class PluginManagerLifecycleTest {
         assertEquals(listOf("load:sink-plugin"), LifecycleRecordingPlugin.calls)
         assertEquals("sink-plugin", LifecycleRecordingPlugin.loadedContextPluginId)
         assertEquals(CORE_PLUGIN_API_VERSION, LifecycleRecordingPlugin.loadedContextApiVersion)
-        assertSame(commandPublisher, LifecycleRecordingPlugin.loadedCommandPublisher)
-        assertSame(publisher, LifecycleRecordingPlugin.loadedSourceUpdatePublisher)
+        assertEquals(publisher, LifecycleRecordingPlugin.loadedSourceUpdatePublisher)
         assertEquals(dataDir.resolve("sink-plugin"), LifecycleRecordingPlugin.loadedDataDir)
-        assertSame(RepositorySourceStateStore, LifecycleRecordingPlugin.loadedSourceStateStore)
-        assertSame(RepositorySubscriptionQueryService, LifecycleRecordingPlugin.loadedSubscriptionQueryService)
+        assertEquals(RepositorySourceStateStore, LifecycleRecordingPlugin.loadedSourceStateStore)
+        assertEquals(RepositorySubscriptionQueryService, LifecycleRecordingPlugin.loadedSubscriptionQueryService)
 
         val loaded = manager.getAllPlugins().single()
         assertEquals(setOf(PluginCapability.MESSAGE_SINK), loaded.capabilities)
@@ -128,13 +123,13 @@ class PluginManagerLifecycleTest {
             pluginDir = pluginDir,
             id = "old-api",
             mainClass = LifecycleRecordingPlugin::class.java.name,
-            apiVersion = "2.3.0",
+            apiVersion = "3.0.0",
         )
 
         val result = manager.loadAllPlugins()
 
         assertTrue(result.loadedPlugins.isEmpty())
-        assertTrue(result.failedPlugins.getValue("old-api").contains("不兼容的 apiVersion=2.3.0"))
+        assertTrue(result.failedPlugins.getValue("old-api").contains("不兼容的 apiVersion=3.0.0"))
     }
 
     @Test
@@ -548,7 +543,6 @@ class LifecycleRecordingPlugin : MessageSinkPlugin {
         calls += "load:${context.pluginId}"
         loadedContextPluginId = context.pluginId
         loadedContextApiVersion = context.descriptor.apiVersion
-        loadedCommandPublisher = context.commandPublisher
         loadedSourceUpdatePublisher = context.sourceUpdatePublisher
         loadedDataDir = context.dataStore.dataDir
         loadedSourceStateStore = context.sourceStateStore
@@ -571,7 +565,6 @@ class LifecycleRecordingPlugin : MessageSinkPlugin {
         val calls: MutableList<String> = mutableListOf()
         var loadedContextPluginId: String? = null
         var loadedContextApiVersion: String? = null
-        var loadedCommandPublisher: CommandPublisher? = null
         var loadedSourceUpdatePublisher: SourceUpdatePublisher? = null
         var loadedDataDir: java.nio.file.Path? = null
         var loadedSourceStateStore: SourceStateStore? = null
@@ -581,7 +574,6 @@ class LifecycleRecordingPlugin : MessageSinkPlugin {
             calls.clear()
             loadedContextPluginId = null
             loadedContextApiVersion = null
-            loadedCommandPublisher = null
             loadedSourceUpdatePublisher = null
             loadedDataDir = null
             loadedSourceStateStore = null

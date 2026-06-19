@@ -10,7 +10,7 @@ import top.colter.dynamic.core.plugin.CommandResultSendRequest
 import top.colter.dynamic.core.plugin.MessageRecallResult
 import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.core.tools.loggerFor
-import top.colter.dynamic.event.CommandEvent
+import top.colter.dynamic.event.IncomingTextMessageEvent
 
 private val progressLogger = loggerFor<LinkParseProgressMessenger>()
 
@@ -22,8 +22,8 @@ public data class LinkParseProgressReceipt(
 )
 
 public interface LinkParseProgressMessenger {
-    public suspend fun send(event: CommandEvent, config: LinkParseProgressReplyConfig): LinkParseProgressReceipt? {
-        return send(event.context, event.traceId, config.text)
+    public suspend fun send(event: IncomingTextMessageEvent, config: LinkParseProgressReplyConfig): LinkParseProgressReceipt? {
+        return send(event.context, event.replyToMessageId, config.text)
     }
 
     public suspend fun send(context: CommandContext, inReplyTo: String, text: String): LinkParseProgressReceipt?
