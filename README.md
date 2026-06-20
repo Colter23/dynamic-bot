@@ -26,7 +26,7 @@ dynamic-bot 是主程序，负责运行 Web 后台、管理订阅、加载插件
 启动：
 
 ```powershell
-java -jar build\libs\dynamic-bot-0.0.1-all.jar
+java -jar build\libs\dynamic-bot-0.0.5-all.jar
 ```
 
 默认后台地址：
@@ -112,7 +112,7 @@ ghcr.io/colter23/dynamic-bot
 生成的完整 JAR：
 
 ```text
-build/libs/dynamic-bot-0.0.1-all.jar
+build/libs/dynamic-bot-0.0.5-all.jar
 ```
 
 ## 使用建议
