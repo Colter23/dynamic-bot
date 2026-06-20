@@ -3,17 +3,11 @@ package top.colter.dynamic.listener
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
-import top.colter.dynamic.core.plugin.CommandResultSendRequest
-import top.colter.dynamic.core.plugin.MessageDeliveryRequest
+import top.colter.dynamic.core.plugin.MessageSendRequest
 
-internal fun MessageDeliveryRequest.withMergedForwardFallback(): MessageDeliveryRequest {
+internal fun MessageSendRequest.withMergedForwardFallback(): MessageSendRequest {
     if (!message.batches.containsMergedForward()) return this
     return copy(message = message.withMergedForwardFallback())
-}
-
-internal fun CommandResultSendRequest.withMergedForwardFallback(): CommandResultSendRequest {
-    if (!chain.containsMergedForward()) return this
-    return copy(chain = chain.withMergedForwardFallback())
 }
 
 internal fun Message.withMergedForwardFallback(): Message {

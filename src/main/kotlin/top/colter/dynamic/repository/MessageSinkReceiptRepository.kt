@@ -16,7 +16,7 @@ import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.data.UpdateKey
-import top.colter.dynamic.core.plugin.MessageSendResult
+import top.colter.dynamic.core.plugin.MessageSinkSendReceipt
 import top.colter.dynamic.core.tools.nowInstant
 import top.colter.dynamic.table.MessageSinkReceiptTable
 
@@ -28,6 +28,7 @@ public data class MessageSinkReceipt(
     val sinkMessageId: String,
     val sinkRouteId: String? = null,
     val sinkAccountId: String? = null,
+    val recallable: Boolean = true,
     val deliveryId: Int,
     val messageId: String,
     val sourceUpdateKey: UpdateKey? = null,
@@ -39,19 +40,31 @@ public object MessageSinkReceiptRepository {
     public fun recordSent(
         delivery: top.colter.dynamic.core.data.MessageDelivery,
         message: Message,
-        result: MessageSendResult.Sent,
+        receipts: List<MessageSinkSendReceipt>,
     ): Int {
-        val sinkMessageIds = result.actualSinkMessageIds()
-        if (sinkMessageIds.isEmpty()) return 0
+        val normalizedReceipts = receipts
+            .mapNotNull { receipt ->
+                val sinkMessageId = receipt.sinkMessageId.normalized() ?: return@mapNotNull null
+                receipt.copy(sinkMessageId = sinkMessageId)
+            }
+            .distinctBy { receipt ->
+                listOf(
+                    receipt.sinkTransportId.orEmpty(),
+                    receipt.target?.stableValue().orEmpty(),
+                    receipt.sinkAccountId.orEmpty(),
+                    receipt.sinkMessageId,
+                ).joinToString("\u001F")
+            }
+        if (normalizedReceipts.isEmpty()) return 0
 
-        val transportId = result.sinkTransportId.normalized().orEmpty()
-        val sinkRouteId = result.sinkRouteId.normalized()
-        val sinkAccountId = result.sinkAccountId.normalized()
-        val sinkAccountKey = sinkAccountId.orEmpty()
-        val target = delivery.target
         val createdAt = nowInstant()
         return transaction {
-            sinkMessageIds.sumOf { sinkMessageId ->
+            normalizedReceipts.sumOf { receipt ->
+                val target = receipt.target ?: delivery.target
+                val transportId = receipt.sinkTransportId.normalized().orEmpty()
+                val sinkRouteId = receipt.sinkRouteId.normalized()
+                val sinkAccountId = receipt.sinkAccountId.normalized()
+                val sinkAccountKey = sinkAccountId.orEmpty()
                 MessageSinkReceiptTable.insertIgnore {
                     it[MessageSinkReceiptTable.transportId] = transportId
                     it[MessageSinkReceiptTable.platformId] = target.platformId.value
@@ -61,10 +74,11 @@ public object MessageSinkReceiptRepository {
                     it[MessageSinkReceiptTable.scopeId] = target.scopeId
                     it[MessageSinkReceiptTable.threadId] = target.threadId
                     it[MessageSinkReceiptTable.targetAccountId] = target.accountId
-                    it[MessageSinkReceiptTable.sinkMessageId] = sinkMessageId
+                    it[MessageSinkReceiptTable.sinkMessageId] = receipt.sinkMessageId
                     it[MessageSinkReceiptTable.sinkRouteId] = sinkRouteId
                     it[MessageSinkReceiptTable.sinkAccountId] = sinkAccountId
                     it[MessageSinkReceiptTable.sinkAccountKey] = sinkAccountKey
+                    it[MessageSinkReceiptTable.recallable] = receipt.recallable
                     it[MessageSinkReceiptTable.deliveryId] = delivery.id
                     it[MessageSinkReceiptTable.messageId] = message.id
                     it[MessageSinkReceiptTable.sourceUpdateKey] = message.sourceUpdateKey
@@ -74,6 +88,12 @@ public object MessageSinkReceiptRepository {
             }
         }
     }
+
+    public fun recordSent(
+        delivery: top.colter.dynamic.core.data.MessageDelivery,
+        message: Message,
+        result: top.colter.dynamic.core.plugin.MessageSendResult.Sent,
+    ): Int = recordSent(delivery, message, result.receipts)
 
     public fun findByIncomingReply(message: IncomingMessage): MessageSinkReceipt? {
         val replyMessageId = message.replyMessageId() ?: return null
@@ -141,12 +161,6 @@ public object MessageSinkReceiptRepository {
         }
     }
 
-    private fun MessageSendResult.Sent.actualSinkMessageIds(): List<String> {
-        val explicitIds = sinkMessageIds.mapNotNull { it.normalized() }
-        if (explicitIds.isNotEmpty()) return explicitIds.distinct()
-        return listOfNotNull(sinkMessageId.normalized()).distinct()
-    }
-
     private fun IncomingMessage.replyMessageId(): String? {
         replyTo?.messageId.normalized()?.let { return it }
         return segments
@@ -172,6 +186,7 @@ private fun ResultRow.toMessageSinkReceipt(): MessageSinkReceipt = MessageSinkRe
     sinkMessageId = this[MessageSinkReceiptTable.sinkMessageId],
     sinkRouteId = this[MessageSinkReceiptTable.sinkRouteId],
     sinkAccountId = this[MessageSinkReceiptTable.sinkAccountId],
+    recallable = this[MessageSinkReceiptTable.recallable],
     deliveryId = this[MessageSinkReceiptTable.deliveryId],
     messageId = this[MessageSinkReceiptTable.messageId],
     sourceUpdateKey = this[MessageSinkReceiptTable.sourceUpdateKey],

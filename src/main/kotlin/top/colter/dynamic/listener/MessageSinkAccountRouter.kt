@@ -4,10 +4,9 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
-import top.colter.dynamic.core.plugin.CommandResultSendRequest
-import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.core.plugin.MessageRecallRequest
 import top.colter.dynamic.core.plugin.MessageRecallResult
+import top.colter.dynamic.core.plugin.MessageSendRequest
 import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.core.plugin.MessageSinkRoute
 import top.colter.dynamic.core.plugin.MessageSinkRouteState
@@ -32,8 +31,8 @@ public class MessageSinkAccountRouter(
     internal suspend fun sendMessage(
         candidates: List<MessageSinkRouteCandidate>,
         policy: MessageSinkRoutingPolicy,
-        request: MessageDeliveryRequest,
-        prepareRequest: suspend (MessageSinkRouteCandidate) -> MessageDeliveryRequest = { request },
+        request: MessageSendRequest,
+        prepareRequest: suspend (MessageSinkRouteCandidate) -> MessageSendRequest = { request },
         onRouteFailure: (MessageSinkRouteCandidate) -> Unit = {},
     ): MessageSendResult {
         return sendWithRoute(
@@ -44,24 +43,6 @@ public class MessageSinkAccountRouter(
             onRouteFailure = onRouteFailure,
         ) { candidate ->
             candidate.sink.sendMessage(prepareRequest(candidate), candidate.route.routeId)
-        }
-    }
-
-    internal suspend fun sendCommandResult(
-        candidates: List<MessageSinkRouteCandidate>,
-        policy: MessageSinkRoutingPolicy,
-        request: CommandResultSendRequest,
-        prepareRequest: suspend (MessageSinkRouteCandidate) -> CommandResultSendRequest = { request },
-        onRouteFailure: (MessageSinkRouteCandidate) -> Unit = {},
-    ): MessageSendResult {
-        return sendWithRoute(
-            candidates = candidates,
-            target = request.target.address,
-            policy = policy,
-            actionLabel = "命令回复",
-            onRouteFailure = onRouteFailure,
-        ) { candidate ->
-            candidate.sink.sendCommandResult(prepareRequest(candidate), candidate.route.routeId)
         }
     }
 
@@ -122,22 +103,20 @@ public class MessageSinkAccountRouter(
             when (result) {
                 is MessageSendResult.Sent -> {
                     clearFailure(route.routeId)
-                    return result.copy(
-                        sinkRouteId = result.sinkRouteId ?: route.routeId,
-                        sinkAccountId = result.sinkAccountId ?: route.accountId,
-                        sinkTransportId = result.sinkTransportId ?: route.transportId,
-                    )
+                    return result.withRoute(route)
+                }
+                is MessageSendResult.PartiallySent -> {
+                    markFailure(route.routeId, policy)
+                    onRouteFailure(candidate)
+                    accountRouterLogger.warn {
+                        "$actionLabel 已部分成功，停止路线切换：target=${target.stableValue()}，routeId=${route.routeId}，原因=${result.reason}"
+                    }
+                    return result.withRoute(route)
                 }
                 is MessageSendResult.Failed -> {
                     markFailure(route.routeId, policy)
                     onRouteFailure(candidate)
                     failures += "${route.routeId}=${result.reason}"
-                    if (result.partialSent) {
-                        accountRouterLogger.warn {
-                            "$actionLabel 已部分成功，停止路线切换：target=${target.stableValue()}，routeId=${route.routeId}，原因=${result.reason}"
-                        }
-                        return result.copy(retryable = false, partialSent = true)
-                    }
                     if (!result.retryable) {
                         return result
                     }
@@ -152,6 +131,30 @@ public class MessageSinkAccountRouter(
                 "${actionLabel}所有发送路线均失败：${failures.joinToString("；")}"
             },
             retryable = true,
+        )
+    }
+
+    private fun MessageSendResult.Sent.withRoute(route: MessageSinkRoute): MessageSendResult.Sent {
+        return copy(
+            receipts = receipts.map { receipt ->
+                receipt.copy(
+                    sinkRouteId = receipt.sinkRouteId ?: route.routeId,
+                    sinkAccountId = receipt.sinkAccountId ?: route.accountId,
+                    sinkTransportId = receipt.sinkTransportId ?: route.transportId,
+                )
+            },
+        )
+    }
+
+    private fun MessageSendResult.PartiallySent.withRoute(route: MessageSinkRoute): MessageSendResult.PartiallySent {
+        return copy(
+            receipts = receipts.map { receipt ->
+                receipt.copy(
+                    sinkRouteId = receipt.sinkRouteId ?: route.routeId,
+                    sinkAccountId = receipt.sinkAccountId ?: route.accountId,
+                    sinkTransportId = receipt.sinkTransportId ?: route.transportId,
+                )
+            },
         )
     }
 

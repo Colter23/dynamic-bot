@@ -16,7 +16,6 @@ import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.LinkVideoDownloadConfig
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.data.CommandContext
-import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.SourceUpdate
@@ -33,11 +32,12 @@ import top.colter.dynamic.core.link.LinkVideoDownloadRequest
 import top.colter.dynamic.core.link.LinkVideoDownloadResult
 import top.colter.dynamic.core.link.LinkVideoDownloader
 import top.colter.dynamic.core.link.ParsedLink
+import top.colter.dynamic.core.plugin.OutboundMessagePublishRequest
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.DefaultLinkPreviewRenderer
 import top.colter.dynamic.draw.LinkPreviewRenderer
-import top.colter.dynamic.repository.MessageDeliveryRepository
+import top.colter.dynamic.message.OutboundMessageService
 import top.colter.dynamic.repository.SubscriberRepository
 
 internal const val LINK_PARSE_EVENT_LABEL: String = "link-parse"
@@ -55,6 +55,9 @@ public class LinkParseService(
     private val publisherLookupResolver: (String) -> PublisherLookupPlugin? = { null },
     private val previewRenderer: LinkPreviewRenderer = DefaultLinkPreviewRenderer(),
     private val onMessagesQueued: suspend () -> Unit = {},
+    private val outboundMessageService: OutboundMessageService = OutboundMessageService(
+        onMessagesQueued = onMessagesQueued,
+    ),
     private val progressMessenger: LinkParseProgressMessenger = NoopLinkParseProgressMessenger,
     private val backgroundScope: CoroutineScope? = null,
     private val projectRootProvider: () -> File = { File(System.getProperty("user.dir")) },
@@ -598,22 +601,19 @@ public class LinkParseService(
             address = context.target,
             name = context.chatId,
         )
-        val message = Message(
-            id = buildLinkParseMessageId(parsedLink),
-            time = System.currentTimeMillis() / 1000,
-            sourceUpdateKey = null,
-            renderVariant = LINK_PARSE_EVENT_LABEL,
-            targets = listOf(subscriber.address),
-            batches = batches,
+        val result = outboundMessageService.publish(
+            OutboundMessagePublishRequest(
+                sourcePlugin = LINK_PARSE_EVENT_SOURCE,
+                messageId = buildLinkParseMessageId(parsedLink),
+                targets = listOf(subscriber.address),
+                batches = batches,
+                renderVariant = LINK_PARSE_EVENT_LABEL,
+            ),
         )
-        val enqueue = MessageDeliveryRepository.enqueue(message)
-        if (enqueue.newDeliveries.isNotEmpty()) {
-            onMessagesQueued()
-        }
         return LinkParseItemResult.Forwarded(
             parsedLink = parsedLink,
             subscriber = subscriber,
-            deliveryCount = enqueue.newDeliveries.size,
+            deliveryCount = result.newDeliveries.size,
         )
     }
 

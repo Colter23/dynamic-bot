@@ -30,7 +30,7 @@ import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
-import top.colter.dynamic.core.plugin.MessageDeliveryRequest
+import top.colter.dynamic.core.plugin.MessageSendRequest
 import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.core.plugin.MessageSinkFeature
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
@@ -205,7 +205,7 @@ class DeliveryDispatcherTest {
         initDb("partial-send")
         val sink = RoutedRecordingSink(
             accountIds = listOf("bot-a", "bot-b"),
-            result = { _, _ -> MessageSendResult.failed("第二段消息失败", retryable = true, partialSent = true) },
+            result = { _, _ -> MessageSendResult.partiallySent(emptyList(), "第二段消息失败") },
         )
         val target = testTargetAddress(platformId = "qq", kind = TargetKind.GROUP, externalId = "10001")
         val message = testMessage("message-partial", target)
@@ -213,10 +213,11 @@ class DeliveryDispatcherTest {
 
         val stats = dispatcher(sink).dispatchDue()
 
-        assertEquals(1, stats.failed)
+        assertEquals(1, stats.partiallySent)
+        assertEquals(0, stats.failed)
         assertEquals(listOf("bot-a:message-partial"), sink.sent)
         val delivery = MessageDeliveryRepository.findByMessageId(message.id).single()
-        assertEquals(DeliveryStatus.FAILED, delivery.status)
+        assertEquals(DeliveryStatus.PARTIALLY_SENT, delivery.status)
         assertEquals(1, delivery.attempts)
     }
 
@@ -489,7 +490,7 @@ class DeliveryDispatcherTest {
     }
 
     private class RecordingSink(
-        private val result: (MessageDeliveryRequest) -> MessageSendResult = {
+        private val result: (MessageSendRequest) -> MessageSendResult = {
             MessageSendResult.sent("receipt-${it.message.id}")
         },
     ) : MessageSinkPlugin {
@@ -500,7 +501,7 @@ class DeliveryDispatcherTest {
         val sentMessageIds: MutableList<String> = mutableListOf()
         val sentMessages: MutableList<Message> = mutableListOf()
 
-        override suspend fun sendMessage(request: MessageDeliveryRequest): MessageSendResult {
+        override suspend fun sendMessage(request: MessageSendRequest): MessageSendResult {
             sentMessageIds += request.message.id
             sentMessages += request.message
             return result(request)
@@ -519,7 +520,7 @@ class DeliveryDispatcherTest {
         var maxInFlight: Int = 0
             private set
 
-        override suspend fun sendMessage(request: MessageDeliveryRequest): MessageSendResult {
+        override suspend fun sendMessage(request: MessageSendRequest): MessageSendResult {
             synchronized(lock) {
                 inFlight += 1
                 maxInFlight = maxOf(maxInFlight, inFlight)
@@ -536,7 +537,7 @@ class DeliveryDispatcherTest {
         private val accountIds: List<String>,
         private val features: Set<MessageSinkFeature> = emptySet(),
         private val routeProfileIds: Map<String, String> = emptyMap(),
-        private val result: (String, MessageDeliveryRequest) -> MessageSendResult = { accountId, request ->
+        private val result: (String, MessageSendRequest) -> MessageSendResult = { accountId, request ->
             MessageSendResult.sent("receipt-${request.message.id}", sinkAccountId = accountId)
         },
     ) : AccountRoutedMessageSinkPlugin {
@@ -562,7 +563,7 @@ class DeliveryDispatcherTest {
         }
 
         override suspend fun sendMessage(
-            request: MessageDeliveryRequest,
+            request: MessageSendRequest,
             routeId: String,
         ): MessageSendResult {
             val accountId = routeId.substringAfterLast(":")

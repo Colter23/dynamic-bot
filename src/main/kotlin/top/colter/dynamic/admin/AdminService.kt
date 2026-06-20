@@ -40,6 +40,7 @@ import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.data.TextMatchMode
 import top.colter.dynamic.core.data.coreJson
+import top.colter.dynamic.core.data.policyType
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.core.event.SubscriptionChangedEvent
 import top.colter.dynamic.core.event.SubscriptionChangeType
@@ -211,7 +212,7 @@ public class AdminService(
                 .groupingBy { it.state }
                 .eachCount()
                 .toStateCounts(pluginDtos.size.toLong()),
-            deliveryStatusCounts = MessageDeliveryRepository.countsByStatus()
+            deliveryStatusCounts = MessageDeliveryRepository.countsByStatus(includeInternalRecords = false)
                 .map { (status, count) -> StateCountDto(status.name, count) },
             plugins = pluginDtos,
             platformLogins = platformLogins(),
@@ -313,6 +314,7 @@ public class AdminService(
         targetKind: String? = null,
         query: String? = null,
         limit: Int? = null,
+        includeInternal: Boolean = false,
     ): List<MessageDeliveryDto> {
         val deliveryStatus = status
             ?.trim()
@@ -323,14 +325,15 @@ public class AdminService(
             ?.takeIf { it.isNotBlank() }
             ?.let { parseEnum<TargetKind>(it, "targetKind") }
         return MessageDeliveryRepository
-            .findRecent(
+            .findRecentWithMessages(
                 status = deliveryStatus,
                 platformId = platformId,
                 targetKind = deliveryTargetKind,
                 query = query,
                 limit = limit ?: 50,
+                includeInternalRecords = includeInternal,
             )
-            .map { it.toDto() }
+            .map { it.delivery.toDto(message = it.message) }
     }
 
     public fun delivery(id: Int): MessageDeliveryDetailDto {
@@ -338,7 +341,7 @@ public class AdminService(
             ?: throw NoSuchElementException("消息记录不存在：$id")
         val message = MessageDeliveryRepository.findMessage(delivery.messageId)
         return MessageDeliveryDetailDto(
-            delivery = delivery.toDto(),
+            delivery = delivery.toDto(message = message),
             message = message?.toJsonElement(),
         )
     }
@@ -2667,11 +2670,15 @@ private fun PublisherLiveRecord.toDto(): PublisherLiveRecordDto = PublisherLiveR
     lastObservedAtEpochSeconds = lastObservedAtEpochSeconds,
 )
 
-private fun MessageDelivery.toDto(): MessageDeliveryDto = MessageDeliveryDto(
+private fun MessageDelivery.toDto(message: Message? = null): MessageDeliveryDto = MessageDeliveryDto(
     id = id,
     messageId = messageId,
     sourceUpdateKey = sourceUpdateKey?.stableValue(),
     renderVariant = renderVariant,
+    messageKind = message?.kind?.name ?: messageKind.name,
+    messageImportance = message?.importance?.name ?: messageImportance.name,
+    messageVisibility = message?.visibility?.name ?: messageVisibility.name,
+    messageRecordPolicy = message?.recordPolicy?.policyType?.name ?: messageRecordPolicyType.name,
     platformId = target.platformId.value,
     targetKind = target.kind.name,
     targetId = target.externalId,

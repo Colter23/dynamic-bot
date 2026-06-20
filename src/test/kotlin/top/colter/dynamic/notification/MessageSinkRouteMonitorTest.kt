@@ -13,7 +13,7 @@ import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
-import top.colter.dynamic.core.plugin.MessageDeliveryRequest
+import top.colter.dynamic.core.plugin.MessageSendRequest
 import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.core.plugin.MessageSinkRoute
@@ -278,7 +278,7 @@ class MessageSinkRouteMonitorTest {
             }
         }
 
-        override suspend fun sendMessage(request: MessageDeliveryRequest, routeId: String): MessageSendResult {
+        override suspend fun sendMessage(request: MessageSendRequest, routeId: String): MessageSendResult {
             return MessageSendResult.sent()
         }
     }

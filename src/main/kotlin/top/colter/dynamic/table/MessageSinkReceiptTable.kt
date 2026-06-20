@@ -21,6 +21,7 @@ public object MessageSinkReceiptTable : IntIdTable("message_sink_receipt") {
     public val sinkRouteId: Column<String?> = varchar(name = "sink_route_id", length = 160).nullable()
     public val sinkAccountId: Column<String?> = varchar(name = "sink_account_id", length = 120).nullable()
     public val sinkAccountKey: Column<String> = varchar(name = "sink_account_key", length = 120).default("")
+    public val recallable: Column<Boolean> = bool(name = "recallable").default(true)
     public val deliveryId: Column<Int> = integer(name = "delivery_id")
     public val messageId: Column<String> = varchar(name = "message_id", length = 255)
     public val sourceUpdateKey: Column<UpdateKey?> = registerColumn("source_update_key_json", updateKeyColumn()).nullable()

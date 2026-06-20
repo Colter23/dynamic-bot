@@ -66,6 +66,7 @@ function deliveryFilters() {
       targetKind: "",
       q: "",
       limit: String(DELIVERY_LIMIT),
+      includeInternal: false,
     };
   }
   return state.deliveryFilters;
@@ -146,6 +147,10 @@ function renderLayout() {
               <select id="deliveryFilterLimit" data-delivery-filter="limit">
                 ${limitOptions(filters.limit)}
               </select>
+              <label class="message-internal-toggle">
+                <input id="deliveryFilterIncludeInternal" type="checkbox" data-delivery-filter="includeInternal"${filters.includeInternal ? " checked" : ""}>
+                <span>显示内部临时</span>
+              </label>
               <button type="button" class="filter-apply-button compact" data-action="apply-delivery-filter">筛选</button>
               <button type="button" class="filter-clear-button compact delivery-clear-filter-button" data-action="reset-delivery-filter">清除筛选</button>
             </div>
@@ -171,6 +176,7 @@ function deliveryStatusOptions(selected) {
     ["PENDING", "等待"],
     ["SENDING", "发送中"],
     ["SENT", "已发送"],
+    ["PARTIALLY_SENT", "部分发送"],
   ].map(([value, text]) => `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(text)}</option>`).join("");
 }
 
@@ -203,9 +209,11 @@ function bindDeliveryControls() {
   const status = pageQuery("#deliveryFilterStatus");
   const targetKind = pageQuery("#deliveryFilterTargetKind");
   const limit = pageQuery("#deliveryFilterLimit");
+  const includeInternal = pageQuery("#deliveryFilterIncludeInternal");
   if (status) status.onchange = () => applyDeliveryFilter().catch(handleError);
   if (targetKind) targetKind.onchange = () => applyDeliveryFilter().catch(handleError);
   if (limit) limit.onchange = () => applyDeliveryFilter().catch(handleError);
+  if (includeInternal) includeInternal.onchange = () => applyDeliveryFilter().catch(handleError);
 }
 
 async function applyDeliveryFilter(button) {
@@ -221,6 +229,7 @@ function readDeliveryFilterControls() {
   filters.targetKind = pageQuery("#deliveryFilterTargetKind")?.value.trim() || "";
   filters.q = pageQuery("#deliveryFilterKeyword")?.value.trim() || "";
   filters.limit = pageQuery("#deliveryFilterLimit")?.value.trim() || String(DELIVERY_LIMIT);
+  filters.includeInternal = !!pageQuery("#deliveryFilterIncludeInternal")?.checked;
 }
 
 function deliveryFilterActiveFromControls() {
@@ -230,9 +239,11 @@ function deliveryFilterActiveFromControls() {
   const targetKind = pageQuery("#deliveryFilterTargetKind")?.value.trim() || "";
   const q = pageQuery("#deliveryFilterKeyword")?.value.trim() || "";
   const limit = pageQuery("#deliveryFilterLimit")?.value.trim() || String(DELIVERY_LIMIT);
+  const includeInternal = !!pageQuery("#deliveryFilterIncludeInternal")?.checked;
   return Boolean(
-    status || platformId || targetKind || q || limit !== String(DELIVERY_LIMIT) ||
-    filters.status || filters.platformId || filters.targetKind || filters.q || filters.limit !== String(DELIVERY_LIMIT)
+    status || platformId || targetKind || q || limit !== String(DELIVERY_LIMIT) || includeInternal ||
+    filters.status || filters.platformId || filters.targetKind || filters.q ||
+    filters.limit !== String(DELIVERY_LIMIT) || filters.includeInternal
   );
 }
 
@@ -243,11 +254,13 @@ function resetDeliveryFilterControls() {
   filters.targetKind = "";
   filters.q = "";
   filters.limit = String(DELIVERY_LIMIT);
+  filters.includeInternal = false;
   if (pageQuery("#deliveryFilterStatus")) pageQuery("#deliveryFilterStatus").value = "";
   if (pageQuery("#deliveryFilterPlatform")) pageQuery("#deliveryFilterPlatform").value = "";
   if (pageQuery("#deliveryFilterTargetKind")) pageQuery("#deliveryFilterTargetKind").value = "";
   if (pageQuery("#deliveryFilterKeyword")) pageQuery("#deliveryFilterKeyword").value = "";
   if (pageQuery("#deliveryFilterLimit")) pageQuery("#deliveryFilterLimit").value = String(DELIVERY_LIMIT);
+  if (pageQuery("#deliveryFilterIncludeInternal")) pageQuery("#deliveryFilterIncludeInternal").checked = false;
 }
 
 async function refreshDeliveries(button, force) {
@@ -264,6 +277,7 @@ async function refreshDeliveries(button, force) {
         targetKind: filters.targetKind,
         q: filters.q,
         limit: filters.limit,
+        includeInternal: filters.includeInternal ? "true" : "",
       }));
       if (!isCurrentPageRequest(request)) return;
       state.deliveryRows = rows || [];
@@ -305,9 +319,20 @@ function renderDeliveries() {
 
 function messageSubLine(row) {
   const parts = [];
+  const meta = messageMetaText(row);
+  if (meta) parts.push(meta);
   if (row.sourceUpdateKey) parts.push(`来源 ${compactValue(row.sourceUpdateKey, 46)}`);
   if (row.renderVariant) parts.push(`渲染 ${row.renderVariant}`);
   return parts.join(" · ");
+}
+
+function messageMetaText(row) {
+  const parts = [];
+  if (row.messageKind && row.messageKind !== "NORMAL") parts.push(label(row.messageKind));
+  if (row.messageImportance && row.messageImportance !== "NORMAL") parts.push(label(row.messageImportance));
+  if (row.messageVisibility && row.messageVisibility !== "DEFAULT") parts.push(label(row.messageVisibility));
+  if (row.messageRecordPolicy && row.messageRecordPolicy !== "DURABLE") parts.push(label(row.messageRecordPolicy));
+  return parts.join(" / ");
 }
 
 function targetSubLine(row) {
@@ -320,6 +345,7 @@ function targetSubLine(row) {
 function statusHint(row) {
   if (row.status === "FAILED") return row.lastError ? "有失败原因" : "无失败详情";
   if (row.status === "SENT") return row.sinkMessageId ? "已有平台回执" : "已完成";
+  if (row.status === "PARTIALLY_SENT") return row.lastError ? "部分成功，有失败原因" : "部分成功";
   if (row.status === "SENDING") return row.lockedUntilEpochSeconds ? `锁定至 ${fmtTime(row.lockedUntilEpochSeconds)}` : "正在发送";
   if (row.status === "PENDING") return row.nextAttemptAtEpochSeconds ? `下次 ${fmtTime(row.nextAttemptAtEpochSeconds)}` : "等待调度";
   return "-";
@@ -328,6 +354,7 @@ function statusHint(row) {
 function resultText(row) {
   if (row.status === "FAILED") return row.lastError || "投递失败";
   if (row.status === "SENT") return row.sinkMessageId ? `回执：${row.sinkMessageId}` : "已发送";
+  if (row.status === "PARTIALLY_SENT") return row.lastError || "部分消息已发送，后续不再重试";
   if (row.status === "SENDING") return row.lockedUntilEpochSeconds ? `发送锁定至 ${fmtTime(row.lockedUntilEpochSeconds)}` : "发送中";
   if (row.status === "PENDING") return row.nextAttemptAtEpochSeconds ? `等待下次尝试：${fmtTime(row.nextAttemptAtEpochSeconds)}` : "等待投递队列调度";
   return "-";
@@ -388,6 +415,10 @@ function renderDeliveryDetail(row, message) {
         ${detailItem("消息 ID", row.messageId, true)}
         ${detailItem("来源动态", row.sourceUpdateKey || "-", true)}
         ${detailItem("渲染类型", row.renderVariant || "-")}
+        ${detailItem("消息类型", row.messageKind ? label(row.messageKind) : "-")}
+        ${detailItem("重要度", row.messageImportance ? label(row.messageImportance) : "-")}
+        ${detailItem("可见性", row.messageVisibility ? label(row.messageVisibility) : "-")}
+        ${detailItem("记录策略", row.messageRecordPolicy ? label(row.messageRecordPolicy) : "-")}
         ${detailItem("尝试次数", row.attempts)}
         ${detailItem("目标平台", row.platformId)}
         ${detailItem("目标类型", label(row.targetKind))}

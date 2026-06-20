@@ -2,15 +2,20 @@ package top.colter.dynamic.link
 
 import top.colter.dynamic.LinkParseProgressReplyConfig
 import top.colter.dynamic.core.data.CommandContext
-import top.colter.dynamic.core.data.CommandTarget
+import top.colter.dynamic.core.data.MessageImportance
+import top.colter.dynamic.core.data.MessageRecordPolicy
+import top.colter.dynamic.core.data.MessageVisibility
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.OutboundMessageKind
 import top.colter.dynamic.core.data.TargetAddress
-import top.colter.dynamic.core.plugin.CommandResultSendRequest
 import top.colter.dynamic.core.plugin.MessageRecallResult
 import top.colter.dynamic.core.plugin.MessageSendResult
+import top.colter.dynamic.core.plugin.OutboundMessagePublishRequest
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.event.IncomingTextMessageEvent
+import top.colter.dynamic.message.OutboundMessagePublishResult
+import top.colter.dynamic.message.RENDER_VARIANT_LINK_PROGRESS
 
 private val progressLogger = loggerFor<LinkParseProgressMessenger>()
 
@@ -43,7 +48,7 @@ public object NoopLinkParseProgressMessenger : LinkParseProgressMessenger {
 }
 
 public class DeliveryLinkParseProgressMessenger(
-    private val sendCommandResult: suspend (CommandResultSendRequest) -> MessageSendResult,
+    private val publishMessage: suspend (OutboundMessagePublishRequest) -> OutboundMessagePublishResult,
     private val recallMessage: suspend (TargetAddress, String, String?, String?) -> MessageRecallResult,
 ) : LinkParseProgressMessenger {
     override suspend fun send(
@@ -53,20 +58,29 @@ public class DeliveryLinkParseProgressMessenger(
     ): LinkParseProgressReceipt? {
         val value = text.trim().takeIf { it.isNotBlank() } ?: return null
         val targetAddress = context.target.withPreferredAccount(context.botAccountId)
-        val result = sendCommandResult(
-            CommandResultSendRequest(
-                target = CommandTarget(
-                    address = targetAddress,
-                    senderId = context.senderId,
-                ),
-                chain = listOf(MessageBatch(listOf(MessageContent.Text(value)))),
-                inReplyTo = inReplyTo,
+        val result = publishMessage(
+            OutboundMessagePublishRequest(
+                sourcePlugin = "main-link-parser",
+                targets = listOf(targetAddress),
+                batches = listOf(MessageBatch(listOf(MessageContent.Text(value)))),
+                renderVariant = RENDER_VARIANT_LINK_PROGRESS,
+                kind = OutboundMessageKind.PROGRESS,
+                importance = MessageImportance.LOW,
+                visibility = MessageVisibility.INTERNAL,
+                recordPolicy = MessageRecordPolicy.Transient(),
+                replyToMessageId = inReplyTo,
+                correlationId = inReplyTo,
             ),
         )
-        return (result as? MessageSendResult.Sent)
-            ?.sinkMessageId
-            ?.takeIf { it.isNotBlank() }
-            ?.let { LinkParseProgressReceipt(targetAddress, it, result.sinkRouteId, result.sinkAccountId) }
+        val receipt = result.sendResults
+            .asSequence()
+            .filterIsInstance<MessageSendResult.Sent>()
+            .flatMap { it.receipts.asSequence() }
+            .firstOrNull()
+            ?: return null
+        return receipt.sinkMessageId
+            .takeIf { it.isNotBlank() }
+            ?.let { LinkParseProgressReceipt(targetAddress, it, receipt.sinkRouteId, receipt.sinkAccountId) }
     }
 
     override suspend fun recall(receipt: LinkParseProgressReceipt) {

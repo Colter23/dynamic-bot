@@ -10,7 +10,6 @@ import top.colter.dynamic.core.data.DynamicPayload
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.MediaRef
-import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.Publisher
@@ -23,18 +22,19 @@ import top.colter.dynamic.event.MessageEvent
 import top.colter.dynamic.core.event.PublisherPersistenceMode
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
+import top.colter.dynamic.core.plugin.OutboundMessagePublishRequest
 import top.colter.dynamic.draw.DefaultDynamicDrawService
 import top.colter.dynamic.draw.DynamicDrawService
 import top.colter.dynamic.filter.DynamicFilterEvaluator
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
-import top.colter.dynamic.repository.MessageEnqueueResult
-import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PublisherLiveRecordRepository
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SourceUpdateSnapshotRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.link.LINK_PARSE_EVENT_LABEL
+import top.colter.dynamic.message.OutboundMessagePublishResult
+import top.colter.dynamic.message.OutboundMessageService
 
 private val logger = loggerFor<SourceUpdateProcessor>()
 
@@ -46,7 +46,10 @@ public class SourceUpdateProcessor(
     private val templateRenderer: PushTemplateRenderer = PushTemplateRenderer(),
     drawService: DynamicDrawService? = null,
     private val broadcastMessages: Boolean = true,
-    private val onDeliveriesQueued: suspend () -> Unit = {},
+    onDeliveriesQueued: suspend () -> Unit = {},
+    private val outboundMessageService: OutboundMessageService = OutboundMessageService(
+        onMessagesQueued = onDeliveriesQueued,
+    ),
 ) {
     private val fixedConfig: MainDynamicConfig by lazy {
         config ?: configService.loadOrCreate(MainDynamicConfig.CONFIG_ID, MainConfigForms.migrations) {
@@ -249,8 +252,8 @@ public class SourceUpdateProcessor(
 
         val (mentionAllTargets, normalTargets) = targets.partition { it.shouldMentionAll(update) }
         val results = listOfNotNull(
-            publishMessageVariant(update, normalTargets, batches, "default", messageIdNonce),
-            publishMessageVariant(update, mentionAllTargets, batches.withMentionAllAtTail(), "mention_all", messageIdNonce),
+            publishMessageVariant(sourcePlugin, update, normalTargets, batches, "default", messageIdNonce),
+            publishMessageVariant(sourcePlugin, update, mentionAllTargets, batches.withMentionAllAtTail(), "mention_all", messageIdNonce),
         )
         val newDeliveryCount = results.sumOf { it.newDeliveries.size }
         return when {
@@ -258,12 +261,6 @@ public class SourceUpdateProcessor(
                 logger.info {
                     "来源更新已创建投递任务：update=${update.key.stableValue()}，消息变体=${results.size}，新增投递=$newDeliveryCount"
                 }
-                runCatching { onDeliveriesQueued() }
-                    .onFailure { error ->
-                        logger.warn(error) {
-                            "来源更新已创建投递任务，但触发即时投递失败：update=${update.key.stableValue()}"
-                        }
-                    }
                 SourceUpdatePublishResult.enqueued(newDeliveryCount)
             }
             results.isNotEmpty() -> {
@@ -274,35 +271,37 @@ public class SourceUpdateProcessor(
         }
     }
 
-    private fun publishMessageVariant(
+    private suspend fun publishMessageVariant(
+        sourcePlugin: String,
         update: SourceUpdate,
         targets: List<DeliveryTarget>,
         batches: List<MessageBatch>,
         renderVariant: String,
         messageIdNonce: String?,
-    ): MessageEnqueueResult? {
+    ): OutboundMessagePublishResult? {
         if (targets.isEmpty()) return null
 
-        val message = Message(
-            id = buildMessageId(update, renderVariant, messageIdNonce),
-            time = System.currentTimeMillis() / 1000,
-            sourceUpdateKey = update.key,
-            renderVariant = renderVariant,
-            targets = targets.map { it.subscriber.address },
-            batches = batches,
+        val result = outboundMessageService.publish(
+            OutboundMessagePublishRequest(
+                sourcePlugin = sourcePlugin,
+                messageId = buildMessageId(update, renderVariant, messageIdNonce),
+                sourceUpdateKey = update.key,
+                targets = targets.map { it.subscriber.address },
+                batches = batches,
+                renderVariant = renderVariant,
+            ),
         )
-        val result = MessageDeliveryRepository.enqueue(message)
         if (result.newDeliveries.isNotEmpty()) {
             logger.debug {
-                "消息已入队：messageId=${message.id}，variant=$renderVariant，新增投递=${result.newDeliveries.size}，已存在=${result.existingDeliveries.size}，目标=${message.targets.targetSummary()}"
+                "消息已入队：messageId=${result.message.id}，variant=$renderVariant，新增投递=${result.newDeliveries.size}，已存在=${result.existingDeliveries.size}，目标=${result.message.targets.targetSummary()}"
             }
         } else {
             logger.debug {
-                "消息入队跳过重复投递：messageId=${message.id}，variant=$renderVariant，已存在=${result.existingDeliveries.size}"
+                "消息入队跳过重复投递：messageId=${result.message.id}，variant=$renderVariant，已存在=${result.existingDeliveries.size}"
             }
         }
         if (broadcastMessages && result.newDeliveries.isNotEmpty()) {
-            val broadcastMessage = message.copy(targets = result.newDeliveries.map { it.target })
+            val broadcastMessage = result.message.copy(targets = result.newDeliveries.map { it.target })
             MessageEvent(sourcePlugin = "main", message = broadcastMessage).let { eventBus.broadcast(it) }
         }
         return result

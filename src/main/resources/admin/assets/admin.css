@@ -6129,6 +6129,28 @@
       padding: 3px 9px;
       font-size: 12px;
     }
+    .message-internal-toggle {
+      min-height: 28px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 8px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      white-space: nowrap;
+      background: var(--panel-soft);
+    }
+    .message-filter-bar .entity-filter-controls .message-internal-toggle input {
+      width: 14px;
+      min-width: 14px;
+      height: 14px;
+      min-height: 14px;
+      margin: 0;
+      padding: 0;
+    }
     .message-table-region,
     .messages-table-host {
       min-width: 0;

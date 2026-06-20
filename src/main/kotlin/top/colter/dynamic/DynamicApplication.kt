@@ -17,15 +17,19 @@ import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.MessageDeliveryPolicy
+import top.colter.dynamic.core.data.MessageRecordPolicy
+import top.colter.dynamic.core.data.OutboundMessageKind
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.event.ListenerToken
 import top.colter.dynamic.core.plugin.IncomingMessagePublishRequest
+import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.core.plugin.PluginMessagePublishOptions
 import top.colter.dynamic.core.plugin.PluginMessagePublishResult
 import top.colter.dynamic.core.plugin.PluginMessagePublishSink
+import top.colter.dynamic.core.plugin.OutboundMessagePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.core.event.SourceUpdatePublisher
@@ -51,12 +55,16 @@ import top.colter.dynamic.link.LinkParseService
 import top.colter.dynamic.listener.SourceUpdateProcessor
 import top.colter.dynamic.media.OutboundMediaService
 import top.colter.dynamic.message.OutboundMessageService
+import top.colter.dynamic.message.OutboundMessagePublishResult
+import top.colter.dynamic.message.RENDER_VARIANT_COMMAND_RESULT
 import top.colter.dynamic.notification.MessageSinkRouteMonitor
 import top.colter.dynamic.notification.SystemNotificationService
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.SourceUpdateSnapshotRepository
 
 private val logger = loggerFor<DynamicApplication>()
+
+private const val TRANSIENT_MESSAGE_CLEANUP_INTERVAL_SECONDS: Long = 5L * 60L
 
 public object DynamicApplication : CoroutineScope {
     private val job: Job = Job()
@@ -86,19 +94,27 @@ public object DynamicApplication : CoroutineScope {
             return@PluginMessagePublishSink PluginMessagePublishResult.failed("主项目消息发布器尚未初始化")
         }
         runCatching {
-            val result = outboundMessageService.enqueueBatches(
-                source = request.sourcePlugin,
-                targets = request.targets,
-                batches = request.batches,
-                renderVariant = request.renderVariant,
-                deliveryPolicy = request.options.toDeliveryPolicy(),
+            val result = outboundMessageService.publish(
+                request.toOutboundRequest().copy(
+                    deliveryPolicy = request.options.toDeliveryPolicy(),
+                ),
             )
-            PluginMessagePublishResult.accepted(
-                messageId = result.message.id,
-                targetCount = result.targetCount,
-                newDeliveryCount = result.newDeliveryCount,
-                existingDeliveryCount = result.existingDeliveryCount,
-            )
+            if (result.accepted) {
+                PluginMessagePublishResult.accepted(
+                    messageId = result.message.id,
+                    targetCount = result.targetCount,
+                    newDeliveryCount = result.newDeliveryCount,
+                    existingDeliveryCount = result.existingDeliveryCount,
+                )
+            } else {
+                PluginMessagePublishResult.rejected(
+                    messageId = result.message.id,
+                    targetCount = result.targetCount,
+                    newDeliveryCount = result.newDeliveryCount,
+                    existingDeliveryCount = result.existingDeliveryCount,
+                    message = result.failureMessage(),
+                )
+            }
         }.getOrElse { error ->
             PluginMessagePublishResult.failed(error.message ?: error::class.qualifiedName ?: "消息发布失败")
         }
@@ -200,6 +216,7 @@ public object DynamicApplication : CoroutineScope {
             onMessagesQueued = {
                 deliveryDispatcher.dispatchDue()
             },
+            sendNow = deliveryDispatcher::sendNow,
         )
         messageSinkRouteMonitor = MessageSinkRouteMonitor(
             sinkProvider = { pluginManager.getMessageSinkPlugins() },
@@ -208,6 +225,7 @@ public object DynamicApplication : CoroutineScope {
         )
         registerDeliveryDispatchTask(config)
         registerDeliveryCleanupTask(config)
+        registerTransientMessageCleanupTask()
         registerMessageSinkRouteMonitorTask(config)
         sourceUpdateProcessor = SourceUpdateProcessor(
             configProvider = configStore::current,
@@ -218,13 +236,11 @@ public object DynamicApplication : CoroutineScope {
                 assetResolver = drawAssetRegistry,
             ),
             broadcastMessages = false,
-            onDeliveriesQueued = {
-                deliveryDispatcher.dispatchDue()
-            },
+            outboundMessageService = outboundMessageService,
         )
 
         val linkParseProgressMessenger = DeliveryLinkParseProgressMessenger(
-            sendCommandResult = deliveryDispatcher::sendCommandResult,
+            publishMessage = outboundMessageService::publish,
             recallMessage = deliveryDispatcher::recallMessage,
         )
         val linkParseService = LinkParseService(
@@ -243,6 +259,7 @@ public object DynamicApplication : CoroutineScope {
             onMessagesQueued = {
                 deliveryDispatcher.dispatchDue()
             },
+            outboundMessageService = outboundMessageService,
             progressMessenger = linkParseProgressMessenger,
             backgroundScope = this,
         )
@@ -285,13 +302,7 @@ public object DynamicApplication : CoroutineScope {
             ),
         )
 
-        listenerTokens += eventBus.subscribe(
-            object : Listener<CommandResultEvent> {
-                override suspend fun onMessage(event: CommandResultEvent) {
-                    deliveryDispatcher.dispatchCommandResult(event)
-                }
-            },
-        )
+        listenerTokens += eventBus.subscribe(CommandResultOutboundListener(outboundMessageService))
     }
 
     private fun startAdminServer(config: MainDynamicConfig) {
@@ -367,11 +378,47 @@ public object DynamicApplication : CoroutineScope {
         val now = System.currentTimeMillis() / 1000
         val expiresAt = expiresInSeconds?.let { seconds ->
             if (seconds > Long.MAX_VALUE - now) Long.MAX_VALUE else now + seconds
+        } ?: (recordPolicy as? MessageRecordPolicy.Transient)?.let { policy ->
+            if (policy.retentionSeconds > Long.MAX_VALUE - now) Long.MAX_VALUE else now + policy.retentionSeconds
         }
         return MessageDeliveryPolicy(
-            retry = retry,
+            retry = retry && recordPolicy.retry,
             expiresAtEpochSeconds = expiresAt,
         )
+    }
+
+    private fun OutboundMessagePublishResult.failureMessage(): String {
+        val reasons = sendResults.mapNotNull { result ->
+            when (result) {
+                is MessageSendResult.Failed -> result.reason
+                is MessageSendResult.PartiallySent -> result.reason
+                is MessageSendResult.Sent -> null
+            }
+        }.distinct()
+        return reasons.joinToString("；").ifBlank { "消息发布未被接受" }
+    }
+
+    private class CommandResultOutboundListener(
+        private val outboundMessageService: OutboundMessageService,
+    ) : Listener<CommandResultEvent> {
+        override suspend fun onMessage(event: CommandResultEvent) {
+            val result = outboundMessageService.publish(
+                OutboundMessagePublishRequest(
+                    sourcePlugin = event.sourcePlugin,
+                    targets = listOf(event.target.address),
+                    batches = event.chain,
+                    renderVariant = RENDER_VARIANT_COMMAND_RESULT,
+                    kind = OutboundMessageKind.COMMAND_RESULT,
+                    replyToMessageId = event.inReplyTo,
+                    correlationId = event.inReplyTo,
+                ),
+            )
+            if (!result.accepted) {
+                logger.warn {
+                    "命令回复发送失败：traceId=${event.inReplyTo}，target=${event.target.address.stableValue()}"
+                }
+            }
+        }
     }
 
     private fun registerImageCleanupTask(config: MainDynamicConfig) {
@@ -453,15 +500,49 @@ public object DynamicApplication : CoroutineScope {
                     val cutoff = System.currentTimeMillis() / 1000 -
                         config.delivery.historyRetentionDays.coerceAtLeast(0) * 24 * 60 * 60
                     val result = MessageDeliveryRepository.cleanupHistory(cutoffEpochSeconds = cutoff)
+                    val transientResult = MessageDeliveryRepository.cleanupTransientMessages(
+                        nowEpochSeconds = System.currentTimeMillis() / 1000,
+                    )
                     val deletedSnapshots = SourceUpdateSnapshotRepository.cleanupOrphaned(cutoffEpochSeconds = cutoff)
-                    if (result.deletedDeliveries > 0 || result.deletedMessages > 0) {
+                    if (
+                        result.deletedDeliveries > 0 ||
+                        result.deletedMessages > 0 ||
+                        transientResult.deletedDeliveries > 0 ||
+                        transientResult.deletedMessages > 0
+                    ) {
                         logger.info {
-                            "消息记录已清理：投递=${result.deletedDeliveries}，消息=${result.deletedMessages}，来源快照=$deletedSnapshots"
+                            "消息记录已清理：投递=${result.deletedDeliveries}，消息=${result.deletedMessages}，临时投递=${transientResult.deletedDeliveries}，临时消息=${transientResult.deletedMessages}，来源快照=$deletedSnapshots"
                         }
                     } else if (deletedSnapshots > 0) {
                         logger.info { "来源更新快照已清理：数量=$deletedSnapshots" }
                     } else {
                         logger.debug { "消息记录无需清理" }
+                    }
+                },
+            ),
+        )
+    }
+
+    private fun registerTransientMessageCleanupTask() {
+        taskScheduler.start(
+            TaskDefinition(
+                id = "main-transient-message-cleanup",
+                name = "临时消息清理",
+                description = "按出站记录策略清理已过保留期的临时消息和回执。",
+                schedule = TaskSchedule.FixedDelay(
+                    delay = TRANSIENT_MESSAGE_CLEANUP_INTERVAL_SECONDS.seconds,
+                    runImmediately = false,
+                ),
+                action = {
+                    val result = MessageDeliveryRepository.cleanupTransientMessages(
+                        nowEpochSeconds = System.currentTimeMillis() / 1000,
+                    )
+                    if (result.deletedDeliveries > 0 || result.deletedMessages > 0) {
+                        logger.info {
+                            "临时消息已清理：投递=${result.deletedDeliveries}，消息=${result.deletedMessages}"
+                        }
+                    } else {
+                        logger.debug { "临时消息无需清理" }
                     }
                 },
             ),

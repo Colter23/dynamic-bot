@@ -355,6 +355,7 @@ public fun Application.adminModule(context: AdminServerContext) {
                             ?: call.request.queryParameters["type"],
                         query = call.request.queryParameters["q"],
                         limit = call.optionalQueryInt("limit"),
+                        includeInternal = call.optionalQueryBoolean("includeInternal") ?: false,
                     )
                 }
             }
@@ -855,4 +856,13 @@ private fun ApplicationCall.optionalQueryInt(name: String): Int? {
 private fun ApplicationCall.optionalQueryLong(name: String): Long? {
     val raw = request.queryParameters[name] ?: return null
     return raw.toLongOrNull() ?: throw IllegalArgumentException("查询参数无效：$name")
+}
+
+private fun ApplicationCall.optionalQueryBoolean(name: String): Boolean? {
+    val raw = request.queryParameters[name]?.trim() ?: return null
+    return when {
+        raw.equals("true", ignoreCase = true) || raw == "1" -> true
+        raw.equals("false", ignoreCase = true) || raw == "0" -> false
+        else -> throw IllegalArgumentException("查询参数无效：$name")
+    }
 }

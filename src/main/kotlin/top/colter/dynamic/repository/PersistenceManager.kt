@@ -294,6 +294,125 @@ private val DATABASE_MIGRATIONS: List<DatabaseMigration> = listOf(
                 """.trimIndent(),
             )
         }
+    },
+    DatabaseMigration(
+        id = "message-sink-receipt-recallable",
+        description = "消息发送回执记录是否支持撤回",
+    ) {
+        if (tableExists("message_sink_receipt") && !columnExists("message_sink_receipt", "recallable")) {
+            exec(
+                "ALTER TABLE ${quoteIdentifier("message_sink_receipt")} " +
+                    "ADD COLUMN ${quoteIdentifier("recallable")} BOOLEAN NOT NULL DEFAULT 1",
+            )
+        }
+    },
+    DatabaseMigration(
+        id = "message-delivery-outbound-metadata",
+        description = "消息投递记录补充出站分类、可见性和临时保留字段",
+    ) {
+        if (tableExists("message_delivery")) {
+            if (!columnExists("message_delivery", "message_kind")) {
+                exec(
+                    "ALTER TABLE ${quoteIdentifier("message_delivery")} " +
+                        "ADD COLUMN ${quoteIdentifier("message_kind")} VARCHAR(40) NOT NULL DEFAULT 'NORMAL'",
+                )
+            }
+            if (!columnExists("message_delivery", "message_importance")) {
+                exec(
+                    "ALTER TABLE ${quoteIdentifier("message_delivery")} " +
+                        "ADD COLUMN ${quoteIdentifier("message_importance")} VARCHAR(20) NOT NULL DEFAULT 'NORMAL'",
+                )
+            }
+            if (!columnExists("message_delivery", "message_visibility")) {
+                exec(
+                    "ALTER TABLE ${quoteIdentifier("message_delivery")} " +
+                        "ADD COLUMN ${quoteIdentifier("message_visibility")} VARCHAR(20) NOT NULL DEFAULT 'DEFAULT'",
+                )
+            }
+            if (!columnExists("message_delivery", "message_record_policy")) {
+                exec(
+                    "ALTER TABLE ${quoteIdentifier("message_delivery")} " +
+                        "ADD COLUMN ${quoteIdentifier("message_record_policy")} VARCHAR(20) NOT NULL DEFAULT 'DURABLE'",
+                )
+            }
+            if (!columnExists("message_delivery", "transient_expires_at_epoch_seconds")) {
+                exec(
+                    "ALTER TABLE ${quoteIdentifier("message_delivery")} " +
+                        "ADD COLUMN ${quoteIdentifier("transient_expires_at_epoch_seconds")} INTEGER NULL",
+                )
+            }
+            if (tableExists("message_outbox")) {
+                exec(
+                    """
+                    UPDATE ${quoteIdentifier("message_delivery")}
+                    SET
+                        ${quoteIdentifier("message_kind")} = COALESCE(
+                            json_extract((
+                                SELECT ${quoteIdentifier("message_json")}
+                                FROM ${quoteIdentifier("message_outbox")}
+                                WHERE ${quoteIdentifier("message_outbox")}.${quoteIdentifier("message_id")} =
+                                    ${quoteIdentifier("message_delivery")}.${quoteIdentifier("message_id")}
+                            ), '$.kind'),
+                            'NORMAL'
+                        ),
+                        ${quoteIdentifier("message_importance")} = COALESCE(
+                            json_extract((
+                                SELECT ${quoteIdentifier("message_json")}
+                                FROM ${quoteIdentifier("message_outbox")}
+                                WHERE ${quoteIdentifier("message_outbox")}.${quoteIdentifier("message_id")} =
+                                    ${quoteIdentifier("message_delivery")}.${quoteIdentifier("message_id")}
+                            ), '$.importance'),
+                            'NORMAL'
+                        ),
+                        ${quoteIdentifier("message_visibility")} = COALESCE(
+                            json_extract((
+                                SELECT ${quoteIdentifier("message_json")}
+                                FROM ${quoteIdentifier("message_outbox")}
+                                WHERE ${quoteIdentifier("message_outbox")}.${quoteIdentifier("message_id")} =
+                                    ${quoteIdentifier("message_delivery")}.${quoteIdentifier("message_id")}
+                            ), '$.visibility'),
+                            'DEFAULT'
+                        ),
+                        ${quoteIdentifier("message_record_policy")} = COALESCE(
+                            json_extract((
+                                SELECT ${quoteIdentifier("message_json")}
+                                FROM ${quoteIdentifier("message_outbox")}
+                                WHERE ${quoteIdentifier("message_outbox")}.${quoteIdentifier("message_id")} =
+                                    ${quoteIdentifier("message_delivery")}.${quoteIdentifier("message_id")}
+                            ), '$.recordPolicy.type'),
+                            'DURABLE'
+                        ),
+                        ${quoteIdentifier("transient_expires_at_epoch_seconds")} = CASE
+                            WHEN COALESCE(
+                                json_extract((
+                                    SELECT ${quoteIdentifier("message_json")}
+                                    FROM ${quoteIdentifier("message_outbox")}
+                                    WHERE ${quoteIdentifier("message_outbox")}.${quoteIdentifier("message_id")} =
+                                        ${quoteIdentifier("message_delivery")}.${quoteIdentifier("message_id")}
+                                ), '$.recordPolicy.type'),
+                                'DURABLE'
+                            ) = 'TRANSIENT'
+                            THEN COALESCE(json_extract((
+                                    SELECT ${quoteIdentifier("message_json")}
+                                    FROM ${quoteIdentifier("message_outbox")}
+                                    WHERE ${quoteIdentifier("message_outbox")}.${quoteIdentifier("message_id")} =
+                                        ${quoteIdentifier("message_delivery")}.${quoteIdentifier("message_id")}
+                                ), '$.time'), 0) +
+                                COALESCE(json_extract((
+                                    SELECT ${quoteIdentifier("message_json")}
+                                    FROM ${quoteIdentifier("message_outbox")}
+                                    WHERE ${quoteIdentifier("message_outbox")}.${quoteIdentifier("message_id")} =
+                                        ${quoteIdentifier("message_delivery")}.${quoteIdentifier("message_id")}
+                                ), '$.recordPolicy.retentionSeconds'), 3600)
+                            ELSE NULL
+                        END
+                    WHERE ${quoteIdentifier("message_id")} IN (
+                        SELECT ${quoteIdentifier("message_id")} FROM ${quoteIdentifier("message_outbox")}
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
     }
 )
 

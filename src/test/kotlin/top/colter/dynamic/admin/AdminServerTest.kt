@@ -49,8 +49,12 @@ import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.MessageImportance
+import top.colter.dynamic.core.data.MessageRecordPolicy
+import top.colter.dynamic.core.data.MessageVisibility
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
+import top.colter.dynamic.core.data.OutboundMessageKind
 import top.colter.dynamic.core.data.PlatformCapability
 import top.colter.dynamic.core.data.PlatformDescriptor
 import top.colter.dynamic.core.data.PlatformId
@@ -2041,6 +2045,41 @@ class AdminServerTest {
         assertEquals("thread-1", detail.delivery.targetThreadId)
         assertEquals("bot-1", detail.delivery.targetAccountId)
         assertEquals("message-admin", assertNotNull(detail.message).jsonObject["id"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun deliveriesShouldHideInternalTransientRecordsByDefault() = runBlocking {
+        initDb("admin-delivery-internal-filter")
+        val service = service(FakePublisherFollowPlugin())
+        val target = TargetAddress.of("qq", TargetKind.GROUP, "100")
+        val durable = Message(
+            id = "message-admin-durable",
+            time = 1L,
+            targets = listOf(target),
+            batches = listOf(MessageBatch(listOf(MessageContent.Text("hello")))),
+        )
+        val transient = durable.copy(
+            id = "message-admin-transient",
+            kind = OutboundMessageKind.PROGRESS,
+            importance = MessageImportance.LOW,
+            visibility = MessageVisibility.INTERNAL,
+            recordPolicy = MessageRecordPolicy.Transient(),
+        )
+
+        MessageDeliveryRepository.enqueue(durable)
+        MessageDeliveryRepository.createMessageOnly(transient)
+        MessageDeliveryRepository.createDeliveryRecord(transient, target, DeliveryStatus.SENT, attempts = 1)
+
+        val defaultRows = service.deliveries(limit = 10)
+        val internalRows = service.deliveries(limit = 10, includeInternal = true)
+
+        assertEquals(listOf("message-admin-durable"), defaultRows.map { it.messageId })
+        assertEquals(listOf("message-admin-transient", "message-admin-durable"), internalRows.map { it.messageId })
+        val transientRow = internalRows.first()
+        assertEquals("PROGRESS", transientRow.messageKind)
+        assertEquals("LOW", transientRow.messageImportance)
+        assertEquals("INTERNAL", transientRow.messageVisibility)
+        assertEquals("TRANSIENT", transientRow.messageRecordPolicy)
     }
 
     @Test

@@ -4,6 +4,7 @@ import java.sql.DriverManager
 import kotlin.io.path.createTempDirectory
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import top.colter.dynamic.core.data.DeliveryStatus
 
@@ -92,5 +93,83 @@ class PersistenceManagerSchemaTest {
                 }
             }
         }
+    }
+
+    @Test
+    fun initShouldBackfillMessageDeliveryOutboundMetadata() {
+        val tempDir = createTempDirectory("dynamic-bot-delivery-metadata-migration-db").toFile()
+        val dbPath = tempDir.resolve("test.db").path
+        DriverManager.getConnection("jdbc:sqlite:$dbPath").use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeUpdate(
+                    """
+                    CREATE TABLE message_outbox (
+                        message_id VARCHAR(255) PRIMARY KEY,
+                        message_json TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                statement.executeUpdate(
+                    """
+                    CREATE TABLE message_delivery (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        message_id VARCHAR(255) NOT NULL,
+                        source_update_key_json TEXT NULL,
+                        render_variant VARCHAR(80) NULL,
+                        platform_id VARCHAR(50) NOT NULL,
+                        target_kind VARCHAR(30) NOT NULL,
+                        target_id VARCHAR(120) NOT NULL,
+                        target_key TEXT NOT NULL,
+                        scope_id VARCHAR(120) NULL,
+                        thread_id VARCHAR(120) NULL,
+                        account_id VARCHAR(120) NULL,
+                        status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+                        attempts INTEGER NOT NULL DEFAULT 0,
+                        sink_message_id VARCHAR(255) NULL,
+                        sink_route_id VARCHAR(160) NULL,
+                        sink_account_id VARCHAR(120) NULL,
+                        last_error VARCHAR(500) NULL,
+                        next_attempt_at TEXT NULL,
+                        locked_until TEXT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL
+                    )
+                    """.trimIndent(),
+                )
+                statement.executeUpdate(
+                    """
+                    INSERT INTO message_outbox (message_id, message_json, created_at, updated_at)
+                    VALUES (
+                        'legacy-transient',
+                        '{"id":"legacy-transient","time":100,"kind":"PROGRESS","importance":"LOW","visibility":"INTERNAL","recordPolicy":{"type":"TRANSIENT","retentionSeconds":30},"targets":[{"platformId":"qq","kind":"GROUP","externalId":"10001","scopeId":null,"threadId":null,"accountId":null}],"batches":[{"content":[{"type":"TEXT","fallbackText":"hello"}]}]}',
+                        '2026-01-01 00:00:00.000',
+                        '2026-01-01 00:00:00.000'
+                    )
+                    """.trimIndent(),
+                )
+                statement.executeUpdate(
+                    """
+                    INSERT INTO message_delivery (
+                        message_id, render_variant, platform_id, target_kind, target_id, target_key,
+                        status, attempts, created_at, updated_at
+                    ) VALUES (
+                        'legacy-transient', 'default', 'qq', 'GROUP', '10001', 'qqGROUP10001',
+                        'SENT', 1, '2026-01-01 00:00:00.000', '2026-01-01 00:00:00.000'
+                    )
+                    """.trimIndent(),
+                )
+            }
+        }
+
+        PersistenceManager.init(dbPath)
+
+        val delivery = assertNotNull(MessageDeliveryRepository.findByMessageId("legacy-transient").singleOrNull())
+        assertEquals("PROGRESS", delivery.messageKind.name)
+        assertEquals("LOW", delivery.messageImportance.name)
+        assertEquals("INTERNAL", delivery.messageVisibility.name)
+        assertEquals("TRANSIENT", delivery.messageRecordPolicyType.name)
+        assertEquals(130L, delivery.transientExpiresAtEpochSeconds)
     }
 }

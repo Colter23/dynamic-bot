@@ -13,16 +13,15 @@ import top.colter.dynamic.DeliveryConfig
 import top.colter.dynamic.MessageRoutingConfig
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
-import top.colter.dynamic.core.plugin.CommandResultSendRequest
 import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.core.plugin.MessageRecallRequest
 import top.colter.dynamic.core.plugin.MessageRecallResult
+import top.colter.dynamic.core.plugin.MessageSendRequest
 import top.colter.dynamic.core.plugin.MessageSendResult
-import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryAdvisor
 import top.colter.dynamic.core.plugin.MessageSinkFeature
+import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryAdvisor
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
 import top.colter.dynamic.core.tools.loggerFor
-import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.media.OutboundMediaRouteContext
 import top.colter.dynamic.media.OutboundMediaService
 import top.colter.dynamic.plugin.PluginHandle
@@ -34,6 +33,7 @@ private val logger = loggerFor<DeliveryDispatcher>()
 public data class DeliveryDispatchStats(
     val claimed: Int,
     val sent: Int,
+    val partiallySent: Int,
     val retried: Int,
     val failed: Int,
 )
@@ -64,7 +64,7 @@ public class DeliveryDispatcher(
             limit = config.dispatchConcurrency.coerceAtLeast(1) * 4,
             lockTtlMs = secondsToMillis(config.lockTtlSeconds, minimumMillis = 1),
         )
-        if (requests.isEmpty()) return@coroutineScope DeliveryDispatchStats(0, 0, 0, 0)
+        if (requests.isEmpty()) return@coroutineScope DeliveryDispatchStats(0, 0, 0, 0, 0)
 
         val concurrency = config.dispatchConcurrency.coerceAtLeast(1)
         logger.debug { "开始投递消息：领取=${requests.size}，并发=$concurrency" }
@@ -81,40 +81,24 @@ public class DeliveryDispatcher(
         val stats = DeliveryDispatchStats(
             claimed = requests.size,
             sent = results.count { it == DeliveryOutcome.SENT },
+            partiallySent = results.count { it == DeliveryOutcome.PARTIALLY_SENT },
             retried = results.count { it == DeliveryOutcome.RETRIED },
             failed = results.count { it == DeliveryOutcome.FAILED },
         )
-        logger.info { "投递批次完成：领取=${stats.claimed}，成功=${stats.sent}，重试=${stats.retried}，失败=${stats.failed}" }
+        logger.info { "投递批次完成：领取=${stats.claimed}，成功=${stats.sent}，部分成功=${stats.partiallySent}，重试=${stats.retried}，失败=${stats.failed}" }
         stats
     }
 
-    public suspend fun dispatchCommandResult(event: CommandResultEvent): MessageSendResult {
-        val result = sendCommandResult(
-            CommandResultSendRequest(
-                target = event.target,
-                chain = event.chain,
-                inReplyTo = event.inReplyTo,
-            ),
-        )
-        if (result is MessageSendResult.Failed) {
-            logger.warn {
-                "命令回复发送失败：traceId=${event.inReplyTo}，target=${event.target.address.stableValue()}，原因=${result.reason}"
-            }
-        }
-        return result
-    }
-
-    public suspend fun sendCommandResult(request: CommandResultSendRequest): MessageSendResult {
-        val target = request.target.address
-        val routed = resolveRoutedSinks(target)
+    public suspend fun sendNow(request: MessageSendRequest): MessageSendResult {
+        val routed = resolveRoutedSinks(request.target)
         if (routed.routedSinkIds.isNotEmpty()) {
-            val (sendRequest, candidates) = prepareRoutedCommandResultRequest(request, routed.candidates)
-            return accountRouter.sendCommandResult(
+            val (sendRequest, candidates) = prepareRoutedSendRequest(request, routed.candidates)
+            return accountRouter.sendMessage(
                 candidates = candidates,
-                policy = routingConfigProvider().policyFor(target.platformId.value),
+                policy = routingConfigProvider().policyFor(request.target.platformId.value),
                 request = sendRequest,
                 prepareRequest = { candidate ->
-                    rewriteCommandResultRequest(
+                    rewriteSendRequest(
                         sendRequest,
                         candidate.route.mediaDeliveryProfileId,
                         mediaRouteContext(candidate),
@@ -124,20 +108,26 @@ public class DeliveryDispatcher(
             )
         }
 
-        return when (val direct = resolveDirectSink(target)) {
-            is DirectSinkResolveResult.Found -> runCatching {
-                direct.sink.sendCommandResult(prepareDirectCommandResultRequest(request, direct.sink))
-            }
-                .getOrElse { MessageSendResult.failed(it.message ?: "命令回复发送失败", retryable = true) }
+        return when (val direct = resolveDirectSink(request.target)) {
+            is DirectSinkResolveResult.Found -> sendWithDirectSink(
+                prepareDirectSendRequest(request, direct.sink),
+                direct.sink,
+            )
             DirectSinkResolveResult.NotFound -> {
-                logger.warn { "命令回复无可用消息出口：traceId=${request.inReplyTo}，target=${target.stableValue()}" }
-                MessageSendResult.failed("命令回复无可用消息出口", retryable = false)
+                logger.warn { "消息发送失败：未找到消息出口插件，messageId=${request.message.id}，target=${request.target.stableValue()}" }
+                MessageSendResult.failed(
+                    "未找到消息出口插件：platform=${request.target.platformId.value}，kind=${request.target.kind.name}",
+                    retryable = false,
+                )
             }
             is DirectSinkResolveResult.Ambiguous -> {
                 logger.warn {
-                    "命令回复消息出口不唯一：traceId=${request.inReplyTo}，target=${target.stableValue()}，plugins=${direct.pluginIds}"
+                    "消息发送失败：消息出口插件不唯一，messageId=${request.message.id}，target=${request.target.stableValue()}，plugins=${direct.pluginIds}"
                 }
-                MessageSendResult.failed("命令回复消息出口不唯一：plugins=${direct.pluginIds.joinToString(",")}", retryable = false)
+                MessageSendResult.failed(
+                    "消息出口插件不唯一：platform=${request.target.platformId.value}，kind=${request.target.kind.name}，plugins=${direct.pluginIds.joinToString(",")}",
+                    retryable = false,
+                )
             }
         }
     }
@@ -188,65 +178,27 @@ public class DeliveryDispatcher(
             return DeliveryOutcome.FAILED
         }
 
-        val routed = resolveRoutedSinks(request.target)
-        if (routed.routedSinkIds.isNotEmpty()) {
-            val (sendRequest, candidates) = prepareRoutedDeliveryRequest(request, routed.candidates)
-            return sendWithRoutes(sendRequest, candidates, config)
+        logger.debug {
+            "正在发送消息：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，attempt=${request.delivery.attempts}"
         }
-
-        return when (val direct = resolveDirectSink(request.target)) {
-            is DirectSinkResolveResult.Found -> sendWithSink(
-                prepareDirectDeliveryRequest(request, direct.sink),
-                direct.sink,
-                config,
-            )
-            DirectSinkResolveResult.NotFound -> {
-                logger.warn {
-                    "消息投递失败：未找到消息出口插件，deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}"
-                }
-                MessageDeliveryRepository.markFailed(
-                    request.delivery.id,
-                    "未找到消息出口插件：platform=${request.target.platformId.value}，kind=${request.target.kind.name}",
-                )
-                DeliveryOutcome.FAILED
-            }
-            is DirectSinkResolveResult.Ambiguous -> {
-                logger.warn {
-                    "消息投递失败：消息出口插件不唯一，deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，plugins=${direct.pluginIds}"
-                }
-                MessageDeliveryRepository.markFailed(
-                    request.delivery.id,
-                    "消息出口插件不唯一：platform=${request.target.platformId.value}，kind=${request.target.kind.name}，plugins=${direct.pluginIds.joinToString(",")}",
-                )
-                DeliveryOutcome.FAILED
-            }
-        }
+        val result = sendNow(request.toSendRequest())
+        return handleSendResult(request, result, config)
     }
 
-    private suspend fun rewriteDeliveryRequest(
-        request: MessageDeliveryRequest,
+    private suspend fun rewriteSendRequest(
+        request: MessageSendRequest,
         profileId: String,
         routeContext: OutboundMediaRouteContext,
-    ): MessageDeliveryRequest {
+    ): MessageSendRequest {
         val service = outboundMediaService ?: return request
         val message = service.rewriteMessage(request.message, profileId, routeContext)
         return if (message == request.message) request else request.copy(message = message)
     }
 
-    private suspend fun rewriteCommandResultRequest(
-        request: CommandResultSendRequest,
-        profileId: String,
-        routeContext: OutboundMediaRouteContext,
-    ): CommandResultSendRequest {
-        val service = outboundMediaService ?: return request
-        val chain = service.rewriteBatches(request.chain, profileId, routeContext)
-        return if (chain == request.chain) request else request.copy(chain = chain)
-    }
-
-    private fun prepareRoutedDeliveryRequest(
-        request: MessageDeliveryRequest,
+    private fun prepareRoutedSendRequest(
+        request: MessageSendRequest,
         candidates: List<MessageSinkRouteCandidate>,
-    ): Pair<MessageDeliveryRequest, List<MessageSinkRouteCandidate>> {
+    ): Pair<MessageSendRequest, List<MessageSinkRouteCandidate>> {
         if (!request.message.batches.containsMergedForward()) return request to candidates
         val supported = candidates.filter { candidate ->
             MessageSinkFeature.MERGED_FORWARD in candidate.sink.supportedMessageFeatures
@@ -258,25 +210,10 @@ public class DeliveryDispatcher(
         }
     }
 
-    private fun prepareRoutedCommandResultRequest(
-        request: CommandResultSendRequest,
-        candidates: List<MessageSinkRouteCandidate>,
-    ): Pair<CommandResultSendRequest, List<MessageSinkRouteCandidate>> {
-        if (!request.chain.containsMergedForward()) return request to candidates
-        val supported = candidates.filter { candidate ->
-            MessageSinkFeature.MERGED_FORWARD in candidate.sink.supportedMessageFeatures
-        }
-        return if (supported.isNotEmpty()) {
-            request to supported
-        } else {
-            request.withMergedForwardFallback() to candidates
-        }
-    }
-
-    private suspend fun prepareDirectDeliveryRequest(
-        request: MessageDeliveryRequest,
+    private suspend fun prepareDirectSendRequest(
+        request: MessageSendRequest,
         sink: MessageSinkPlugin,
-    ): MessageDeliveryRequest {
+    ): MessageSendRequest {
         val prepared = if (!request.message.batches.containsMergedForward() ||
             MessageSinkFeature.MERGED_FORWARD in sink.supportedMessageFeatures
         ) {
@@ -284,62 +221,20 @@ public class DeliveryDispatcher(
         } else {
             request.withMergedForwardFallback()
         }
-        return rewriteDeliveryRequest(prepared, sink.mediaDeliveryProfileId, mediaRouteContext(sink))
+        return rewriteSendRequest(prepared, sink.mediaDeliveryProfileId, mediaRouteContext(sink))
     }
 
-    private suspend fun prepareDirectCommandResultRequest(
-        request: CommandResultSendRequest,
+    private suspend fun sendWithDirectSink(
+        request: MessageSendRequest,
         sink: MessageSinkPlugin,
-    ): CommandResultSendRequest {
-        val prepared = if (!request.chain.containsMergedForward() ||
-            MessageSinkFeature.MERGED_FORWARD in sink.supportedMessageFeatures
-        ) {
-            request
-        } else {
-            request.withMergedForwardFallback()
-        }
-        return rewriteCommandResultRequest(prepared, sink.mediaDeliveryProfileId, mediaRouteContext(sink))
-    }
-
-    private suspend fun sendWithRoutes(
-        request: MessageDeliveryRequest,
-        candidates: List<MessageSinkRouteCandidate>,
-        config: DeliveryConfig,
-    ): DeliveryOutcome {
-        logger.debug {
-            "正在发送消息：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，attempt=${request.delivery.attempts}"
-        }
-        val result = accountRouter.sendMessage(
-            candidates = candidates,
-            policy = routingConfigProvider().policyFor(request.target.platformId.value),
-            request = request,
-            prepareRequest = { candidate ->
-                rewriteDeliveryRequest(
-                    request,
-                    candidate.route.mediaDeliveryProfileId,
-                    mediaRouteContext(candidate),
-                )
-            },
-            onRouteFailure = { candidate -> invalidateMediaRoute(candidate) },
-        )
-        return handleSendResult(request, result, config)
-    }
-
-    private suspend fun sendWithSink(
-        request: MessageDeliveryRequest,
-        sink: MessageSinkPlugin,
-        config: DeliveryConfig,
-    ): DeliveryOutcome {
-        logger.debug {
-            "正在发送消息：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，attempt=${request.delivery.attempts}"
-        }
+    ): MessageSendResult {
         val result = runCatching { sink.sendMessage(request) }
             .getOrElse { error -> MessageSendResult.failed(error.message ?: "消息发送失败", retryable = true) }
             .withTransportId(sink.transportId)
-        if (result is MessageSendResult.Failed) {
+        if (result is MessageSendResult.Failed || result is MessageSendResult.PartiallySent) {
             outboundMediaService?.invalidateRoute(mediaRouteContext(sink))
         }
-        return handleSendResult(request, result, config)
+        return result
     }
 
     private fun mediaRouteContext(candidate: MessageSinkRouteCandidate): OutboundMediaRouteContext {
@@ -368,30 +263,61 @@ public class DeliveryDispatcher(
         config: DeliveryConfig,
     ): DeliveryOutcome {
         return when (result) {
-            is MessageSendResult.Sent -> {
-                MessageDeliveryRepository.markSent(
-                    deliveryId = request.delivery.id,
-                    sinkMessageId = result.sinkMessageId,
-                    sinkRouteId = result.sinkRouteId,
-                    sinkAccountId = result.sinkAccountId,
-                )
-                runCatching {
-                    MessageSinkReceiptRepository.recordSent(
-                        delivery = request.delivery,
-                        message = request.message,
-                        result = result,
-                    )
-                }.onFailure { error ->
-                    logger.warn(error) {
-                        "消息发送回执记录失败：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，sinkMessageId=${result.sinkMessageId ?: "-"}"
-                    }
-                }
-                logger.debug {
-                    "消息发送成功：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，sinkMessageId=${result.sinkMessageId ?: "-"}，sinkRouteId=${result.sinkRouteId ?: "-"}，sinkAccountId=${result.sinkAccountId ?: "-"}"
-                }
-                DeliveryOutcome.SENT
-            }
+            is MessageSendResult.Sent -> handleSendSuccess(request, result)
+            is MessageSendResult.PartiallySent -> handlePartialSend(request, result)
             is MessageSendResult.Failed -> handleSendFailure(request, result, config)
+        }
+    }
+
+    private fun handleSendSuccess(
+        request: MessageDeliveryRequest,
+        result: MessageSendResult.Sent,
+    ): DeliveryOutcome {
+        MessageDeliveryRepository.markSent(
+            deliveryId = request.delivery.id,
+            sinkMessageId = result.sinkMessageId,
+            sinkRouteId = result.sinkRouteId,
+            sinkAccountId = result.sinkAccountId,
+        )
+        recordReceipts(request, result.receipts)
+        logger.debug {
+            "消息发送成功：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，sinkMessageId=${result.sinkMessageId ?: "-"}，sinkRouteId=${result.sinkRouteId ?: "-"}，sinkAccountId=${result.sinkAccountId ?: "-"}"
+        }
+        return DeliveryOutcome.SENT
+    }
+
+    private fun handlePartialSend(
+        request: MessageDeliveryRequest,
+        result: MessageSendResult.PartiallySent,
+    ): DeliveryOutcome {
+        MessageDeliveryRepository.markPartiallySent(
+            deliveryId = request.delivery.id,
+            error = result.reason.withFailurePolicySuffix("已部分发送，不再重试"),
+            sinkMessageId = result.receipts.firstOrNull()?.sinkMessageId,
+            sinkRouteId = result.receipts.firstOrNull()?.sinkRouteId,
+            sinkAccountId = result.receipts.firstOrNull()?.sinkAccountId,
+        )
+        recordReceipts(request, result.receipts)
+        logger.warn {
+            "消息部分发送后失败：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，原因=${result.reason}"
+        }
+        return DeliveryOutcome.PARTIALLY_SENT
+    }
+
+    private fun recordReceipts(
+        request: MessageDeliveryRequest,
+        receipts: List<top.colter.dynamic.core.plugin.MessageSinkSendReceipt>,
+    ) {
+        runCatching {
+            MessageSinkReceiptRepository.recordSent(
+                delivery = request.delivery,
+                message = request.message,
+                receipts = receipts,
+            )
+        }.onFailure { error ->
+            logger.warn(error) {
+                "消息发送回执记录失败：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}"
+            }
         }
     }
 
@@ -404,7 +330,6 @@ public class DeliveryDispatcher(
         val expired = policy.isExpired(nowEpochSeconds())
         val shouldRetry = !expired &&
             policy.retry &&
-            !result.partialSent &&
             result.retryable &&
             request.delivery.attempts < config.maxAttempts.coerceAtLeast(1)
         return if (shouldRetry) {
@@ -421,8 +346,7 @@ public class DeliveryDispatcher(
         } else {
             val reason = when {
                 expired -> result.reason.withFailurePolicySuffix("消息已过期，不再重试")
-                !policy.retry && result.retryable && !result.partialSent ->
-                    result.reason.withFailurePolicySuffix("消息已禁用重试")
+                !policy.retry && result.retryable -> result.reason.withFailurePolicySuffix("消息已禁用重试")
                 else -> result.reason
             }
             MessageDeliveryRepository.markFailed(request.delivery.id, reason)
@@ -481,10 +405,18 @@ public class DeliveryDispatcher(
         if (isBlank()) suffix else "$this（$suffix）"
 
     private fun MessageSendResult.withTransportId(transportId: String): MessageSendResult {
-        return if (this is MessageSendResult.Sent && sinkTransportId.isNullOrBlank()) {
-            copy(sinkTransportId = transportId)
-        } else {
-            this
+        return when (this) {
+            is MessageSendResult.Sent -> copy(
+                receipts = receipts.map { receipt ->
+                    receipt.copy(sinkTransportId = receipt.sinkTransportId ?: transportId)
+                },
+            )
+            is MessageSendResult.PartiallySent -> copy(
+                receipts = receipts.map { receipt ->
+                    receipt.copy(sinkTransportId = receipt.sinkTransportId ?: transportId)
+                },
+            )
+            is MessageSendResult.Failed -> this
         }
     }
 
@@ -495,6 +427,7 @@ public class DeliveryDispatcher(
 
     private enum class DeliveryOutcome {
         SENT,
+        PARTIALLY_SENT,
         RETRIED,
         FAILED,
     }
