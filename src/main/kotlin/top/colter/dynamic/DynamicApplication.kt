@@ -504,18 +504,10 @@ public object DynamicApplication : CoroutineScope {
                     val cutoff = System.currentTimeMillis() / 1000 -
                         config.delivery.historyRetentionDays.coerceAtLeast(0) * 24 * 60 * 60
                     val result = MessageDeliveryRepository.cleanupHistory(cutoffEpochSeconds = cutoff)
-                    val transientResult = MessageDeliveryRepository.cleanupTransientMessages(
-                        nowEpochSeconds = System.currentTimeMillis() / 1000,
-                    )
                     val deletedSnapshots = SourceUpdateSnapshotRepository.cleanupOrphaned(cutoffEpochSeconds = cutoff)
-                    if (
-                        result.deletedDeliveries > 0 ||
-                        result.deletedMessages > 0 ||
-                        transientResult.deletedDeliveries > 0 ||
-                        transientResult.deletedMessages > 0
-                    ) {
+                    if (result.deletedDeliveries > 0 || result.deletedMessages > 0) {
                         logger.info {
-                            "消息记录已清理：投递=${result.deletedDeliveries}，消息=${result.deletedMessages}，临时投递=${transientResult.deletedDeliveries}，临时消息=${transientResult.deletedMessages}，来源快照=$deletedSnapshots"
+                            "消息记录已清理：投递=${result.deletedDeliveries}，消息=${result.deletedMessages}，来源快照=$deletedSnapshots"
                         }
                     } else if (deletedSnapshots > 0) {
                         logger.info { "来源更新快照已清理：数量=$deletedSnapshots" }
