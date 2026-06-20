@@ -106,7 +106,7 @@ const $ = id => document.getElementById(id);
       const map = {
         ACTIVE: "运行中", LOADED: "已加载", FAILED: "失败", DISABLED: "停用",
         RUNNING: "运行中", COMPLETED: "已完成", CANCELLED: "已取消",
-        PENDING: "等待", SENDING: "发送中", SENT: "已发送",
+        PENDING: "等待", SENDING: "发送中", SENT: "已发送", PARTIALLY_SENT: "部分发送",
         SUCCESS: "已登录", CANCELED: "已取消", EXPIRED: "已过期", UNSUPPORTED: "不支持",
         COOKIE: "Cookie", QR_CODE: "二维码",
         GROUP: "群组", USER: "用户", CHANNEL: "频道", OTHER: "其他",
@@ -116,7 +116,11 @@ const $ = id => document.getElementById(id);
         BLOCK: "阻止", ALLOW: "允许", MENTION_ALL: "@全体", NONE: "无",
         TEXT: "正文", IMAGE: "图片", VIDEO: "视频", CARD: "非视频卡片", POLL: "投票", REPOST: "转发", ORIGIN: "转发", TEXT_MATCH: "文本匹配",
         READY: "可用", UNAVAILABLE: "不可用",
-        ROUND_ROBIN: "轮询", PRIMARY_BACKUP: "主备"
+        ROUND_ROBIN: "轮询", PRIMARY_BACKUP: "主备",
+        NORMAL: "普通", COMMAND_RESULT: "命令回复", PROGRESS: "进度", SYSTEM_NOTIFICATION: "系统通知",
+        LOW: "低", HIGH: "高", DEFAULT: "默认", INTERNAL: "内部", HIDDEN: "隐藏",
+        DURABLE: "持久", TRANSIENT: "临时", EPHEMERAL: "即时",
+        HAS_RECEIPT: "有回执", NO_RECEIPT: "无回执", HAS_ERROR: "有错误", RETRY_SCHEDULED: "等待重试", LOCKED: "发送锁定"
       };
       return map[value] || value || "-";
     }
@@ -127,7 +131,7 @@ const $ = id => document.getElementById(id);
       const text = label(value);
       const cls = ["ACTIVE", "SUCCESS", "SENT", "OPEN", "RUNNING"].includes(value) ? "ok"
         : ["FAILED", "EXPIRED", "ERROR"].includes(value) ? "bad"
-        : ["PENDING", "SENDING", "LOADED", "CANCELED", "CANCELLED", "WARN"].includes(value) ? "warn" : "info";
+        : ["PENDING", "SENDING", "PARTIALLY_SENT", "LOADED", "CANCELED", "CANCELLED", "WARN"].includes(value) ? "warn" : "info";
       return `<span class="pill ${cls}">${esc(text)}</span>`;
     }
     function tags(items) {

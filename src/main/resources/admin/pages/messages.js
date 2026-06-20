@@ -1,4 +1,20 @@
 const DELIVERY_LIMIT = 160;
+const DEFAULT_DELIVERY_FILTERS = {
+  status: "",
+  platformId: "",
+  targetKind: "",
+  targetId: "",
+  messageKind: "",
+  messageImportance: "",
+  messageVisibility: "",
+  messageRecordPolicy: "",
+  sinkRouteId: "",
+  sinkAccountId: "",
+  result: "",
+  q: "",
+  limit: String(DELIVERY_LIMIT),
+  includeInternal: false,
+};
 
 let ctx;
 let root;
@@ -60,14 +76,9 @@ function pageQuery(selector) {
 
 function deliveryFilters() {
   if (!state.deliveryFilters) {
-    state.deliveryFilters = {
-      status: "",
-      platformId: "",
-      targetKind: "",
-      q: "",
-      limit: String(DELIVERY_LIMIT),
-      includeInternal: false,
-    };
+    state.deliveryFilters = { ...DEFAULT_DELIVERY_FILTERS };
+  } else {
+    state.deliveryFilters = { ...DEFAULT_DELIVERY_FILTERS, ...state.deliveryFilters };
   }
   return state.deliveryFilters;
 }
@@ -143,7 +154,25 @@ function renderLayout() {
               <select id="deliveryFilterTargetKind" data-delivery-filter="targetKind">
                 ${targetKindOptions(filters.targetKind)}
               </select>
-              <input id="deliveryFilterKeyword" data-delivery-filter="q" value="${attr(filters.q)}" placeholder="消息 / 目标 / 错误">
+              <input id="deliveryFilterTargetId" data-delivery-filter="targetId" value="${attr(filters.targetId)}" placeholder="目标 ID">
+              <select id="deliveryFilterMessageKind" data-delivery-filter="messageKind">
+                ${messageKindOptions(filters.messageKind)}
+              </select>
+              <select id="deliveryFilterImportance" data-delivery-filter="messageImportance">
+                ${messageImportanceOptions(filters.messageImportance)}
+              </select>
+              <select id="deliveryFilterVisibility" data-delivery-filter="messageVisibility">
+                ${messageVisibilityOptions(filters.messageVisibility)}
+              </select>
+              <select id="deliveryFilterRecordPolicy" data-delivery-filter="messageRecordPolicy">
+                ${messageRecordPolicyOptions(filters.messageRecordPolicy)}
+              </select>
+              <input id="deliveryFilterRoute" data-delivery-filter="sinkRouteId" value="${attr(filters.sinkRouteId)}" placeholder="发送路由">
+              <input id="deliveryFilterAccount" data-delivery-filter="sinkAccountId" value="${attr(filters.sinkAccountId)}" placeholder="发送账号">
+              <select id="deliveryFilterResult" data-delivery-filter="result">
+                ${deliveryResultOptions(filters.result)}
+              </select>
+              <input id="deliveryFilterKeyword" data-delivery-filter="q" value="${attr(filters.q)}" placeholder="消息 / 目标 / 路由 / 错误">
               <select id="deliveryFilterLimit" data-delivery-filter="limit">
                 ${limitOptions(filters.limit)}
               </select>
@@ -190,6 +219,54 @@ function targetKindOptions(selected) {
   ].map(([value, text]) => `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(text)}</option>`).join("");
 }
 
+function messageKindOptions(selected) {
+  return [
+    ["", "全部消息"],
+    ["NORMAL", "普通消息"],
+    ["COMMAND_RESULT", "命令回复"],
+    ["PROGRESS", "进度提示"],
+    ["SYSTEM_NOTIFICATION", "系统通知"],
+  ].map(([value, text]) => `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(text)}</option>`).join("");
+}
+
+function messageImportanceOptions(selected) {
+  return [
+    ["", "全部重要度"],
+    ["HIGH", "高重要"],
+    ["NORMAL", "普通"],
+    ["LOW", "低重要"],
+  ].map(([value, text]) => `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(text)}</option>`).join("");
+}
+
+function messageVisibilityOptions(selected) {
+  return [
+    ["", "全部可见性"],
+    ["DEFAULT", "默认展示"],
+    ["INTERNAL", "内部"],
+    ["HIDDEN", "隐藏"],
+  ].map(([value, text]) => `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(text)}</option>`).join("");
+}
+
+function messageRecordPolicyOptions(selected) {
+  return [
+    ["", "全部记录策略"],
+    ["DURABLE", "持久记录"],
+    ["TRANSIENT", "临时记录"],
+    ["EPHEMERAL", "即时不记录"],
+  ].map(([value, text]) => `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(text)}</option>`).join("");
+}
+
+function deliveryResultOptions(selected) {
+  return [
+    ["", "全部结果"],
+    ["HAS_RECEIPT", "有回执"],
+    ["NO_RECEIPT", "无回执"],
+    ["HAS_ERROR", "有错误"],
+    ["RETRY_SCHEDULED", "等待重试"],
+    ["LOCKED", "发送锁定"],
+  ].map(([value, text]) => `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(text)}</option>`).join("");
+}
+
 function limitOptions(selected) {
   return [50, 100, 160, 200].map(value =>
     `<option value="${value}"${String(value) === String(selected) ? " selected" : ""}>最近 ${value} 条</option>`
@@ -208,10 +285,20 @@ function bindDeliveryControls() {
   });
   const status = pageQuery("#deliveryFilterStatus");
   const targetKind = pageQuery("#deliveryFilterTargetKind");
+  const messageKind = pageQuery("#deliveryFilterMessageKind");
+  const importance = pageQuery("#deliveryFilterImportance");
+  const visibility = pageQuery("#deliveryFilterVisibility");
+  const recordPolicy = pageQuery("#deliveryFilterRecordPolicy");
+  const result = pageQuery("#deliveryFilterResult");
   const limit = pageQuery("#deliveryFilterLimit");
   const includeInternal = pageQuery("#deliveryFilterIncludeInternal");
   if (status) status.onchange = () => applyDeliveryFilter().catch(handleError);
   if (targetKind) targetKind.onchange = () => applyDeliveryFilter().catch(handleError);
+  if (messageKind) messageKind.onchange = () => applyDeliveryFilter().catch(handleError);
+  if (importance) importance.onchange = () => applyDeliveryFilter().catch(handleError);
+  if (visibility) visibility.onchange = () => applyDeliveryFilter().catch(handleError);
+  if (recordPolicy) recordPolicy.onchange = () => applyDeliveryFilter().catch(handleError);
+  if (result) result.onchange = () => applyDeliveryFilter().catch(handleError);
   if (limit) limit.onchange = () => applyDeliveryFilter().catch(handleError);
   if (includeInternal) includeInternal.onchange = () => applyDeliveryFilter().catch(handleError);
 }
@@ -224,43 +311,45 @@ async function applyDeliveryFilter(button) {
 
 function readDeliveryFilterControls() {
   const filters = deliveryFilters();
-  filters.status = pageQuery("#deliveryFilterStatus")?.value.trim() || "";
-  filters.platformId = pageQuery("#deliveryFilterPlatform")?.value.trim() || "";
-  filters.targetKind = pageQuery("#deliveryFilterTargetKind")?.value.trim() || "";
-  filters.q = pageQuery("#deliveryFilterKeyword")?.value.trim() || "";
-  filters.limit = pageQuery("#deliveryFilterLimit")?.value.trim() || String(DELIVERY_LIMIT);
-  filters.includeInternal = !!pageQuery("#deliveryFilterIncludeInternal")?.checked;
+  pageRoot().querySelectorAll("[data-delivery-filter]").forEach(control => {
+    const key = control.dataset.deliveryFilter;
+    if (!key) return;
+    filters[key] = control.type === "checkbox" ? !!control.checked : (control.value || "").trim();
+  });
+  filters.limit = filters.limit || String(DELIVERY_LIMIT);
 }
 
 function deliveryFilterActiveFromControls() {
   const filters = deliveryFilters();
-  const status = pageQuery("#deliveryFilterStatus")?.value.trim() || "";
-  const platformId = pageQuery("#deliveryFilterPlatform")?.value.trim() || "";
-  const targetKind = pageQuery("#deliveryFilterTargetKind")?.value.trim() || "";
-  const q = pageQuery("#deliveryFilterKeyword")?.value.trim() || "";
-  const limit = pageQuery("#deliveryFilterLimit")?.value.trim() || String(DELIVERY_LIMIT);
-  const includeInternal = !!pageQuery("#deliveryFilterIncludeInternal")?.checked;
-  return Boolean(
-    status || platformId || targetKind || q || limit !== String(DELIVERY_LIMIT) || includeInternal ||
-    filters.status || filters.platformId || filters.targetKind || filters.q ||
-    filters.limit !== String(DELIVERY_LIMIT) || filters.includeInternal
-  );
+  const controlValues = { ...DEFAULT_DELIVERY_FILTERS };
+  pageRoot().querySelectorAll("[data-delivery-filter]").forEach(control => {
+    const key = control.dataset.deliveryFilter;
+    if (!key) return;
+    controlValues[key] = control.type === "checkbox" ? !!control.checked : (control.value || "").trim();
+  });
+  return filterObjectActive(controlValues) || filterObjectActive(filters);
 }
 
 function resetDeliveryFilterControls() {
   const filters = deliveryFilters();
-  filters.status = "";
-  filters.platformId = "";
-  filters.targetKind = "";
-  filters.q = "";
-  filters.limit = String(DELIVERY_LIMIT);
-  filters.includeInternal = false;
-  if (pageQuery("#deliveryFilterStatus")) pageQuery("#deliveryFilterStatus").value = "";
-  if (pageQuery("#deliveryFilterPlatform")) pageQuery("#deliveryFilterPlatform").value = "";
-  if (pageQuery("#deliveryFilterTargetKind")) pageQuery("#deliveryFilterTargetKind").value = "";
-  if (pageQuery("#deliveryFilterKeyword")) pageQuery("#deliveryFilterKeyword").value = "";
-  if (pageQuery("#deliveryFilterLimit")) pageQuery("#deliveryFilterLimit").value = String(DELIVERY_LIMIT);
-  if (pageQuery("#deliveryFilterIncludeInternal")) pageQuery("#deliveryFilterIncludeInternal").checked = false;
+  Object.assign(filters, DEFAULT_DELIVERY_FILTERS);
+  pageRoot().querySelectorAll("[data-delivery-filter]").forEach(control => {
+    const key = control.dataset.deliveryFilter;
+    if (!key) return;
+    if (control.type === "checkbox") {
+      control.checked = !!DEFAULT_DELIVERY_FILTERS[key];
+    } else {
+      control.value = DEFAULT_DELIVERY_FILTERS[key] || "";
+    }
+  });
+}
+
+function filterObjectActive(filters) {
+  return Object.entries(DEFAULT_DELIVERY_FILTERS).some(([key, value]) => {
+    if (key === "limit") return String(filters[key] || String(DELIVERY_LIMIT)) !== String(value);
+    if (typeof value === "boolean") return Boolean(filters[key]) !== value;
+    return Boolean(filters[key]);
+  });
 }
 
 async function refreshDeliveries(button, force) {
@@ -275,6 +364,14 @@ async function refreshDeliveries(button, force) {
         status: filters.status,
         platformId: filters.platformId,
         targetKind: filters.targetKind,
+        targetId: filters.targetId,
+        messageKind: filters.messageKind,
+        messageImportance: filters.messageImportance,
+        messageVisibility: filters.messageVisibility,
+        messageRecordPolicy: filters.messageRecordPolicy,
+        sinkRouteId: filters.sinkRouteId,
+        sinkAccountId: filters.sinkAccountId,
+        result: filters.result,
         q: filters.q,
         limit: filters.limit,
         includeInternal: filters.includeInternal ? "true" : "",
@@ -304,12 +401,11 @@ function renderDeliveries() {
     return;
   }
   target.innerHTML = renderTable(rows, [
-    { title: "消息", render: row => cell(row.messageId, messageSubLine(row)) },
-    { title: "平台", render: row => platformTag(row.platformId, row.platformId) },
-    { title: "目标", render: row => cell(`${label(row.targetKind)} ${row.targetId}`, targetSubLine(row)) },
-    { title: "状态", render: row => `<div class="message-status-cell">${pill(row.status)}<span class="sub-line">${esc(statusHint(row))}</span></div>` },
-    { title: "次数", render: row => `<span class="message-attempts">${Number(row.attempts || 0)}</span>` },
-    { title: "结果", render: row => `<span class="message-result ${row.status === "FAILED" ? "bad" : ""}">${esc(resultText(row))}</span>` },
+    { title: "消息", render: row => messageCell(row) },
+    { title: "目标", render: row => targetCell(row) },
+    { title: "分类", render: row => messagePolicyCell(row) },
+    { title: "投递状态", render: row => deliveryStatusCell(row) },
+    { title: "路由回执", render: row => routeReceiptCell(row) },
     { title: "更新时间", render: row => `<span class="sub-line message-time">${fmtTime(row.updatedAtEpochSeconds)}</span>` },
     { title: "操作", render: row => `<button type="button" class="message-action-button" data-action="delivery-detail" data-id="${attr(row.id)}">详情</button>` },
   ])
@@ -317,29 +413,85 @@ function renderDeliveries() {
     .replace("<table>", '<table class="messages-table">');
 }
 
+function messageCell(row) {
+  const title = compactValue(row.messagePreview || "无文本内容", 76);
+  return `
+    <div class="message-preview-cell">
+      <span class="primary-line message-preview-title">${esc(title)}</span>
+      <span class="sub-line">${esc(messageSubLine(row))}</span>
+    </div>`;
+}
+
 function messageSubLine(row) {
-  const parts = [];
-  const meta = messageMetaText(row);
-  if (meta) parts.push(meta);
-  if (row.sourceUpdateKey) parts.push(`来源 ${compactValue(row.sourceUpdateKey, 46)}`);
+  const parts = [`ID ${compactValue(row.messageId, 28)}`];
+  if (row.sourceUpdateKey) parts.push(`来源 ${compactValue(row.sourceUpdateKey, 34)}`);
+  if (row.sourcePlugin) parts.push(`插件 ${row.sourcePlugin}`);
   if (row.renderVariant) parts.push(`渲染 ${row.renderVariant}`);
+  if (row.replyToMessageId) parts.push(`回复 ${compactValue(row.replyToMessageId, 22)}`);
+  if (row.correlationId) parts.push(`关联 ${compactValue(row.correlationId, 24)}`);
   return parts.join(" · ");
 }
 
-function messageMetaText(row) {
+function targetCell(row) {
+  const title = `${label(row.targetKind)} ${row.targetId}`;
+  const suffix = targetSubLine(row);
+  return `
+    <div class="message-target-cell">
+      <span class="message-target-title">${platformTag(row.platformId, row.platformId)}<span class="primary-line">${esc(title)}</span></span>
+      <span class="sub-line">${esc(suffix || "-")}</span>
+    </div>`;
+}
+
+function messagePolicyCell(row) {
+  const tags = [
+    messageMetaTag(row.messageKind || "NORMAL", ""),
+    row.messageImportance && row.messageImportance !== "NORMAL" ? messageMetaTag(row.messageImportance, "") : "",
+    row.messageVisibility && row.messageVisibility !== "DEFAULT" ? messageMetaTag(row.messageVisibility, "") : "",
+    row.messageRecordPolicy && row.messageRecordPolicy !== "DURABLE" ? messageMetaTag(row.messageRecordPolicy, "") : "",
+  ].filter(Boolean).join("");
+  const expires = row.messageRecordPolicy === "TRANSIENT" && row.transientExpiresAtEpochSeconds
+    ? `<span class="sub-line">保留至 ${fmtTime(row.transientExpiresAtEpochSeconds)}</span>`
+    : `<span class="sub-line">${row.messageRecordPolicy === "DURABLE" ? "持久记录" : "-"}</span>`;
+  return `<div class="message-policy-cell">${tags || messageMetaTag("NORMAL", "")}${expires}</div>`;
+}
+
+function messageMetaTag(value, normalValue) {
+  if (!value) return "";
+  const cls = value === normalValue ? "" : ` ${messageMetaClass(value)}`;
+  return `<span class="message-meta-tag${cls}">${esc(label(value))}</span>`;
+}
+
+function messageMetaClass(value) {
+  if (["HIGH", "FAILED", "HIDDEN"].includes(value)) return "bad";
+  if (["LOW", "INTERNAL", "TRANSIENT", "PROGRESS"].includes(value)) return "soft";
+  if (["COMMAND_RESULT", "SYSTEM_NOTIFICATION"].includes(value)) return "info";
+  return "";
+}
+
+function deliveryStatusCell(row) {
+  return `
+    <div class="message-status-cell">
+      <div class="message-status-line">${pill(row.status)}<span class="message-attempts">${Number(row.attempts || 0)}</span></div>
+      <span class="sub-line">${esc(statusHint(row))}</span>
+      ${row.lastError ? `<span class="message-result bad">${esc(compactValue(row.lastError, 96))}</span>` : ""}
+    </div>`;
+}
+
+function routeReceiptCell(row) {
+  const title = row.sinkMessageId ? `回执 ${compactValue(row.sinkMessageId, 32)}` : "无平台回执";
   const parts = [];
-  if (row.messageKind && row.messageKind !== "NORMAL") parts.push(label(row.messageKind));
-  if (row.messageImportance && row.messageImportance !== "NORMAL") parts.push(label(row.messageImportance));
-  if (row.messageVisibility && row.messageVisibility !== "DEFAULT") parts.push(label(row.messageVisibility));
-  if (row.messageRecordPolicy && row.messageRecordPolicy !== "DURABLE") parts.push(label(row.messageRecordPolicy));
-  return parts.join(" / ");
+  if (row.sinkRouteId) parts.push(`路由 ${row.sinkRouteId}`);
+  if (row.sinkAccountId) parts.push(`账号 ${row.sinkAccountId}`);
+  if (!row.sinkRouteId && !row.sinkAccountId && row.targetAccountId) parts.push(`目标账号 ${row.targetAccountId}`);
+  return cell(title, parts.join(" · ") || resultText(row));
 }
 
 function targetSubLine(row) {
-  const normalized = String(row.targetKey || "").replace(/\u001F/g, " / ");
-  return normalized && normalized !== `${row.platformId} / ${row.targetKind} / ${row.targetId}`
-    ? compactValue(normalized, 72)
-    : "";
+  const parts = [];
+  if (row.targetScopeId) parts.push(`作用域 ${compactValue(row.targetScopeId, 24)}`);
+  if (row.targetThreadId) parts.push(`线程 ${compactValue(row.targetThreadId, 24)}`);
+  if (row.targetAccountId) parts.push(`目标账号 ${compactValue(row.targetAccountId, 24)}`);
+  return parts.join(" · ");
 }
 
 function statusHint(row) {
@@ -374,7 +526,10 @@ function renderDeliverySummary(rows) {
   }, {});
   const failed = counts.FAILED || 0;
   const pending = counts.PENDING || 0;
-  summary.textContent = `显示 ${rows.length} 条 · 失败 ${failed} · 等待 ${pending}`;
+  const sending = counts.SENDING || 0;
+  const partial = counts.PARTIALLY_SENT || 0;
+  const internal = rows.filter(row => row.messageVisibility === "INTERNAL" || row.messageRecordPolicy === "TRANSIENT").length;
+  summary.textContent = `显示 ${rows.length} 条 · 失败 ${failed} · 部分 ${partial} · 等待 ${pending} · 发送中 ${sending} · 内部/临时 ${internal}`;
 }
 
 function updateDeliveryFilterButtons() {
@@ -414,11 +569,15 @@ function renderDeliveryDetail(row, message) {
         ${detailItem("状态", label(row.status))}
         ${detailItem("消息 ID", row.messageId, true)}
         ${detailItem("来源动态", row.sourceUpdateKey || "-", true)}
+        ${detailItem("来源插件", row.sourcePlugin || "-", true)}
         ${detailItem("渲染类型", row.renderVariant || "-")}
         ${detailItem("消息类型", row.messageKind ? label(row.messageKind) : "-")}
         ${detailItem("重要度", row.messageImportance ? label(row.messageImportance) : "-")}
         ${detailItem("可见性", row.messageVisibility ? label(row.messageVisibility) : "-")}
         ${detailItem("记录策略", row.messageRecordPolicy ? label(row.messageRecordPolicy) : "-")}
+        ${detailItem("临时过期", row.transientExpiresAtEpochSeconds ? fmtTime(row.transientExpiresAtEpochSeconds) : "-")}
+        ${detailItem("回复消息", row.replyToMessageId || "-", true)}
+        ${detailItem("关联 ID", row.correlationId || "-", true)}
         ${detailItem("尝试次数", row.attempts)}
         ${detailItem("目标平台", row.platformId)}
         ${detailItem("目标类型", label(row.targetKind))}

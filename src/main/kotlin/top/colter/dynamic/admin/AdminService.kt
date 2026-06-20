@@ -22,8 +22,13 @@ import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageDelivery
 import top.colter.dynamic.core.data.MessageBatch
+import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
+import top.colter.dynamic.core.data.MessageImportance
+import top.colter.dynamic.core.data.MessageRecordPolicyType
+import top.colter.dynamic.core.data.MessageVisibility
+import top.colter.dynamic.core.data.OutboundMessageKind
 import top.colter.dynamic.core.data.PlatformCapability
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.Publisher
@@ -78,6 +83,7 @@ import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.LinkParseTargetConfigRepository
 import top.colter.dynamic.repository.MessageDeliveryRepository
+import top.colter.dynamic.repository.MessageDeliveryResultFilter
 import top.colter.dynamic.repository.PublisherDrawTheme
 import top.colter.dynamic.repository.PublisherDrawThemeRepository
 import top.colter.dynamic.repository.PersistenceManager
@@ -312,6 +318,14 @@ public class AdminService(
         status: String? = null,
         platformId: String? = null,
         targetKind: String? = null,
+        targetId: String? = null,
+        messageKind: String? = null,
+        messageImportance: String? = null,
+        messageVisibility: String? = null,
+        messageRecordPolicy: String? = null,
+        sinkRouteId: String? = null,
+        sinkAccountId: String? = null,
+        result: String? = null,
         query: String? = null,
         limit: Int? = null,
         includeInternal: Boolean = false,
@@ -324,14 +338,47 @@ public class AdminService(
             ?.trim()
             ?.takeIf { it.isNotBlank() }
             ?.let { parseEnum<TargetKind>(it, "targetKind") }
+        val outboundMessageKind = messageKind
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { parseEnum<OutboundMessageKind>(it, "messageKind") }
+        val outboundMessageImportance = messageImportance
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { parseEnum<MessageImportance>(it, "messageImportance") }
+        val outboundMessageVisibility = messageVisibility
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { parseEnum<MessageVisibility>(it, "messageVisibility") }
+        val outboundMessageRecordPolicy = messageRecordPolicy
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { parseEnum<MessageRecordPolicyType>(it, "messageRecordPolicy") }
+        val deliveryResultFilter = result
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { parseEnum<MessageDeliveryResultFilter>(it, "result") }
+        val includeInternalRecords = includeInternal ||
+            outboundMessageKind != null ||
+            outboundMessageImportance != null ||
+            outboundMessageVisibility != null ||
+            outboundMessageRecordPolicy != null
         return MessageDeliveryRepository
             .findRecentWithMessages(
                 status = deliveryStatus,
                 platformId = platformId,
                 targetKind = deliveryTargetKind,
+                targetId = targetId,
+                messageKind = outboundMessageKind,
+                messageImportance = outboundMessageImportance,
+                messageVisibility = outboundMessageVisibility,
+                messageRecordPolicy = outboundMessageRecordPolicy,
+                sinkRouteId = sinkRouteId,
+                sinkAccountId = sinkAccountId,
+                resultFilter = deliveryResultFilter,
                 query = query,
                 limit = limit ?: 50,
-                includeInternalRecords = includeInternal,
+                includeInternalRecords = includeInternalRecords,
             )
             .map { it.delivery.toDto(message = it.message) }
     }
@@ -2674,11 +2721,16 @@ private fun MessageDelivery.toDto(message: Message? = null): MessageDeliveryDto 
     id = id,
     messageId = messageId,
     sourceUpdateKey = sourceUpdateKey?.stableValue(),
+    sourcePlugin = message?.sourcePlugin,
     renderVariant = renderVariant,
     messageKind = message?.kind?.name ?: messageKind.name,
     messageImportance = message?.importance?.name ?: messageImportance.name,
     messageVisibility = message?.visibility?.name ?: messageVisibility.name,
     messageRecordPolicy = message?.recordPolicy?.policyType?.name ?: messageRecordPolicyType.name,
+    messagePreview = message?.previewText(),
+    replyToMessageId = message?.replyToMessageId,
+    correlationId = message?.correlationId,
+    transientExpiresAtEpochSeconds = transientExpiresAtEpochSeconds,
     platformId = target.platformId.value,
     targetKind = target.kind.name,
     targetId = target.externalId,
@@ -2697,6 +2749,44 @@ private fun MessageDelivery.toDto(message: Message? = null): MessageDeliveryDto 
     createdAtEpochSeconds = createdAtEpochSeconds,
     updatedAtEpochSeconds = updatedAtEpochSeconds,
 )
+
+private fun Message.previewText(): String {
+    val contents = batches.flatMap { it.content }
+    val text = contents
+        .mapNotNull { content -> content.previewFallbackText() }
+        .joinToString(" ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .takeIf { it.isNotBlank() }
+    if (text != null) return text.take(160)
+
+    val parts = buildList {
+        val imageCount = contents.count { it is MessageContent.Image }
+        val videoCount = contents.count { it is MessageContent.Video }
+        val audioCount = contents.count { it is MessageContent.Audio }
+        val forwardCount = contents.count { it is MessageContent.Forward }
+        val mentionCount = contents.count { it is MessageContent.Mention }
+        val mentionAllCount = contents.count { it is MessageContent.MentionAll }
+        if (imageCount > 0) add("图片 $imageCount")
+        if (videoCount > 0) add("视频 $videoCount")
+        if (audioCount > 0) add("音频 $audioCount")
+        if (forwardCount > 0) add("合并转发 $forwardCount")
+        if (mentionCount > 0) add("提及 $mentionCount")
+        if (mentionAllCount > 0) add("@全体 $mentionAllCount")
+    }
+    return parts.joinToString(" · ").ifBlank { "无文本内容" }
+}
+
+private fun MessageContent.previewFallbackText(): String? {
+    val text = when (this) {
+        is MessageContent.Image -> altText ?: fallbackText
+        is MessageContent.Video -> altText ?: fallbackText
+        is MessageContent.Audio -> altText ?: fallbackText
+        is MessageContent.Forward -> summary.ifBlank { title }.ifBlank { fallbackText }
+        else -> fallbackText
+    }
+    return text.trim().takeIf { it.isNotBlank() }
+}
 
 private fun Message.toJsonElement() = coreJson.encodeToJsonElement(Message.serializer(), this)
 

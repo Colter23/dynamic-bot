@@ -51,6 +51,7 @@ import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.MessageImportance
 import top.colter.dynamic.core.data.MessageRecordPolicy
+import top.colter.dynamic.core.data.MessageRecordPolicyType
 import top.colter.dynamic.core.data.MessageVisibility
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
@@ -2044,6 +2045,7 @@ class AdminServerTest {
         assertEquals("scope-1", detail.delivery.targetScopeId)
         assertEquals("thread-1", detail.delivery.targetThreadId)
         assertEquals("bot-1", detail.delivery.targetAccountId)
+        assertEquals("hello", detail.delivery.messagePreview)
         assertEquals("message-admin", assertNotNull(detail.message).jsonObject["id"]?.jsonPrimitive?.content)
     }
 
@@ -2080,6 +2082,86 @@ class AdminServerTest {
         assertEquals("LOW", transientRow.messageImportance)
         assertEquals("INTERNAL", transientRow.messageVisibility)
         assertEquals("TRANSIENT", transientRow.messageRecordPolicy)
+    }
+
+    @Test
+    fun deliveriesShouldFilterByOutboundMetadataAndSendResult() = runBlocking {
+        initDb("admin-delivery-advanced-filter")
+        val service = service(FakePublisherFollowPlugin())
+        val groupTarget = TargetAddress.of("qq", TargetKind.GROUP, "100", accountId = "target-account")
+        val userTarget = TargetAddress.of("qq", TargetKind.USER, "200")
+        val durable = Message(
+            id = "message-filter-durable",
+            time = 10L,
+            sourcePlugin = "test-source",
+            renderVariant = "card",
+            replyToMessageId = "reply-1",
+            correlationId = "corr-1",
+            targets = listOf(groupTarget),
+            batches = listOf(MessageBatch(listOf(MessageContent.Text("durable")))),
+        )
+        val transient = durable.copy(
+            id = "message-filter-transient",
+            time = 11L,
+            kind = OutboundMessageKind.PROGRESS,
+            importance = MessageImportance.LOW,
+            visibility = MessageVisibility.INTERNAL,
+            recordPolicy = MessageRecordPolicy.Transient(retentionSeconds = 60),
+            targets = listOf(userTarget),
+        )
+
+        MessageDeliveryRepository.enqueue(durable)
+        val durableDelivery = MessageDeliveryRepository.findByMessageId(durable.id).single()
+        MessageDeliveryRepository.markSent(
+            deliveryId = durableDelivery.id,
+            sinkMessageId = "sink-1",
+            sinkRouteId = "route-a",
+            sinkAccountId = "account-a",
+        )
+        MessageDeliveryRepository.createMessageOnly(transient)
+        MessageDeliveryRepository.createDeliveryRecord(
+            message = transient,
+            target = userTarget,
+            status = DeliveryStatus.FAILED,
+            attempts = 1,
+            lastError = "progress failed",
+        )
+
+        val progressRows = service.deliveries(
+            messageKind = OutboundMessageKind.PROGRESS.name,
+            messageImportance = MessageImportance.LOW.name,
+            messageVisibility = MessageVisibility.INTERNAL.name,
+            messageRecordPolicy = MessageRecordPolicyType.TRANSIENT.name,
+            targetId = "200",
+            result = "HAS_ERROR",
+            limit = 10,
+        )
+        val transientRows = service.deliveries(messageRecordPolicy = MessageRecordPolicyType.TRANSIENT.name, limit = 10)
+        val receiptRows = service.deliveries(
+            sinkRouteId = "route-a",
+            sinkAccountId = "account-a",
+            result = "HAS_RECEIPT",
+            query = "corr-1",
+            limit = 10,
+        )
+        val previewRows = service.deliveries(query = "durable", limit = 10)
+        val internalPreviewRows = service.deliveries(query = "durable", limit = 10, includeInternal = true)
+        val noReceiptRows = service.deliveries(result = "NO_RECEIPT", limit = 10, includeInternal = true)
+
+        assertEquals(listOf("message-filter-transient"), progressRows.map { it.messageId })
+        assertEquals(listOf("message-filter-transient"), transientRows.map { it.messageId })
+        assertEquals(listOf("message-filter-durable"), receiptRows.map { it.messageId })
+        assertEquals(listOf("message-filter-durable"), previewRows.map { it.messageId })
+        assertEquals(listOf("message-filter-transient", "message-filter-durable"), internalPreviewRows.map { it.messageId })
+        assertEquals(listOf("message-filter-transient"), noReceiptRows.map { it.messageId })
+        val durableRow = receiptRows.single()
+        assertEquals("test-source", durableRow.sourcePlugin)
+        assertEquals("reply-1", durableRow.replyToMessageId)
+        assertEquals("corr-1", durableRow.correlationId)
+        assertEquals("route-a", durableRow.sinkRouteId)
+        assertEquals("account-a", durableRow.sinkAccountId)
+        assertEquals("durable", durableRow.messagePreview)
+        assertTrue(progressRows.single().transientExpiresAtEpochSeconds != null)
     }
 
     @Test

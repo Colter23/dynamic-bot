@@ -6121,8 +6121,14 @@
       font-size: 13px;
     }
     .message-filter-bar .entity-filter-controls input#deliveryFilterKeyword {
-      min-width: 190px;
+      min-width: 220px;
       max-width: 300px;
+    }
+    .message-filter-bar .entity-filter-controls input#deliveryFilterTargetId,
+    .message-filter-bar .entity-filter-controls input#deliveryFilterRoute,
+    .message-filter-bar .entity-filter-controls input#deliveryFilterAccount {
+      min-width: 120px;
+      max-width: 190px;
     }
     .message-filter-bar .entity-filter-controls button {
       min-height: 28px;
@@ -6166,7 +6172,7 @@
       overflow: auto;
     }
     .messages-table {
-      min-width: 1120px;
+      min-width: 1260px;
       table-layout: fixed;
     }
     .messages-table th {
@@ -6181,41 +6187,107 @@
     }
     .messages-table th:nth-child(1),
     .messages-table td:nth-child(1) {
-      width: 370px;
+      width: 300px;
     }
     .messages-table th:nth-child(2),
     .messages-table td:nth-child(2) {
-      width: 90px;
+      width: 220px;
     }
     .messages-table th:nth-child(3),
     .messages-table td:nth-child(3) {
-      width: 230px;
+      width: 175px;
     }
     .messages-table th:nth-child(4),
     .messages-table td:nth-child(4) {
-      width: 100px;
+      width: 185px;
     }
     .messages-table th:nth-child(5),
     .messages-table td:nth-child(5) {
-      width: 72px;
-      text-align: center;
+      width: 220px;
     }
     .messages-table th:nth-child(6),
     .messages-table td:nth-child(6) {
-        width: 100px;
+      width: 145px;
     }
     .messages-table th:nth-child(7),
     .messages-table td:nth-child(7) {
-      width: 150px;
-    }
-    .messages-table th:nth-child(8),
-    .messages-table td:nth-child(8) {
       width: 82px;
+    }
+    .message-preview-cell,
+    .message-target-cell,
+    .message-policy-cell {
+      min-width: 0;
+      display: grid;
+      gap: 4px;
+    }
+    .message-preview-title {
+      display: -webkit-box;
+      max-width: none;
+      line-height: 1.35;
+      overflow: hidden;
+      overflow-wrap: anywhere;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+    }
+    .message-target-title {
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .message-target-title .platform-tag {
+      flex: 0 0 auto;
+    }
+    .message-target-title .primary-line {
+      min-width: 0;
+      flex: 1 1 auto;
+    }
+    .message-policy-cell {
+      grid-template-columns: repeat(2, minmax(0, max-content));
+      align-items: start;
+    }
+    .message-policy-cell .sub-line {
+      grid-column: 1 / -1;
+    }
+    .message-meta-tag {
+      min-height: 22px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 2px 7px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 900;
+      white-space: nowrap;
+    }
+    .message-meta-tag.info {
+      border-color: #bfdbfe;
+      background: #eff6ff;
+      color: #1d4ed8;
+    }
+    .message-meta-tag.soft {
+      border-color: #d9e2d0;
+      background: #f4f8ef;
+      color: #55703a;
+    }
+    .message-meta-tag.bad {
+      border-color: #fecaca;
+      background: #fff1f2;
+      color: #b91c1c;
     }
     .message-status-cell {
       display: grid;
       gap: 4px;
       justify-items: start;
+    }
+    .message-status-line {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      flex-wrap: wrap;
     }
     .message-attempts {
       min-width: 28px;
@@ -8587,14 +8659,26 @@
         margin-left: 0;
       }
       .messages-table {
-        min-width: 860px;
+        min-width: 1040px;
       }
       .messages-table th:nth-child(1),
       .messages-table td:nth-child(1) {
-        width: 190px;
+        width: 230px;
+      }
+      .messages-table th:nth-child(2),
+      .messages-table td:nth-child(2) {
+        width: 180px;
       }
       .messages-table th:nth-child(3),
       .messages-table td:nth-child(3) {
+        width: 160px;
+      }
+      .messages-table th:nth-child(4),
+      .messages-table td:nth-child(4) {
+        width: 170px;
+      }
+      .messages-table th:nth-child(5),
+      .messages-table td:nth-child(5) {
         width: 180px;
       }
       .log-panel-head {

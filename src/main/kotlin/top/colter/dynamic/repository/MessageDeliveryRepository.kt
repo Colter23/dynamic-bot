@@ -19,8 +19,11 @@ import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.Message
+import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.MessageDelivery
+import top.colter.dynamic.core.data.MessageImportance
 import top.colter.dynamic.core.data.MessageVisibility
+import top.colter.dynamic.core.data.OutboundMessageKind
 import top.colter.dynamic.core.data.MessageRecordPolicy
 import top.colter.dynamic.core.data.MessageRecordPolicyType
 import top.colter.dynamic.core.data.PlatformId
@@ -47,6 +50,14 @@ public data class MessageDeliveryWithMessage(
     val delivery: MessageDelivery,
     val message: Message?,
 )
+
+public enum class MessageDeliveryResultFilter {
+    HAS_RECEIPT,
+    NO_RECEIPT,
+    HAS_ERROR,
+    RETRY_SCHEDULED,
+    LOCKED,
+}
 
 public object MessageDeliveryRepository {
     public fun createMessageOnly(message: Message): Boolean {
@@ -335,6 +346,14 @@ public object MessageDeliveryRepository {
         status: DeliveryStatus? = null,
         platformId: String? = null,
         targetKind: TargetKind? = null,
+        targetId: String? = null,
+        messageKind: OutboundMessageKind? = null,
+        messageImportance: MessageImportance? = null,
+        messageVisibility: MessageVisibility? = null,
+        messageRecordPolicy: MessageRecordPolicyType? = null,
+        sinkRouteId: String? = null,
+        sinkAccountId: String? = null,
+        resultFilter: MessageDeliveryResultFilter? = null,
         query: String? = null,
         limit: Int = 50,
         includeInternalRecords: Boolean = true,
@@ -342,6 +361,14 @@ public object MessageDeliveryRepository {
         status = status,
         platformId = platformId,
         targetKind = targetKind,
+        targetId = targetId,
+        messageKind = messageKind,
+        messageImportance = messageImportance,
+        messageVisibility = messageVisibility,
+        messageRecordPolicy = messageRecordPolicy,
+        sinkRouteId = sinkRouteId,
+        sinkAccountId = sinkAccountId,
+        resultFilter = resultFilter,
         query = query,
         limit = limit,
         includeInternalRecords = includeInternalRecords,
@@ -351,14 +378,25 @@ public object MessageDeliveryRepository {
         status: DeliveryStatus? = null,
         platformId: String? = null,
         targetKind: TargetKind? = null,
+        targetId: String? = null,
+        messageKind: OutboundMessageKind? = null,
+        messageImportance: MessageImportance? = null,
+        messageVisibility: MessageVisibility? = null,
+        messageRecordPolicy: MessageRecordPolicyType? = null,
+        sinkRouteId: String? = null,
+        sinkAccountId: String? = null,
+        resultFilter: MessageDeliveryResultFilter? = null,
         query: String? = null,
         limit: Int = 50,
         includeInternalRecords: Boolean = true,
     ): List<MessageDeliveryWithMessage> {
         val safeLimit = if (limit == Int.MAX_VALUE) Int.MAX_VALUE else limit.coerceIn(1, 200)
         val normalizedPlatformId = platformId?.trim()?.takeIf { it.isNotBlank() }
+        val normalizedTargetId = targetId?.trim()?.takeIf { it.isNotBlank() }
+        val normalizedSinkRouteId = sinkRouteId.normalizedSinkRouteId()
+        val normalizedSinkAccountId = sinkAccountId.normalizedSinkAccountId()
         val normalizedQuery = query?.trim()?.takeIf { it.isNotBlank() }
-        val needsPostFilter = normalizedQuery != null
+        val needsPostFilter = normalizedQuery != null || resultFilter != null
         val pageLimit = when {
             limit == Int.MAX_VALUE -> 5_000
             needsPostFilter -> (safeLimit * 25).coerceIn(safeLimit, 5_000)
@@ -366,7 +404,19 @@ public object MessageDeliveryRepository {
         }
         val maxScannedRows = if (limit == Int.MAX_VALUE) Int.MAX_VALUE else pageLimit * 20
         return transaction {
-            val filter = deliveryFilter(status, normalizedPlatformId, targetKind, includeInternalRecords)
+            val filter = deliveryFilter(
+                status = status,
+                platformId = normalizedPlatformId,
+                targetKind = targetKind,
+                targetId = normalizedTargetId,
+                messageKind = messageKind,
+                messageImportance = messageImportance,
+                messageVisibility = messageVisibility,
+                messageRecordPolicy = messageRecordPolicy,
+                sinkRouteId = normalizedSinkRouteId,
+                sinkAccountId = normalizedSinkAccountId,
+                includeInternalRecords = includeInternalRecords,
+            )
             val rows = mutableListOf<MessageDeliveryWithMessage>()
             var offset = 0L
             var scannedRows = 0
@@ -385,10 +435,10 @@ public object MessageDeliveryRepository {
                     .where { MessageOutboxTable.messageId inList deliveries.map { it.messageId }.distinct() }
                     .associate { it[MessageOutboxTable.messageId] to it[MessageOutboxTable.message] }
                 rows += deliveries
-                    .filter { delivery ->
-                        normalizedQuery == null || delivery.matchesDeliveryQuery(normalizedQuery)
-                    }
+                    .asSequence()
                     .map { delivery -> MessageDeliveryWithMessage(delivery, messagesById[delivery.messageId]) }
+                    .filter { row -> row.matchesDeliveryPostFilter(normalizedQuery, resultFilter) }
+                    .toList()
 
                 if (deliveries.size < pageLimit) break
             }
@@ -624,12 +674,26 @@ private fun deliveryFilter(
     status: DeliveryStatus?,
     platformId: String?,
     targetKind: TargetKind?,
+    targetId: String? = null,
+    messageKind: OutboundMessageKind? = null,
+    messageImportance: MessageImportance? = null,
+    messageVisibility: MessageVisibility? = null,
+    messageRecordPolicy: MessageRecordPolicyType? = null,
+    sinkRouteId: String? = null,
+    sinkAccountId: String? = null,
     includeInternalRecords: Boolean = true,
 ): Op<Boolean>? {
     val filters = buildList {
         status?.let { add(MessageDeliveryTable.status eq it) }
         platformId?.let { add(MessageDeliveryTable.platformId eq it) }
         targetKind?.let { add(MessageDeliveryTable.targetKind eq it) }
+        targetId?.let { add(MessageDeliveryTable.targetId eq it) }
+        messageKind?.let { add(MessageDeliveryTable.messageKind eq it) }
+        messageImportance?.let { add(MessageDeliveryTable.messageImportance eq it) }
+        messageVisibility?.let { add(MessageDeliveryTable.messageVisibility eq it) }
+        messageRecordPolicy?.let { add(MessageDeliveryTable.messageRecordPolicy eq it) }
+        sinkRouteId?.let { add(MessageDeliveryTable.sinkRouteId eq it) }
+        sinkAccountId?.let { add(MessageDeliveryTable.sinkAccountId eq it) }
         if (!includeInternalRecords) add(defaultVisibleDeliveryFilter())
     }
     return filters.reduceOrNull { acc, op -> acc and op }
@@ -652,6 +716,10 @@ private fun MessageDelivery.matchesDeliveryQuery(query: String): Boolean {
         messageId,
         sourceUpdateKey?.stableValue(),
         renderVariant,
+        messageKind.name,
+        messageImportance.name,
+        messageVisibility.name,
+        messageRecordPolicyType.name,
         target.platformId.value,
         target.kind.name,
         target.externalId,
@@ -665,6 +733,62 @@ private fun MessageDelivery.matchesDeliveryQuery(query: String): Boolean {
         sinkAccountId,
         lastError,
     ).any { it.contains(query, ignoreCase = true) }
+}
+
+private fun MessageDeliveryWithMessage.matchesDeliveryPostFilter(
+    query: String?,
+    resultFilter: MessageDeliveryResultFilter?,
+): Boolean {
+    if (resultFilter != null && !delivery.matchesDeliveryResultFilter(resultFilter)) return false
+    if (query == null) return true
+    return delivery.matchesDeliveryQuery(query) || message?.matchesMessageQuery(query) == true
+}
+
+private fun MessageDelivery.matchesDeliveryResultFilter(filter: MessageDeliveryResultFilter): Boolean {
+    return when (filter) {
+        MessageDeliveryResultFilter.HAS_RECEIPT -> !sinkMessageId.isNullOrBlank()
+        MessageDeliveryResultFilter.NO_RECEIPT -> sinkMessageId.isNullOrBlank()
+        MessageDeliveryResultFilter.HAS_ERROR -> !lastError.isNullOrBlank()
+        MessageDeliveryResultFilter.RETRY_SCHEDULED ->
+            status == DeliveryStatus.PENDING && attempts > 0 && nextAttemptAtEpochSeconds != null
+        MessageDeliveryResultFilter.LOCKED ->
+            status == DeliveryStatus.SENDING && lockedUntilEpochSeconds != null
+    }
+}
+
+private fun Message.matchesMessageQuery(query: String): Boolean {
+    return listOfNotNull(
+        sourcePlugin,
+        kind.name,
+        importance.name,
+        visibility.name,
+        recordPolicy.policyType.name,
+        replyToMessageId,
+        correlationId,
+        contentPreviewText(),
+    ).any { it.contains(query, ignoreCase = true) }
+}
+
+private fun Message.contentPreviewText(): String? {
+    return batches
+        .asSequence()
+        .flatMap { it.content.asSequence() }
+        .mapNotNull { it.queryText() }
+        .joinToString(" ")
+        .replace(Regex("\\s+"), " ")
+        .trim()
+        .takeIf { it.isNotBlank() }
+}
+
+private fun MessageContent.queryText(): String? {
+    val text = when (this) {
+        is MessageContent.Image -> altText ?: fallbackText
+        is MessageContent.Video -> altText ?: fallbackText
+        is MessageContent.Audio -> altText ?: fallbackText
+        is MessageContent.Forward -> listOf(summary, title, fallbackText).firstOrNull { it.isNotBlank() }.orEmpty()
+        else -> fallbackText
+    }
+    return text.trim().takeIf { it.isNotBlank() }
 }
 
 private fun String?.normalizedSinkRouteId(): String? = this?.trim()?.takeIf { it.isNotBlank() }
