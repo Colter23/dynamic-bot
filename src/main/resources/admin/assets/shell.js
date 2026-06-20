@@ -6,7 +6,7 @@ const $ = id => document.getElementById(id);
       login: ["账号连接", "动态源与消息出口状态", "/admin/pages/login.html", "/admin/pages/login.js"],
       subscriptions: ["订阅管理", "订阅策略与过滤规则", "/admin/pages/subscriptions.html", "/admin/pages/subscriptions.js"],
       entities: ["发布者与目标", "来源与消息出口", "/admin/pages/entities.html", "/admin/pages/entities.js"],
-      messages: ["消息记录", "投递结果与失败详情", "/admin/pages/messages.html", "/admin/pages/messages.js"],
+      messages: ["消息链路", "入站审计与出站投递", "/admin/pages/messages.html", "/admin/pages/messages.js"],
       testing: ["测试台", "绘图、模板与链接解析预览", "/admin/pages/testing.html", "/admin/pages/testing.js"],
       tasks: ["任务查看", "调度状态与操作", "/admin/pages/tasks.html", "/admin/pages/tasks.js"],
       logs: ["日志查看", "进程内实时日志", "/admin/pages/logs.html", "/admin/pages/logs.js"],
@@ -120,6 +120,10 @@ const $ = id => document.getElementById(id);
         NORMAL: "普通", COMMAND_RESULT: "命令回复", PROGRESS: "进度", SYSTEM_NOTIFICATION: "系统通知",
         LOW: "低", HIGH: "高", DEFAULT: "默认", INTERNAL: "内部", HIDDEN: "隐藏",
         DURABLE: "持久", TRANSIENT: "临时", EPHEMERAL: "即时",
+        AUDIT: "审计", TRACE: "追踪",
+        COMMAND: "命令", LINK_TEXT: "链接文本", PLAIN_TEXT: "普通文本", NON_TEXT: "非文本",
+        COMMAND_PARSE: "命令解析", COMMAND_EXECUTE: "命令执行", LINK_PARSE: "链接解析", PLUGIN_CONSUMER: "插件消费",
+        IGNORED: "已忽略", MATCHED: "已匹配", SUCCEEDED: "成功", REJECTED: "拒绝",
         HAS_RECEIPT: "有回执", NO_RECEIPT: "无回执", HAS_ERROR: "有错误", RETRY_SCHEDULED: "等待重试", LOCKED: "发送锁定"
       };
       return map[value] || value || "-";
@@ -129,8 +133,8 @@ const $ = id => document.getElementById(id);
     }
     function pill(value) {
       const text = label(value);
-      const cls = ["ACTIVE", "SUCCESS", "SENT", "OPEN", "RUNNING"].includes(value) ? "ok"
-        : ["FAILED", "EXPIRED", "ERROR"].includes(value) ? "bad"
+      const cls = ["ACTIVE", "SUCCESS", "SUCCEEDED", "MATCHED", "SENT", "OPEN", "RUNNING"].includes(value) ? "ok"
+        : ["FAILED", "REJECTED", "EXPIRED", "ERROR"].includes(value) ? "bad"
         : ["PENDING", "SENDING", "PARTIALLY_SENT", "LOADED", "CANCELED", "CANCELLED", "WARN"].includes(value) ? "warn" : "info";
       return `<span class="pill ${cls}">${esc(text)}</span>`;
     }
@@ -983,7 +987,7 @@ const $ = id => document.getElementById(id);
             login: ["platformLogins", "targetPlatformAccounts"],
             subscriptions: ["subscriptions"],
             entities: ["publishers", "subscribers", "subscriptions"],
-            messages: ["deliveries"],
+            messages: ["deliveries", "incomingMessages"],
             testing: [],
             tasks: ["tasks"],
             logs: [],

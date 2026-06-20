@@ -628,6 +628,58 @@ public data class MessageDeliveryDetailDto(
 )
 
 @Serializable
+public data class IncomingMessageAuditDto(
+    val traceId: String,
+    val sourcePlugin: String,
+    val platformId: String,
+    val botAccountId: String? = null,
+    val targetKind: String,
+    val targetId: String,
+    val targetKey: String,
+    val senderId: String,
+    val platformMessageId: String? = null,
+    val sourceEventId: String? = null,
+    val dedupeKey: String? = null,
+    val intent: String,
+    val recordPolicy: String,
+    val retentionSeconds: Long? = null,
+    val expiresAtEpochSeconds: Long? = null,
+    val textPreview: String,
+    val segmentSummary: String,
+    val replyToMessageId: String? = null,
+    val receivedAtEpochSeconds: Long,
+    val messageTimestampEpochSeconds: Long? = null,
+    val rawFormat: String? = null,
+    val rawPayloadSha256: String? = null,
+    val rawPayloadSize: Int,
+    val createdAtEpochSeconds: Long,
+    val lastProcessingResult: String? = null,
+    val failedProcessingCount: Int = 0,
+    val processingCount: Int = 0,
+)
+
+@Serializable
+public data class IncomingProcessingAuditDto(
+    val id: Int,
+    val traceId: String,
+    val stage: String,
+    val handlerId: String,
+    val result: String,
+    val commandPath: String? = null,
+    val role: String? = null,
+    val errorMessage: String? = null,
+    val durationMs: Long? = null,
+    val createdAtEpochSeconds: Long,
+)
+
+@Serializable
+public data class IncomingMessageAuditDetailDto(
+    val message: IncomingMessageAuditDto,
+    val processing: List<IncomingProcessingAuditDto>,
+    val outboundDeliveries: List<MessageDeliveryDto>,
+)
+
+@Serializable
 public data class ForwardTargetRequest(
     val platformId: String,
     val targetKind: String,

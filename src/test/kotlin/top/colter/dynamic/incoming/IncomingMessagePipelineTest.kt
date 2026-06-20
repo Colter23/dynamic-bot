@@ -13,6 +13,8 @@ import top.colter.dynamic.CommandConfig
 import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.data.IncomingMessage
+import top.colter.dynamic.core.data.IncomingMessageAuditMode
+import top.colter.dynamic.core.data.IncomingMessageRecordPolicy
 import top.colter.dynamic.core.data.IncomingMessageSegment
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.TargetAddress
@@ -31,6 +33,7 @@ import top.colter.dynamic.event.IncomingMessageEvent
 import top.colter.dynamic.event.IncomingTextMessageEvent
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.link.LinkParseService
+import top.colter.dynamic.repository.IncomingAuditWriteRequest
 
 class IncomingMessagePipelineTest {
     @Test
@@ -54,6 +57,28 @@ class IncomingMessagePipelineTest {
         assertEquals(message, event.message)
         assertTrue(event.traceId.isNotBlank())
         assertEquals("message-1", event.replyToMessageId)
+        eventBus.shutdown()
+    }
+
+    @Test
+    fun `handle should not use trace id as reply target when platform message id is missing`() = runBlocking {
+        val eventBus = EventBus()
+        val received = CompletableDeferred<IncomingMessageEvent>()
+        eventBus.subscribe(
+            object : Listener<IncomingMessageEvent> {
+                override suspend fun onMessage(event: IncomingMessageEvent) {
+                    received.complete(event)
+                }
+            },
+        )
+        val pipeline = pipeline(eventBus = eventBus)
+        val message = testMessage(text = "hello", messageId = "")
+
+        pipeline.handle("onebot", IncomingMessagePublishRequest(message = message, traceId = "trace-1"))
+        val event = withTimeout(1_000) { received.await() }
+
+        assertEquals("trace-1", event.traceId)
+        assertEquals("", event.replyToMessageId)
         eventBus.shutdown()
     }
 
@@ -214,10 +239,82 @@ class IncomingMessagePipelineTest {
         eventBus.shutdown()
     }
 
+    @Test
+    fun `plain text should not record incoming audit by default`() = runBlocking {
+        val recorder = RecordingAuditRecorder()
+        val pipeline = pipeline(auditRecorder = recorder)
+
+        pipeline.handle("onebot", request("hello"))
+
+        assertEquals(0, recorder.records.size)
+    }
+
+    @Test
+    fun `non text should not record incoming audit by default`() = runBlocking {
+        val recorder = RecordingAuditRecorder()
+        val pipeline = pipeline(auditRecorder = recorder)
+        val request = IncomingMessagePublishRequest(
+            message = testMessage(text = "", segments = listOf(IncomingMessageSegment.Image(file = "image.jpg"))),
+            traceId = "trace-non-text",
+        )
+
+        pipeline.handle("onebot", request)
+
+        assertEquals(0, recorder.records.size)
+    }
+
+    @Test
+    fun `command should record audit policy`() = runBlocking {
+        val recorder = RecordingAuditRecorder()
+        val pipeline = pipeline(auditRecorder = recorder)
+
+        pipeline.handle("onebot", request("/db help", traceId = "trace-command"))
+
+        val record = recorder.records.single()
+        assertEquals("trace-command", record.traceId)
+        assertEquals(IncomingMessageIntent.Command, record.intent)
+        assertEquals(IncomingMessageRecordPolicy.Audit, record.recordPolicy)
+    }
+
+    @Test
+    fun `link text should record trace policy`() = runBlocking {
+        val recorder = RecordingAuditRecorder()
+        val resolver = MatchingLinkResolver(prefix = "https://t.bilibili.com/")
+        val pipeline = pipeline(
+            linkParseService = LinkParseService(resolversProvider = { listOf(resolver) }),
+            auditRecorder = recorder,
+        )
+
+        pipeline.handle("onebot", request("https://t.bilibili.com/123", traceId = "trace-link"))
+
+        val record = recorder.records.single()
+        assertEquals("trace-link", record.traceId)
+        assertEquals(IncomingMessageIntent.LinkText, record.intent)
+        assertTrue(record.recordPolicy is IncomingMessageRecordPolicy.Trace)
+    }
+
+    @Test
+    fun `plugin audit mode should elevate ordinary text to trace`() = runBlocking {
+        val recorder = RecordingAuditRecorder()
+        val pipeline = pipeline(
+            auditModeResolver = { IncomingMessageAuditMode.TRACE },
+            auditRecorder = recorder,
+        )
+
+        pipeline.handle("onebot", request("hello", traceId = "trace-plugin"))
+
+        val record = recorder.records.single()
+        assertEquals("trace-plugin", record.traceId)
+        assertEquals(IncomingMessageIntent.PlainText, record.intent)
+        assertTrue(record.recordPolicy is IncomingMessageRecordPolicy.Trace)
+    }
+
     private fun pipeline(
         eventBus: EventBus = EventBus(),
         linkParseService: LinkParseService = LinkParseService(resolversProvider = { emptyList() }),
         incomingConsumerDispatcher: (IncomingMessageDispatchContext) -> Unit = {},
+        auditModeResolver: (IncomingMessageDispatchContext) -> IncomingMessageAuditMode = { IncomingMessageAuditMode.NONE },
+        auditRecorder: IncomingMessageAuditRecorder = IncomingMessageAuditRecorder { true },
     ): IncomingMessagePipeline {
         return IncomingMessagePipeline(
             configProvider = {
@@ -229,6 +326,8 @@ class IncomingMessagePipelineTest {
             linkParseService = linkParseService,
             eventBus = eventBus,
             incomingConsumerDispatcher = incomingConsumerDispatcher,
+            auditModeResolver = auditModeResolver,
+            auditRecorder = auditRecorder,
         )
     }
 
@@ -294,6 +393,15 @@ class IncomingMessagePipelineTest {
                     title = parsedLink.targetId,
                 ),
             )
+        }
+    }
+
+    private class RecordingAuditRecorder : IncomingMessageAuditRecorder {
+        val records: MutableList<IncomingAuditWriteRequest> = mutableListOf()
+
+        override fun recordMessage(request: IncomingAuditWriteRequest): Boolean {
+            records += request
+            return true
         }
     }
 }

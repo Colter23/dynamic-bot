@@ -1438,6 +1438,7 @@ class LinkParseServiceTest {
         override suspend fun send(
             context: CommandContext,
             inReplyTo: String,
+            correlationId: String?,
             text: String,
         ): LinkParseProgressReceipt? {
             sentTexts += text

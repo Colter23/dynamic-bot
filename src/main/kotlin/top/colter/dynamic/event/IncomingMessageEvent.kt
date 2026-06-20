@@ -6,5 +6,5 @@ public data class IncomingMessageEvent(
     val sourcePlugin: String,
     val message: IncomingMessage,
     val traceId: String,
-    val replyToMessageId: String = traceId,
+    val replyToMessageId: String = "",
 ) : Event

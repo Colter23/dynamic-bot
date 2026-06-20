@@ -28,10 +28,15 @@ public data class LinkParseProgressReceipt(
 
 public interface LinkParseProgressMessenger {
     public suspend fun send(event: IncomingTextMessageEvent, config: LinkParseProgressReplyConfig): LinkParseProgressReceipt? {
-        return send(event.context, event.replyToMessageId, config.text)
+        return send(event.context, event.replyToMessageId, event.traceId, config.text)
     }
 
-    public suspend fun send(context: CommandContext, inReplyTo: String, text: String): LinkParseProgressReceipt?
+    public suspend fun send(
+        context: CommandContext,
+        inReplyTo: String,
+        correlationId: String?,
+        text: String,
+    ): LinkParseProgressReceipt?
 
     public suspend fun recall(receipt: LinkParseProgressReceipt)
 }
@@ -40,6 +45,7 @@ public object NoopLinkParseProgressMessenger : LinkParseProgressMessenger {
     override suspend fun send(
         context: CommandContext,
         inReplyTo: String,
+        correlationId: String?,
         text: String,
     ): LinkParseProgressReceipt? = null
 
@@ -54,6 +60,7 @@ public class DeliveryLinkParseProgressMessenger(
     override suspend fun send(
         context: CommandContext,
         inReplyTo: String,
+        correlationId: String?,
         text: String,
     ): LinkParseProgressReceipt? {
         val value = text.trim().takeIf { it.isNotBlank() } ?: return null
@@ -69,7 +76,7 @@ public class DeliveryLinkParseProgressMessenger(
                 visibility = MessageVisibility.INTERNAL,
                 recordPolicy = MessageRecordPolicy.Transient(),
                 replyToMessageId = inReplyTo,
-                correlationId = inReplyTo,
+                correlationId = correlationId?.trim()?.takeIf { it.isNotBlank() } ?: inReplyTo,
             ),
         )
         val receipt = result.sendResults

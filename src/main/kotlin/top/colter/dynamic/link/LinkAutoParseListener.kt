@@ -64,6 +64,7 @@ internal class LinkAutoParseListener(
                     secondsToMillis(linkParsing.autoDedupeTtlSeconds, minimumMillis = 0)
                 },
                 inReplyTo = event.replyToMessageId,
+                correlationId = event.traceId,
                 onForwardingStarted = {
                     sendProgressOnce()
                 },
@@ -104,6 +105,7 @@ internal class LinkAutoParseListener(
             ),
             chain = listOf(MessageBatch(listOf(MessageContent.Text(message)))),
             inReplyTo = event.replyToMessageId,
+            traceId = event.traceId,
             status = status,
             errorMessage = if (status == CommandStatus.FAILED) message else null,
         ).let { eventBus.broadcast(it) }

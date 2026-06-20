@@ -16,6 +16,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.LinkVideoDownloadConfig
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.data.CommandContext
+import top.colter.dynamic.core.data.IncomingProcessingResult
+import top.colter.dynamic.core.data.IncomingProcessingStage
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.SourceUpdate
@@ -38,12 +40,18 @@ import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.DefaultLinkPreviewRenderer
 import top.colter.dynamic.draw.LinkPreviewRenderer
 import top.colter.dynamic.message.OutboundMessageService
+import top.colter.dynamic.repository.IncomingMessageAuditRepository
+import top.colter.dynamic.repository.IncomingProcessingWriteRequest
 import top.colter.dynamic.repository.SubscriberRepository
 
 internal const val LINK_PARSE_EVENT_LABEL: String = "link-parse"
 internal const val LINK_PARSE_EVENT_SOURCE: String = "main-link-parser"
 
 private val linkParseLogger = loggerFor<LinkParseService>()
+
+private fun elapsedMillis(startedNanos: Long): Long {
+    return ((System.nanoTime() - startedNanos) / 1_000_000).coerceAtLeast(0)
+}
 
 public class LinkParseService(
     private val resolversProvider: () -> List<LinkResolver>,
@@ -61,6 +69,9 @@ public class LinkParseService(
     private val progressMessenger: LinkParseProgressMessenger = NoopLinkParseProgressMessenger,
     private val backgroundScope: CoroutineScope? = null,
     private val projectRootProvider: () -> File = { File(System.getProperty("user.dir")) },
+    private val incomingProcessingRecorder: (IncomingProcessingWriteRequest) -> Boolean = {
+        IncomingMessageAuditRepository.recordProcessing(it)
+    },
 ) {
     private val videoDownloadSemaphores: MutableMap<Int, Semaphore> = ConcurrentHashMap()
     private val videoDownloadLocks: MutableMap<String, VideoDownloadLock> = ConcurrentHashMap()
@@ -81,16 +92,30 @@ public class LinkParseService(
         dedupe: LinkParseDedupe? = null,
         dedupeTtlMs: Long = 0,
         inReplyTo: String? = null,
+        correlationId: String? = null,
         onForwardingStarted: suspend (ParsedLink) -> Unit = {},
     ): LinkParseBatchResult {
-        if (maxLinks <= 0) return LinkParseBatchResult.disabled()
+        val startedNanos = System.nanoTime()
+        if (maxLinks <= 0) return recordLinkProcessing(
+            correlationId = correlationId,
+            result = LinkParseBatchResult.disabled(),
+            startedNanos = startedNanos,
+        )
 
         val urls = LinkUrlExtractor.extract(text)
-        if (urls.isEmpty()) return LinkParseBatchResult.noSupportedLink()
+        if (urls.isEmpty()) return recordLinkProcessing(
+            correlationId = correlationId,
+            result = LinkParseBatchResult.noSupportedLink(),
+            startedNanos = startedNanos,
+        )
 
         val resolvers = resolversProvider()
         if (resolvers.isEmpty()) {
-            return LinkParseBatchResult.failed("没有可用的链接解析插件")
+            return recordLinkProcessing(
+                correlationId = correlationId,
+                result = LinkParseBatchResult.failed("没有可用的链接解析插件"),
+                startedNanos = startedNanos,
+            )
         }
 
         val results = mutableListOf<LinkParseItemResult>()
@@ -115,9 +140,9 @@ public class LinkParseService(
 
             results += runCatching {
                 when (val resolution = candidate.resolver.resolveLink(parsedLink)) {
-                    is LinkResolution.Dynamic -> forwardDynamic(resolution.update, parsedLink, context)
-                    is LinkResolution.Preview -> forwardPreview(resolution.preview, parsedLink, context, inReplyTo)
-                    is LinkResolution.Message -> forwardMessage(resolution.batches, parsedLink, context)
+                    is LinkResolution.Dynamic -> forwardDynamic(resolution.update, parsedLink, context, correlationId)
+                    is LinkResolution.Preview -> forwardPreview(resolution.preview, parsedLink, context, inReplyTo, correlationId)
+                    is LinkResolution.Message -> forwardMessage(resolution.batches, parsedLink, context, correlationId)
                     is LinkResolution.Failed -> LinkParseItemResult.Failed(parsedLink, resolution.reason)
                 }
             }.getOrElse { error ->
@@ -128,7 +153,42 @@ public class LinkParseService(
             }
         }
 
-        return LinkParseBatchResult(results)
+        return recordLinkProcessing(
+            correlationId = correlationId,
+            result = LinkParseBatchResult(results),
+            startedNanos = startedNanos,
+        )
+    }
+
+    private fun recordLinkProcessing(
+        correlationId: String?,
+        result: LinkParseBatchResult,
+        startedNanos: Long,
+    ): LinkParseBatchResult {
+        val traceId = correlationId?.trim()?.takeIf { it.isNotBlank() } ?: return result
+        val processingResult = when {
+            result.disabledReason != null -> IncomingProcessingResult.FAILED
+            !result.hasSupportedLinks -> IncomingProcessingResult.IGNORED
+            result.failures.isNotEmpty() -> IncomingProcessingResult.FAILED
+            else -> IncomingProcessingResult.SUCCEEDED
+        }
+        val errorMessage = result.disabledReason
+            ?: result.failureSummary.takeIf { result.failures.isNotEmpty() }
+        runCatching {
+            incomingProcessingRecorder(
+                IncomingProcessingWriteRequest(
+                    traceId = traceId,
+                    stage = IncomingProcessingStage.LINK_PARSE,
+                    handlerId = LINK_PARSE_EVENT_SOURCE,
+                    result = processingResult,
+                    errorMessage = errorMessage,
+                    durationMs = elapsedMillis(startedNanos),
+                ),
+            )
+        }.onFailure { error ->
+            linkParseLogger.warn(error) { "链接解析入站处理审计记录失败：traceId=$traceId" }
+        }
+        return result
     }
 
     internal fun hasSupportedLinkCandidate(text: String, maxLinks: Int = 1): Boolean {
@@ -170,6 +230,7 @@ public class LinkParseService(
         update: SourceUpdate,
         parsedLink: ParsedLink,
         context: CommandContext,
+        correlationId: String?,
     ): LinkParseItemResult {
         val enrichedUpdate = enrichPublisherForLinkParse(update)
         val sourcePublisher = enrichedUpdate.publisher
@@ -186,6 +247,7 @@ public class LinkParseService(
                 sourcePlugin = LINK_PARSE_EVENT_SOURCE,
                 deliveryTarget = subscriber,
                 deliveryTag = LINK_PARSE_EVENT_LABEL,
+                correlationId = correlationId,
                 update = enrichedUpdate,
                 publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY,
             ),
@@ -214,6 +276,7 @@ public class LinkParseService(
         parsedLink: ParsedLink,
         context: CommandContext,
         inReplyTo: String?,
+        correlationId: String?,
     ): LinkParseItemResult {
         val enrichedPreview = enrichPreviewForLinkParse(preview)
         val template = configProvider().linkParsing.templates.message
@@ -223,7 +286,12 @@ public class LinkParseService(
             linkParseLogger.warn(error) {
                 "链接解析模板解析失败，回退为文本：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
             }
-            return forwardMessage(listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText())))), parsedLink, context)
+            return forwardMessage(
+                listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText())))),
+                parsedLink,
+                context,
+                correlationId,
+            )
         }
 
         val immediateBatches = runCatching {
@@ -236,7 +304,7 @@ public class LinkParseService(
         }
         var currentResult = when {
             immediateBatches.isEmpty() -> null
-            else -> when (val immediateResult = forwardMessage(immediateBatches, parsedLink, context)) {
+            else -> when (val immediateResult = forwardMessage(immediateBatches, parsedLink, context, correlationId)) {
                 is LinkParseItemResult.Forwarded -> immediateResult
                 else -> return immediateResult
             }
@@ -244,7 +312,12 @@ public class LinkParseService(
 
         if (!templatePlan.requiresVideo) {
             return currentResult
-                ?: forwardMessage(listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText())))), parsedLink, context)
+                ?: forwardMessage(
+                    listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText())))),
+                    parsedLink,
+                    context,
+                    correlationId,
+                )
         }
 
         val downloadPlan = when (val planned = videoDownloadPlan(enrichedPreview, parsedLink)) {
@@ -252,7 +325,7 @@ public class LinkParseService(
                 val fallbackBatches = renderVideoFallbackBatches(templatePlan, enrichedPreview, parsedLink)
                 return when {
                     fallbackBatches.isNotEmpty() -> {
-                        val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context)
+                        val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context, correlationId)
                         when (fallbackResult) {
                             is LinkParseItemResult.Forwarded -> currentResult?.withAdditionalDeliveries(fallbackResult.deliveryCount)
                                 ?: fallbackResult
@@ -261,6 +334,7 @@ public class LinkParseService(
                                     listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText())))),
                                     parsedLink,
                                     context,
+                                    correlationId,
                                 )
                         }
                     }
@@ -269,6 +343,7 @@ public class LinkParseService(
                         listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText())))),
                         parsedLink,
                         context,
+                        correlationId,
                     )
                 }
             }
@@ -278,10 +353,11 @@ public class LinkParseService(
                     parsedLink = parsedLink,
                     context = context,
                     inReplyTo = inReplyTo,
+                    correlationId = correlationId,
                 )
                 val fallbackBatches = renderVideoFallbackBatches(templatePlan, enrichedPreview, parsedLink)
                 if (fallbackBatches.isNotEmpty()) {
-                    val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context)
+                    val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context, correlationId)
                     return if (fallbackResult is LinkParseItemResult.Forwarded) {
                         currentResult
                             ?.withAdditionalDeliveries(fallbackResult.deliveryCount + feedback.deliveryCount)
@@ -304,6 +380,7 @@ public class LinkParseService(
             parsedLink = parsedLink,
             context = context,
             inReplyTo = inReplyTo,
+            correlationId = correlationId,
         )
         currentResult = currentResult?.withAdditionalDeliveries(downloadPrompt.deliveryCount)
             ?: forwardedForContext(parsedLink, context, downloadPrompt.deliveryCount)
@@ -319,6 +396,7 @@ public class LinkParseService(
                 currentResult = currentResult,
                 downloadPromptReceipt = downloadPrompt.receipt,
                 inReplyTo = inReplyTo,
+                correlationId = correlationId,
             )
             return currentResult
         }
@@ -332,6 +410,7 @@ public class LinkParseService(
             currentResult = currentResult,
             downloadPromptReceipt = downloadPrompt.receipt,
             inReplyTo = inReplyTo,
+            correlationId = correlationId,
         )
     }
 
@@ -345,6 +424,7 @@ public class LinkParseService(
         currentResult: LinkParseItemResult.Forwarded,
         downloadPromptReceipt: LinkParseProgressReceipt?,
         inReplyTo: String?,
+        correlationId: String?,
     ) {
         scope.launch {
             try {
@@ -357,6 +437,7 @@ public class LinkParseService(
                     currentResult = currentResult,
                     downloadPromptReceipt = downloadPromptReceipt,
                     inReplyTo = inReplyTo,
+                    correlationId = correlationId,
                 )
             } catch (e: CancellationException) {
                 throw e
@@ -377,6 +458,7 @@ public class LinkParseService(
         currentResult: LinkParseItemResult.Forwarded,
         downloadPromptReceipt: LinkParseProgressReceipt?,
         inReplyTo: String?,
+        correlationId: String?,
     ): LinkParseItemResult.Forwarded {
         try {
             val video = when (val outcome = downloadVideo(preview, parsedLink, downloader)) {
@@ -387,6 +469,7 @@ public class LinkParseService(
                         parsedLink = parsedLink,
                         context = context,
                         inReplyTo = inReplyTo,
+                        correlationId = correlationId,
                     )
                     val fallbackBatches = runCatching {
                         templateRenderer.renderPlanVideoFallback(templatePlan, preview)
@@ -397,7 +480,7 @@ public class LinkParseService(
                         emptyList()
                     }
                     if (fallbackBatches.isNotEmpty()) {
-                        val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context)
+                        val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context, correlationId)
                         return when (fallbackResult) {
                             is LinkParseItemResult.Forwarded -> currentResult.withAdditionalDeliveries(
                                 fallbackResult.deliveryCount + feedback.deliveryCount,
@@ -421,10 +504,11 @@ public class LinkParseService(
                     parsedLink = parsedLink,
                     context = context,
                     inReplyTo = inReplyTo,
+                    correlationId = correlationId,
                 )
                 return currentResult.withAdditionalDeliveries(feedback.deliveryCount)
             }
-            val videoResult = forwardMessage(videoBatches, parsedLink, context)
+            val videoResult = forwardMessage(videoBatches, parsedLink, context, correlationId)
             return if (videoResult is LinkParseItemResult.Forwarded) {
                 currentResult.copy(deliveryCount = currentResult.deliveryCount + videoResult.deliveryCount)
             } else {
@@ -438,6 +522,7 @@ public class LinkParseService(
                     parsedLink = parsedLink,
                     context = context,
                     inReplyTo = inReplyTo,
+                    correlationId = correlationId,
                 )
                 currentResult.withAdditionalDeliveries(feedback.deliveryCount)
             }
@@ -592,6 +677,7 @@ public class LinkParseService(
         batches: List<MessageBatch>,
         parsedLink: ParsedLink,
         context: CommandContext,
+        correlationId: String?,
     ): LinkParseItemResult {
         if (batches.isEmpty()) {
             return LinkParseItemResult.Failed(parsedLink, "链接解析结果为空")
@@ -608,6 +694,7 @@ public class LinkParseService(
                 targets = listOf(subscriber.address),
                 batches = batches,
                 renderVariant = LINK_PARSE_EVENT_LABEL,
+                correlationId = correlationId?.trim()?.takeIf { it.isNotBlank() },
             ),
         )
         return LinkParseItemResult.Forwarded(
@@ -622,16 +709,18 @@ public class LinkParseService(
         parsedLink: ParsedLink,
         context: CommandContext,
         inReplyTo: String?,
+        correlationId: String?,
     ): VideoPromptResult {
         val text = message.trim().takeIf { it.isNotBlank() } ?: return VideoPromptResult()
         if (!inReplyTo.isNullOrBlank()) {
-            val receipt = progressMessenger.send(context, inReplyTo, text)
+            val receipt = progressMessenger.send(context, inReplyTo, correlationId, text)
             return VideoPromptResult(receipt = receipt)
         }
         val feedback = forwardMessage(
             listOf(MessageBatch(listOf(MessageContent.Text(text)))),
             parsedLink,
             context,
+            correlationId,
         )
         return VideoPromptResult(deliveryCount = (feedback as? LinkParseItemResult.Forwarded)?.deliveryCount ?: 0)
     }

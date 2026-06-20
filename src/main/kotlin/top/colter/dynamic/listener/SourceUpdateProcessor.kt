@@ -105,6 +105,7 @@ public class SourceUpdateProcessor(
             batches = chain,
             skipReason = "update=${normalizedUpdate.key.stableValue()}",
             messageIdNonce = request.linkParseMessageIdNonce(),
+            correlationId = request.correlationId,
         )
     }
 
@@ -131,6 +132,7 @@ public class SourceUpdateProcessor(
             targets = targets,
             batches = chain,
             skipReason = "update=${normalizedUpdate.key.stableValue()}",
+            correlationId = request.correlationId,
         )
     }
 
@@ -242,6 +244,7 @@ public class SourceUpdateProcessor(
         batches: List<MessageBatch>,
         skipReason: String,
         messageIdNonce: String? = null,
+        correlationId: String? = null,
     ): SourceUpdatePublishResult {
         if (batches.isEmpty()) {
             logger.warn { "跳过来源更新：$skipReason，渲染后的消息为空" }
@@ -252,8 +255,16 @@ public class SourceUpdateProcessor(
 
         val (mentionAllTargets, normalTargets) = targets.partition { it.shouldMentionAll(update) }
         val results = listOfNotNull(
-            publishMessageVariant(sourcePlugin, update, normalTargets, batches, "default", messageIdNonce),
-            publishMessageVariant(sourcePlugin, update, mentionAllTargets, batches.withMentionAllAtTail(), "mention_all", messageIdNonce),
+            publishMessageVariant(sourcePlugin, update, normalTargets, batches, "default", messageIdNonce, correlationId),
+            publishMessageVariant(
+                sourcePlugin,
+                update,
+                mentionAllTargets,
+                batches.withMentionAllAtTail(),
+                "mention_all",
+                messageIdNonce,
+                correlationId,
+            ),
         )
         val newDeliveryCount = results.sumOf { it.newDeliveries.size }
         return when {
@@ -278,6 +289,7 @@ public class SourceUpdateProcessor(
         batches: List<MessageBatch>,
         renderVariant: String,
         messageIdNonce: String?,
+        correlationId: String?,
     ): OutboundMessagePublishResult? {
         if (targets.isEmpty()) return null
 
@@ -289,6 +301,7 @@ public class SourceUpdateProcessor(
                 targets = targets.map { it.subscriber.address },
                 batches = batches,
                 renderVariant = renderVariant,
+                correlationId = correlationId?.trim()?.takeIf { it.isNotBlank() },
             ),
         )
         if (result.newDeliveries.isNotEmpty()) {

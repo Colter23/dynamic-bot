@@ -371,6 +371,32 @@ public fun Application.adminModule(context: AdminServerContext) {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.delivery(call.pathInt("id")) }
             }
+            get("/incoming-messages") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi {
+                    context.service.incomingMessages(
+                        recordPolicy = call.request.queryParameters["recordPolicy"],
+                        intent = call.request.queryParameters["intent"],
+                        platformId = call.request.queryParameters["platformId"],
+                        targetKind = call.request.queryParameters["targetKind"]
+                            ?: call.request.queryParameters["type"],
+                        targetId = call.request.queryParameters["targetId"],
+                        senderId = call.request.queryParameters["senderId"],
+                        sourcePlugin = call.request.queryParameters["sourcePlugin"],
+                        traceId = call.request.queryParameters["traceId"],
+                        result = call.request.queryParameters["result"],
+                        stage = call.request.queryParameters["stage"],
+                        commandPath = call.request.queryParameters["commandPath"],
+                        query = call.request.queryParameters["q"],
+                        includeTrace = call.optionalQueryBoolean("includeTrace") ?: false,
+                        limit = call.optionalQueryInt("limit"),
+                    )
+                }
+            }
+            get("/incoming-messages/{traceId}") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi { context.service.incomingMessage(call.pathString("traceId")) }
+            }
             post("/message-forwards") {
                 if (!call.ensureAuthorized(context)) return@post
                 call.respondApi { context.service.forwardMessage(call.receive()) }

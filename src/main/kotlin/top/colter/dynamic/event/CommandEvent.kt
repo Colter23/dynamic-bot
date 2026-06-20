@@ -7,5 +7,5 @@ public data class CommandEvent(
     val context: CommandContext,
     val rawText: String,
     val traceId: String,
-    val replyToMessageId: String = traceId,
+    val replyToMessageId: String = "",
 ) : Event

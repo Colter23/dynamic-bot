@@ -4,7 +4,9 @@ import java.util.UUID
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.command.CommandParser
 import top.colter.dynamic.core.data.CommandContext
+import top.colter.dynamic.core.data.IncomingMessageAuditMode
 import top.colter.dynamic.core.data.IncomingMessage
+import top.colter.dynamic.core.data.IncomingMessageRecordPolicy
 import top.colter.dynamic.core.data.IncomingMessageSegment
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.plugin.IncomingMessageDispatchContext
@@ -15,12 +17,22 @@ import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.IncomingMessageEvent
 import top.colter.dynamic.event.IncomingTextMessageEvent
 import top.colter.dynamic.link.LinkParseService
+import top.colter.dynamic.repository.IncomingAuditWriteRequest
+import top.colter.dynamic.repository.IncomingMessageAuditRepository
+
+internal fun interface IncomingMessageAuditRecorder {
+    fun recordMessage(request: IncomingAuditWriteRequest): Boolean
+}
 
 internal class IncomingMessagePipeline(
     private val configProvider: () -> MainDynamicConfig,
     private val linkParseService: LinkParseService,
     private val eventBus: EventBus,
     private val incomingConsumerDispatcher: (IncomingMessageDispatchContext) -> Unit,
+    private val auditModeResolver: (IncomingMessageDispatchContext) -> IncomingMessageAuditMode = { IncomingMessageAuditMode.NONE },
+    private val auditRecorder: IncomingMessageAuditRecorder = IncomingMessageAuditRecorder {
+        IncomingMessageAuditRepository.recordMessage(it)
+    },
 ) {
     suspend fun handle(sourcePlugin: String, request: IncomingMessagePublishRequest) {
         val message = request.message
@@ -30,7 +42,7 @@ internal class IncomingMessagePipeline(
             ?.trim()
             ?.takeIf { it.isNotBlank() }
             ?: message.messageId.trim().takeIf { it.isNotBlank() }
-            ?: traceId
+            ?: ""
         val rawText = message.commandText().trim()
         val commandContext = message.toCommandContext()
         val commandPrefix = configProvider().command.prefix
@@ -68,6 +80,22 @@ internal class IncomingMessagePipeline(
             rawText = rawText,
             intent = intent,
         )
+        val recordPolicy = resolveRecordPolicy(intent, request.recordPolicyHint, auditModeResolver(dispatchContext))
+        if (recordPolicy != IncomingMessageRecordPolicy.None) {
+            auditRecorder.recordMessage(
+                IncomingAuditWriteRequest(
+                    sourcePlugin = sourcePlugin,
+                    message = message,
+                    traceId = traceId,
+                    replyToMessageId = replyToMessageId,
+                    intent = intent,
+                    recordPolicy = recordPolicy,
+                    receivedAtEpochSeconds = request.receivedAtEpochSeconds ?: System.currentTimeMillis() / 1000,
+                    dedupeKey = request.dedupeKey,
+                    sourceEventId = request.sourceEventId,
+                ),
+            )
+        }
         if (intent == IncomingMessageIntent.Command) {
             eventBus.broadcast(
                 CommandEvent(
@@ -93,6 +121,36 @@ internal class IncomingMessagePipeline(
         }
 
         incomingConsumerDispatcher(dispatchContext)
+    }
+
+    private fun resolveRecordPolicy(
+        intent: IncomingMessageIntent,
+        requestHint: IncomingMessageRecordPolicy,
+        auditMode: IncomingMessageAuditMode,
+    ): IncomingMessageRecordPolicy {
+        val defaultPolicy = when (intent) {
+            IncomingMessageIntent.Command -> IncomingMessageRecordPolicy.Audit
+            IncomingMessageIntent.LinkText -> IncomingMessageRecordPolicy.Trace()
+            IncomingMessageIntent.PlainText,
+            IncomingMessageIntent.NonText -> IncomingMessageRecordPolicy.None
+        }
+        return listOf(defaultPolicy, requestHint, auditMode.toRecordPolicy()).maxBy { it.priority() }
+    }
+
+    private fun IncomingMessageAuditMode.toRecordPolicy(): IncomingMessageRecordPolicy {
+        return when (this) {
+            IncomingMessageAuditMode.NONE -> IncomingMessageRecordPolicy.None
+            IncomingMessageAuditMode.TRACE -> IncomingMessageRecordPolicy.Trace()
+            IncomingMessageAuditMode.AUDIT -> IncomingMessageRecordPolicy.Audit
+        }
+    }
+
+    private fun IncomingMessageRecordPolicy.priority(): Int {
+        return when (this) {
+            IncomingMessageRecordPolicy.None -> 0
+            is IncomingMessageRecordPolicy.Trace -> 1
+            IncomingMessageRecordPolicy.Audit -> 2
+        }
     }
 
     private fun IncomingMessage.toCommandContext(): CommandContext {

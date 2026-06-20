@@ -9,6 +9,7 @@ public data class CommandResultEvent(
     val target: CommandTarget,
     val chain: List<MessageBatch>,
     val inReplyTo: String,
+    val traceId: String,
     val status: CommandStatus,
     val errorMessage: String? = null,
 ) : Event

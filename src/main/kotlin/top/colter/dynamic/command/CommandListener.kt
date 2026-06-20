@@ -31,6 +31,8 @@ import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicBlockKind
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.FilterCondition
+import top.colter.dynamic.core.data.IncomingProcessingResult
+import top.colter.dynamic.core.data.IncomingProcessingStage
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageBatch
@@ -55,10 +57,13 @@ import top.colter.dynamic.core.plugin.PublisherLoginResult
 import top.colter.dynamic.core.plugin.PublisherLoginStatus
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.plugin.PublisherQrLoginChallenge
+import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.DefaultPublisherThemeInitializer
 import top.colter.dynamic.draw.PublisherDrawThemeService
 import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
+import top.colter.dynamic.repository.IncomingMessageAuditRepository
+import top.colter.dynamic.repository.IncomingProcessingWriteRequest
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PublisherDrawThemeRepository
 import top.colter.dynamic.repository.PublisherRepository
@@ -75,6 +80,8 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import javax.imageio.ImageIO
+
+private val commandListenerLogger = loggerFor<CommandListener>()
 
 public class CommandListener(
     private val publisherLookupResolver: (String) -> PublisherLookupPlugin?,
@@ -95,6 +102,9 @@ public class CommandListener(
     private val primaryBotAccountResolver: suspend (CommandContext) -> String? = { null },
     private val outboundMessageService: OutboundMessageService = OutboundMessageService(),
     publisherThemeInitializer: PublisherThemeInitializer? = null,
+    private val incomingProcessingRecorder: (IncomingProcessingWriteRequest) -> Boolean = {
+        IncomingMessageAuditRepository.recordProcessing(it)
+    },
 ) : Listener<CommandEvent> {
     private companion object {
         private const val MAIN_OWNER: String = "main"
@@ -123,13 +133,39 @@ public class CommandListener(
     override suspend fun onMessage(event: CommandEvent) {
         val parsed = CommandParser.parse(event.rawText, commandPrefix) ?: return
         val tokens = parsed.tokens
-        if (!shouldAcceptCommand(event)) return
+        if (!shouldAcceptCommand(event)) {
+            recordCommandProcessing(
+                event = event,
+                stage = IncomingProcessingStage.COMMAND_PARSE,
+                handlerId = "command-receive-mode",
+                result = IncomingProcessingResult.IGNORED,
+                commandPath = tokens.joinToString(" "),
+                errorMessage = "命令接收模式忽略",
+            )
+            return
+        }
 
         val match = commandRegistry.match(tokens)
         if (match == null) {
+            recordCommandProcessing(
+                event = event,
+                stage = IncomingProcessingStage.COMMAND_PARSE,
+                handlerId = "command-registry",
+                result = IncomingProcessingResult.FAILED,
+                commandPath = tokens.joinToString(" "),
+                errorMessage = "未知命令",
+            )
             reply(event, CommandExecutionResult.failed("未知命令：${tokens.joinToString(" ")}"))
             return
         }
+        val commandPath = match.matchedPath.joinToString(" ")
+        recordCommandProcessing(
+            event = event,
+            stage = IncomingProcessingStage.COMMAND_PARSE,
+            handlerId = "command-registry",
+            result = IncomingProcessingResult.MATCHED,
+            commandPath = commandPath,
+        )
 
         val commandConfig = runtimeConfig.command
         val defaultRole = if (commandConfig.requirePermissionRule) CommandRole.NONE else CommandRole.USER
@@ -139,6 +175,15 @@ public class CommandListener(
             defaultRole = defaultRole,
         )
         if (!role.satisfies(match.spec.requiredRole)) {
+            recordCommandProcessing(
+                event = event,
+                stage = IncomingProcessingStage.COMMAND_EXECUTE,
+                handlerId = match.spec.path.joinToString("/"),
+                result = IncomingProcessingResult.REJECTED,
+                commandPath = commandPath,
+                role = role.name,
+                errorMessage = "权限不足",
+            )
             reply(event, CommandExecutionResult.rejected("权限不足"))
             return
         }
@@ -155,8 +200,19 @@ public class CommandListener(
             role = role,
         )
 
+        val started = System.nanoTime()
         val result = runCatching { match.handler.handle(invocation) }
             .getOrElse { CommandExecutionResult.failed("命令执行失败：${it.message}") }
+        recordCommandProcessing(
+            event = event,
+            stage = IncomingProcessingStage.COMMAND_EXECUTE,
+            handlerId = match.spec.path.joinToString("/"),
+            result = result.status.toIncomingProcessingResult(),
+            commandPath = commandPath,
+            role = role.name,
+            errorMessage = result.errorMessage,
+            durationMs = elapsedMillis(started),
+        )
 
         reply(event, result)
         runCatching { result.afterReply?.invoke() }
@@ -171,9 +227,38 @@ public class CommandListener(
             ),
             chain = result.reply,
             inReplyTo = event.replyToMessageId,
+            traceId = event.traceId,
             status = result.status,
             errorMessage = result.errorMessage,
         ).let { eventBus.broadcast(it) }
+    }
+
+    private fun recordCommandProcessing(
+        event: CommandEvent,
+        stage: IncomingProcessingStage,
+        handlerId: String,
+        result: IncomingProcessingResult,
+        commandPath: String? = null,
+        role: String? = null,
+        errorMessage: String? = null,
+        durationMs: Long? = null,
+    ) {
+        runCatching {
+            incomingProcessingRecorder(
+                IncomingProcessingWriteRequest(
+                    traceId = event.traceId,
+                    stage = stage,
+                    handlerId = handlerId,
+                    result = result,
+                    commandPath = commandPath,
+                    role = role,
+                    errorMessage = errorMessage,
+                    durationMs = durationMs,
+                ),
+            )
+        }.onFailure { error ->
+            commandListenerLogger.warn(error) { "命令入站处理审计记录失败：traceId=${event.traceId}" }
+        }
     }
 
     private fun registerBuiltins() {
@@ -249,6 +334,18 @@ private fun success(message: String): CommandExecutionResult {
 
 private fun failed(message: String): CommandExecutionResult {
     return CommandExecutionResult.failed(message)
+}
+
+private fun CommandStatus.toIncomingProcessingResult(): IncomingProcessingResult {
+    return when (this) {
+        CommandStatus.SUCCESS -> IncomingProcessingResult.SUCCEEDED
+        CommandStatus.REJECTED -> IncomingProcessingResult.REJECTED
+        CommandStatus.FAILED -> IncomingProcessingResult.FAILED
+    }
+}
+
+private fun elapsedMillis(startedNanos: Long): Long {
+    return ((System.nanoTime() - startedNanos) / 1_000_000).coerceAtLeast(0)
 }
 
 private fun parseDynamicElementType(value: String): DynamicBlockKind? {
@@ -527,6 +624,7 @@ private class LoginCommandHandler(
             ),
             chain = commandResult.reply,
             inReplyTo = invocation.replyToMessageId,
+            traceId = invocation.traceId,
             status = commandResult.status,
             errorMessage = commandResult.errorMessage,
         ).let { eventBus.broadcast(it) }

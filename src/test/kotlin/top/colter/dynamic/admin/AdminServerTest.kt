@@ -46,6 +46,11 @@ import top.colter.dynamic.core.data.DynamicBlockKind
 import top.colter.dynamic.core.data.DynamicFilterAction
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.FilterCondition
+import top.colter.dynamic.core.data.IncomingMessage
+import top.colter.dynamic.core.data.IncomingMessageRecordPolicy
+import top.colter.dynamic.core.data.IncomingMessageSegment
+import top.colter.dynamic.core.data.IncomingProcessingResult
+import top.colter.dynamic.core.data.IncomingProcessingStage
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
@@ -85,6 +90,7 @@ import top.colter.dynamic.core.plugin.PluginAdminPageDescriptor
 import top.colter.dynamic.core.plugin.PluginAdminPageProvider
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
+import top.colter.dynamic.core.plugin.IncomingMessageIntent
 import top.colter.dynamic.core.task.TaskDefinition
 import top.colter.dynamic.core.task.TaskSchedule
 import top.colter.dynamic.core.task.TaskSnapshot
@@ -101,6 +107,9 @@ import top.colter.dynamic.plugin.PluginState
 import top.colter.dynamic.plugin.PluginTaskInfo
 import top.colter.dynamic.plugin.PluginManager
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
+import top.colter.dynamic.repository.IncomingAuditWriteRequest
+import top.colter.dynamic.repository.IncomingMessageAuditRepository
+import top.colter.dynamic.repository.IncomingProcessingWriteRequest
 import top.colter.dynamic.repository.LinkParseTargetConfigRepository
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PersistenceManager
@@ -2047,6 +2056,83 @@ class AdminServerTest {
         assertEquals("bot-1", detail.delivery.targetAccountId)
         assertEquals("hello", detail.delivery.messagePreview)
         assertEquals("message-admin", assertNotNull(detail.message).jsonObject["id"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun incomingMessagesApiShouldReturnAuditRowsAndDetail() = testApplication {
+        initDb("admin-incoming-api")
+        val traceId = "trace-admin"
+        val target = TargetAddress.of("qq", TargetKind.GROUP, "100")
+        IncomingMessageAuditRepository.recordMessage(
+            IncomingAuditWriteRequest(
+                sourcePlugin = "onebot",
+                message = IncomingMessage(
+                    platformId = PlatformId.of("qq"),
+                    target = target,
+                    senderId = "sender-1",
+                    botAccountId = "bot-1",
+                    messageId = "platform-message-1",
+                    timestamp = 90,
+                    text = "/status",
+                    segments = listOf(IncomingMessageSegment.Text("/status")),
+                    rawFormat = "json",
+                    rawPayload = """{"message":"/status"}""",
+                ),
+                traceId = traceId,
+                replyToMessageId = "reply-1",
+                intent = IncomingMessageIntent.Command,
+                recordPolicy = IncomingMessageRecordPolicy.Audit,
+                receivedAtEpochSeconds = 100,
+                dedupeKey = "dedupe-$traceId",
+                sourceEventId = "event-$traceId",
+            )
+        )
+        IncomingMessageAuditRepository.recordProcessing(
+            IncomingProcessingWriteRequest(
+                traceId = traceId,
+                stage = IncomingProcessingStage.COMMAND_EXECUTE,
+                handlerId = "status",
+                result = IncomingProcessingResult.SUCCEEDED,
+                commandPath = "status",
+                role = "USER",
+                durationMs = 12,
+            )
+        )
+        val outbound = Message(
+            id = "message-incoming-related",
+            time = 101,
+            correlationId = traceId,
+            replyToMessageId = "platform-message-1",
+            targets = listOf(target),
+            batches = listOf(MessageBatch(listOf(MessageContent.Text("ok")))),
+        )
+        MessageDeliveryRepository.enqueue(outbound)
+        val delivery = MessageDeliveryRepository.findByMessageId(outbound.id).single()
+        MessageDeliveryRepository.markSent(delivery.id, sinkMessageId = "sink-1")
+
+        application {
+            adminModule(staticRouteContext())
+        }
+
+        val listResponse = client.get("/api/incoming-messages?includeTrace=true&traceId=$traceId&limit=10") {
+            header(HttpHeaders.Authorization, "Bearer test-token")
+        }
+        val detailResponse = client.get("/api/incoming-messages/$traceId") {
+            header(HttpHeaders.Authorization, "Bearer test-token")
+        }
+
+        assertEquals(HttpStatusCode.OK, listResponse.status)
+        val listBody = listResponse.bodyAsText()
+        assertTrue(listBody.contains("\"traceId\":\"$traceId\""))
+        assertTrue(listBody.contains("\"recordPolicy\":\"AUDIT\""))
+        assertTrue(listBody.contains("\"lastProcessingResult\":\"SUCCEEDED\""))
+
+        assertEquals(HttpStatusCode.OK, detailResponse.status)
+        val detailBody = detailResponse.bodyAsText()
+        assertTrue(detailBody.contains("\"traceId\":\"$traceId\""))
+        assertTrue(detailBody.contains("\"stage\":\"COMMAND_EXECUTE\""))
+        assertTrue(detailBody.contains("\"messageId\":\"message-incoming-related\""))
+        assertTrue(detailBody.contains("\"correlationId\":\"$traceId\""))
     }
 
     @Test

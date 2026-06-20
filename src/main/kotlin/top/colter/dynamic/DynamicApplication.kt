@@ -60,11 +60,13 @@ import top.colter.dynamic.message.RENDER_VARIANT_COMMAND_RESULT
 import top.colter.dynamic.notification.MessageSinkRouteMonitor
 import top.colter.dynamic.notification.SystemNotificationService
 import top.colter.dynamic.repository.MessageDeliveryRepository
+import top.colter.dynamic.repository.IncomingMessageAuditRepository
 import top.colter.dynamic.repository.SourceUpdateSnapshotRepository
 
 private val logger = loggerFor<DynamicApplication>()
 
 private const val TRANSIENT_MESSAGE_CLEANUP_INTERVAL_SECONDS: Long = 5L * 60L
+private const val INCOMING_TRACE_CLEANUP_INTERVAL_SECONDS: Long = 30L * 60L
 
 public object DynamicApplication : CoroutineScope {
     private val job: Job = Job()
@@ -226,6 +228,7 @@ public object DynamicApplication : CoroutineScope {
         registerDeliveryDispatchTask(config)
         registerDeliveryCleanupTask(config)
         registerTransientMessageCleanupTask()
+        registerIncomingTraceCleanupTask()
         registerMessageSinkRouteMonitorTask(config)
         sourceUpdateProcessor = SourceUpdateProcessor(
             configProvider = configStore::current,
@@ -268,6 +271,7 @@ public object DynamicApplication : CoroutineScope {
             linkParseService = linkParseService,
             eventBus = eventBus,
             incomingConsumerDispatcher = pluginManager::dispatchIncomingMessageToConsumers,
+            auditModeResolver = pluginManager::incomingAuditModeFor,
         )
 
         listenerTokens += eventBus.subscribe(
@@ -410,7 +414,7 @@ public object DynamicApplication : CoroutineScope {
                     renderVariant = RENDER_VARIANT_COMMAND_RESULT,
                     kind = OutboundMessageKind.COMMAND_RESULT,
                     replyToMessageId = event.inReplyTo,
-                    correlationId = event.inReplyTo,
+                    correlationId = event.traceId,
                 ),
             )
             if (!result.accepted) {
@@ -543,6 +547,32 @@ public object DynamicApplication : CoroutineScope {
                         }
                     } else {
                         logger.debug { "临时消息无需清理" }
+                    }
+                },
+            ),
+        )
+    }
+
+    private fun registerIncomingTraceCleanupTask() {
+        taskScheduler.start(
+            TaskDefinition(
+                id = "main-incoming-trace-cleanup",
+                name = "入站追踪清理",
+                description = "清理已过保留期的入站 TRACE 记录和处理轨迹。",
+                schedule = TaskSchedule.FixedDelay(
+                    delay = INCOMING_TRACE_CLEANUP_INTERVAL_SECONDS.seconds,
+                    runImmediately = false,
+                ),
+                action = {
+                    val result = IncomingMessageAuditRepository.cleanupExpiredTrace(
+                        nowEpochSeconds = System.currentTimeMillis() / 1000,
+                    )
+                    if (result.deletedMessages > 0 || result.deletedProcessingRecords > 0) {
+                        logger.info {
+                            "入站追踪记录已清理：消息=${result.deletedMessages}，处理=${result.deletedProcessingRecords}"
+                        }
+                    } else {
+                        logger.debug { "入站追踪记录无需清理" }
                     }
                 },
             ),

@@ -19,6 +19,9 @@ import top.colter.dynamic.core.data.DynamicFilterAction
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.FilterCondition
+import top.colter.dynamic.core.data.IncomingMessageRecordPolicyType
+import top.colter.dynamic.core.data.IncomingProcessingResult
+import top.colter.dynamic.core.data.IncomingProcessingStage
 import top.colter.dynamic.core.data.Message
 import top.colter.dynamic.core.data.MessageDelivery
 import top.colter.dynamic.core.data.MessageBatch
@@ -81,6 +84,10 @@ import top.colter.dynamic.draw.DrawThemeFactory
 import top.colter.dynamic.draw.PublisherDrawThemeService
 import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
+import top.colter.dynamic.repository.IncomingMessageAuditRecord
+import top.colter.dynamic.repository.IncomingMessageAuditRepository
+import top.colter.dynamic.repository.IncomingMessageAuditWithProcessing
+import top.colter.dynamic.repository.IncomingProcessingAuditRecord
 import top.colter.dynamic.repository.LinkParseTargetConfigRepository
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.MessageDeliveryResultFilter
@@ -390,6 +397,76 @@ public class AdminService(
         return MessageDeliveryDetailDto(
             delivery = delivery.toDto(message = message),
             message = message?.toJsonElement(),
+        )
+    }
+
+    public fun incomingMessages(
+        recordPolicy: String? = null,
+        intent: String? = null,
+        platformId: String? = null,
+        targetKind: String? = null,
+        targetId: String? = null,
+        senderId: String? = null,
+        sourcePlugin: String? = null,
+        traceId: String? = null,
+        result: String? = null,
+        stage: String? = null,
+        commandPath: String? = null,
+        query: String? = null,
+        includeTrace: Boolean = false,
+        limit: Int? = null,
+    ): List<IncomingMessageAuditDto> {
+        val incomingRecordPolicy = recordPolicy
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { parseEnum<IncomingMessageRecordPolicyType>(it, "recordPolicy") }
+        val incomingTargetKind = targetKind
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { parseEnum<TargetKind>(it, "targetKind") }
+        val processingResult = result
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { parseEnum<IncomingProcessingResult>(it, "result") }
+        val processingStage = stage
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+            ?.let { parseEnum<IncomingProcessingStage>(it, "stage") }
+        return IncomingMessageAuditRepository
+            .findRecent(
+                recordPolicy = incomingRecordPolicy,
+                intent = intent,
+                platformId = platformId,
+                targetKind = incomingTargetKind,
+                targetId = targetId,
+                senderId = senderId,
+                sourcePlugin = sourcePlugin,
+                traceId = traceId,
+                result = processingResult,
+                stage = processingStage,
+                commandPath = commandPath,
+                query = query,
+                includeTrace = includeTrace,
+                limit = limit ?: 50,
+            )
+            .map { it.toDto() }
+    }
+
+    public fun incomingMessage(traceId: String): IncomingMessageAuditDetailDto {
+        val audit = IncomingMessageAuditRepository.findByTraceId(traceId)
+            ?: throw NoSuchElementException("入站审计记录不存在：$traceId")
+        val outboundDeliveries = MessageDeliveryRepository
+            .findRecentWithMessages(
+                query = audit.message.traceId,
+                limit = 200,
+                includeInternalRecords = true,
+            )
+            .filter { it.message?.correlationId == audit.message.traceId }
+            .map { it.delivery.toDto(message = it.message) }
+        return IncomingMessageAuditDetailDto(
+            message = audit.toDto(),
+            processing = audit.processing.map { it.toDto() },
+            outboundDeliveries = outboundDeliveries,
         )
     }
 
@@ -2748,6 +2825,62 @@ private fun MessageDelivery.toDto(message: Message? = null): MessageDeliveryDto 
     lockedUntilEpochSeconds = lockedUntilEpochSeconds,
     createdAtEpochSeconds = createdAtEpochSeconds,
     updatedAtEpochSeconds = updatedAtEpochSeconds,
+)
+
+private fun IncomingMessageAuditWithProcessing.toDto(): IncomingMessageAuditDto {
+    val lastProcessing = processing.maxByOrNull { it.createdAtEpochSeconds }
+    return message.toDto(
+        lastProcessingResult = lastProcessing?.result?.name,
+        failedProcessingCount = processing.count { it.result == IncomingProcessingResult.FAILED },
+        processingCount = processing.size,
+    )
+}
+
+private fun IncomingMessageAuditRecord.toDto(
+    lastProcessingResult: String? = null,
+    failedProcessingCount: Int = 0,
+    processingCount: Int = 0,
+): IncomingMessageAuditDto = IncomingMessageAuditDto(
+    traceId = traceId,
+    sourcePlugin = sourcePlugin,
+    platformId = platformId,
+    botAccountId = botAccountId,
+    targetKind = targetKind.name,
+    targetId = targetId,
+    targetKey = targetKey,
+    senderId = senderId,
+    platformMessageId = platformMessageId,
+    sourceEventId = sourceEventId,
+    dedupeKey = dedupeKey,
+    intent = intent,
+    recordPolicy = recordPolicyType.name,
+    retentionSeconds = retentionSeconds,
+    expiresAtEpochSeconds = expiresAtEpochSeconds,
+    textPreview = textPreview,
+    segmentSummary = segmentSummary,
+    replyToMessageId = replyToMessageId,
+    receivedAtEpochSeconds = receivedAtEpochSeconds,
+    messageTimestampEpochSeconds = messageTimestampEpochSeconds,
+    rawFormat = rawFormat,
+    rawPayloadSha256 = rawPayloadSha256,
+    rawPayloadSize = rawPayloadSize,
+    createdAtEpochSeconds = createdAtEpochSeconds,
+    lastProcessingResult = lastProcessingResult,
+    failedProcessingCount = failedProcessingCount,
+    processingCount = processingCount,
+)
+
+private fun IncomingProcessingAuditRecord.toDto(): IncomingProcessingAuditDto = IncomingProcessingAuditDto(
+    id = id,
+    traceId = traceId,
+    stage = stage.name,
+    handlerId = handlerId,
+    result = result.name,
+    commandPath = commandPath,
+    role = role,
+    errorMessage = errorMessage,
+    durationMs = durationMs,
+    createdAtEpochSeconds = createdAtEpochSeconds,
 )
 
 private fun Message.previewText(): String {

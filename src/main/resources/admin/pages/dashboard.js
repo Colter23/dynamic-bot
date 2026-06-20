@@ -98,7 +98,7 @@ async function loadDashboard(force) {
           infoRow("需处理", `${loginFailed} 个`, loginFailed ? "bad" : "ok"),
         ], renderLoginSummary(logins))}
 
-        ${summaryCard("消息投递", `${pendingDeliveries} 等待发送`, failedDeliveries ? `${failedDeliveries} 条失败` : "队列正常", "messages", [
+        ${summaryCard("消息链路", `${pendingDeliveries} 等待发送`, failedDeliveries ? `${failedDeliveries} 条失败` : "队列正常", "messages", [
           infoRow("已发送", sentDeliveries, "ok"),
           infoRow("发送中", sendingDeliveries),
           infoRow("等待中", pendingDeliveries, pendingDeliveries ? "warn" : ""),

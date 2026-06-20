@@ -18,6 +18,10 @@ import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.config.ConfigurablePlugin
 import top.colter.dynamic.core.data.IncomingMessage
+import top.colter.dynamic.core.data.IncomingMessageAuditMode
+import top.colter.dynamic.core.data.IncomingMessageRecordPolicy
+import top.colter.dynamic.core.data.IncomingProcessingResult
+import top.colter.dynamic.core.data.IncomingProcessingStage
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.plugin.IncomingMessageDispatchContext
@@ -28,6 +32,9 @@ import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.event.ListenerToken
 import top.colter.dynamic.event.SystemNotificationEvent
+import top.colter.dynamic.repository.IncomingAuditWriteRequest
+import top.colter.dynamic.repository.IncomingMessageAuditRepository
+import top.colter.dynamic.repository.IncomingProcessingWriteRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
 import top.colter.dynamic.core.event.SourceUpdatePublisher
 import top.colter.dynamic.core.event.SubscriptionChangedEvent
@@ -458,6 +465,17 @@ public class PluginManager(
                 if (!consumer.incomingMessageFilter.matches(context)) return@forEach
                 launchIncomingMessageForPlugin(runtime, consumer, context)
             }
+    }
+
+    public fun incomingAuditModeFor(context: IncomingMessageDispatchContext): IncomingMessageAuditMode {
+        return activeIncomingMessageConsumerPlugins()
+            .mapNotNull { runtime ->
+                val consumer = runtime.instance as? IncomingMessageConsumerPlugin ?: return@mapNotNull null
+                val filter = consumer.incomingMessageFilter
+                filter.auditMode.takeIf { mode -> mode != IncomingMessageAuditMode.NONE && filter.matches(context) }
+            }
+            .maxByOrNull { it.auditPriority() }
+            ?: IncomingMessageAuditMode.NONE
     }
 
     public fun shutdown() {
@@ -1049,8 +1067,25 @@ public class PluginManager(
             try {
                 state.semaphore.withPermit {
                     if (isShuttingDown) return@withPermit
+                    val startNanos = System.nanoTime()
                     runCatching { consumer.onIncomingMessage(context) }
+                        .onSuccess {
+                            recordIncomingProcessing(
+                                context = context,
+                                pluginId = pluginId,
+                                result = IncomingProcessingResult.SUCCEEDED,
+                                durationMs = elapsedMillis(startNanos),
+                            )
+                        }
                         .onFailure { error ->
+                            recordIncomingMessageForPluginFailure(context, pluginId)
+                            recordIncomingProcessing(
+                                context = context,
+                                pluginId = pluginId,
+                                result = IncomingProcessingResult.FAILED,
+                                errorMessage = error.message ?: error::class.qualifiedName,
+                                durationMs = elapsedMillis(startNanos),
+                            )
                             logger.error(error) {
                                 "入站消息分发失败：pluginId=$pluginId，intent=${context.intent}，platform=${message.platformId.value}，target=${message.target.stableValue()}"
                             }
@@ -1071,6 +1106,61 @@ public class PluginManager(
         } else {
             job.invokeOnCompletion { releasePending() }
         }
+    }
+
+    private fun recordIncomingProcessing(
+        context: IncomingMessageDispatchContext,
+        pluginId: String,
+        result: IncomingProcessingResult,
+        errorMessage: String? = null,
+        durationMs: Long? = null,
+    ) {
+        if (context.traceId.isBlank()) return
+        if (result != IncomingProcessingResult.FAILED) {
+            val consumer = plugins[pluginId]?.instance as? IncomingMessageConsumerPlugin ?: return
+            if (consumer.incomingMessageFilter.auditMode == IncomingMessageAuditMode.NONE) return
+        }
+        runCatching {
+            IncomingMessageAuditRepository.recordProcessing(
+                IncomingProcessingWriteRequest(
+                    traceId = context.traceId,
+                    stage = IncomingProcessingStage.PLUGIN_CONSUMER,
+                    handlerId = pluginId,
+                    result = result,
+                    errorMessage = errorMessage,
+                    durationMs = durationMs,
+                ),
+            )
+        }.onFailure { error ->
+            logger.warn(error) { "插件入站处理审计写入失败：pluginId=$pluginId，traceId=${context.traceId}" }
+        }
+    }
+
+    private fun recordIncomingMessageForPluginFailure(
+        context: IncomingMessageDispatchContext,
+        pluginId: String,
+    ) {
+        val traceId = context.traceId.trim().takeIf { it.isNotBlank() } ?: return
+        runCatching {
+            IncomingMessageAuditRepository.recordMessage(
+                IncomingAuditWriteRequest(
+                    sourcePlugin = context.sourcePlugin,
+                    message = context.message,
+                    traceId = traceId,
+                    replyToMessageId = context.replyToMessageId,
+                    intent = context.intent,
+                    recordPolicy = IncomingMessageRecordPolicy.Trace(),
+                    receivedAtEpochSeconds = System.currentTimeMillis() / 1000,
+                    sourceEventId = "plugin-failure:$pluginId",
+                ),
+            )
+        }.onFailure { error ->
+            logger.warn(error) { "插件失败入站消息审计写入失败：pluginId=$pluginId，traceId=$traceId" }
+        }
+    }
+
+    private fun elapsedMillis(startNanos: Long): Long {
+        return ((System.nanoTime() - startNanos) / 1_000_000).coerceAtLeast(0)
     }
 
     private fun createPluginScope(pluginId: String): CoroutineScope {
@@ -1155,6 +1245,14 @@ public class PluginManager(
         private val PLUGIN_ID_REGEX: Regex = Regex("^[a-zA-Z0-9._-]+$")
         private const val DEFAULT_PLUGIN_HOOK_TIMEOUT_MS: Long = 10_000
         private const val DEFAULT_INCOMING_MESSAGE_PENDING_LIMIT: Int = 64
+    }
+}
+
+private fun IncomingMessageAuditMode.auditPriority(): Int {
+    return when (this) {
+        IncomingMessageAuditMode.NONE -> 0
+        IncomingMessageAuditMode.TRACE -> 1
+        IncomingMessageAuditMode.AUDIT -> 2
     }
 }
 

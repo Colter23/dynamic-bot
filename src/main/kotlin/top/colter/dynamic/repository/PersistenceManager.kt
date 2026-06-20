@@ -15,6 +15,8 @@ import org.jetbrains.exposed.v1.migration.jdbc.MigrationUtils
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.core.tools.nowInstant
 import top.colter.dynamic.table.DynamicFilterRuleTable
+import top.colter.dynamic.table.IncomingMessageAuditTable
+import top.colter.dynamic.table.IncomingProcessingAuditTable
 import top.colter.dynamic.table.LinkParseTargetConfigTable
 import top.colter.dynamic.table.MessageDeliveryTable
 import top.colter.dynamic.table.MessageOutboxTable
@@ -159,6 +161,8 @@ private val SCHEMA_TABLES: Array<Table> = arrayOf(
     DynamicFilterRuleTable,
     LinkParseTargetConfigTable,
     SourceUpdateSnapshotTable,
+    IncomingMessageAuditTable,
+    IncomingProcessingAuditTable,
     MessageOutboxTable,
     MessageDeliveryTable,
     MessageSinkReceiptTable,
