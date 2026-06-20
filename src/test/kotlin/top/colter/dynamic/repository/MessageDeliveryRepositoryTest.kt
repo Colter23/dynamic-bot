@@ -286,6 +286,48 @@ class MessageDeliveryRepositoryTest {
         assertEquals(130L, delivery.transientExpiresAtEpochSeconds)
     }
 
+    @Test
+    fun enqueueShouldSnapshotSubscriberDisplayName() {
+        initTestDatabase("dynamic-bot-delivery-target-name-snapshot-db")
+
+        val target = testTargetAddress("onebot", TargetKind.GROUP, "10001")
+        SubscriberRepository.upsert(target, name = "测试群")
+
+        val message = testMessage("message-target-name", target)
+        val delivery = MessageDeliveryRepository.enqueue(message).newDeliveries.single()
+
+        assertEquals("测试群", delivery.targetName)
+    }
+
+    @Test
+    fun findRecentShouldMatchTargetDisplayName() {
+        initTestDatabase("dynamic-bot-delivery-target-name-query-db")
+
+        val target = testTargetAddress("onebot", TargetKind.GROUP, "10001")
+        SubscriberRepository.upsert(target, name = "测试群")
+
+        val message = testMessage("message-target-name-query", target)
+        MessageDeliveryRepository.enqueue(message)
+
+        val rows = MessageDeliveryRepository.findRecentWithMessages(query = "测试群", limit = 10)
+
+        assertEquals(listOf("message-target-name-query"), rows.map { it.delivery.messageId })
+        assertEquals("测试群", rows.single().delivery.targetName)
+    }
+
+    @Test
+    fun enqueueShouldIgnorePlaceholderTargetName() {
+        initTestDatabase("dynamic-bot-delivery-target-name-placeholder-db")
+
+        val target = testTargetAddress("onebot", TargetKind.GROUP, "10001")
+        SubscriberRepository.upsert(target, name = "10001")
+
+        val message = testMessage("message-target-name-placeholder", target)
+        val delivery = MessageDeliveryRepository.enqueue(message).newDeliveries.single()
+
+        assertNull(delivery.targetName)
+    }
+
     private fun testMessage(id: String, target: top.colter.dynamic.core.data.TargetAddress): Message {
         return Message(
             id = id,

@@ -605,6 +605,7 @@ public data class MessageDeliveryDto(
     val platformId: String,
     val targetKind: String,
     val targetId: String,
+    val targetName: String? = null,
     val targetScopeId: String? = null,
     val targetThreadId: String? = null,
     val targetAccountId: String? = null,

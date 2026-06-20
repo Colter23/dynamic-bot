@@ -826,7 +826,8 @@ function incomingMessageCell(row) {
 }
 
 function targetCell(row) {
-  const title = `${label(row.targetKind)} ${row.targetId}`;
+  const name = row.targetName || row.targetId;
+  const title = `${label(row.targetKind)} ${name}`;
   const suffix = targetSubLine(row);
   return `
     <div class="message-target-cell">
@@ -935,6 +936,7 @@ function deliveryTimeCell(row) {
 
 function targetSubLine(row) {
   const parts = [];
+  if (row.targetName && row.targetName !== row.targetId) parts.push(`ID ${compactValue(row.targetId, 24)}`);
   if (row.targetScopeId) parts.push(`作用域 ${compactValue(row.targetScopeId, 24)}`);
   if (row.targetThreadId) parts.push(`线程 ${compactValue(row.targetThreadId, 24)}`);
   if (row.targetAccountId) parts.push(`目标账号 ${compactValue(row.targetAccountId, 24)}`);
@@ -1116,6 +1118,7 @@ function renderDeliveryDetail(row, message) {
         ${detailItem("尝试次数", row.attempts)}
         ${detailItem("目标平台", row.platformId)}
         ${detailItem("目标类型", label(row.targetKind))}
+        ${detailItem("目标名称", row.targetName || "-")}
         ${detailItem("目标 ID", row.targetId, true)}
         ${detailItem("目标作用域", row.targetScopeId || "-", true)}
         ${detailItem("目标线程", row.targetThreadId || "-", true)}

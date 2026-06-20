@@ -29,6 +29,7 @@ public object MessageDeliveryTable : IntIdTable("message_delivery") {
     public val platformId: Column<String> = varchar(name = "platform_id", length = 50)
     public val targetKind: Column<TargetKind> = enumerationByName<TargetKind>("target_kind", 30)
     public val targetId: Column<String> = varchar(name = "target_id", length = 120)
+    public val targetName: Column<String?> = varchar(name = "target_name", length = 255).nullable()
     public val targetKey: Column<String> = text(name = "target_key")
     public val scopeId: Column<String?> = varchar(name = "scope_id", length = 120).nullable()
     public val threadId: Column<String?> = varchar(name = "thread_id", length = 120).nullable()

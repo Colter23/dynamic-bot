@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.TargetKind
@@ -90,5 +91,70 @@ class SubscriberRepositoryTest {
         assertEquals(refreshedAvatar, preserved.value.avatar)
         assertEquals(refreshedAvatar, SubscriberRepository.findByAddress(address)?.avatar)
         assertEquals("group-c", SubscriberRepository.findByAddress(address)?.name)
+    }
+
+    @Test
+    fun upsertShouldPreserveExistingStateUnlessExplicitlyChanged() {
+        initTestDatabase("dynamic-bot-core-subscriber-upsert-preserve-state-db")
+        val address = testTargetAddress(platformId = "onebot", kind = TargetKind.GROUP, externalId = "10001")
+
+        val disabled = SubscriberRepository.upsert(
+            address = address,
+            name = "测试群",
+            state = EntityState.DISABLED,
+        )
+        val refreshed = SubscriberRepository.upsert(address = address, name = "测试群新名称")
+        val reenabled = SubscriberRepository.upsert(
+            address = address,
+            name = "测试群新名称",
+            state = EntityState.ACTIVE,
+        )
+
+        assertEquals(EntityState.DISABLED, disabled.value.state)
+        assertEquals(EntityState.DISABLED, refreshed.value.state)
+        assertEquals(EntityState.ACTIVE, reenabled.value.state)
+        assertEquals(EntityState.ACTIVE, SubscriberRepository.findByAddress(address)?.state)
+    }
+
+    @Test
+    fun ensureShouldNotDowngradeExistingDisplayNameToTargetId() {
+        initTestDatabase("dynamic-bot-core-subscriber-ensure-preserve-name-db")
+        val address = testTargetAddress(platformId = "onebot", kind = TargetKind.GROUP, externalId = "10001")
+
+        val created = SubscriberRepository.upsert(address = address, name = "测试群")
+        val ensured = SubscriberRepository.ensure(address = address, name = "10001")
+
+        assertEquals(created.value.id, ensured.id)
+        assertEquals("测试群", ensured.name)
+        assertEquals("测试群", SubscriberRepository.findByAddress(address)?.name)
+    }
+
+    @Test
+    fun ensureShouldUpgradePlaceholderNameToDisplayName() {
+        initTestDatabase("dynamic-bot-core-subscriber-ensure-upgrade-name-db")
+        val address = testTargetAddress(platformId = "onebot", kind = TargetKind.GROUP, externalId = "10001")
+
+        SubscriberRepository.ensure(address = address, name = "10001")
+        val upgraded = SubscriberRepository.ensure(address = address, name = "测试群")
+
+        assertEquals("测试群", upgraded.name)
+        assertEquals("测试群", SubscriberRepository.findByAddress(address)?.name)
+    }
+
+    @Test
+    fun ensureShouldPreserveExistingDisabledState() {
+        initTestDatabase("dynamic-bot-core-subscriber-ensure-preserve-state-db")
+        val address = testTargetAddress(platformId = "onebot", kind = TargetKind.GROUP, externalId = "10001")
+
+        val created = SubscriberRepository.upsert(
+            address = address,
+            name = "测试群",
+            state = EntityState.DISABLED,
+        )
+        val ensured = SubscriberRepository.ensure(address = address, name = "测试群")
+
+        assertEquals(created.value.id, ensured.id)
+        assertEquals(EntityState.DISABLED, ensured.state)
+        assertEquals(EntityState.DISABLED, SubscriberRepository.findByAddress(address)?.state)
     }
 }

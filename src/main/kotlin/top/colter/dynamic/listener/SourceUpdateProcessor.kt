@@ -16,6 +16,7 @@ import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
+import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.MessageEvent
@@ -78,7 +79,7 @@ public class SourceUpdateProcessor(
 
     private suspend fun handleDynamic(request: SourceUpdatePublishRequest, update: SourceUpdate): SourceUpdatePublishResult {
         val (normalizedUpdate, storedPublisher) = normalizePublisher(update, request.publisherPersistenceMode)
-        val targets = resolveTargets(request.deliveryTarget, storedPublisher)
+        val targets = resolveTargets(request.deliveryTarget, request.deliveryTargetAddress, storedPublisher)
         if (targets.isEmpty()) {
             logger.info { "来源更新无可投递目标：update=${normalizedUpdate.key.stableValue()}" }
             return SourceUpdatePublishResult.ignored("没有可投递目标")
@@ -114,7 +115,7 @@ public class SourceUpdateProcessor(
         storedPublisher?.let { publisher ->
             PublisherLiveRecordRepository.recordLiveEvent(publisher.id, normalizedUpdate)
         }
-        val targets = resolveTargets(request.deliveryTarget, storedPublisher)
+        val targets = resolveTargets(request.deliveryTarget, request.deliveryTargetAddress, storedPublisher)
             .filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds)
             .let { applySubscriptionRules(normalizedUpdate, it) }
         logger.debug {
@@ -156,11 +157,16 @@ public class SourceUpdateProcessor(
         return update.copy(publisher = normalizedPublisher.toInfo()) to normalizedPublisher
     }
 
-    private fun resolveTargets(target: Subscriber?, publisher: Publisher?): List<DeliveryTarget> {
+    private fun resolveTargets(
+        target: Subscriber?,
+        targetAddress: TargetAddress?,
+        publisher: Publisher?,
+    ): List<DeliveryTarget> {
         target?.let {
             if (it.state != EntityState.ACTIVE) return emptyList()
             return listOf(
                 DeliveryTarget(
+                    address = it.address,
                     subscriber = it,
                     subscription = publisher?.let { stored ->
                         SubscriptionRepository.findBySubscriberAndPublisher(it.id, stored.id)
@@ -168,11 +174,14 @@ public class SourceUpdateProcessor(
                 ),
             )
         }
+        targetAddress?.let {
+            return listOf(DeliveryTarget(address = it, subscriber = null, subscription = null))
+        }
         if (publisher == null) return emptyList()
         return SubscriptionRepository
             .findSubscriptionsWithSubscribersByPublisherId(publisher.id)
             .filter { it.subscriber.state == EntityState.ACTIVE }
-            .map { DeliveryTarget(subscriber = it.subscriber, subscription = it.subscription) }
+            .map { DeliveryTarget(address = it.subscriber.address, subscriber = it.subscriber, subscription = it.subscription) }
     }
 
     private fun applySubscriptionRules(update: SourceUpdate, targets: List<DeliveryTarget>): List<DeliveryTarget> {
@@ -298,7 +307,7 @@ public class SourceUpdateProcessor(
                 sourcePlugin = sourcePlugin,
                 messageId = buildMessageId(update, renderVariant, messageIdNonce),
                 sourceUpdateKey = update.key,
-                targets = targets.map { it.subscriber.address },
+                targets = targets.map { it.address },
                 batches = batches,
                 renderVariant = renderVariant,
                 correlationId = correlationId?.trim()?.takeIf { it.isNotBlank() },
@@ -335,7 +344,7 @@ public class SourceUpdateProcessor(
     }
 
     private fun DeliveryTarget.shouldMentionAll(update: SourceUpdate): Boolean {
-        if (subscriber.kind != TargetKind.GROUP) return false
+        if (address.kind != TargetKind.GROUP) return false
         val policy = subscription?.policy ?: return false
         return policy.shouldMentionAll(update)
     }
@@ -356,7 +365,8 @@ public class SourceUpdateProcessor(
     }
 
     private data class DeliveryTarget(
-        val subscriber: Subscriber,
+        val address: TargetAddress,
+        val subscriber: Subscriber?,
         val subscription: top.colter.dynamic.core.data.Subscription?,
     )
 }

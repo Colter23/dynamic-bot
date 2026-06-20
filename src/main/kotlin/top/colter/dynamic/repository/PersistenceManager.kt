@@ -417,6 +417,50 @@ private val DATABASE_MIGRATIONS: List<DatabaseMigration> = listOf(
                 )
             }
         }
+    },
+    DatabaseMigration(
+        id = "message-delivery-target-name",
+        description = "消息投递记录补充目标名称快照",
+    ) {
+        if (tableExists("message_delivery")) {
+            if (!columnExists("message_delivery", "target_name")) {
+                exec(
+                    "ALTER TABLE ${quoteIdentifier("message_delivery")} " +
+                        "ADD COLUMN ${quoteIdentifier("target_name")} VARCHAR(255) NULL",
+                )
+            }
+            if (tableExists("subscriber")) {
+                exec(
+                    """
+                    UPDATE ${quoteIdentifier("message_delivery")}
+                    SET ${quoteIdentifier("target_name")} = (
+                        SELECT ${quoteIdentifier("name")}
+                        FROM ${quoteIdentifier("subscriber")}
+                        WHERE ${quoteIdentifier("subscriber")}.${quoteIdentifier("target_key")} =
+                            ${quoteIdentifier("message_delivery")}.${quoteIdentifier("target_key")}
+                          AND TRIM(${quoteIdentifier("subscriber")}.${quoteIdentifier("name")}) <> ''
+                          AND ${quoteIdentifier("subscriber")}.${quoteIdentifier("name")} <>
+                            ${quoteIdentifier("message_delivery")}.${quoteIdentifier("target_id")}
+                          AND ${quoteIdentifier("subscriber")}.${quoteIdentifier("name")} <>
+                            ${quoteIdentifier("message_delivery")}.${quoteIdentifier("target_key")}
+                        LIMIT 1
+                    )
+                    WHERE ${quoteIdentifier("target_name")} IS NULL
+                      AND EXISTS (
+                        SELECT 1
+                        FROM ${quoteIdentifier("subscriber")}
+                        WHERE ${quoteIdentifier("subscriber")}.${quoteIdentifier("target_key")} =
+                            ${quoteIdentifier("message_delivery")}.${quoteIdentifier("target_key")}
+                          AND TRIM(${quoteIdentifier("subscriber")}.${quoteIdentifier("name")}) <> ''
+                          AND ${quoteIdentifier("subscriber")}.${quoteIdentifier("name")} <>
+                            ${quoteIdentifier("message_delivery")}.${quoteIdentifier("target_id")}
+                          AND ${quoteIdentifier("subscriber")}.${quoteIdentifier("name")} <>
+                            ${quoteIdentifier("message_delivery")}.${quoteIdentifier("target_key")}
+                      )
+                    """.trimIndent(),
+                )
+            }
+        }
     }
 )
 

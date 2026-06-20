@@ -95,7 +95,7 @@ public object SubscriberRepository {
         address: TargetAddress,
         name: String,
         avatar: MediaRef? = null,
-        state: EntityState = EntityState.ACTIVE,
+        state: EntityState? = null,
         createUser: Int = 0,
     ): UpsertResult<Subscriber> {
         val existed = findByAddress(address)
@@ -104,7 +104,7 @@ public object SubscriberRepository {
                 address = address,
                 name = name,
                 avatar = avatar ?: existed.avatar,
-                state = state,
+                state = state ?: existed.state,
             )
             val changed = updatedSubscriber != existed
             if (changed) replace(updatedSubscriber)
@@ -117,7 +117,7 @@ public object SubscriberRepository {
                 it.writeAddress(address)
                 it[SubscriberTable.name] = name
                 it[SubscriberTable.avatar] = avatar
-                it[SubscriberTable.state] = state
+                it[SubscriberTable.state] = state ?: EntityState.ACTIVE
                 it[createTime] = now
                 it[SubscriberTable.createUser] = createUser
             }.value
@@ -127,7 +127,7 @@ public object SubscriberRepository {
                     address = address,
                     name = name,
                     avatar = avatar,
-                    state = state,
+                    state = state ?: EntityState.ACTIVE,
                     createTime = now.epochSeconds,
                     createUser = createUser,
                 ),
@@ -138,9 +138,27 @@ public object SubscriberRepository {
     }
 
     public fun ensure(address: TargetAddress, name: String = address.externalId): Subscriber {
+        val existed = findByAddress(address)
+        if (existed != null) {
+            val normalizedName = name.targetDisplayName(address)
+            val updated = existed.copy(
+                name = if (normalizedName != null && existed.name.targetDisplayName(address) == null) {
+                    normalizedName
+                } else {
+                    existed.name
+                },
+            )
+            return if (updated != existed) {
+                replace(updated)
+                findByAddress(address) ?: updated
+            } else {
+                existed
+            }
+        }
+
         return upsert(
             address = address,
-            name = name,
+            name = name.trim().takeIf { it.isNotBlank() } ?: address.externalId,
             state = EntityState.ACTIVE,
             createUser = 0,
         ).value

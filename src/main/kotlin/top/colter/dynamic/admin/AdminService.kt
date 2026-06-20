@@ -103,6 +103,7 @@ import top.colter.dynamic.repository.SourceCursorRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.repository.SubscriptionMutationResult
 import top.colter.dynamic.repository.UpsertResult
+import top.colter.dynamic.repository.targetDisplayName
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -1199,7 +1200,7 @@ public class AdminService(
         val targetProfile = resolveSubscriberTarget(subscriber.address)
             ?: throw NoSuchElementException("未找到消息目标资料：${subscriber.address.stableValue()}")
         val updated = subscriber.copy(
-            name = targetProfile.name.trim().takeIf { it.isNotBlank() } ?: subscriber.address.externalId,
+            name = targetProfile.name.targetDisplayName(subscriber.address) ?: subscriber.name,
             avatar = targetProfile.avatar,
         )
         SubscriberRepository.replace(updated)
@@ -2811,6 +2812,7 @@ private fun MessageDelivery.toDto(message: Message? = null): MessageDeliveryDto 
     platformId = target.platformId.value,
     targetKind = target.kind.name,
     targetId = target.externalId,
+    targetName = targetName,
     targetScopeId = target.scopeId,
     targetThreadId = target.threadId,
     targetAccountId = target.accountId,

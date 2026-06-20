@@ -21,7 +21,7 @@ import top.colter.dynamic.core.data.IncomingProcessingStage
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.SourceUpdate
-import top.colter.dynamic.core.data.Subscriber
+import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.event.PublisherPersistenceMode
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
@@ -42,7 +42,6 @@ import top.colter.dynamic.draw.LinkPreviewRenderer
 import top.colter.dynamic.message.OutboundMessageService
 import top.colter.dynamic.repository.IncomingMessageAuditRepository
 import top.colter.dynamic.repository.IncomingProcessingWriteRequest
-import top.colter.dynamic.repository.SubscriberRepository
 
 internal const val LINK_PARSE_EVENT_LABEL: String = "link-parse"
 internal const val LINK_PARSE_EVENT_SOURCE: String = "main-link-parser"
@@ -238,14 +237,10 @@ public class LinkParseService(
             return LinkParseItemResult.Failed(parsedLink, "动态发布者 ID 缺失")
         }
 
-        val subscriber = SubscriberRepository.ensure(
-            address = context.target,
-            name = context.chatId,
-        )
         val result = sourceUpdatePublisher.publish(
             SourceUpdatePublishRequest(
                 sourcePlugin = LINK_PARSE_EVENT_SOURCE,
-                deliveryTarget = subscriber,
+                deliveryTargetAddress = context.target,
                 deliveryTag = LINK_PARSE_EVENT_LABEL,
                 correlationId = correlationId,
                 update = enrichedUpdate,
@@ -258,7 +253,7 @@ public class LinkParseService(
 
         return LinkParseItemResult.Forwarded(
             parsedLink = parsedLink,
-            subscriber = subscriber,
+            target = context.target,
             deliveryCount = result.deliveryCount,
         )
     }
@@ -683,15 +678,11 @@ public class LinkParseService(
             return LinkParseItemResult.Failed(parsedLink, "链接解析结果为空")
         }
 
-        val subscriber = SubscriberRepository.ensure(
-            address = context.target,
-            name = context.chatId,
-        )
         val result = outboundMessageService.publish(
             OutboundMessagePublishRequest(
                 sourcePlugin = LINK_PARSE_EVENT_SOURCE,
                 messageId = buildLinkParseMessageId(parsedLink),
-                targets = listOf(subscriber.address),
+                targets = listOf(context.target),
                 batches = batches,
                 renderVariant = LINK_PARSE_EVENT_LABEL,
                 correlationId = correlationId?.trim()?.takeIf { it.isNotBlank() },
@@ -699,7 +690,7 @@ public class LinkParseService(
         )
         return LinkParseItemResult.Forwarded(
             parsedLink = parsedLink,
-            subscriber = subscriber,
+            target = context.target,
             deliveryCount = result.newDeliveries.size,
         )
     }
@@ -739,13 +730,9 @@ public class LinkParseService(
         context: CommandContext,
         deliveryCount: Int,
     ): LinkParseItemResult.Forwarded {
-        val subscriber = SubscriberRepository.ensure(
-            address = context.target,
-            name = context.chatId,
-        )
         return LinkParseItemResult.Forwarded(
             parsedLink = parsedLink,
-            subscriber = subscriber,
+            target = context.target,
             deliveryCount = deliveryCount,
         )
     }
@@ -1051,7 +1038,7 @@ internal sealed interface LinkParseItemResult {
 
     data class Forwarded(
         override val parsedLink: ParsedLink,
-        val subscriber: Subscriber,
+        val target: TargetAddress,
         val deliveryCount: Int,
     ) : LinkParseItemResult
 

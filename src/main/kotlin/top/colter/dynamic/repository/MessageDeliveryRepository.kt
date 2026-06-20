@@ -34,6 +34,7 @@ import top.colter.dynamic.core.plugin.MessageDeliveryRequest
 import top.colter.dynamic.table.MessageDeliveryTable
 import top.colter.dynamic.table.MessageOutboxTable
 import top.colter.dynamic.table.MessageSinkReceiptTable
+import top.colter.dynamic.table.SubscriberTable
 import top.colter.dynamic.core.tools.nowInstant
 
 public data class MessageEnqueueResult(
@@ -76,6 +77,7 @@ public object MessageDeliveryRepository {
         val insertedTargetKeys = linkedSetOf<String>()
         val createdMessage = transaction {
             val now = nowInstant()
+            val targetNames = resolveTargetNamesInCurrentTransaction(message.targets)
             val messageInserted = MessageOutboxTable.insertIgnore {
                 it[messageId] = message.id
                 it[MessageOutboxTable.message] = message
@@ -89,7 +91,7 @@ public object MessageDeliveryRepository {
                     it[sourceUpdateKey] = message.sourceUpdateKey
                     it[renderVariant] = message.renderVariant
                     it.writeMessageMetadata(message)
-                    it.writeTarget(target)
+                    it.writeTarget(target, targetNames[target.stableValue()])
                     it[status] = DeliveryStatus.PENDING
                     it[attempts] = 0
                     it[sinkMessageId] = null
@@ -134,12 +136,13 @@ public object MessageDeliveryRepository {
         createMessageOnly(message)
         val now = nowInstant()
         val deliveryId = transaction {
+            val targetName = resolveTargetNameInCurrentTransaction(target)
             MessageDeliveryTable.insert {
                 it[messageId] = message.id
                 it[sourceUpdateKey] = message.sourceUpdateKey
                 it[renderVariant] = message.renderVariant
                 it.writeMessageMetadata(message)
-                it.writeTarget(target)
+                it.writeTarget(target, targetName)
                 it[MessageDeliveryTable.status] = status
                 it[MessageDeliveryTable.attempts] = attempts.coerceAtLeast(0)
                 it[MessageDeliveryTable.sinkMessageId] = sinkMessageId
@@ -723,6 +726,7 @@ private fun MessageDelivery.matchesDeliveryQuery(query: String): Boolean {
         target.platformId.value,
         target.kind.name,
         target.externalId,
+        targetName,
         target.scopeId,
         target.threadId,
         target.accountId,
@@ -804,10 +808,35 @@ private fun Message.transientExpiresAtEpochSeconds(): Long? {
     }
 }
 
-private fun UpdateBuilder<*>.writeTarget(target: TargetAddress) {
+private fun resolveTargetNamesInCurrentTransaction(targets: List<TargetAddress>): Map<String, String> {
+    val targetKeys = targets.map { it.stableValue() }.distinct()
+    if (targetKeys.isEmpty()) return emptyMap()
+    return SubscriberTable
+        .selectAll()
+        .where { SubscriberTable.targetKey inList targetKeys }
+        .mapNotNull { row ->
+            val address = TargetAddress(
+                platformId = PlatformId.of(row[SubscriberTable.platformId]),
+                kind = row[SubscriberTable.kind],
+                externalId = row[SubscriberTable.externalId],
+                scopeId = row[SubscriberTable.scopeId],
+                threadId = row[SubscriberTable.threadId],
+                accountId = row[SubscriberTable.accountId],
+            )
+            row[SubscriberTable.name].targetDisplayName(address)?.let { name -> address.stableValue() to name }
+        }
+        .toMap()
+}
+
+private fun resolveTargetNameInCurrentTransaction(target: TargetAddress): String? {
+    return resolveTargetNamesInCurrentTransaction(listOf(target))[target.stableValue()]
+}
+
+private fun UpdateBuilder<*>.writeTarget(target: TargetAddress, targetName: String? = null) {
     this[MessageDeliveryTable.platformId] = target.platformId.value
     this[MessageDeliveryTable.targetKind] = target.kind
     this[MessageDeliveryTable.targetId] = target.externalId
+    this[MessageDeliveryTable.targetName] = targetName?.take(255)
     this[MessageDeliveryTable.targetKey] = target.stableValue()
     this[MessageDeliveryTable.scopeId] = target.scopeId
     this[MessageDeliveryTable.threadId] = target.threadId
@@ -840,6 +869,7 @@ public fun ResultRow.toMessageDelivery(): MessageDelivery = MessageDelivery(
         threadId = this[MessageDeliveryTable.threadId],
         accountId = this[MessageDeliveryTable.accountId],
     ),
+    targetName = this[MessageDeliveryTable.targetName],
     status = this[MessageDeliveryTable.status],
     attempts = this[MessageDeliveryTable.attempts],
     sinkMessageId = this[MessageDeliveryTable.sinkMessageId],
@@ -851,3 +881,8 @@ public fun ResultRow.toMessageDelivery(): MessageDelivery = MessageDelivery(
     createdAtEpochSeconds = this[MessageDeliveryTable.createdAt].epochSeconds,
     updatedAtEpochSeconds = this[MessageDeliveryTable.updatedAt].epochSeconds,
 )
+
+internal fun String?.targetDisplayName(address: TargetAddress): String? {
+    val normalized = this?.trim()?.takeIf { it.isNotBlank() } ?: return null
+    return normalized.takeIf { it != address.externalId && it != address.stableValue() }
+}
