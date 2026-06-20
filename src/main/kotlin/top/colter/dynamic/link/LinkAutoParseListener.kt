@@ -29,9 +29,18 @@ internal class LinkAutoParseListener(
         val config = configProvider()
         val linkParsing = config.linkParsing
         if (!linkParsing.autoParseEnabled) return
-        if (!shouldAcceptAutoParse(event)) {
-            logBotBlocked(event)
-            return
+        val hasSupportedCandidate = event.hasSupportedLinks
+        if (!hasSupportedCandidate) return
+        when (autoParseRejection(event)) {
+            AutoParseRejection.KNOWN_BOT_SENDER -> {
+                logKnownBotSenderBlocked(event)
+                return
+            }
+            AutoParseRejection.NON_CANONICAL_BOT -> {
+                logBotBlocked(event)
+                return
+            }
+            null -> Unit
         }
 
         val triggerMode = LinkParseTargetConfigRepository.findEffectiveByAddress(event.context.target)?.triggerMode
@@ -49,8 +58,6 @@ internal class LinkAutoParseListener(
             }
         }
         val autoDedupe = dedupe.takeIf { triggerMode == LinkParseTriggerMode.ALWAYS }
-        val hasSupportedCandidate = event.hasSupportedLinks
-        if (!hasSupportedCandidate) return
         val finalResult = try {
             sendProgressOnce()
             linkParseService.parseAndDispatch(
@@ -124,8 +131,22 @@ internal class LinkAutoParseListener(
         }
     }
 
-    private suspend fun shouldAcceptAutoParse(event: IncomingTextMessageEvent): Boolean {
-        return incomingBotAccountSelector.select(event.context).acceptsCanonical()
+    private suspend fun autoParseRejection(event: IncomingTextMessageEvent): AutoParseRejection? {
+        if (incomingBotAccountSelector.isKnownBotSender(event.context)) {
+            return AutoParseRejection.KNOWN_BOT_SENDER
+        }
+        if (!incomingBotAccountSelector.select(event.context).acceptsCanonical()) {
+            return AutoParseRejection.NON_CANONICAL_BOT
+        }
+        return null
+    }
+
+    private fun logKnownBotSenderBlocked(event: IncomingTextMessageEvent) {
+        if (!event.rawText.contains("http://") && !event.rawText.contains("https://")) return
+        val context = event.context
+        autoParseLogger.debug {
+            "链接自动解析未触发：消息发送者是已知 Bot target=${context.target.stableValue()} senderId=${context.senderId} botAccountId=${context.botAccountId ?: "未知"}"
+        }
     }
 
     private fun logBotBlocked(event: IncomingTextMessageEvent) {
@@ -186,5 +207,10 @@ internal class LinkAutoParseListener(
     ): top.colter.dynamic.core.data.TargetAddress {
         val normalized = accountId?.trim()?.takeIf { it.isNotBlank() } ?: return this
         return copy(accountId = normalized)
+    }
+
+    private enum class AutoParseRejection {
+        KNOWN_BOT_SENDER,
+        NON_CANONICAL_BOT,
     }
 }

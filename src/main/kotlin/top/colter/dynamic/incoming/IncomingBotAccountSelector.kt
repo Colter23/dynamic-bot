@@ -25,6 +25,18 @@ public class IncomingBotAccountSelector(
     private val primaryBotAccountResolver: suspend (TargetAddress) -> String? = { null },
     private val knownBotAccountIdsResolver: suspend (TargetAddress) -> Set<String> = { emptySet() },
 ) {
+    suspend fun isKnownBotSender(context: CommandContext): Boolean {
+        val sender = context.senderId.trim().takeIf { it.isNotBlank() } ?: return false
+        val currentBot = context.botAccountId
+            ?.trim()
+            ?.takeIf { it.isNotBlank() }
+        if (sender == currentBot) return true
+
+        return knownBotAccountIdsResolver(context.target)
+            .mapNotNullTo(linkedSetOf()) { it.trim().takeIf(String::isNotBlank) }
+            .contains(sender)
+    }
+
     suspend fun select(context: CommandContext): IncomingBotAccountSelection {
         val currentBot = context.botAccountId
             ?.trim()

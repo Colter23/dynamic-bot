@@ -664,6 +664,73 @@ class LinkParseServiceTest {
     }
 
     @Test
+    fun `auto parser should ignore current bot messages`() = runBlocking {
+        initDb("auto-ignore-current-bot")
+        val resolver = FakeLinkResolver()
+        val sourceUpdates = RecordingSourceUpdatePublisher()
+        val listener = LinkAutoParseListener(
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        fallbackTriggerMode = LinkParseTriggerMode.ALWAYS,
+                    ),
+                )
+            },
+            linkParseService = LinkParseService(
+                resolversProvider = { listOf(resolver) },
+                sourceUpdatePublisher = sourceUpdates,
+            ),
+            incomingBotAccountSelector = IncomingBotAccountSelector(primaryBotAccountResolver = { "42" }),
+        )
+
+        listener.onMessage(
+            incomingTextEvent(
+                "动态推送 https://t.bilibili.com/1",
+                senderId = "42",
+                botAccountId = "42",
+            ),
+        )
+
+        assertEquals(0, resolver.resolveCalls)
+        assertNull(withTimeoutOrNull(300) { sourceUpdates.receive() })
+    }
+
+    @Test
+    fun `auto parser should ignore known bot messages from same target`() = runBlocking {
+        initDb("auto-ignore-known-bot")
+        val resolver = FakeLinkResolver()
+        val sourceUpdates = RecordingSourceUpdatePublisher()
+        val listener = LinkAutoParseListener(
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        fallbackTriggerMode = LinkParseTriggerMode.ALWAYS,
+                    ),
+                )
+            },
+            linkParseService = LinkParseService(
+                resolversProvider = { listOf(resolver) },
+                sourceUpdatePublisher = sourceUpdates,
+            ),
+            incomingBotAccountSelector = IncomingBotAccountSelector(
+                primaryBotAccountResolver = { "42" },
+                knownBotAccountIdsResolver = { setOf("42", "24") },
+            ),
+        )
+
+        listener.onMessage(
+            incomingTextEvent(
+                "另一个 Bot 发出的链接 https://t.bilibili.com/1",
+                senderId = "24",
+                botAccountId = "42",
+            ),
+        )
+
+        assertEquals(0, resolver.resolveCalls)
+        assertNull(withTimeoutOrNull(300) { sourceUpdates.receive() })
+    }
+
+    @Test
     fun `video preview should enqueue preview before downloading and video separately when enabled`() = runBlocking {
         initDb("video-download")
         val cacheRoot = createTempDirectory("dynamic-bot-link-video-cache")
@@ -1399,6 +1466,7 @@ class LinkParseServiceTest {
     private fun incomingTextEvent(
         rawText: String,
         targetExternalId: String = "100",
+        senderId: String = "sender",
         botAccountId: String? = null,
         mentionedAccountIds: Set<String> = emptySet(),
         hasSupportedLinks: Boolean = true,
@@ -1407,7 +1475,7 @@ class LinkParseServiceTest {
             platform = "onebot",
             kind = TargetKind.GROUP,
             externalId = targetExternalId,
-            senderId = "sender",
+            senderId = senderId,
             botAccountId = botAccountId,
             mentionedAccountIds = mentionedAccountIds,
         )
