@@ -41,6 +41,7 @@ import top.colter.dynamic.core.data.PublisherKind
 import top.colter.dynamic.core.data.PublisherLiveStatus
 import top.colter.dynamic.core.data.SourceCursor
 import top.colter.dynamic.core.data.Subscriber
+import top.colter.dynamic.core.data.SubscriberState
 import top.colter.dynamic.core.data.Subscription
 import top.colter.dynamic.core.data.SubscriptionEventKind
 import top.colter.dynamic.core.data.SubscriptionPolicy
@@ -1141,9 +1142,9 @@ public class AdminService(
             ?: targetProfile?.name?.trim()?.takeIf { it.isNotBlank() }
             ?: existed?.name
             ?: address.externalId
-        val entityState = request.state?.let { parseEnum<EntityState>(it, "state") }
+        val entityState = request.state?.let { parseSubscriberState(it) }
             ?: existed?.state
-            ?: EntityState.ACTIVE
+            ?: SubscriberState.ACTIVE
         val upsert = SubscriberRepository.upsert(
             address = address,
             name = name,
@@ -1171,7 +1172,7 @@ public class AdminService(
         val subscriber = SubscriberRepository.findById(id) ?: throw NoSuchElementException("未找到消息目标：$id")
         val updated = subscriber.copy(
             name = request.name?.trim()?.takeIf { it.isNotBlank() } ?: subscriber.name,
-            state = request.state?.let { parseEnum<EntityState>(it, "state") } ?: subscriber.state,
+            state = request.state?.let { parseSubscriberState(it) } ?: subscriber.state,
         )
         SubscriberRepository.replace(updated)
         if (request.clearLinkParseTrigger) {
@@ -1448,7 +1449,7 @@ public class AdminService(
                 id = 0,
                 address = targetAddress,
                 name = targetAddress.externalId,
-                state = EntityState.ACTIVE,
+                state = SubscriberState.ACTIVE,
                 createTime = 0,
                 createUser = 0,
             ),
@@ -3037,6 +3038,12 @@ private inline fun <reified T : Enum<T>> parseEnum(value: String, fieldName: Str
         ?: throw IllegalArgumentException(
             "$fieldName 无效：$value，可选值=${enumValues<T>().joinToString("|") { it.name }}",
         )
+}
+
+private fun parseSubscriberState(value: String): SubscriberState {
+    val normalized = value.trim().uppercase()
+    if (normalized == "DISABLED") return SubscriberState.DELIVERY_PAUSED
+    return parseEnum<SubscriberState>(value, "state")
 }
 
 private fun parseLinkParseTriggerModeOrNull(value: String?): LinkParseTriggerMode? {

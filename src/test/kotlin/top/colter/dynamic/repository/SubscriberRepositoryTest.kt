@@ -4,9 +4,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
+import top.colter.dynamic.core.data.SubscriberState
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.initTestDatabase
 import top.colter.dynamic.testTargetAddress
@@ -98,22 +98,52 @@ class SubscriberRepositoryTest {
         initTestDatabase("dynamic-bot-core-subscriber-upsert-preserve-state-db")
         val address = testTargetAddress(platformId = "onebot", kind = TargetKind.GROUP, externalId = "10001")
 
-        val disabled = SubscriberRepository.upsert(
+        val paused = SubscriberRepository.upsert(
             address = address,
             name = "测试群",
-            state = EntityState.DISABLED,
+            state = SubscriberState.DELIVERY_PAUSED,
         )
         val refreshed = SubscriberRepository.upsert(address = address, name = "测试群新名称")
         val reenabled = SubscriberRepository.upsert(
             address = address,
             name = "测试群新名称",
-            state = EntityState.ACTIVE,
+            state = SubscriberState.ACTIVE,
         )
 
-        assertEquals(EntityState.DISABLED, disabled.value.state)
-        assertEquals(EntityState.DISABLED, refreshed.value.state)
-        assertEquals(EntityState.ACTIVE, reenabled.value.state)
-        assertEquals(EntityState.ACTIVE, SubscriberRepository.findByAddress(address)?.state)
+        assertEquals(SubscriberState.DELIVERY_PAUSED, paused.value.state)
+        assertEquals(SubscriberState.DELIVERY_PAUSED, refreshed.value.state)
+        assertEquals(SubscriberState.ACTIVE, reenabled.value.state)
+        assertEquals(SubscriberState.ACTIVE, SubscriberRepository.findByAddress(address)?.state)
+    }
+
+    @Test
+    fun writesShouldKeepSubscriberStateCacheInSync() {
+        initTestDatabase("dynamic-bot-core-subscriber-state-cache-db")
+        val address = testTargetAddress(platformId = "onebot", kind = TargetKind.GROUP, externalId = "10001")
+
+        SubscriberRepository.upsert(
+            address = address,
+            name = "测试群",
+            state = SubscriberState.DELIVERY_PAUSED,
+        )
+        assertEquals(SubscriberState.DELIVERY_PAUSED, SubscriberStateCache.stateOf(address))
+
+        SubscriberRepository.upsert(
+            address = address,
+            name = "测试群",
+            state = SubscriberState.ACTIVE,
+        )
+        assertEquals(SubscriberState.ACTIVE, SubscriberStateCache.stateOf(address))
+
+        SubscriberRepository.upsert(
+            address = address,
+            name = "测试群",
+            state = SubscriberState.BLOCKED,
+        )
+        assertEquals(SubscriberState.BLOCKED, SubscriberStateCache.stateOf(address))
+
+        SubscriberRepository.deleteById(SubscriberRepository.findByAddress(address)!!.id)
+        assertEquals(SubscriberState.ACTIVE, SubscriberStateCache.stateOf(address))
     }
 
     @Test
@@ -142,19 +172,19 @@ class SubscriberRepositoryTest {
     }
 
     @Test
-    fun ensureShouldPreserveExistingDisabledState() {
+    fun ensureShouldPreserveExistingDeliveryPausedState() {
         initTestDatabase("dynamic-bot-core-subscriber-ensure-preserve-state-db")
         val address = testTargetAddress(platformId = "onebot", kind = TargetKind.GROUP, externalId = "10001")
 
         val created = SubscriberRepository.upsert(
             address = address,
             name = "测试群",
-            state = EntityState.DISABLED,
+            state = SubscriberState.DELIVERY_PAUSED,
         )
         val ensured = SubscriberRepository.ensure(address = address, name = "测试群")
 
         assertEquals(created.value.id, ensured.id)
-        assertEquals(EntityState.DISABLED, ensured.state)
-        assertEquals(EntityState.DISABLED, SubscriberRepository.findByAddress(address)?.state)
+        assertEquals(SubscriberState.DELIVERY_PAUSED, ensured.state)
+        assertEquals(SubscriberState.DELIVERY_PAUSED, SubscriberRepository.findByAddress(address)?.state)
     }
 }

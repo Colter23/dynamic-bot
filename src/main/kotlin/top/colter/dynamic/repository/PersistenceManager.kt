@@ -63,6 +63,7 @@ public object PersistenceManager {
                 runDatabaseMigrations()
                 executeRequiredSchemaStatements(*SCHEMA_TABLES)
             }
+            SubscriberStateCache.reload()
 
             initialized = true
             currentPath = dbPath
@@ -460,6 +461,20 @@ private val DATABASE_MIGRATIONS: List<DatabaseMigration> = listOf(
                     """.trimIndent(),
                 )
             }
+        }
+    },
+    DatabaseMigration(
+        id = "subscriber-state-delivery-paused",
+        description = "消息目标状态拆分为投递暂停和屏蔽",
+    ) {
+        if (tableExists("subscriber") && columnExists("subscriber", "state")) {
+            exec(
+                """
+                UPDATE ${quoteIdentifier("subscriber")}
+                SET ${quoteIdentifier("state")} = 'DELIVERY_PAUSED'
+                WHERE ${quoteIdentifier("state")} = 'DISABLED'
+                """.trimIndent(),
+            )
         }
     }
 )

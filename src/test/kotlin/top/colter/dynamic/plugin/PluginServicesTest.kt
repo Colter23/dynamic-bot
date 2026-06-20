@@ -4,11 +4,11 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import top.colter.dynamic.initTestDatabase
-import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LiveStatus
 import top.colter.dynamic.core.data.PublisherLiveStatus
 import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.Subscriber
+import top.colter.dynamic.core.data.SubscriberState
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
@@ -63,7 +63,7 @@ class PluginServicesTest {
                 id = 10,
                 address = testTargetAddress(platformId = "onebot", kind = TargetKind.GROUP, externalId = "100"),
                 name = "group",
-                state = EntityState.ACTIVE,
+                state = SubscriberState.ACTIVE,
                 createTime = 1,
                 createUser = 1,
             ),

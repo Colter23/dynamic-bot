@@ -20,6 +20,7 @@ import top.colter.dynamic.core.data.IncomingProcessingResult
 import top.colter.dynamic.core.data.IncomingProcessingStage
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.MessageDeliveryPolicy
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.event.PublisherPersistenceMode
@@ -686,6 +687,7 @@ public class LinkParseService(
                 batches = batches,
                 renderVariant = LINK_PARSE_EVENT_LABEL,
                 correlationId = correlationId?.trim()?.takeIf { it.isNotBlank() },
+                deliveryPolicy = MessageDeliveryPolicy(requireActiveTarget = false),
             ),
         )
         return LinkParseItemResult.Forwarded(

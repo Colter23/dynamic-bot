@@ -30,6 +30,7 @@ import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
+import top.colter.dynamic.core.data.SubscriberState
 import top.colter.dynamic.core.data.SubscriptionEventKind
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetKind
@@ -156,6 +157,63 @@ class SourceUpdateDynamicTest {
         assertNotEquals(firstEvent.message.id, secondEvent.message.id)
         assertTrue(firstEvent.message.id.contains(":default:link-parse:"))
         assertTrue(secondEvent.message.id.contains(":default:link-parse:"))
+    }
+
+    @Test
+    fun shouldAllowLinkParseDeliveryToDeliveryPausedTarget() = runBlocking {
+        initDb("dynamic-listener-link-parse-paused")
+        val eventBus = EventBus()
+        val publisher = createPublisher()
+        val subscriber = createSubscriber()
+        SubscriberRepository.replace(subscriber.copy(state = SubscriberState.DELIVERY_PAUSED))
+        val pausedSubscriber = assertNotNull(SubscriberRepository.findByAddress(subscriber.address))
+        val listener = SourceUpdateProcessor(
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "{name} {link}")),
+            eventBus = eventBus,
+        )
+        val received = captureMessageEvent(eventBus)
+
+        val result = listener.process(
+            SourceUpdatePublishRequest(
+                sourcePlugin = "test",
+                deliveryTarget = pausedSubscriber,
+                deliveryTag = LINK_PARSE_EVENT_LABEL,
+                update = demoDynamic(publisher),
+            ),
+        )
+        val event = withTimeout(3_000) { received.await() }
+
+        assertEquals(SourceUpdatePublishStatus.ENQUEUED, result.status)
+        assertEquals(listOf(pausedSubscriber.address), event.message.targets)
+        assertEquals(false, event.message.deliveryPolicy.requireActiveTarget)
+    }
+
+    @Test
+    fun shouldBlockLinkParseDeliveryToBlockedTargetAddress() = runBlocking {
+        initDb("dynamic-listener-link-parse-blocked-address")
+        val eventBus = EventBus()
+        val publisher = createPublisher()
+        val subscriber = createSubscriber()
+        SubscriberRepository.replace(subscriber.copy(state = SubscriberState.BLOCKED))
+        val blockedSubscriber = assertNotNull(SubscriberRepository.findByAddress(subscriber.address))
+        val listener = SourceUpdateProcessor(
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "{name} {link}")),
+            eventBus = eventBus,
+        )
+        val received = captureMessageEvent(eventBus)
+
+        val result = listener.process(
+            SourceUpdatePublishRequest(
+                sourcePlugin = "test",
+                deliveryTargetAddress = blockedSubscriber.address,
+                deliveryTag = LINK_PARSE_EVENT_LABEL,
+                update = demoDynamic(publisher),
+            ),
+        )
+
+        assertEquals(SourceUpdatePublishStatus.IGNORED, result.status)
+        assertNull(withTimeoutOrNull(300) { received.await() })
+        assertEquals(0, MessageDeliveryRepository.countAll())
     }
 
     @Test
@@ -322,7 +380,7 @@ class SourceUpdateDynamicTest {
                 id = id,
                 address = address,
                 name = "group",
-                state = EntityState.ACTIVE,
+                state = SubscriberState.ACTIVE,
                 createTime = 1,
                 createUser = 1,
             ),

@@ -19,6 +19,7 @@ import top.colter.dynamic.event.IncomingTextMessageEvent
 import top.colter.dynamic.link.LinkParseService
 import top.colter.dynamic.repository.IncomingAuditWriteRequest
 import top.colter.dynamic.repository.IncomingMessageAuditRepository
+import top.colter.dynamic.repository.SubscriberStateCache
 
 internal fun interface IncomingMessageAuditRecorder {
     fun recordMessage(request: IncomingAuditWriteRequest): Boolean
@@ -36,6 +37,8 @@ internal class IncomingMessagePipeline(
 ) {
     suspend fun handle(sourcePlugin: String, request: IncomingMessagePublishRequest) {
         val message = request.message
+        if (SubscriberStateCache.stateOf(message.target).blocksInbound) return
+
         val traceId = request.traceId.trim().takeIf { it.isNotBlank() }
             ?: UUID.randomUUID().toString()
         val replyToMessageId = request.replyToMessageId

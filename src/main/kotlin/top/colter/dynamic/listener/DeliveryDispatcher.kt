@@ -27,6 +27,7 @@ import top.colter.dynamic.media.OutboundMediaService
 import top.colter.dynamic.plugin.PluginHandle
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.MessageSinkReceiptRepository
+import top.colter.dynamic.repository.SubscriberStateCache
 
 private val logger = loggerFor<DeliveryDispatcher>()
 
@@ -90,6 +91,8 @@ public class DeliveryDispatcher(
     }
 
     public suspend fun sendNow(request: MessageSendRequest): MessageSendResult {
+        targetStateFailure(request)?.let { return it }
+
         val routed = resolveRoutedSinks(request.target)
         if (routed.routedSinkIds.isNotEmpty()) {
             val (sendRequest, candidates) = prepareRoutedSendRequest(request, routed.candidates)
@@ -178,6 +181,10 @@ public class DeliveryDispatcher(
             return DeliveryOutcome.FAILED
         }
 
+        targetStateFailure(request.toSendRequest())?.let { result ->
+            return handleSendFailure(request, result, config)
+        }
+
         logger.debug {
             "正在发送消息：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，attempt=${request.delivery.attempts}"
         }
@@ -255,6 +262,17 @@ public class DeliveryDispatcher(
 
     private fun invalidateMediaRoute(candidate: MessageSinkRouteCandidate) {
         outboundMediaService?.invalidateRoute(mediaRouteContext(candidate))
+    }
+
+    private fun targetStateFailure(request: MessageSendRequest): MessageSendResult.Failed? {
+        val state = SubscriberStateCache.stateOf(request.target)
+        if (state.blocksInbound) {
+            return MessageSendResult.Failed("消息目标已屏蔽：${request.target.stableValue()}", retryable = false)
+        }
+        if (request.message.deliveryPolicy.requireActiveTarget && !state.allowsActiveDelivery) {
+            return MessageSendResult.Failed("消息目标已暂停投递：${request.target.stableValue()}", retryable = false)
+        }
+        return null
     }
 
     private fun handleSendResult(

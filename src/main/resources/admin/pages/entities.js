@@ -229,6 +229,29 @@ function entityStatePill(value) {
   return `<span class="pill ${value === "ACTIVE" ? "ok" : "bad"}">${esc(entityStateText(value))}</span>`;
 }
 
+function subscriberStateText(value) {
+  const map = {
+    ACTIVE: "正常",
+    DELIVERY_PAUSED: "暂停投递",
+    BLOCKED: "黑名单",
+    DISABLED: "暂停投递",
+  };
+  return map[value] || value || "-";
+}
+
+function subscriberStateOptions(selected) {
+  const normalized = selected === "DISABLED" ? "DELIVERY_PAUSED" : selected;
+  return ["ACTIVE", "DELIVERY_PAUSED", "BLOCKED"].map(value =>
+    `<option value="${value}"${value === normalized ? " selected" : ""}>${esc(subscriberStateText(value))}</option>`
+  ).join("");
+}
+
+function subscriberStatePill(value) {
+  const normalized = value === "DISABLED" ? "DELIVERY_PAUSED" : value;
+  const klass = normalized === "ACTIVE" ? "ok" : normalized === "DELIVERY_PAUSED" ? "warn" : "bad";
+  return `<span class="pill ${klass}">${esc(subscriberStateText(value))}</span>`;
+}
+
 function linkParseCell(target) {
   const source = target.linkParseConfigSource === "CUSTOM" ? "当前目标配置" : "全局回退";
   return cell(linkParseModeLabel(target.effectiveLinkParseTriggerMode), source);
@@ -251,12 +274,14 @@ function normalizeEntityFilters(scope, rows) {
 function entityFilterBar(scope, rows, filteredRows) {
   const platformKey = `${scope}Platform`;
   const stateKey = `${scope}State`;
+  const stateDefaults = scope === "subscriber" ? ["ACTIVE", "DELIVERY_PAUSED", "BLOCKED"] : ["ACTIVE", "DISABLED"];
+  const stateText = scope === "subscriber" ? subscriberStateText : entityStateText;
   const disabled = entityFilters[platformKey] || entityFilters[stateKey] ? "" : " disabled";
   return `<div class="entity-filter-bar">
     <span class="entity-filter-title">筛选</span>
     <div class="entity-filter-controls">
       <select data-entity-filter="${attr(platformKey)}">${filterOptions("全部平台", uniqueValues(rows, "platformId"), entityFilters[platformKey])}</select>
-      <select data-entity-filter="${attr(stateKey)}">${filterOptions("全部状态", uniqueValues(rows, "state", ["ACTIVE", "DISABLED"]), entityFilters[stateKey], entityStateText)}</select>
+      <select data-entity-filter="${attr(stateKey)}">${filterOptions("全部状态", uniqueValues(rows, "state", stateDefaults), entityFilters[stateKey], stateText)}</select>
       <button type="button" class="entity-filter-clear" data-entity-filter-reset="${attr(scope)}"${disabled}>清除</button>
     </div>
     <span class="entity-filter-summary">显示 ${filteredRows.length} / ${rows.length}</span>
@@ -320,7 +345,7 @@ async function loadEntities(force) {
           { title: "目标", render: s => entitySubscriberCell(s) },
           { title: "链接解析", render: s => linkParseCell(s) },
           { title: "订阅", render: s => subscriptionCountButton("subscriber-subscriptions", s.id, s.subscriptionCount, "查看订阅发布者") },
-          { title: "状态", render: s => entityStatePill(s.state) },
+          { title: "状态", render: s => subscriberStatePill(s.state) },
           { title: "创建时间", render: s => `<span class="sub-line">${fmtTime(s.createTime)}</span>` },
           { title: "操作", render: s => `<div class="row-actions"><button class="entity-refresh-button" data-action="refresh-subscriber-profile" data-id="${s.id}" title="刷新资料">↻</button><button class="entity-detail-button" data-action="subscriber-detail" data-id="${s.id}">详情</button><button data-action="edit-subscriber" data-id="${s.id}">编辑</button><button class="danger" data-action="delete-subscriber" data-id="${s.id}">删除</button></div>` }
         ])}
@@ -680,7 +705,7 @@ async function openSubscriberDetail(id) {
         ${detailItem("平台", item.platformId)}
         ${detailItem("类型", label(item.targetKind))}
         ${detailItem("目标 ID", item.externalId, true)}
-        ${detailItem("状态", entityStateText(item.state))}
+        ${detailItem("状态", subscriberStateText(item.state))}
         ${detailItem("订阅数量", item.subscriptionCount || 0)}
         ${detailItem("显示名称", item.name)}
         ${detailItem("创建用户", item.createUser)}
@@ -1119,7 +1144,7 @@ async function openEditSubscriber(id) {
   const currentLinkParse = item.linkParseConfigSource === "CUSTOM" ? item.linkParseTriggerMode : "INHERIT";
   openModal("编辑消息目标", `
     <div class="form-grid single">
-      <div class="field"><label>状态</label><select id="entityState">${entityStateOptions(item.state)}</select></div>
+      <div class="field"><label>状态</label><select id="entityState">${subscriberStateOptions(item.state)}</select></div>
       <div class="field"><label>链接解析</label><select id="subscriberLinkParse">${linkParseModeOptions(currentLinkParse)}</select></div>
       <div class="field full"><span class="inline-note">选择“使用全局回退”会删除当前消息目标的单独链接解析配置。当前生效：${esc(linkParseModeLabel(item.effectiveLinkParseTriggerMode))}</span></div>
     </div>

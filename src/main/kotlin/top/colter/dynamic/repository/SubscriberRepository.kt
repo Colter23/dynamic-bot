@@ -2,6 +2,7 @@
 
 import kotlin.time.Instant
 import org.jetbrains.exposed.v1.core.ResultRow
+import org.jetbrains.exposed.v1.core.neq
 import org.jetbrains.exposed.v1.core.eq
 import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.statements.UpdateBuilder
@@ -11,16 +12,16 @@ import org.jetbrains.exposed.v1.jdbc.insertAndGetId
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
 import org.jetbrains.exposed.v1.jdbc.update
-import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.Subscriber
+import top.colter.dynamic.core.data.SubscriberState
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.table.SubscriberTable
 import top.colter.dynamic.core.tools.nowInstant
 
 public object SubscriberRepository {
     public fun create(subscriber: Subscriber): Int {
-        return transaction {
+        val createdId = transaction {
             SubscriberTable.insert {
                 it[id] = subscriber.id
                 it.writeAddress(subscriber.address)
@@ -32,10 +33,13 @@ public object SubscriberRepository {
             }
             subscriber.id
         }
+        SubscriberStateCache.update(subscriber.address, subscriber.state)
+        return createdId
     }
 
     public fun replace(subscriber: Subscriber): Boolean {
-        return transaction {
+        val previous = findById(subscriber.id)
+        val replaced = transaction {
             SubscriberTable.update({ SubscriberTable.id eq subscriber.id }) {
                 it.writeAddress(subscriber.address)
                 it[name] = subscriber.name
@@ -45,6 +49,13 @@ public object SubscriberRepository {
                 it[createUser] = subscriber.createUser
             } > 0
         }
+        if (replaced) {
+            if (previous?.address != null && previous.address != subscriber.address) {
+                SubscriberStateCache.remove(previous.address)
+            }
+            SubscriberStateCache.update(subscriber.address, subscriber.state)
+        }
+        return replaced
     }
 
     public fun findById(id: Int): Subscriber? {
@@ -59,10 +70,24 @@ public object SubscriberRepository {
         }
     }
 
-    public fun deleteById(id: Int): Boolean {
+    public fun findNonActiveStates(): Map<String, SubscriberState> {
         return transaction {
+            SubscriberTable
+                .selectAll()
+                .where { SubscriberTable.state neq SubscriberState.ACTIVE }
+                .associate { row -> row[SubscriberTable.targetKey] to row[SubscriberTable.state] }
+        }
+    }
+
+    public fun deleteById(id: Int): Boolean {
+        val existing = findById(id)
+        val deleted = transaction {
             SubscriberTable.deleteWhere { SubscriberTable.id eq id } > 0
         }
+        if (deleted && existing != null) {
+            SubscriberStateCache.remove(existing.address)
+        }
+        return deleted
     }
 
     public fun findByIds(ids: Collection<Int>): List<Subscriber> {
@@ -95,7 +120,7 @@ public object SubscriberRepository {
         address: TargetAddress,
         name: String,
         avatar: MediaRef? = null,
-        state: EntityState? = null,
+        state: SubscriberState? = null,
         createUser: Int = 0,
     ): UpsertResult<Subscriber> {
         val existed = findByAddress(address)
@@ -111,13 +136,13 @@ public object SubscriberRepository {
             return UpsertResult(updatedSubscriber, created = false, updated = changed)
         }
 
-        return transaction {
+        val result = transaction {
             val now = nowInstant()
             val id = SubscriberTable.insertAndGetId {
                 it.writeAddress(address)
                 it[SubscriberTable.name] = name
                 it[SubscriberTable.avatar] = avatar
-                it[SubscriberTable.state] = state ?: EntityState.ACTIVE
+                it[SubscriberTable.state] = state ?: SubscriberState.ACTIVE
                 it[createTime] = now
                 it[SubscriberTable.createUser] = createUser
             }.value
@@ -127,7 +152,7 @@ public object SubscriberRepository {
                     address = address,
                     name = name,
                     avatar = avatar,
-                    state = state ?: EntityState.ACTIVE,
+                    state = state ?: SubscriberState.ACTIVE,
                     createTime = now.epochSeconds,
                     createUser = createUser,
                 ),
@@ -135,6 +160,8 @@ public object SubscriberRepository {
                 updated = false,
             )
         }
+        SubscriberStateCache.update(result.value.address, result.value.state)
+        return result
     }
 
     public fun ensure(address: TargetAddress, name: String = address.externalId): Subscriber {
@@ -159,11 +186,14 @@ public object SubscriberRepository {
         return upsert(
             address = address,
             name = name.trim().takeIf { it.isNotBlank() } ?: address.externalId,
-            state = EntityState.ACTIVE,
+            state = SubscriberState.ACTIVE,
             createUser = 0,
         ).value
     }
 }
+
+public val Subscriber.isDeliveryAllowed: Boolean
+    get() = state.allowsActiveDelivery
 
 private fun UpdateBuilder<*>.writeAddress(address: TargetAddress) {
     this[SubscriberTable.platformId] = address.platformId.value

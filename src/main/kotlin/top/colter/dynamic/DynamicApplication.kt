@@ -388,6 +388,7 @@ public object DynamicApplication : CoroutineScope {
         return MessageDeliveryPolicy(
             retry = retry && recordPolicy.retry,
             expiresAtEpochSeconds = expiresAt,
+            requireActiveTarget = true,
         )
     }
 
@@ -415,6 +416,7 @@ public object DynamicApplication : CoroutineScope {
                     kind = OutboundMessageKind.COMMAND_RESULT,
                     replyToMessageId = event.inReplyTo,
                     correlationId = event.traceId,
+                    deliveryPolicy = MessageDeliveryPolicy(requireActiveTarget = false),
                 ),
             )
             if (!result.accepted) {

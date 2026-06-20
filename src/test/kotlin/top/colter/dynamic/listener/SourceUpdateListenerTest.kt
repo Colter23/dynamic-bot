@@ -22,6 +22,7 @@ import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
+import top.colter.dynamic.core.data.SubscriberState
 import top.colter.dynamic.core.data.SubscriptionEventKind
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetKind
@@ -197,7 +198,7 @@ class SourceUpdateProcessorTest {
                 id = 10,
                 address = testTargetAddress(kind = TargetKind.GROUP, externalId = "100"),
                 name = "group",
-                state = EntityState.ACTIVE,
+                state = SubscriberState.ACTIVE,
                 createTime = 1,
                 createUser = 1,
             ),

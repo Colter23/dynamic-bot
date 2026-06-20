@@ -11,9 +11,9 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.test.AfterTest
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.Subscriber
+import top.colter.dynamic.core.data.SubscriberState
 import top.colter.dynamic.core.data.Subscription
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.event.EventBus
@@ -77,7 +77,7 @@ class PluginManagerSubscriptionEventTest {
             id = 2,
             address = testTargetAddress(kind = TargetKind.GROUP, externalId = "100"),
             name = "group",
-            state = EntityState.ACTIVE,
+            state = SubscriberState.ACTIVE,
             createTime = 1,
             createUser = 1,
         )

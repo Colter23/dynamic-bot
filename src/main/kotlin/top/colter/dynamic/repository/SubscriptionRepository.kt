@@ -70,7 +70,7 @@ public object SubscriptionRepository {
 
         val subscribersById = SubscriberRepository
             .findByIds(subscriptions.map { it.subscriberId }.distinct())
-            .filter { it.state == EntityState.ACTIVE }
+            .filter { it.isDeliveryAllowed }
             .associateBy { it.id }
         return subscriptions.mapNotNull { subscription ->
             subscribersById[subscription.subscriberId]?.let { subscriber ->
@@ -221,7 +221,7 @@ public object SubscriptionRepository {
                 .selectAll()
                 .where { SubscriberTable.id inList subscriberIds }
                 .map { it.toSubscriber() }
-                .filter { it.state == EntityState.ACTIVE }
+                .filter { it.isDeliveryAllowed }
                 .associateBy { it.id }
 
             val subscriptionsByPublisherId = subscriptionRows

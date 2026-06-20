@@ -27,6 +27,7 @@ import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.MessageDeliveryPolicy
 import top.colter.dynamic.core.data.PlatformId
+import top.colter.dynamic.core.data.SubscriberState
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.plugin.AccountRoutedMessageSinkPlugin
@@ -46,6 +47,7 @@ import top.colter.dynamic.plugin.PluginState
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.MessageSinkReceiptRepository
 import top.colter.dynamic.repository.PersistenceManager
+import top.colter.dynamic.repository.SubscriberStateCache
 import top.colter.dynamic.testTargetAddress
 
 class DeliveryDispatcherTest {
@@ -266,6 +268,79 @@ class DeliveryDispatcherTest {
         assertEquals(DeliveryStatus.FAILED, delivery.status)
         assertEquals(1, delivery.attempts)
         assertTrue(delivery.lastError.orEmpty().contains("过期"))
+    }
+
+    @Test
+    fun `delivery paused target should reject active delivery without calling sink`() = runBlocking {
+        initDb("delivery-paused-active-policy")
+        val sink = RecordingSink()
+        val target = testTargetAddress(platformId = "qq", kind = TargetKind.GROUP, externalId = "10001")
+        SubscriberStateCache.update(target, SubscriberState.DELIVERY_PAUSED)
+        val message = testMessage("message-paused", target)
+        MessageDeliveryRepository.enqueue(message)
+
+        try {
+            val stats = dispatcher(sink).dispatchDue()
+
+            assertEquals(1, stats.failed)
+            assertEquals(emptyList(), sink.sentMessageIds)
+            val delivery = MessageDeliveryRepository.findByMessageId(message.id).single()
+            assertEquals(DeliveryStatus.FAILED, delivery.status)
+            assertTrue(delivery.lastError.orEmpty().contains("暂停投递"))
+        } finally {
+            SubscriberStateCache.remove(target)
+        }
+    }
+
+    @Test
+    fun `delivery paused target should allow interaction feedback policy`() = runBlocking {
+        initDb("delivery-paused-feedback-policy")
+        val sink = RecordingSink()
+        val target = testTargetAddress(platformId = "qq", kind = TargetKind.GROUP, externalId = "10001")
+        SubscriberStateCache.update(target, SubscriberState.DELIVERY_PAUSED)
+        val message = testMessage(
+            id = "message-paused-feedback",
+            target = target,
+            deliveryPolicy = MessageDeliveryPolicy(requireActiveTarget = false),
+        )
+        MessageDeliveryRepository.enqueue(message)
+
+        try {
+            val stats = dispatcher(sink).dispatchDue()
+
+            assertEquals(1, stats.sent)
+            assertEquals(listOf("message-paused-feedback"), sink.sentMessageIds)
+            val delivery = MessageDeliveryRepository.findByMessageId(message.id).single()
+            assertEquals(DeliveryStatus.SENT, delivery.status)
+        } finally {
+            SubscriberStateCache.remove(target)
+        }
+    }
+
+    @Test
+    fun `blocked target should reject any delivery policy without calling sink`() = runBlocking {
+        initDb("blocked-target-delivery-policy")
+        val sink = RecordingSink()
+        val target = testTargetAddress(platformId = "qq", kind = TargetKind.GROUP, externalId = "10001")
+        SubscriberStateCache.update(target, SubscriberState.BLOCKED)
+        val message = testMessage(
+            id = "message-blocked-feedback",
+            target = target,
+            deliveryPolicy = MessageDeliveryPolicy(requireActiveTarget = false),
+        )
+        MessageDeliveryRepository.enqueue(message)
+
+        try {
+            val stats = dispatcher(sink).dispatchDue()
+
+            assertEquals(1, stats.failed)
+            assertEquals(emptyList(), sink.sentMessageIds)
+            val delivery = MessageDeliveryRepository.findByMessageId(message.id).single()
+            assertEquals(DeliveryStatus.FAILED, delivery.status)
+            assertTrue(delivery.lastError.orEmpty().contains("屏蔽"))
+        } finally {
+            SubscriberStateCache.remove(target)
+        }
     }
 
     @Test

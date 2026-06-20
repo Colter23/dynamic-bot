@@ -7,11 +7,11 @@ import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.config.loadOrCreate
 import top.colter.dynamic.core.data.DynamicPayload
-import top.colter.dynamic.core.data.EntityState
 import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.MessageDeliveryPolicy
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
@@ -31,7 +31,9 @@ import top.colter.dynamic.repository.DynamicFilterRuleRepository
 import top.colter.dynamic.repository.PublisherLiveRecordRepository
 import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SourceUpdateSnapshotRepository
+import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SubscriptionRepository
+import top.colter.dynamic.repository.isDeliveryAllowed
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.link.LINK_PARSE_EVENT_LABEL
 import top.colter.dynamic.message.OutboundMessagePublishResult
@@ -79,7 +81,13 @@ public class SourceUpdateProcessor(
 
     private suspend fun handleDynamic(request: SourceUpdatePublishRequest, update: SourceUpdate): SourceUpdatePublishResult {
         val (normalizedUpdate, storedPublisher) = normalizePublisher(update, request.publisherPersistenceMode)
-        val targets = resolveTargets(request.deliveryTarget, request.deliveryTargetAddress, storedPublisher)
+        val requireActiveTarget = request.deliveryTag != LINK_PARSE_EVENT_LABEL
+        val targets = resolveTargets(
+            target = request.deliveryTarget,
+            targetAddress = request.deliveryTargetAddress,
+            publisher = storedPublisher,
+            requireActiveTarget = requireActiveTarget,
+        )
         if (targets.isEmpty()) {
             logger.info { "来源更新无可投递目标：update=${normalizedUpdate.key.stableValue()}" }
             return SourceUpdatePublishResult.ignored("没有可投递目标")
@@ -107,6 +115,7 @@ public class SourceUpdateProcessor(
             skipReason = "update=${normalizedUpdate.key.stableValue()}",
             messageIdNonce = request.linkParseMessageIdNonce(),
             correlationId = request.correlationId,
+            requireActiveTarget = requireActiveTarget,
         )
     }
 
@@ -161,9 +170,10 @@ public class SourceUpdateProcessor(
         target: Subscriber?,
         targetAddress: TargetAddress?,
         publisher: Publisher?,
+        requireActiveTarget: Boolean = true,
     ): List<DeliveryTarget> {
         target?.let {
-            if (it.state != EntityState.ACTIVE) return emptyList()
+            if (!it.canReceiveDelivery(requireActiveTarget)) return emptyList()
             return listOf(
                 DeliveryTarget(
                     address = it.address,
@@ -175,12 +185,25 @@ public class SourceUpdateProcessor(
             )
         }
         targetAddress?.let {
+            val subscriber = SubscriberRepository.findByAddress(it)
+            if (subscriber != null) {
+                if (!subscriber.canReceiveDelivery(requireActiveTarget)) return emptyList()
+                return listOf(
+                    DeliveryTarget(
+                        address = subscriber.address,
+                        subscriber = subscriber,
+                        subscription = publisher?.let { stored ->
+                            SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, stored.id)
+                        },
+                    ),
+                )
+            }
             return listOf(DeliveryTarget(address = it, subscriber = null, subscription = null))
         }
         if (publisher == null) return emptyList()
         return SubscriptionRepository
             .findSubscriptionsWithSubscribersByPublisherId(publisher.id)
-            .filter { it.subscriber.state == EntityState.ACTIVE }
+            .filter { it.subscriber.isDeliveryAllowed }
             .map { DeliveryTarget(address = it.subscriber.address, subscriber = it.subscriber, subscription = it.subscription) }
     }
 
@@ -254,6 +277,7 @@ public class SourceUpdateProcessor(
         skipReason: String,
         messageIdNonce: String? = null,
         correlationId: String? = null,
+        requireActiveTarget: Boolean = true,
     ): SourceUpdatePublishResult {
         if (batches.isEmpty()) {
             logger.warn { "跳过来源更新：$skipReason，渲染后的消息为空" }
@@ -264,7 +288,16 @@ public class SourceUpdateProcessor(
 
         val (mentionAllTargets, normalTargets) = targets.partition { it.shouldMentionAll(update) }
         val results = listOfNotNull(
-            publishMessageVariant(sourcePlugin, update, normalTargets, batches, "default", messageIdNonce, correlationId),
+            publishMessageVariant(
+                sourcePlugin,
+                update,
+                normalTargets,
+                batches,
+                "default",
+                messageIdNonce,
+                correlationId,
+                requireActiveTarget,
+            ),
             publishMessageVariant(
                 sourcePlugin,
                 update,
@@ -273,6 +306,7 @@ public class SourceUpdateProcessor(
                 "mention_all",
                 messageIdNonce,
                 correlationId,
+                requireActiveTarget,
             ),
         )
         val newDeliveryCount = results.sumOf { it.newDeliveries.size }
@@ -299,6 +333,7 @@ public class SourceUpdateProcessor(
         renderVariant: String,
         messageIdNonce: String?,
         correlationId: String?,
+        requireActiveTarget: Boolean = true,
     ): OutboundMessagePublishResult? {
         if (targets.isEmpty()) return null
 
@@ -311,6 +346,7 @@ public class SourceUpdateProcessor(
                 batches = batches,
                 renderVariant = renderVariant,
                 correlationId = correlationId?.trim()?.takeIf { it.isNotBlank() },
+                deliveryPolicy = MessageDeliveryPolicy(requireActiveTarget = requireActiveTarget),
             ),
         )
         if (result.newDeliveries.isNotEmpty()) {
@@ -347,6 +383,11 @@ public class SourceUpdateProcessor(
         if (address.kind != TargetKind.GROUP) return false
         val policy = subscription?.policy ?: return false
         return policy.shouldMentionAll(update)
+    }
+
+    private fun Subscriber.canReceiveDelivery(requireActiveTarget: Boolean): Boolean {
+        if (state.blocksInbound) return false
+        return !requireActiveTarget || state.allowsActiveDelivery
     }
 
     private fun List<MessageBatch>.withMentionAllAtTail(): List<MessageBatch> {

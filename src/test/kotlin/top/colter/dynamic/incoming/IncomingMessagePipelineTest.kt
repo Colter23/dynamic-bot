@@ -17,6 +17,7 @@ import top.colter.dynamic.core.data.IncomingMessageAuditMode
 import top.colter.dynamic.core.data.IncomingMessageRecordPolicy
 import top.colter.dynamic.core.data.IncomingMessageSegment
 import top.colter.dynamic.core.data.PlatformId
+import top.colter.dynamic.core.data.SubscriberState
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.link.LinkKinds
@@ -34,6 +35,7 @@ import top.colter.dynamic.event.IncomingTextMessageEvent
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.link.LinkParseService
 import top.colter.dynamic.repository.IncomingAuditWriteRequest
+import top.colter.dynamic.repository.SubscriberStateCache
 
 class IncomingMessagePipelineTest {
     @Test
@@ -180,6 +182,48 @@ class IncomingMessagePipelineTest {
         val command = withTimeout(1_000) { commandEvent.await() }
         assertEquals("/db help", command.rawText)
         eventBus.shutdown()
+    }
+
+    @Test
+    fun `blocked target should skip incoming events dispatch and audit`() = runBlocking {
+        val eventBus = EventBus()
+        val incomingEvent = CompletableDeferred<IncomingMessageEvent>()
+        val commandEvent = CompletableDeferred<CommandEvent>()
+        eventBus.subscribe(
+            object : Listener<IncomingMessageEvent> {
+                override suspend fun onMessage(event: IncomingMessageEvent) {
+                    incomingEvent.complete(event)
+                }
+            },
+        )
+        eventBus.subscribe(
+            object : Listener<CommandEvent> {
+                override suspend fun onMessage(event: CommandEvent) {
+                    commandEvent.complete(event)
+                }
+            },
+        )
+        var dispatchCalls = 0
+        val recorder = RecordingAuditRecorder()
+        val pipeline = pipeline(
+            eventBus = eventBus,
+            incomingConsumerDispatcher = { dispatchCalls += 1 },
+            auditRecorder = recorder,
+        )
+        val target = TargetAddress.of("onebot", TargetKind.GROUP, "10001")
+        SubscriberStateCache.update(target, SubscriberState.BLOCKED)
+
+        try {
+            pipeline.handle("onebot", request("/db help", traceId = "trace-blocked"))
+
+            assertNull(withTimeoutOrNull(200) { incomingEvent.await() })
+            assertNull(withTimeoutOrNull(200) { commandEvent.await() })
+            assertEquals(0, dispatchCalls)
+            assertEquals(0, recorder.records.size)
+        } finally {
+            SubscriberStateCache.remove(target)
+            eventBus.shutdown()
+        }
     }
 
     @Test

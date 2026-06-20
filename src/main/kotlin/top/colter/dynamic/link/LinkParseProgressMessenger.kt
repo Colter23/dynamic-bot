@@ -2,6 +2,7 @@ package top.colter.dynamic.link
 
 import top.colter.dynamic.LinkParseProgressReplyConfig
 import top.colter.dynamic.core.data.CommandContext
+import top.colter.dynamic.core.data.MessageDeliveryPolicy
 import top.colter.dynamic.core.data.MessageImportance
 import top.colter.dynamic.core.data.MessageRecordPolicy
 import top.colter.dynamic.core.data.MessageVisibility
@@ -77,6 +78,7 @@ public class DeliveryLinkParseProgressMessenger(
                 recordPolicy = MessageRecordPolicy.Transient(),
                 replyToMessageId = inReplyTo,
                 correlationId = correlationId?.trim()?.takeIf { it.isNotBlank() } ?: inReplyTo,
+                deliveryPolicy = MessageDeliveryPolicy(requireActiveTarget = false),
             ),
         )
         val receipt = result.sendResults

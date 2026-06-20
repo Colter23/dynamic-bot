@@ -34,6 +34,7 @@ import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.PublisherKind
 import top.colter.dynamic.core.data.Subscriber
+import top.colter.dynamic.core.data.SubscriberState
 import top.colter.dynamic.core.data.Subscription
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
@@ -457,7 +458,7 @@ class PluginManagerLifecycleTest {
                 id = 1,
                 address = TargetAddress.of("qq", TargetKind.GROUP, "100"),
                 name = "group",
-                state = EntityState.ACTIVE,
+                state = SubscriberState.ACTIVE,
                 createTime = 1,
                 createUser = 0,
             ),
