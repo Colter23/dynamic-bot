@@ -28,6 +28,7 @@ import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
+import top.colter.dynamic.incoming.IncomingBotAccountSelector
 import top.colter.dynamic.core.plugin.FollowActionResult
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.FollowState
@@ -203,7 +204,7 @@ class CommandListenerTest {
             config = MainDynamicConfig(),
             commandRegistry = CommandRegistry(),
             eventBus = eventBus,
-            primaryBotAccountResolver = { "42" },
+            incomingBotAccountSelector = IncomingBotAccountSelector(primaryBotAccountResolver = { "42" }),
         )
 
         val result = dispatchOrNull(
@@ -224,7 +225,7 @@ class CommandListenerTest {
             config = publicUserConfig(),
             commandRegistry = CommandRegistry(),
             eventBus = eventBus,
-            primaryBotAccountResolver = { "42" },
+            incomingBotAccountSelector = IncomingBotAccountSelector(primaryBotAccountResolver = { "42" }),
         )
 
         val result = dispatchOrNull(

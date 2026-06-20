@@ -53,6 +53,7 @@ import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.IncomingTextMessageEvent
 import top.colter.dynamic.event.Listener
+import top.colter.dynamic.incoming.IncomingBotAccountSelector
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.repository.PublisherRepository
@@ -616,7 +617,7 @@ class LinkParseServiceTest {
                 resolversProvider = { listOf(resolver) },
                 sourceUpdatePublisher = sourceUpdates,
             ),
-            primaryBotAccountResolver = { "42" },
+            incomingBotAccountSelector = IncomingBotAccountSelector(primaryBotAccountResolver = { "42" }),
         )
 
         listener.onMessage(incomingTextEvent("https://t.bilibili.com/1", botAccountId = "24"))
@@ -646,7 +647,7 @@ class LinkParseServiceTest {
                 resolversProvider = { listOf(resolver) },
                 sourceUpdatePublisher = sourceUpdates,
             ),
-            primaryBotAccountResolver = { "42" },
+            incomingBotAccountSelector = IncomingBotAccountSelector(primaryBotAccountResolver = { "42" }),
         )
 
         listener.onMessage(

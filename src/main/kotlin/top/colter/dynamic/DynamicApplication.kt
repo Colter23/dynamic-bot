@@ -15,10 +15,10 @@ import top.colter.dynamic.admin.AdminServer
 import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.config.ConfigService
-import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.MessageDeliveryPolicy
 import top.colter.dynamic.core.data.MessageRecordPolicy
 import top.colter.dynamic.core.data.OutboundMessageKind
+import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
@@ -48,6 +48,7 @@ import top.colter.dynamic.draw.DefaultDynamicDrawService
 import top.colter.dynamic.draw.DefaultLinkPreviewRenderer
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.incoming.IncomingMessagePipeline
+import top.colter.dynamic.incoming.IncomingBotAccountSelector
 import top.colter.dynamic.listener.DeliveryDispatcher
 import top.colter.dynamic.link.LinkAutoParseListener
 import top.colter.dynamic.link.DeliveryLinkParseProgressMessenger
@@ -82,6 +83,10 @@ public object DynamicApplication : CoroutineScope {
     private lateinit var outboundMediaService: OutboundMediaService
     private lateinit var messageSinkRouteMonitor: MessageSinkRouteMonitor
     private lateinit var incomingMessagePipeline: IncomingMessagePipeline
+    private val incomingBotAccountSelector: IncomingBotAccountSelector = IncomingBotAccountSelector(
+        primaryBotAccountResolver = ::resolvePrimaryMessageBotAccount,
+        knownBotAccountIdsResolver = ::resolveKnownMessageBotAccounts,
+    )
     private val incomingMessagePublishSink: suspend (String, IncomingMessagePublishRequest) -> Unit = { sourcePlugin, request ->
         if (!::incomingMessagePipeline.isInitialized) {
             logger.warn {
@@ -138,6 +143,8 @@ public object DynamicApplication : CoroutineScope {
         pluginMessagePublishSink = pluginMessagePublishSink,
         sourceUpdatePublisher = sourceUpdatePublisher,
         drawAssetRegistry = drawAssetRegistry,
+        primaryBotAccountResolver = ::resolvePrimaryMessageBotAccount,
+        knownBotAccountIdsResolver = ::resolveKnownMessageBotAccounts,
     )
     private val listenerTokens: MutableList<ListenerToken> = mutableListOf()
     private val taskScheduler: DefaultTaskScheduler = DefaultTaskScheduler(scope = this)
@@ -285,7 +292,7 @@ public object DynamicApplication : CoroutineScope {
                 configService = configService,
                 commandRegistry = commandRegistry,
                 eventBus = eventBus,
-                primaryBotAccountResolver = ::resolvePrimaryCommandBotAccount,
+                incomingBotAccountSelector = incomingBotAccountSelector,
                 outboundMessageService = outboundMessageService,
             ),
         )
@@ -295,7 +302,7 @@ public object DynamicApplication : CoroutineScope {
                 linkParseService = linkParseService,
                 eventBus = eventBus,
                 progressMessenger = linkParseProgressMessenger,
-                primaryBotAccountResolver = ::resolvePrimaryCommandBotAccount,
+                incomingBotAccountSelector = incomingBotAccountSelector,
             ),
         )
 
@@ -331,23 +338,8 @@ public object DynamicApplication : CoroutineScope {
         logger.info { "管理后台已启动：http://${config.webAdmin.host}:${config.webAdmin.port}" }
     }
 
-    private suspend fun resolvePrimaryCommandBotAccount(context: CommandContext): String? {
-        val target = context.target
-        val routes = pluginManager.getMessageSinkPlugins()
-            .flatMap { handle ->
-                val sink = handle.instance as? AccountRoutedMessageSinkPlugin ?: return@flatMap emptyList()
-                if (!sink.supportsTarget(target)) return@flatMap emptyList()
-                runCatching { sink.listMessageSinkRoutes(target) }
-                    .getOrElse { error ->
-                        logger.debug(error) {
-                            "命令主账号解析跳过消息出口：pluginId=${handle.info.descriptor.id}，target=${target.stableValue()}"
-                        }
-                        emptyList()
-                    }
-            }
-            .filter { it.enabled && it.state == MessageSinkRouteState.READY }
-            .filter { it.targetPlatformId == target.platformId }
-            .sortedWith(compareBy({ it.transportId }, { it.accountId }, { it.routeId }))
+    private suspend fun resolvePrimaryMessageBotAccount(target: TargetAddress): String? {
+        val routes = readyMessageSinkRoutes(target)
         if (routes.isEmpty()) return null
 
         val configuredPrimary = configStore.current()
@@ -360,6 +352,28 @@ public object DynamicApplication : CoroutineScope {
             ?.takeIf { accountId -> routes.any { it.accountId == accountId } }
             ?: routes.first().accountId
     }
+
+    private suspend fun resolveKnownMessageBotAccounts(target: TargetAddress): Set<String> {
+        return readyMessageSinkRoutes(target)
+            .mapTo(linkedSetOf()) { it.accountId }
+    }
+
+    private suspend fun readyMessageSinkRoutes(target: TargetAddress) =
+        pluginManager.getMessageSinkPlugins()
+            .flatMap { handle ->
+                val sink = handle.instance as? AccountRoutedMessageSinkPlugin ?: return@flatMap emptyList()
+                if (!sink.supportsTarget(target)) return@flatMap emptyList()
+                runCatching { sink.listMessageSinkRoutes(target) }
+                    .getOrElse { error ->
+                        logger.debug(error) {
+                            "消息主账号解析跳过消息出口：pluginId=${handle.info.descriptor.id}，target=${target.stableValue()}"
+                        }
+                        emptyList()
+                    }
+            }
+            .filter { it.enabled && it.state == MessageSinkRouteState.READY }
+            .filter { it.targetPlatformId == target.platformId }
+            .sortedWith(compareBy({ it.transportId }, { it.accountId }, { it.routeId }))
 
     private fun generateAdminToken(): String {
         val bytes = ByteArray(32)

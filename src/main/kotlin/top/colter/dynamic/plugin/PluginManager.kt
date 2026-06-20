@@ -32,6 +32,8 @@ import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.event.ListenerToken
 import top.colter.dynamic.event.SystemNotificationEvent
+import top.colter.dynamic.incoming.IncomingBotAccountSelection
+import top.colter.dynamic.incoming.IncomingBotAccountSelector
 import top.colter.dynamic.repository.IncomingAuditWriteRequest
 import top.colter.dynamic.repository.IncomingMessageAuditRepository
 import top.colter.dynamic.repository.IncomingProcessingWriteRequest
@@ -46,6 +48,7 @@ import top.colter.dynamic.core.link.LinkResolver
 import top.colter.dynamic.core.link.LinkVideoDownloader
 import top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION
 import top.colter.dynamic.core.plugin.CommandContributor
+import top.colter.dynamic.core.plugin.IncomingBotDispatchPolicy
 import top.colter.dynamic.core.plugin.IncomingMessageConsumerPlugin
 import top.colter.dynamic.core.plugin.IncomingMessagePublisher
 import top.colter.dynamic.core.plugin.MessageSinkPlugin
@@ -101,6 +104,8 @@ public class PluginManager(
     private val sourceStateStore: SourceStateStore = RepositorySourceStateStore,
     private val subscriptionQueryService: SubscriptionQueryService = RepositorySubscriptionQueryService,
     private val drawAssetRegistry: PlatformDrawAssetRegistry = PlatformDrawAssetRegistry(),
+    private val primaryBotAccountResolver: suspend (TargetAddress) -> String? = { null },
+    private val knownBotAccountIdsResolver: suspend (TargetAddress) -> Set<String> = { emptySet() },
     private val shutdownDrainTimeoutMs: Long = 5000,
     private val pluginHookTimeoutMs: Long = DEFAULT_PLUGIN_HOOK_TIMEOUT_MS,
     private val incomingMessagePendingLimit: Int = DEFAULT_INCOMING_MESSAGE_PENDING_LIMIT,
@@ -110,6 +115,10 @@ public class PluginManager(
     private val scanner: PluginScanner = PluginScanner(pluginDir, objectMapper)
     private val loader: PluginLoader = PluginLoader()
     private val hookRunner: PluginHookRunner = PluginHookRunner(pluginHookTimeoutMs)
+    private val incomingBotAccountSelector: IncomingBotAccountSelector = IncomingBotAccountSelector(
+        primaryBotAccountResolver = primaryBotAccountResolver,
+        knownBotAccountIdsResolver = knownBotAccountIdsResolver,
+    )
 
     private val plugins = ConcurrentHashMap<String, PluginRuntime>()
     private val inFlightDispatchJobs = ConcurrentHashMap<String, MutableSet<Job>>()
@@ -450,7 +459,7 @@ public class PluginManager(
             }
     }
 
-    public fun dispatchIncomingMessageToConsumers(context: IncomingMessageDispatchContext) {
+    public suspend fun dispatchIncomingMessageToConsumers(context: IncomingMessageDispatchContext) {
         val message = context.message
         if (isShuttingDown) {
             logger.debug {
@@ -459,23 +468,58 @@ public class PluginManager(
             return
         }
 
-        activeIncomingMessageConsumerPlugins()
-            .forEach { runtime ->
-                val consumer = runtime.instance as? IncomingMessageConsumerPlugin ?: return@forEach
-                if (!consumer.incomingMessageFilter.matches(context)) return@forEach
-                launchIncomingMessageForPlugin(runtime, consumer, context)
-            }
-    }
-
-    public fun incomingAuditModeFor(context: IncomingMessageDispatchContext): IncomingMessageAuditMode {
-        return activeIncomingMessageConsumerPlugins()
+        val matchingConsumers = activeIncomingMessageConsumerPlugins()
             .mapNotNull { runtime ->
                 val consumer = runtime.instance as? IncomingMessageConsumerPlugin ?: return@mapNotNull null
                 val filter = consumer.incomingMessageFilter
-                filter.auditMode.takeIf { mode -> mode != IncomingMessageAuditMode.NONE && filter.matches(context) }
+                if (!filter.matches(context)) return@mapNotNull null
+                MatchingIncomingConsumer(runtime, consumer, filter.botDispatchPolicy)
+            }
+        if (matchingConsumers.isEmpty()) return
+
+        val botSelection = matchingConsumers
+            .takeIf { consumers -> consumers.any { it.botDispatchPolicy != IncomingBotDispatchPolicy.ALL_RECEIVERS } }
+            ?.let { resolveIncomingBotSelection(context) }
+        matchingConsumers.forEach { matched ->
+            if (botSelection == null || matched.botDispatchPolicy.accepts(botSelection)) {
+                launchIncomingMessageForPlugin(matched.runtime, matched.consumer, context)
+            }
+        }
+    }
+
+    public suspend fun incomingAuditModeFor(context: IncomingMessageDispatchContext): IncomingMessageAuditMode {
+        val matchingFilters = activeIncomingMessageConsumerPlugins()
+            .mapNotNull { runtime ->
+                val consumer = runtime.instance as? IncomingMessageConsumerPlugin ?: return@mapNotNull null
+                val filter = consumer.incomingMessageFilter
+                filter.takeIf { it.auditMode != IncomingMessageAuditMode.NONE && it.matches(context) }
+            }
+        if (matchingFilters.isEmpty()) return IncomingMessageAuditMode.NONE
+
+        val botSelection = matchingFilters
+            .takeIf { filters -> filters.any { it.botDispatchPolicy != IncomingBotDispatchPolicy.ALL_RECEIVERS } }
+            ?.let { resolveIncomingBotSelection(context) }
+        return matchingFilters
+            .mapNotNull { filter ->
+                val selection = botSelection
+                if (selection != null && !filter.botDispatchPolicy.accepts(selection)) return@mapNotNull null
+                filter.auditMode
             }
             .maxByOrNull { it.auditPriority() }
             ?: IncomingMessageAuditMode.NONE
+    }
+
+    private suspend fun resolveIncomingBotSelection(context: IncomingMessageDispatchContext): IncomingBotAccountSelection {
+        return runCatching { incomingBotAccountSelector.select(context.commandContext) }
+            .getOrElse { error ->
+                logger.debug(error) {
+                    "入站主 Bot 解析失败：target=${context.commandContext.target.stableValue()}"
+                }
+                IncomingBotAccountSelection(
+                    currentBotAccountId = context.commandContext.botAccountId?.trim()?.takeIf(String::isNotBlank),
+                    selectedBotAccountId = null,
+                )
+            }
     }
 
     public fun shutdown() {
@@ -1241,6 +1285,12 @@ public class PluginManager(
         val semaphore: Semaphore = Semaphore(1)
     }
 
+    private data class MatchingIncomingConsumer(
+        val runtime: PluginRuntime,
+        val consumer: IncomingMessageConsumerPlugin,
+        val botDispatchPolicy: IncomingBotDispatchPolicy,
+    )
+
     private companion object {
         private val PLUGIN_ID_REGEX: Regex = Regex("^[a-zA-Z0-9._-]+$")
         private const val DEFAULT_PLUGIN_HOOK_TIMEOUT_MS: Long = 10_000
@@ -1253,6 +1303,14 @@ private fun IncomingMessageAuditMode.auditPriority(): Int {
         IncomingMessageAuditMode.NONE -> 0
         IncomingMessageAuditMode.TRACE -> 1
         IncomingMessageAuditMode.AUDIT -> 2
+    }
+}
+
+private fun IncomingBotDispatchPolicy.accepts(selection: IncomingBotAccountSelection): Boolean {
+    return when (this) {
+        IncomingBotDispatchPolicy.ALL_RECEIVERS -> true
+        IncomingBotDispatchPolicy.MENTIONED_ONLY -> selection.acceptsMentionedOnly()
+        IncomingBotDispatchPolicy.CANONICAL -> selection.acceptsCanonical()
     }
 }
 

@@ -23,7 +23,6 @@ import top.colter.dynamic.core.command.CommandSpec
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.config.loadOrCreate
-import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
@@ -49,6 +48,7 @@ import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
+import top.colter.dynamic.incoming.IncomingBotAccountSelector
 import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
 import top.colter.dynamic.core.plugin.PublisherLoginMethod
@@ -99,7 +99,7 @@ public class CommandListener(
     private val commandRegistry: CommandRegistry = CommandRegistry(),
     private val eventBus: EventBus = EventBus(),
     private val publisherDrawThemeService: PublisherDrawThemeService = PublisherDrawThemeService(),
-    private val primaryBotAccountResolver: suspend (CommandContext) -> String? = { null },
+    private val incomingBotAccountSelector: IncomingBotAccountSelector = IncomingBotAccountSelector(),
     private val outboundMessageService: OutboundMessageService = OutboundMessageService(),
     publisherThemeInitializer: PublisherThemeInitializer? = null,
     private val incomingProcessingRecorder: (IncomingProcessingWriteRequest) -> Boolean = {
@@ -306,14 +306,11 @@ public class CommandListener(
     private suspend fun shouldAcceptCommand(event: CommandEvent): Boolean {
         val mode = runtimeConfig.command.receiveMode
         if (mode == CommandReceiveMode.ANY) return true
-        val botAccountId = event.context.botAccountId?.trim()?.takeIf { it.isNotBlank() } ?: return true
-        if (event.context.mentionedAccountIds.any { it == botAccountId }) return true
+        val selection = incomingBotAccountSelector.select(event.context)
+        if (selection.currentBotAccountId == null) return true
+        if (selection.currentBotMentioned) return true
         if (mode == CommandReceiveMode.MENTIONED_ONLY) return false
-        val primaryAccountId = primaryBotAccountResolver(event.context)
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?: return true
-        return botAccountId == primaryAccountId
+        return selection.acceptsCanonical()
     }
 }
 

@@ -356,8 +356,8 @@ class IncomingMessagePipelineTest {
     private fun pipeline(
         eventBus: EventBus = EventBus(),
         linkParseService: LinkParseService = LinkParseService(resolversProvider = { emptyList() }),
-        incomingConsumerDispatcher: (IncomingMessageDispatchContext) -> Unit = {},
-        auditModeResolver: (IncomingMessageDispatchContext) -> IncomingMessageAuditMode = { IncomingMessageAuditMode.NONE },
+        incomingConsumerDispatcher: suspend (IncomingMessageDispatchContext) -> Unit = {},
+        auditModeResolver: suspend (IncomingMessageDispatchContext) -> IncomingMessageAuditMode = { IncomingMessageAuditMode.NONE },
         auditRecorder: IncomingMessageAuditRecorder = IncomingMessageAuditRecorder { true },
     ): IncomingMessagePipeline {
         return IncomingMessagePipeline(

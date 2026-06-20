@@ -23,6 +23,7 @@ import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION
+import top.colter.dynamic.core.plugin.IncomingBotDispatchPolicy
 import top.colter.dynamic.core.plugin.IncomingMessageDispatchContext
 import top.colter.dynamic.core.plugin.IncomingMessageConsumerPlugin
 import top.colter.dynamic.core.plugin.IncomingMessageFilter
@@ -197,6 +198,77 @@ class PluginManagerIncomingMessageTest {
         manager.shutdown()
     }
 
+    @Test
+    fun `canonical incoming consumer should only receive primary bot event`() = runBlocking {
+        val manager = PluginManager(
+            pluginDirPath = createTempDirectory("plugin-manager-incoming-canonical").toString(),
+            primaryBotAccountResolver = { "bot-a" },
+        )
+        val consumer = RecordingConsumerPlugin(
+            IncomingMessageFilter(botDispatchPolicy = IncomingBotDispatchPolicy.CANONICAL),
+        )
+        manager.registerPluginForTest(descriptor("canonical", consumer), consumer, state = PluginState.ACTIVE)
+
+        manager.dispatchIncomingMessageToConsumers(testDispatchContext(botAccountId = "bot-b"))
+        delay(100)
+        assertFalse(consumer.received.isCompleted)
+
+        manager.dispatchIncomingMessageToConsumers(testDispatchContext(botAccountId = "bot-a"))
+
+        val received = withTimeout(1_000) { consumer.received.await() }
+        assertEquals("bot-a", received.message.botAccountId)
+
+        manager.shutdown()
+    }
+
+    @Test
+    fun `canonical incoming consumer should prefer explicitly mentioned bot`() = runBlocking {
+        val manager = PluginManager(
+            pluginDirPath = createTempDirectory("plugin-manager-incoming-mentioned").toString(),
+            primaryBotAccountResolver = { "bot-a" },
+            knownBotAccountIdsResolver = { setOf("bot-a", "bot-b") },
+        )
+        val primary = RecordingConsumerPlugin()
+        val mentioned = RecordingConsumerPlugin()
+        manager.registerPluginForTest(descriptor("primary", primary), primary, state = PluginState.ACTIVE)
+        manager.registerPluginForTest(descriptor("mentioned", mentioned), mentioned, state = PluginState.ACTIVE)
+
+        manager.dispatchIncomingMessageToConsumers(
+            testDispatchContext(botAccountId = "bot-a", mentionedAccountIds = setOf("bot-b")),
+        )
+        delay(100)
+        assertFalse(primary.received.isCompleted)
+
+        manager.dispatchIncomingMessageToConsumers(
+            testDispatchContext(botAccountId = "bot-b", mentionedAccountIds = setOf("bot-b")),
+        )
+
+        val received = withTimeout(1_000) { primary.received.await() }
+        assertEquals("bot-b", received.message.botAccountId)
+        assertTrue(mentioned.received.isCompleted)
+
+        manager.shutdown()
+    }
+
+    @Test
+    fun `all receivers incoming consumer should bypass canonical bot selection`() = runBlocking {
+        val manager = PluginManager(
+            pluginDirPath = createTempDirectory("plugin-manager-incoming-all").toString(),
+            primaryBotAccountResolver = { "bot-a" },
+        )
+        val consumer = RecordingConsumerPlugin(
+            IncomingMessageFilter(botDispatchPolicy = IncomingBotDispatchPolicy.ALL_RECEIVERS),
+        )
+        manager.registerPluginForTest(descriptor("all", consumer), consumer, state = PluginState.ACTIVE)
+
+        manager.dispatchIncomingMessageToConsumers(testDispatchContext(botAccountId = "bot-b"))
+
+        val received = withTimeout(1_000) { consumer.received.await() }
+        assertEquals("bot-b", received.message.botAccountId)
+
+        manager.shutdown()
+    }
+
     private fun descriptor(id: String, plugin: Plugin): PluginDescriptor {
         return PluginDescriptor(
             id = id,
@@ -206,20 +278,28 @@ class PluginManagerIncomingMessageTest {
         )
     }
 
-    private fun testIncomingMessage(text: String = "hello"): IncomingMessage {
+    private fun testIncomingMessage(
+        text: String = "hello",
+        botAccountId: String? = null,
+        mentionedAccountIds: Set<String> = emptySet(),
+    ): IncomingMessage {
         return IncomingMessage(
             platformId = PlatformId.of("qq"),
             target = TargetAddress.of("qq", TargetKind.GROUP, "10001"),
             senderId = "20001",
+            botAccountId = botAccountId,
             text = text,
+            mentions = mentionedAccountIds,
         )
     }
 
     private fun testDispatchContext(
         text: String = "hello",
         intent: IncomingMessageIntent = IncomingMessageIntent.PlainText,
+        botAccountId: String? = null,
+        mentionedAccountIds: Set<String> = emptySet(),
     ): IncomingMessageDispatchContext {
-        val message = testIncomingMessage(text)
+        val message = testIncomingMessage(text, botAccountId, mentionedAccountIds)
         return IncomingMessageDispatchContext(
             message = message,
             sourcePlugin = "test",

@@ -29,8 +29,8 @@ internal class IncomingMessagePipeline(
     private val configProvider: () -> MainDynamicConfig,
     private val linkParseService: LinkParseService,
     private val eventBus: EventBus,
-    private val incomingConsumerDispatcher: (IncomingMessageDispatchContext) -> Unit,
-    private val auditModeResolver: (IncomingMessageDispatchContext) -> IncomingMessageAuditMode = { IncomingMessageAuditMode.NONE },
+    private val incomingConsumerDispatcher: suspend (IncomingMessageDispatchContext) -> Unit,
+    private val auditModeResolver: suspend (IncomingMessageDispatchContext) -> IncomingMessageAuditMode = { IncomingMessageAuditMode.NONE },
     private val auditRecorder: IncomingMessageAuditRecorder = IncomingMessageAuditRecorder {
         IncomingMessageAuditRepository.recordMessage(it)
     },

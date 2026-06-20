@@ -2,7 +2,6 @@
 
 import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.MainDynamicConfig
-import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
 import top.colter.dynamic.core.data.MessageBatch
@@ -12,6 +11,7 @@ import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.IncomingTextMessageEvent
 import top.colter.dynamic.event.Listener
+import top.colter.dynamic.incoming.IncomingBotAccountSelector
 import top.colter.dynamic.repository.LinkParseTargetConfigRepository
 import kotlin.math.roundToLong
 
@@ -23,7 +23,7 @@ internal class LinkAutoParseListener(
     private val eventBus: EventBus = EventBus(),
     private val dedupe: LinkParseDedupe = LinkParseDedupe(),
     private val progressMessenger: LinkParseProgressMessenger = NoopLinkParseProgressMessenger,
-    private val primaryBotAccountResolver: suspend (CommandContext) -> String? = { null },
+    private val incomingBotAccountSelector: IncomingBotAccountSelector = IncomingBotAccountSelector(),
 ) : Listener<IncomingTextMessageEvent> {
     override suspend fun onMessage(event: IncomingTextMessageEvent) {
         val config = configProvider()
@@ -125,13 +125,7 @@ internal class LinkAutoParseListener(
     }
 
     private suspend fun shouldAcceptAutoParse(event: IncomingTextMessageEvent): Boolean {
-        val botAccountId = event.context.botAccountId?.trim()?.takeIf { it.isNotBlank() } ?: return true
-        if (event.context.mentionedAccountIds.any { it == botAccountId }) return true
-        val primaryAccountId = primaryBotAccountResolver(event.context)
-            ?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?: return true
-        return botAccountId == primaryAccountId
+        return incomingBotAccountSelector.select(event.context).acceptsCanonical()
     }
 
     private fun logBotBlocked(event: IncomingTextMessageEvent) {
