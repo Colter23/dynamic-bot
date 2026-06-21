@@ -15,6 +15,7 @@ import top.colter.dynamic.admin.AdminServer
 import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.config.ConfigService
+import top.colter.dynamic.core.data.MessageImportance
 import top.colter.dynamic.core.data.MessageDeliveryPolicy
 import top.colter.dynamic.core.data.MessageRecordPolicy
 import top.colter.dynamic.core.data.OutboundMessageKind
@@ -392,20 +393,6 @@ public object DynamicApplication : CoroutineScope {
         }
     }
 
-    private fun PluginMessagePublishOptions.toDeliveryPolicy(): MessageDeliveryPolicy {
-        val now = System.currentTimeMillis() / 1000
-        val expiresAt = expiresInSeconds?.let { seconds ->
-            if (seconds > Long.MAX_VALUE - now) Long.MAX_VALUE else now + seconds
-        } ?: (recordPolicy as? MessageRecordPolicy.Transient)?.let { policy ->
-            if (policy.retentionSeconds > Long.MAX_VALUE - now) Long.MAX_VALUE else now + policy.retentionSeconds
-        }
-        return MessageDeliveryPolicy(
-            retry = retry && recordPolicy.retry,
-            expiresAtEpochSeconds = expiresAt,
-            requireActiveTarget = true,
-        )
-    }
-
     private fun OutboundMessagePublishResult.failureMessage(): String {
         val reasons = sendResults.mapNotNull { result ->
             when (result) {
@@ -428,6 +415,8 @@ public object DynamicApplication : CoroutineScope {
                     batches = event.chain,
                     renderVariant = RENDER_VARIANT_COMMAND_RESULT,
                     kind = OutboundMessageKind.COMMAND_RESULT,
+                    importance = MessageImportance.NORMAL,
+                    recordPolicy = MessageRecordPolicy.Transient(retentionSeconds = COMMAND_RESULT_RETENTION_SECONDS),
                     replyToMessageId = event.inReplyTo,
                     correlationId = event.traceId,
                     deliveryPolicy = MessageDeliveryPolicy(requireActiveTarget = false),
@@ -438,6 +427,10 @@ public object DynamicApplication : CoroutineScope {
                     "命令回复发送失败：traceId=${event.inReplyTo}，target=${event.target.address.stableValue()}"
                 }
             }
+        }
+
+        private companion object {
+            private const val COMMAND_RESULT_RETENTION_SECONDS: Long = 7L * 24L * 60L * 60L
         }
     }
 
@@ -664,4 +657,23 @@ public object DynamicApplication : CoroutineScope {
             logger.warn(error) { "应用关闭步骤失败，继续关闭：$name" }
         }
     }
+}
+
+internal fun PluginMessagePublishOptions.toDeliveryPolicy(
+    nowEpochSeconds: Long = System.currentTimeMillis() / 1000,
+): MessageDeliveryPolicy {
+    val expiresAt = expiresInSeconds?.let { seconds ->
+        if (seconds > Long.MAX_VALUE - nowEpochSeconds) Long.MAX_VALUE else nowEpochSeconds + seconds
+    } ?: (recordPolicy as? MessageRecordPolicy.Transient)?.let { policy ->
+        if (policy.retentionSeconds > Long.MAX_VALUE - nowEpochSeconds) {
+            Long.MAX_VALUE
+        } else {
+            nowEpochSeconds + policy.retentionSeconds
+        }
+    }
+    return MessageDeliveryPolicy(
+        retry = retry ?: recordPolicy.retry,
+        expiresAtEpochSeconds = expiresAt,
+        requireActiveTarget = true,
+    )
 }

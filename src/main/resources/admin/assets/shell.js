@@ -117,7 +117,7 @@ const $ = id => document.getElementById(id);
         TEXT: "正文", IMAGE: "图片", VIDEO: "视频", CARD: "非视频卡片", POLL: "投票", REPOST: "转发", ORIGIN: "转发", TEXT_MATCH: "文本匹配",
         READY: "可用", UNAVAILABLE: "不可用",
         ROUND_ROBIN: "轮询", PRIMARY_BACKUP: "主备",
-        NORMAL: "普通", COMMAND_RESULT: "命令回复", PROGRESS: "进度", SYSTEM_NOTIFICATION: "系统通知",
+        NORMAL: "普通", SOURCE_UPDATE: "订阅推送", LINK_RESULT: "链接结果", COMMAND_RESULT: "命令回复", INTERACTION_REPLY: "交互回复", PROGRESS: "进度", SYSTEM_NOTIFICATION: "系统通知", MANUAL: "手动消息",
         LOW: "低", HIGH: "高", DEFAULT: "默认", INTERNAL: "内部", HIDDEN: "隐藏",
         DURABLE: "持久", TRANSIENT: "临时", EPHEMERAL: "即时",
         AUDIT: "审计", TRACE: "追踪",

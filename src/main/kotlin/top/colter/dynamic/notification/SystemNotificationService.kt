@@ -5,13 +5,20 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.core.data.MessageBatch
+import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.MessageImportance
+import top.colter.dynamic.core.data.MessageRecordPolicy
+import top.colter.dynamic.core.data.OutboundMessageKind
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.event.SystemNotificationPublishRequest
+import top.colter.dynamic.core.event.SystemNotificationSeverity
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.event.SystemNotificationEvent
 import top.colter.dynamic.message.OutboundMessageService
 import top.colter.dynamic.message.RENDER_VARIANT_SYSTEM_NOTIFICATION
+import top.colter.dynamic.core.plugin.OutboundMessagePublishRequest
 
 private val notificationLogger = loggerFor<SystemNotificationService>()
 
@@ -51,11 +58,16 @@ public class SystemNotificationService(
 
         if (isDuplicated(event, config.dedupeSeconds)) return
 
-        val result = outboundMessageService.enqueueText(
-            source = "system-notification:${event.sourcePlugin}",
-            targets = targets,
-            text = formatNotification(event),
-            renderVariant = RENDER_VARIANT_SYSTEM_NOTIFICATION,
+        val result = outboundMessageService.publish(
+            OutboundMessagePublishRequest(
+                sourcePlugin = "system-notification:${event.sourcePlugin}",
+                targets = targets,
+                batches = listOf(MessageBatch(listOf(MessageContent.Text(formatNotification(event))))),
+                renderVariant = RENDER_VARIANT_SYSTEM_NOTIFICATION,
+                kind = OutboundMessageKind.SYSTEM_NOTIFICATION,
+                importance = notification.severity.toMessageImportance(),
+                recordPolicy = MessageRecordPolicy.Durable,
+            ),
         )
         notificationLogger.info {
             "系统通知已入队：source=${event.sourcePlugin}，type=${notification.type}，severity=${notification.severity}，目标=${result.targetCount}，新增投递=${result.newDeliveryCount}"
@@ -114,6 +126,15 @@ public class SystemNotificationService(
 
     private fun formatTime(epochMillis: Long): String {
         return FORMATTER.format(Instant.ofEpochMilli(epochMillis))
+    }
+
+    private fun SystemNotificationSeverity.toMessageImportance(): MessageImportance {
+        return when (this) {
+            SystemNotificationSeverity.INFO -> MessageImportance.LOW
+            SystemNotificationSeverity.WARN -> MessageImportance.NORMAL
+            SystemNotificationSeverity.ERROR,
+            SystemNotificationSeverity.CRITICAL -> MessageImportance.HIGH
+        }
     }
 
     private companion object {

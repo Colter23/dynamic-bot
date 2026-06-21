@@ -27,6 +27,7 @@ public const val RENDER_VARIANT_MANUAL_FORWARD: String = "manual-forward"
 public const val RENDER_VARIANT_SYSTEM_NOTIFICATION: String = "system-notification"
 public const val RENDER_VARIANT_COMMAND_RESULT: String = "command-result"
 public const val RENDER_VARIANT_LINK_PROGRESS: String = "link-progress"
+public const val RENDER_VARIANT_LINK_RESULT: String = "link-parse"
 
 public data class OutboundMessageEnqueueResult(
     val message: Message,
@@ -274,10 +275,26 @@ public class OutboundMessageService(
             recordPolicy = request.recordPolicy,
             replyToMessageId = request.replyToMessageId?.trim()?.takeIf { it.isNotBlank() },
             correlationId = request.correlationId?.trim()?.takeIf { it.isNotBlank() },
-            deliveryPolicy = request.deliveryPolicy ?: request.recordPolicy.toDeliveryPolicy(now),
+            deliveryPolicy = request.deliveryPolicy.resolveDeliveryPolicy(request.recordPolicy, now),
             targets = normalizedTargets,
             batches = request.batches,
         )
+    }
+
+    private fun MessageDeliveryPolicy?.resolveDeliveryPolicy(
+        recordPolicy: MessageRecordPolicy,
+        now: Long,
+    ): MessageDeliveryPolicy {
+        val defaultPolicy = recordPolicy.toDeliveryPolicy(now)
+        val explicit = this ?: return defaultPolicy
+        return when (recordPolicy) {
+            MessageRecordPolicy.Durable -> explicit
+            is MessageRecordPolicy.Transient -> explicit.copy(
+                retry = false,
+                expiresAtEpochSeconds = minExpiresAt(explicit.expiresAtEpochSeconds, defaultPolicy.expiresAtEpochSeconds),
+            )
+            MessageRecordPolicy.Ephemeral -> explicit.copy(retry = false)
+        }
     }
 
     private fun MessageRecordPolicy.toDeliveryPolicy(now: Long): MessageDeliveryPolicy {
@@ -302,6 +319,7 @@ public class OutboundMessageService(
             RENDER_VARIANT_MANUAL_FORWARD -> RENDER_VARIANT_MANUAL_FORWARD
             RENDER_VARIANT_COMMAND_RESULT -> RENDER_VARIANT_COMMAND_RESULT
             RENDER_VARIANT_LINK_PROGRESS -> RENDER_VARIANT_LINK_PROGRESS
+            RENDER_VARIANT_LINK_RESULT -> RENDER_VARIANT_LINK_RESULT
             else -> renderVariant
         }
         return listOf(
@@ -315,9 +333,19 @@ public class OutboundMessageService(
     private fun kindForRenderVariant(renderVariant: String): OutboundMessageKind {
         return when (renderVariant) {
             RENDER_VARIANT_SYSTEM_NOTIFICATION -> OutboundMessageKind.SYSTEM_NOTIFICATION
+            RENDER_VARIANT_MANUAL_FORWARD -> OutboundMessageKind.MANUAL
             RENDER_VARIANT_COMMAND_RESULT -> OutboundMessageKind.COMMAND_RESULT
             RENDER_VARIANT_LINK_PROGRESS -> OutboundMessageKind.PROGRESS
+            RENDER_VARIANT_LINK_RESULT -> OutboundMessageKind.LINK_RESULT
             else -> OutboundMessageKind.NORMAL
+        }
+    }
+
+    private fun minExpiresAt(left: Long?, right: Long?): Long? {
+        return when {
+            left == null -> right
+            right == null -> left
+            else -> minOf(left, right)
         }
     }
 

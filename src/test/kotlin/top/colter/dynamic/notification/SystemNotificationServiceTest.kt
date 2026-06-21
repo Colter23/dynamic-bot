@@ -10,6 +10,8 @@ import top.colter.dynamic.NotificationConfig
 import top.colter.dynamic.NotificationTargetConfig
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.MessageImportance
+import top.colter.dynamic.core.data.OutboundMessageKind
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.event.SystemNotificationPublishRequest
@@ -48,6 +50,8 @@ class SystemNotificationServiceTest {
         assertEquals(1, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
         val delivery = MessageDeliveryRepository.findRecent(limit = 1).single()
         val message = MessageDeliveryRepository.findMessage(delivery.messageId)!!
+        assertEquals(OutboundMessageKind.SYSTEM_NOTIFICATION, message.kind)
+        assertEquals(MessageImportance.HIGH, message.importance)
         val text = (message.batches.single().content.single() as MessageContent.Text).fallbackText
         assertTrue(text.contains("测试异常"))
         assertTrue(text.contains("demo-plugin"))

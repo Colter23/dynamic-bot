@@ -27,6 +27,8 @@ import top.colter.dynamic.core.data.MediaCardStyle
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.MessageRecordPolicyType
+import top.colter.dynamic.core.data.OutboundMessageKind
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.Subscriber
@@ -35,11 +37,13 @@ import top.colter.dynamic.core.data.SubscriptionEventKind
 import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.data.TextBlock
+import top.colter.dynamic.core.data.policyType
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishStatus
+import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.draw.DynamicDrawService
 import top.colter.dynamic.link.LINK_PARSE_EVENT_LABEL
 import top.colter.dynamic.repository.DynamicFilterRuleRepository
@@ -49,6 +53,7 @@ import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SourceUpdateSnapshotRepository
 import top.colter.dynamic.repository.SubscriptionRepository
+import top.colter.dynamic.message.OutboundMessageService
 import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testMedia
 import top.colter.dynamic.testPublisher
@@ -73,6 +78,7 @@ class SourceUpdateDynamicTest {
         val event = withTimeout(3_000) { received.await() }
 
         assertEquals(listOf(subscriber.address), event.message.targets)
+        assertEquals(OutboundMessageKind.SOURCE_UPDATE, event.message.kind)
         val contents = event.message.batches.single().content
         assertTrue(contents.first() is MessageContent.Image)
         assertEquals("D:/tmp/dynamic.png", (contents.first() as MessageContent.Image).image.uri)
@@ -89,6 +95,7 @@ class SourceUpdateDynamicTest {
         val listener = SourceUpdateProcessor(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "{name} {link}")),
             eventBus = eventBus,
+            outboundMessageService = successfulOutboundMessageService(),
         )
         val received = captureMessageEvents(eventBus)
         val request = SourceUpdatePublishRequest(sourcePlugin = "test", update = demoDynamic(publisher))
@@ -136,6 +143,7 @@ class SourceUpdateDynamicTest {
         val listener = SourceUpdateProcessor(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "{name} {link}")),
             eventBus = eventBus,
+            outboundMessageService = successfulOutboundMessageService(),
         )
         val received = captureMessageEvents(eventBus)
         val request = SourceUpdatePublishRequest(
@@ -152,8 +160,11 @@ class SourceUpdateDynamicTest {
 
         assertEquals(SourceUpdatePublishStatus.ENQUEUED, first.status)
         assertEquals(SourceUpdatePublishStatus.ENQUEUED, second.status)
-        assertEquals(2, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
+        assertEquals(0, MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING))
+        assertEquals(2, MessageDeliveryRepository.countByStatus(DeliveryStatus.SENT))
         assertEquals(firstEvent.message.sourceUpdateKey, secondEvent.message.sourceUpdateKey)
+        assertEquals(OutboundMessageKind.LINK_RESULT, firstEvent.message.kind)
+        assertEquals(MessageRecordPolicyType.TRANSIENT, firstEvent.message.recordPolicy.policyType)
         assertNotEquals(firstEvent.message.id, secondEvent.message.id)
         assertTrue(firstEvent.message.id.contains(":default:link-parse:"))
         assertTrue(secondEvent.message.id.contains(":default:link-parse:"))
@@ -386,6 +397,12 @@ class SourceUpdateDynamicTest {
             ),
         )
         return assertNotNull(SubscriberRepository.findByAddress(address))
+    }
+
+    private fun successfulOutboundMessageService(): OutboundMessageService {
+        return OutboundMessageService(
+            sendNow = { request -> MessageSendResult.sent("sink-${request.target.externalId}") },
+        )
     }
 
     private fun demoDynamic(

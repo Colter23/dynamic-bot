@@ -10,6 +10,7 @@ import kotlinx.coroutines.runBlocking
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageDeliveryPolicy
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.OutboundMessageKind
 import top.colter.dynamic.core.data.MessageRecordPolicy
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.PublisherKind
@@ -49,6 +50,7 @@ class OutboundMessageServiceTest {
         assertEquals(1, triggered)
         val stored = assertNotNull(MessageDeliveryRepository.findMessage(result.message.id))
         assertEquals(RENDER_VARIANT_MANUAL_FORWARD, stored.renderVariant)
+        assertEquals(OutboundMessageKind.MANUAL, stored.kind)
         assertEquals(MessageDeliveryPolicy(retry = false, expiresAtEpochSeconds = 60), stored.deliveryPolicy)
         assertEquals("hello", (stored.batches.single().content.single() as MessageContent.Text).fallbackText)
     }
@@ -106,6 +108,34 @@ class OutboundMessageServiceTest {
         val delivery = MessageDeliveryRepository.findByMessageId(result.message.id).single()
         assertEquals("sink-10001", delivery.sinkMessageId)
         assertEquals(1, MessageSinkReceiptRepository.findByMessageId(result.message.id).size)
+    }
+
+    @Test
+    fun `publish transient should force non retrying expiry when explicit delivery policy is passed`() = runBlocking {
+        initDb("outbound-transient-policy-merge")
+        val service = OutboundMessageService(
+            sendNow = { MessageSendResult.sent("sink-${it.target.externalId}") },
+            nowEpochSeconds = { 10L },
+            uuid = { "uuid" },
+        )
+
+        val result = service.publish(
+            publishRequest(
+                recordPolicy = MessageRecordPolicy.Transient(retentionSeconds = 60),
+            ).copy(
+                deliveryPolicy = MessageDeliveryPolicy(
+                    retry = true,
+                    expiresAtEpochSeconds = 120,
+                    requireActiveTarget = false,
+                ),
+            ),
+        )
+
+        assertEquals(true, result.accepted)
+        assertEquals(
+            MessageDeliveryPolicy(retry = false, expiresAtEpochSeconds = 70, requireActiveTarget = false),
+            result.message.deliveryPolicy,
+        )
     }
 
     @Test

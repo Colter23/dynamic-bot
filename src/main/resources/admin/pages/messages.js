@@ -376,9 +376,13 @@ function messageKindOptions(selected) {
   return [
     ["", "全部消息"],
     ["NORMAL", "普通消息"],
+    ["SOURCE_UPDATE", "订阅推送"],
+    ["LINK_RESULT", "链接结果"],
     ["COMMAND_RESULT", "命令回复"],
+    ["INTERACTION_REPLY", "交互回复"],
     ["PROGRESS", "进度提示"],
     ["SYSTEM_NOTIFICATION", "系统通知"],
+    ["MANUAL", "手动消息"],
   ].map(([value, text]) => `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(text)}</option>`).join("");
 }
 
@@ -898,8 +902,8 @@ function messageMetaTag(value, normalValue) {
 
 function messageMetaClass(value) {
   if (["HIGH", "FAILED", "HIDDEN", "REJECTED"].includes(value)) return "bad";
-  if (["LOW", "INTERNAL", "TRANSIENT", "TRACE", "PROGRESS", "IGNORED", "PLAIN_TEXT", "NON_TEXT"].includes(value)) return "soft";
-  if (["COMMAND", "LINK_TEXT", "AUDIT", "COMMAND_RESULT", "SYSTEM_NOTIFICATION", "SUCCEEDED", "MATCHED"].includes(value)) return "info";
+  if (["LOW", "INTERNAL", "TRANSIENT", "TRACE", "PROGRESS", "LINK_RESULT", "INTERACTION_REPLY", "IGNORED", "PLAIN_TEXT", "NON_TEXT"].includes(value)) return "soft";
+  if (["COMMAND", "LINK_TEXT", "AUDIT", "SOURCE_UPDATE", "COMMAND_RESULT", "SYSTEM_NOTIFICATION", "MANUAL", "SUCCEEDED", "MATCHED"].includes(value)) return "info";
   return "";
 }
 

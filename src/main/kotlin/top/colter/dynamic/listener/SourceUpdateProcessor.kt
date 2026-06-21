@@ -12,6 +12,9 @@ import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.MessageDeliveryPolicy
+import top.colter.dynamic.core.data.MessageImportance
+import top.colter.dynamic.core.data.MessageRecordPolicy
+import top.colter.dynamic.core.data.OutboundMessageKind
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
@@ -116,6 +119,7 @@ public class SourceUpdateProcessor(
             messageIdNonce = request.linkParseMessageIdNonce(),
             correlationId = request.correlationId,
             requireActiveTarget = requireActiveTarget,
+            isLinkResult = request.deliveryTag == LINK_PARSE_EVENT_LABEL,
         )
     }
 
@@ -278,6 +282,7 @@ public class SourceUpdateProcessor(
         messageIdNonce: String? = null,
         correlationId: String? = null,
         requireActiveTarget: Boolean = true,
+        isLinkResult: Boolean = false,
     ): SourceUpdatePublishResult {
         if (batches.isEmpty()) {
             logger.warn { "跳过来源更新：$skipReason，渲染后的消息为空" }
@@ -297,6 +302,7 @@ public class SourceUpdateProcessor(
                 messageIdNonce,
                 correlationId,
                 requireActiveTarget,
+                isLinkResult,
             ),
             publishMessageVariant(
                 sourcePlugin,
@@ -307,6 +313,7 @@ public class SourceUpdateProcessor(
                 messageIdNonce,
                 correlationId,
                 requireActiveTarget,
+                isLinkResult,
             ),
         )
         val newDeliveryCount = results.sumOf { it.newDeliveries.size }
@@ -334,6 +341,7 @@ public class SourceUpdateProcessor(
         messageIdNonce: String?,
         correlationId: String?,
         requireActiveTarget: Boolean = true,
+        isLinkResult: Boolean = false,
     ): OutboundMessagePublishResult? {
         if (targets.isEmpty()) return null
 
@@ -345,6 +353,21 @@ public class SourceUpdateProcessor(
                 targets = targets.map { it.address },
                 batches = batches,
                 renderVariant = renderVariant,
+                kind = if (isLinkResult) {
+                    OutboundMessageKind.LINK_RESULT
+                } else {
+                    OutboundMessageKind.SOURCE_UPDATE
+                },
+                importance = if (isLinkResult) {
+                    MessageImportance.LOW
+                } else {
+                    MessageImportance.NORMAL
+                },
+                recordPolicy = if (isLinkResult) {
+                    MessageRecordPolicy.Transient(retentionSeconds = LINK_RESULT_RETENTION_SECONDS)
+                } else {
+                    MessageRecordPolicy.Durable
+                },
                 correlationId = correlationId?.trim()?.takeIf { it.isNotBlank() },
                 deliveryPolicy = MessageDeliveryPolicy(requireActiveTarget = requireActiveTarget),
             ),
@@ -410,4 +433,8 @@ public class SourceUpdateProcessor(
         val subscriber: Subscriber?,
         val subscription: top.colter.dynamic.core.data.Subscription?,
     )
+
+    private companion object {
+        private const val LINK_RESULT_RETENTION_SECONDS: Long = 7L * 24L * 60L * 60L
+    }
 }

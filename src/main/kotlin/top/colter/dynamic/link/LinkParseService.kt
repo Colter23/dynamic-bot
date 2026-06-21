@@ -21,6 +21,9 @@ import top.colter.dynamic.core.data.IncomingProcessingStage
 import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.MessageDeliveryPolicy
+import top.colter.dynamic.core.data.MessageImportance
+import top.colter.dynamic.core.data.MessageRecordPolicy
+import top.colter.dynamic.core.data.OutboundMessageKind
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.event.PublisherPersistenceMode
@@ -46,6 +49,7 @@ import top.colter.dynamic.repository.IncomingProcessingWriteRequest
 
 internal const val LINK_PARSE_EVENT_LABEL: String = "link-parse"
 internal const val LINK_PARSE_EVENT_SOURCE: String = "main-link-parser"
+private const val LINK_RESULT_RETENTION_SECONDS: Long = 7L * 24L * 60L * 60L
 
 private val linkParseLogger = loggerFor<LinkParseService>()
 
@@ -686,6 +690,9 @@ public class LinkParseService(
                 targets = listOf(context.target),
                 batches = batches,
                 renderVariant = LINK_PARSE_EVENT_LABEL,
+                kind = OutboundMessageKind.LINK_RESULT,
+                importance = MessageImportance.LOW,
+                recordPolicy = MessageRecordPolicy.Transient(retentionSeconds = LINK_RESULT_RETENTION_SECONDS),
                 correlationId = correlationId?.trim()?.takeIf { it.isNotBlank() },
                 deliveryPolicy = MessageDeliveryPolicy(requireActiveTarget = false),
             ),
