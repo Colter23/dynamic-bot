@@ -188,6 +188,35 @@ class OutboundMessageServiceTest {
     }
 
     @Test
+    fun `publish transient should record uncertain delivery without receipts`() = runBlocking {
+        initDb("outbound-transient-uncertain")
+        val service = OutboundMessageService(
+            sendNow = {
+                MessageSendResult.uncertain(
+                    reason = "OneBot 发送响应超时",
+                    sinkRouteId = "onebot:qq:42",
+                    sinkAccountId = "42",
+                    sinkTransportId = "onebot",
+                )
+            },
+            nowEpochSeconds = { 10L },
+            uuid = { "uuid" },
+        )
+
+        val result = service.publish(
+            publishRequest(recordPolicy = MessageRecordPolicy.Transient(retentionSeconds = 60)),
+        )
+
+        assertEquals(false, result.accepted)
+        val delivery = MessageDeliveryRepository.findByMessageId(result.message.id).single()
+        assertEquals(DeliveryStatus.SEND_UNKNOWN, delivery.status)
+        assertEquals("onebot:qq:42", delivery.sinkRouteId)
+        assertEquals("42", delivery.sinkAccountId)
+        assertEquals("OneBot 发送响应超时", delivery.lastError)
+        assertEquals(emptyList(), MessageSinkReceiptRepository.findByMessageId(result.message.id))
+    }
+
+    @Test
     fun `publish transient should record failed delivery when synchronous send throws`() = runBlocking {
         initDb("outbound-transient-send-throws")
         val service = OutboundMessageService(

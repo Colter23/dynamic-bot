@@ -217,6 +217,15 @@ public class OutboundMessageService(
                 sinkAccountId = result.receipts.firstOrNull()?.sinkAccountId,
                 lastError = result.reason,
             )
+            is MessageSendResult.Uncertain -> MessageDeliveryRepository.createDeliveryRecord(
+                message = message,
+                target = target,
+                status = DeliveryStatus.SEND_UNKNOWN,
+                attempts = 1,
+                sinkRouteId = result.sinkRouteId,
+                sinkAccountId = result.sinkAccountId,
+                lastError = result.reason,
+            )
             is MessageSendResult.Failed -> MessageDeliveryRepository.createDeliveryRecord(
                 message = message,
                 target = target,
@@ -235,6 +244,7 @@ public class OutboundMessageService(
         val receipts = when (result) {
             is MessageSendResult.Sent -> result.receipts
             is MessageSendResult.PartiallySent -> result.receipts
+            is MessageSendResult.Uncertain -> emptyList()
             is MessageSendResult.Failed -> emptyList()
         }
         if (receipts.isEmpty()) return

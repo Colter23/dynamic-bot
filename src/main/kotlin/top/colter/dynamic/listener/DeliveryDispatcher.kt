@@ -34,6 +34,7 @@ private val logger = loggerFor<DeliveryDispatcher>()
 public data class DeliveryDispatchStats(
     val claimed: Int,
     val sent: Int,
+    val sendUnknown: Int,
     val partiallySent: Int,
     val retried: Int,
     val failed: Int,
@@ -65,7 +66,7 @@ public class DeliveryDispatcher(
             limit = config.dispatchConcurrency.coerceAtLeast(1) * 4,
             lockTtlMs = secondsToMillis(config.lockTtlSeconds, minimumMillis = 1),
         )
-        if (requests.isEmpty()) return@coroutineScope DeliveryDispatchStats(0, 0, 0, 0, 0)
+        if (requests.isEmpty()) return@coroutineScope DeliveryDispatchStats(0, 0, 0, 0, 0, 0)
 
         val concurrency = config.dispatchConcurrency.coerceAtLeast(1)
         logger.debug { "开始投递消息：领取=${requests.size}，并发=$concurrency" }
@@ -82,11 +83,12 @@ public class DeliveryDispatcher(
         val stats = DeliveryDispatchStats(
             claimed = requests.size,
             sent = results.count { it == DeliveryOutcome.SENT },
+            sendUnknown = results.count { it == DeliveryOutcome.SEND_UNKNOWN },
             partiallySent = results.count { it == DeliveryOutcome.PARTIALLY_SENT },
             retried = results.count { it == DeliveryOutcome.RETRIED },
             failed = results.count { it == DeliveryOutcome.FAILED },
         )
-        logger.info { "投递批次完成：领取=${stats.claimed}，成功=${stats.sent}，部分成功=${stats.partiallySent}，重试=${stats.retried}，失败=${stats.failed}" }
+        logger.info { "投递批次完成：领取=${stats.claimed}，成功=${stats.sent}，状态未知=${stats.sendUnknown}，部分成功=${stats.partiallySent}，重试=${stats.retried}，失败=${stats.failed}" }
         stats
     }
 
@@ -238,7 +240,7 @@ public class DeliveryDispatcher(
         val result = runCatching { sink.sendMessage(request) }
             .getOrElse { error -> MessageSendResult.failed(error.message ?: "消息发送失败", retryable = true) }
             .withTransportId(sink.transportId)
-        if (result is MessageSendResult.Failed || result is MessageSendResult.PartiallySent) {
+        if (result is MessageSendResult.Failed || result is MessageSendResult.PartiallySent || result is MessageSendResult.Uncertain) {
             outboundMediaService?.invalidateRoute(mediaRouteContext(sink))
         }
         return result
@@ -282,6 +284,7 @@ public class DeliveryDispatcher(
     ): DeliveryOutcome {
         return when (result) {
             is MessageSendResult.Sent -> handleSendSuccess(request, result)
+            is MessageSendResult.Uncertain -> handleSendUnknown(request, result)
             is MessageSendResult.PartiallySent -> handlePartialSend(request, result)
             is MessageSendResult.Failed -> handleSendFailure(request, result, config)
         }
@@ -321,6 +324,23 @@ public class DeliveryDispatcher(
         }
         return DeliveryOutcome.PARTIALLY_SENT
     }
+
+    private fun handleSendUnknown(
+        request: MessageDeliveryRequest,
+        result: MessageSendResult.Uncertain,
+    ): DeliveryOutcome {
+        MessageDeliveryRepository.markSendUnknown(
+            deliveryId = request.delivery.id,
+            error = result.reason.withFailurePolicySuffix("发送状态未知，不自动重试"),
+            sinkRouteId = result.sinkRouteId,
+            sinkAccountId = result.sinkAccountId,
+        )
+        logger.warn {
+            "消息发送状态未知：deliveryId=${request.delivery.id}，messageId=${request.delivery.messageId}，target=${request.target.stableValue()}，原因=${result.reason}"
+        }
+        return DeliveryOutcome.SEND_UNKNOWN
+    }
+
 
     private fun recordReceipts(
         request: MessageDeliveryRequest,
@@ -434,6 +454,7 @@ public class DeliveryDispatcher(
                     receipt.copy(sinkTransportId = receipt.sinkTransportId ?: transportId)
                 },
             )
+            is MessageSendResult.Uncertain -> copy(sinkTransportId = sinkTransportId ?: transportId)
             is MessageSendResult.Failed -> this
         }
     }
@@ -445,6 +466,7 @@ public class DeliveryDispatcher(
 
     private enum class DeliveryOutcome {
         SENT,
+        SEND_UNKNOWN,
         PARTIALLY_SENT,
         RETRIED,
         FAILED,

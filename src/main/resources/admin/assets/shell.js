@@ -106,7 +106,7 @@ const $ = id => document.getElementById(id);
       const map = {
         ACTIVE: "运行中", LOADED: "已加载", FAILED: "失败", DISABLED: "停用",
         RUNNING: "运行中", COMPLETED: "已完成", CANCELLED: "已取消",
-        PENDING: "等待", SENDING: "发送中", SENT: "已发送", PARTIALLY_SENT: "部分发送",
+        PENDING: "等待", SENDING: "发送中", SENT: "已发送", SEND_UNKNOWN: "状态未知", PARTIALLY_SENT: "部分发送",
         SUCCESS: "已登录", CANCELED: "已取消", EXPIRED: "已过期", UNSUPPORTED: "不支持",
         COOKIE: "Cookie", QR_CODE: "二维码",
         GROUP: "群组", USER: "用户", CHANNEL: "频道", OTHER: "其他",
@@ -135,7 +135,7 @@ const $ = id => document.getElementById(id);
       const text = label(value);
       const cls = ["ACTIVE", "SUCCESS", "SUCCEEDED", "MATCHED", "SENT", "OPEN", "RUNNING"].includes(value) ? "ok"
         : ["FAILED", "REJECTED", "EXPIRED", "ERROR"].includes(value) ? "bad"
-        : ["PENDING", "SENDING", "PARTIALLY_SENT", "LOADED", "CANCELED", "CANCELLED", "WARN"].includes(value) ? "warn" : "info";
+        : ["PENDING", "SENDING", "SEND_UNKNOWN", "PARTIALLY_SENT", "LOADED", "CANCELED", "CANCELLED", "WARN"].includes(value) ? "warn" : "info";
       return `<span class="pill ${cls}">${esc(text)}</span>`;
     }
     function tags(items) {

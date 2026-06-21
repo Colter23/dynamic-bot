@@ -398,6 +398,7 @@ public object DynamicApplication : CoroutineScope {
             when (result) {
                 is MessageSendResult.Failed -> result.reason
                 is MessageSendResult.PartiallySent -> result.reason
+                is MessageSendResult.Uncertain -> result.reason
                 is MessageSendResult.Sent -> null
             }
         }.distinct()

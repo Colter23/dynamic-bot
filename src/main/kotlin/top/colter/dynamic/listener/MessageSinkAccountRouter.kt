@@ -113,6 +113,14 @@ public class MessageSinkAccountRouter(
                     }
                     return result.withRoute(route)
                 }
+                is MessageSendResult.Uncertain -> {
+                    markFailure(route.routeId, policy)
+                    onRouteFailure(candidate)
+                    accountRouterLogger.warn {
+                        "$actionLabel 状态未知，停止路线切换：target=${target.stableValue()}，routeId=${route.routeId}，原因=${result.reason}"
+                    }
+                    return result.withRoute(route)
+                }
                 is MessageSendResult.Failed -> {
                     markFailure(route.routeId, policy)
                     onRouteFailure(candidate)
@@ -155,6 +163,14 @@ public class MessageSinkAccountRouter(
                     sinkTransportId = receipt.sinkTransportId ?: route.transportId,
                 )
             },
+        )
+    }
+
+    private fun MessageSendResult.Uncertain.withRoute(route: MessageSinkRoute): MessageSendResult.Uncertain {
+        return copy(
+            sinkRouteId = sinkRouteId ?: route.routeId,
+            sinkAccountId = sinkAccountId ?: route.accountId,
+            sinkTransportId = sinkTransportId ?: route.transportId,
         )
     }
 

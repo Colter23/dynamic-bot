@@ -224,8 +224,8 @@ class MessageDeliveryRepositoryTest {
     }
 
     @Test
-    fun cleanupHistoryShouldTreatPartiallySentAsTerminal() {
-        initTestDatabase("dynamic-bot-core-delivery-cleanup-partial-db")
+    fun cleanupHistoryShouldTreatWarningTerminalStatusesAsTerminal() {
+        initTestDatabase("dynamic-bot-core-delivery-cleanup-warning-terminal-db")
 
         val target = testTargetAddress("onebot", TargetKind.GROUP, "10001")
         val message = testMessage("message-cleanup-partial", target)
@@ -241,6 +241,20 @@ class MessageDeliveryRepositoryTest {
         assertEquals(1, result.deletedMessages)
         assertTrue(MessageDeliveryRepository.findByMessageId(message.id).isEmpty())
         assertNull(MessageDeliveryRepository.findMessage(message.id))
+
+        val unknown = testMessage("message-cleanup-unknown", target)
+        MessageDeliveryRepository.enqueue(unknown)
+        val unknownDelivery = MessageDeliveryRepository.findByMessageId(unknown.id).single()
+        assertTrue(MessageDeliveryRepository.markSendUnknown(unknownDelivery.id, "OneBot 发送响应超时"))
+
+        val unknownResult = MessageDeliveryRepository.cleanupHistory(
+            cutoffEpochSeconds = System.currentTimeMillis() / 1000 + 1,
+        )
+
+        assertEquals(1, unknownResult.deletedDeliveries)
+        assertEquals(1, unknownResult.deletedMessages)
+        assertTrue(MessageDeliveryRepository.findByMessageId(unknown.id).isEmpty())
+        assertNull(MessageDeliveryRepository.findMessage(unknown.id))
     }
 
     @Test

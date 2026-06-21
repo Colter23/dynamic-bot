@@ -53,6 +53,8 @@ let prettyJson;
 let renderTable;
 let notify;
 let openModal;
+let closeModal;
+let confirmDanger;
 let platformTag;
 let withButtonLoading;
 let beginPageRequest;
@@ -81,6 +83,8 @@ function bindContext(nextCtx) {
     renderTable,
     notify,
     openModal,
+    closeModal,
+    confirmDanger,
     platformTag,
     withButtonLoading,
   } = ctx.ui);
@@ -166,6 +170,10 @@ export async function handleAction(nextCtx, { action, button, id }) {
   }
   if (action === "delivery-detail") {
     await openDeliveryDetail(id, button);
+    return true;
+  }
+  if (action === "delivery-resend") {
+    await resendDelivery(id, button);
     return true;
   }
   if (action === "set-message-tab") {
@@ -358,6 +366,7 @@ function deliveryStatusOptions(selected) {
     ["PENDING", "等待"],
     ["SENDING", "发送中"],
     ["SENT", "已发送"],
+    ["SEND_UNKNOWN", "状态未知"],
     ["PARTIALLY_SENT", "部分发送"],
   ].map(([value, text]) => `<option value="${attr(value)}"${value === selected ? " selected" : ""}>${esc(text)}</option>`).join("");
 }
@@ -760,10 +769,18 @@ function renderDeliveries() {
     { title: "投递状态", render: row => deliveryStatusCell(row) },
     { title: "路由与回执", render: row => routeReceiptCell(row) },
     { title: "时间", render: row => deliveryTimeCell(row) },
-    { title: "操作", render: row => `<button type="button" class="message-action-button" data-action="delivery-detail" data-id="${attr(row.id)}">详情</button>` },
+    { title: "操作", render: row => deliveryActions(row) },
   ])
     .replace('class="table-wrap"', 'class="table-wrap messages-table-wrap"')
     .replace("<table>", '<table class="messages-table">');
+}
+
+function deliveryActions(row) {
+  const actions = [`<button type="button" class="message-action-button" data-action="delivery-detail" data-id="${attr(row.id)}">详情</button>`];
+  if (row.status === "SEND_UNKNOWN" || row.status === "FAILED") {
+    actions.push(`<button type="button" class="message-action-button" data-action="delivery-resend" data-id="${attr(row.id)}">补发</button>`);
+  }
+  return actions.join(" ");
 }
 
 function renderIncomingMessages() {
@@ -950,6 +967,7 @@ function targetSubLine(row) {
 function statusHint(row) {
   if (row.status === "FAILED") return row.lastError ? "有失败原因" : "无失败详情";
   if (row.status === "SENT") return row.sinkMessageId ? "已有平台回执" : "已完成";
+  if (row.status === "SEND_UNKNOWN") return row.lastError ? "发送结果待确认" : "发送状态未知";
   if (row.status === "PARTIALLY_SENT") return row.lastError ? "部分成功，有失败原因" : "部分成功";
   if (row.status === "SENDING") return row.lockedUntilEpochSeconds ? `锁定至 ${fmtTime(row.lockedUntilEpochSeconds)}` : "正在发送";
   if (row.status === "PENDING") return row.nextAttemptAtEpochSeconds ? `下次 ${fmtTime(row.nextAttemptAtEpochSeconds)}` : "等待调度";
@@ -959,6 +977,7 @@ function statusHint(row) {
 function resultText(row) {
   if (row.status === "FAILED") return row.lastError || "投递失败";
   if (row.status === "SENT") return row.sinkMessageId ? `回执：${row.sinkMessageId}` : "已发送";
+  if (row.status === "SEND_UNKNOWN") return row.lastError || "平台响应超时或无响应，发送状态未知，未自动重试";
   if (row.status === "PARTIALLY_SENT") return row.lastError || "部分消息已发送，后续不再重试";
   if (row.status === "SENDING") return row.lockedUntilEpochSeconds ? `发送锁定至 ${fmtTime(row.lockedUntilEpochSeconds)}` : "发送中";
   if (row.status === "PENDING") return row.nextAttemptAtEpochSeconds ? `等待下次尝试：${fmtTime(row.nextAttemptAtEpochSeconds)}` : "等待投递队列调度";
@@ -978,11 +997,12 @@ function renderDeliverySummary(rows) {
     return acc;
   }, {});
   const failed = counts.FAILED || 0;
+  const unknown = counts.SEND_UNKNOWN || 0;
   const pending = counts.PENDING || 0;
   const sending = counts.SENDING || 0;
   const partial = counts.PARTIALLY_SENT || 0;
   const internal = rows.filter(row => row.messageVisibility === "INTERNAL" || row.messageRecordPolicy === "TRANSIENT").length;
-  summary.textContent = `显示 ${rows.length} 条 · 失败 ${failed} · 部分 ${partial} · 等待 ${pending} · 发送中 ${sending} · 内部/临时 ${internal}`;
+  summary.textContent = `显示 ${rows.length} 条 · 失败 ${failed} · 未知 ${unknown} · 部分 ${partial} · 等待 ${pending} · 发送中 ${sending} · 内部/临时 ${internal}`;
 }
 
 function renderIncomingSummary(rows) {
@@ -1086,6 +1106,37 @@ async function openDeliveryDetail(id, button) {
       size: "wide",
       cancelText: "关闭",
     });
+  });
+}
+
+async function resendDelivery(id, button) {
+  const fallback = (state.deliveryRows || []).find(item => String(item.id) === String(id));
+  if (!fallback) throw new Error("出站投递记录不存在");
+  const detail = await withButtonLoading(button, "读取中...", async () => api(`/deliveries/${encodeURIComponent(id)}`));
+  const row = detail.delivery || fallback;
+  if (!detail.message) throw new Error("原始消息已被清理，无法补发");
+  const confirmed = await confirmDanger("补发消息", "补发会创建新的手动出站记录。如果原消息其实已经送达，可能会造成重复推送。", {
+    confirmText: "确认补发",
+  });
+  if (!confirmed) return;
+  await withButtonLoading(button, "补发中...", async () => {
+    const response = await api("/message-forwards", {
+      method: "POST",
+      body: JSON.stringify({
+        targets: [{
+          platformId: row.platformId,
+          targetKind: row.targetKind,
+          externalId: row.targetId,
+          scopeId: row.targetScopeId || null,
+          threadId: row.targetThreadId || null,
+          accountId: row.targetAccountId || null,
+        }],
+        batches: Array.isArray(detail.message.batches) ? detail.message.batches : [],
+      }),
+    });
+    notify(`已创建补发记录：${response.newDeliveryCount || 0} 条`, false);
+    closeModal?.();
+    await refreshDeliveries(null, false, { readControls: false });
   });
 }
 

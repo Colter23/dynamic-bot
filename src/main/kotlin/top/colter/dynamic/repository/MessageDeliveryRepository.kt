@@ -324,6 +324,26 @@ public object MessageDeliveryRepository {
         }
     }
 
+    public fun markSendUnknown(
+        deliveryId: Int,
+        error: String?,
+        sinkRouteId: String? = null,
+        sinkAccountId: String? = null,
+    ): Boolean {
+        return transaction {
+            MessageDeliveryTable.update({ MessageDeliveryTable.id eq deliveryId }) {
+                it[status] = DeliveryStatus.SEND_UNKNOWN
+                it[sinkMessageId] = null
+                it[MessageDeliveryTable.sinkRouteId] = sinkRouteId.normalizedSinkRouteId()
+                it[MessageDeliveryTable.sinkAccountId] = sinkAccountId.normalizedSinkAccountId()
+                it[lastError] = error?.take(500)
+                it[nextAttemptAt] = null
+                it[lockedUntil] = null
+                it[updatedAt] = nowInstant()
+            } > 0
+        }
+    }
+
     public fun countAll(): Long {
         return transaction {
             MessageDeliveryTable.selectAll().count()
@@ -709,6 +729,7 @@ private fun defaultVisibleDeliveryFilter(): Op<Boolean> {
 
 private fun terminalStatusFilter(): Op<Boolean> {
     return (MessageDeliveryTable.status eq DeliveryStatus.SENT) or
+        (MessageDeliveryTable.status eq DeliveryStatus.SEND_UNKNOWN) or
         (MessageDeliveryTable.status eq DeliveryStatus.PARTIALLY_SENT) or
         (MessageDeliveryTable.status eq DeliveryStatus.FAILED)
 }

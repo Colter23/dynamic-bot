@@ -224,6 +224,31 @@ class DeliveryDispatcherTest {
     }
 
     @Test
+    fun `routed sink should not retry or switch route after uncertain send`() = runBlocking {
+        initDb("uncertain-send")
+        val sink = RoutedRecordingSink(
+            accountIds = listOf("bot-a", "bot-b"),
+            result = { _, _ -> MessageSendResult.uncertain("OneBot 发送响应超时") },
+        )
+        val target = testTargetAddress(platformId = "qq", kind = TargetKind.GROUP, externalId = "10001")
+        val message = testMessage("message-uncertain", target)
+        MessageDeliveryRepository.enqueue(message)
+
+        val stats = dispatcher(sink).dispatchDue()
+
+        assertEquals(1, stats.sendUnknown)
+        assertEquals(0, stats.retried)
+        assertEquals(0, stats.failed)
+        assertEquals(listOf("bot-a:message-uncertain"), sink.sent)
+        val delivery = MessageDeliveryRepository.findByMessageId(message.id).single()
+        assertEquals(DeliveryStatus.SEND_UNKNOWN, delivery.status)
+        assertEquals(1, delivery.attempts)
+        assertEquals("onebot:qq:bot-a", delivery.sinkRouteId)
+        assertEquals("bot-a", delivery.sinkAccountId)
+        assertTrue(delivery.lastError.orEmpty().contains("不自动重试"))
+    }
+
+    @Test
     fun `delivery with retry disabled should fail without scheduling retry`() = runBlocking {
         initDb("retry-disabled")
         val sink = RecordingSink(
