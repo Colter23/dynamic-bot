@@ -1,32 +1,63 @@
 # dynamic-bot
 
-dynamic-bot 是主程序，负责运行 Web 后台、管理订阅、加载插件，并把插件提供的动态、直播和链接解析结果推送到 QQ 等目标平台。
+<p align="center">
+  <img src="docs/assets/logo-icon.svg" alt="dynamic-bot" width="160">
+</p>
 
-单独运行主程序本身不会接入任何平台。你需要安装至少一个内容来源插件，以及至少一个消息发送插件。
+<p align="center">
+  <a href="https://github.com/Colter23/dynamic-bot/actions/workflows/ci.yml"><img src="https://github.com/Colter23/dynamic-bot/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/Colter23/dynamic-bot/releases"><img src="https://img.shields.io/github/v/release/Colter23/dynamic-bot?include_prereleases&label=release" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/Colter23/dynamic-bot" alt="License"></a>
+  <img src="https://img.shields.io/badge/Kotlin-2.4.0-7F52FF?logo=kotlin&logoColor=white" alt="Kotlin 2.4.0">
+  <img src="https://img.shields.io/badge/JVM-17+-orange" alt="JVM 17+">
+  <img src="https://img.shields.io/badge/Docker-GHCR-2496ED?logo=docker&logoColor=white" alt="Docker GHCR">
+</p>
 
-## 主要功能
+dynamic-bot 是面向动态订阅、直播提醒、链接解析和动态绘图推送的可扩展 Bot 主程序。它提供 Web 后台、插件运行时、统一消息链路和高质量推送图片渲染。
 
-- Web 后台管理订阅、插件、配置、日志、任务和消息记录。
-- 支持 Bilibili、微博等来源插件。
-- 支持 OneBot/QQ 等消息出口插件。
-- 支持动态推送、直播开播/下播推送和链接解析。
-- 支持平台入站消息统一处理：主程序识别命令、链接和普通消息，再分发给对应处理器或插件。
-- 支持推送图片渲染、媒体缓存和视频缓存。
-- 支持失败重试、消息记录和系统通知。
-- 支持插件提供自己的管理页面。
+主程序保持平台无关，Bilibili、微博、QQ 等接入由官方插件提供。
 
-## 快速启动
+QQ群：734922374
 
-构建主程序：
+## 特性
+
+- 动态绘图：把动态、直播、链接解析结果渲染成适合聊天窗口阅读的图片卡片。
+- 订阅转发：支持动态推送、直播提醒、链接解析、测试预览和多平台消息出口。
+- Web 后台：集中管理发布者、消息目标、订阅、插件、配置、日志、任务和消息记录。
+- 统一消息链路：入站识别命令和链接，出站记录投递、回执、重试、撤回和审计状态。
+- 多 Bot 路由：支持同一平台多个 Bot 账号按目标和策略选择发送账号。
+- 插件化扩展：内容来源、消息出口、命令和后台页面都可以由插件提供。
+
+## 项目预览
+
+### 绘图效果
+
+<p align="center">
+  <img src="docs/assets/previews/rendering/DrawDemo01.webp" alt="动态绘图预览 1" width="48%" loading="lazy">
+  <img src="docs/assets/previews/rendering/DrawDemo02.webp" alt="动态绘图预览 2" width="48%" loading="lazy">
+  <img src="docs/assets/previews/rendering/DrawDemo03.webp" alt="动态绘图预览 3" width="48%" loading="lazy">
+  <img src="docs/assets/previews/rendering/DrawDemo04.webp" alt="动态绘图预览 4" width="48%" loading="lazy">
+</p>
+
+### Web 后台
+
+<p align="center">
+  <img src="docs/assets/previews/admin/WebPreview01.webp" alt="Web 后台预览 1" width="48%" loading="lazy">
+  <img src="docs/assets/previews/admin/WebPreview02.webp" alt="Web 后台预览 2" width="48%" loading="lazy">
+  <img src="docs/assets/previews/admin/WebPreview03.webp" alt="Web 后台预览 3" width="48%" loading="lazy">
+  <img src="docs/assets/previews/admin/WebPreview04.webp" alt="Web 后台预览 4" width="48%" loading="lazy">
+  <img src="docs/assets/previews/admin/WebPreview05.webp" alt="Web 后台预览 5" width="48%" loading="lazy">
+  <img src="docs/assets/previews/admin/WebPreview06.webp" alt="Web 后台预览 6" width="48%" loading="lazy">
+</p>
+
+## 快速开始
+
+### 本地运行
+
+从 [Releases](https://github.com/Colter23/dynamic-bot/releases) 下载最新的 `dynamic-bot-*-all.jar`，然后运行：
 
 ```powershell
-.\gradlew.bat fatJar
-```
-
-启动：
-
-```powershell
-java -jar build\libs\dynamic-bot-0.0.5-all.jar
+java -jar dynamic-bot-0.0.5-all.jar
 ```
 
 默认后台地址：
@@ -35,53 +66,11 @@ java -jar build\libs\dynamic-bot-0.0.5-all.jar
 http://127.0.0.1:2233
 ```
 
-如果通过 Docker 首次启动，后台会默认监听 `0.0.0.0`，方便容器外访问；已有 `config/main.yml` 不会被自动改写。
+需要 JDK 17 或更高版本。首次启动时，如果 `config/main.yml` 中没有后台 token，程序会自动生成并写入配置文件，同时在日志中输出。
 
-首次启动时，如果没有配置后台 token，程序会自动生成并写入：
+### Docker 运行
 
-```text
-config/main.yml
-```
-
-启动日志中也会输出本次生成的 token，请妥善保存。
-
-## 安装插件
-
-将插件 JAR 放到主程序运行目录的 `plugins/` 下，然后重启主程序或在后台刷新插件。
-
-常用插件：
-
-- `dynamic-bot-bilibili`：Bilibili 动态和直播来源。
-- `dynamic-bot-weibo`：微博动态来源。
-- `dynamic-bot-onebot`：QQ/OneBot 消息发送和消息接收。
-- `dynamic-bot-qqbot`：QQ 官方机器人消息发送和消息接收。
-
-## 常用目录
-
-- `config/`：主程序和插件配置。
-- `data/dynamic.db`：数据库。
-- `data/images/source`：来源原图缓存。
-- `data/images/draw`：推送渲染图缓存。
-- `data/videos`：链接解析视频缓存。
-- `data/fonts`：绘图字体文件。
-- `data/plugins/`：插件自己的数据。
-- `plugins/`：插件 JAR。
-
-## 基础配置
-
-大多数配置都可以先使用默认值。首次使用通常只需要关注：
-
-- Web 后台地址、端口和 token。
-- 命令前缀。
-- 推送模板。
-- 媒体发送方式，默认建议使用自动。
-- 消息发送路由，多 Bot 时再配置。
-
-内容平台登录、OneBot 连接等配置在对应插件页面中完成。
-
-## Docker
-
-默认从 GHCR 拉取镜像：
+默认 Compose 文件会从 GHCR 拉取镜像：
 
 ```powershell
 docker compose up -d
@@ -93,32 +82,89 @@ docker compose up -d
 ghcr.io/colter23/dynamic-bot
 ```
 
-详细说明见 [DOCKER.md](DOCKER.md)。
+Docker 首次生成主配置时，后台默认监听 `0.0.0.0`，方便从容器外访问；已有 `config/main.yml` 不会被自动覆盖。更多端口、权限、挂载目录和故障排查说明见 [DOCKER.md](DOCKER.md)。
 
-## 构建与测试
+## 安装插件
+
+官方插件支持两种安装方式：
+
+1. 推荐方式：在 Web 后台的插件页面中直接下载和安装。
+2. 手动方式：从对应插件仓库下载 JAR，放到运行目录的 `plugins/` 下，然后重启主程序或在后台刷新插件。
+
+| 插件              | 用途 | 仓库 |
+|-----------------| --- | --- |
+| Bilibili 插件     | Bilibili 动态、直播和链接解析。 | [dynamic-bot-bilibili](https://github.com/Colter23/dynamic-bot-bilibili) |
+| 微博插件            | 微博动态来源。 | [dynamic-bot-weibo](https://github.com/Colter23/dynamic-bot-weibo) |
+| OneBot 插件       | OneBot/QQ 消息发送与接收。 | [dynamic-bot-onebot](https://github.com/Colter23/dynamic-bot-onebot) |
+| QQ 官方机器人插件(未完成) | QQ 官方机器人消息发送与接收。 | [dynamic-bot-qqbot](https://github.com/Colter23/dynamic-bot-qqbot) |
+
+一个常见的最小部署通常包含：
+
+1. 一个内容来源插件，例如 `dynamic-bot-bilibili` 或 `dynamic-bot-weibo`。
+2. 一个消息出口插件，例如 `dynamic-bot-onebot` 或 `dynamic-bot-qqbot`。
+3. 在后台配置平台登录、消息目标和订阅关系。
+
+## 目录与配置
+
+常用运行目录：
+
+| 路径 | 说明 |
+| --- | --- |
+| `config/` | 主程序和插件配置。 |
+| `plugins/` | 插件 JAR。 |
+| `data/dynamic.db` | SQLite 数据库。 |
+| `data/plugins/` | 插件私有数据。 |
+| `data/images/` | 来源图片和推送渲染图缓存。 |
+| `data/videos/` | 链接解析视频缓存。 |
+| `data/fonts` | 绘图字体文件。 |
+
+大多数配置可以先使用默认值。首次部署通常只需要关注：
+
+- Web 后台地址、端口和 token。
+- 消息出口插件连接状态。
+- 内容来源插件登录状态。
+- 消息目标、订阅关系和多 Bot 路由。
+- 推送模板、绘图主题和媒体发送方式。
+
+这些配置可以在 Web 后台中调整，也可以直接编辑 `config/main.yml`。修改监听地址、端口等启动级配置后，需要重启主程序。
+
+## 开发与贡献
+
+主项目使用 Kotlin、Ktor、Exposed、SQLite 和 Skiko。仓库旁边如果存在 `../dynamic-bot-core`，Gradle 会通过 composite build 使用本地 core 项目，方便同时开发主程序和插件 API。
+
+常用命令：
 
 ```powershell
+.\gradlew.bat compileKotlin
 .\gradlew.bat test
 .\gradlew.bat fatJar
 ```
 
-默认 fatJar 会带上常用桌面和 Linux 的 Skiko 原生库，方便直接跨平台运行。如果只需要某个平台，可以指定：
+默认 `fatJar` 会带上当前平台、Windows x64 和 Linux x64 的 Skiko 原生库。也可以指定需要打包的平台：
 
 ```powershell
 .\gradlew.bat fatJar -PskikoRuntimeTargets=windows-x64
 .\gradlew.bat fatJar -PskikoRuntimeTargets=linux-x64
+.\gradlew.bat fatJar -PskikoRuntimeTargets=linux-x64,linux-arm64
 ```
 
-生成的完整 JAR：
+开发插件时，请优先依赖 `dynamic-bot-core` 中的公开 API，不要直接依赖主程序内部实现。提交代码前建议至少运行：
 
-```text
-build/libs/dynamic-bot-0.0.5-all.jar
+```powershell
+.\gradlew.bat test
 ```
 
-## 使用建议
+如果改动涉及 Web 后台脚本，也建议对修改过的 JS 文件运行 `node --check`。生产环境建议定期备份 `data/` 和 `config/`。
 
-- 先安装消息出口插件，再配置内容来源插件。
-- Bilibili、微博等平台不要把轮询间隔设置得太短，避免增加风控风险。
-- 默认媒体发送方式建议保持“自动”。
-- 如果和 OneBot 客户端部署在同一台机器，自动模式通常会优先尝试本地文件发送，图片量大时更友好。
-- 如果推送失败，优先查看后台消息记录和日志页面。
+## 支持项目
+
+如果 dynamic-bot 对你有帮助，可以通过下面的方式支持项目继续维护。
+
+<p align="center">
+  <img src="docs/assets/sponsor/weixin.jpg" alt="微信赞助码" width="180" loading="lazy">
+  <img src="docs/assets/sponsor/aifadian.jpg" alt="爱发电赞助码" width="180" loading="lazy">
+</p>
+
+## 许可证
+
+本项目基于 Apache License 2.0 开源，详见 [LICENSE](LICENSE)。

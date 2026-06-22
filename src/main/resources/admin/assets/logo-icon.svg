@@ -1,0 +1,43 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">dynamic-bot icon</title>
+  <desc id="desc">dynamic-bot 的抽象 D 形图标。</desc>
+  <defs>
+    <linearGradient id="bg" x1="86" y1="82" x2="426" y2="430" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#14B8A6"/>
+      <stop offset="0.48" stop-color="#0EA5E9"/>
+      <stop offset="1" stop-color="#6366F1"/>
+    </linearGradient>
+    <linearGradient id="mark" x1="158" y1="136" x2="360" y2="376" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F6FFFC"/>
+      <stop offset="0.34" stop-color="#E6FCF7"/>
+      <stop offset="0.68" stop-color="#D6F4FF"/>
+      <stop offset="1" stop-color="#DCE6FF"/>
+    </linearGradient>
+    <linearGradient id="markTint" x1="168" y1="154" x2="346" y2="362" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#99F6E4" stop-opacity="0.06"/>
+      <stop offset="0.5" stop-color="#5EEAD4" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#60A5FA" stop-opacity="0.22"/>
+    </linearGradient>
+    <linearGradient id="markEdge" x1="160" y1="138" x2="362" y2="372" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" stop-opacity="0.68"/>
+      <stop offset="0.52" stop-color="#FFFFFF" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#FFFFFF" stop-opacity="0"/>
+    </linearGradient>
+    <filter id="iconShadow" x="30" y="32" width="452" height="452" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#0F172A" flood-opacity="0.2"/>
+    </filter>
+    <filter id="markShadow" x="126" y="116" width="274" height="282" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="10" stdDeviation="8" flood-color="#0F172A" flood-opacity="0.15"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#iconShadow)">
+    <rect x="44" y="44" width="424" height="424" rx="112" fill="url(#bg)"/>
+  </g>
+
+  <g filter="url(#markShadow)" transform="translate(256 256) scale(1.08) translate(-256 -256)">
+    <path fill-rule="evenodd" clip-rule="evenodd" d="M190 138H258C331 138 379 184 379 256C379 328 331 374 258 374H190C175.088 374 163 361.912 163 347V165C163 150.088 175.088 138 190 138ZM214 198V314H258C298 314 325 291 325 256C325 221 298 198 258 198H214Z" fill="url(#mark)"/>
+    <path fill-rule="evenodd" clip-rule="evenodd" d="M190 138H258C331 138 379 184 379 256C379 328 331 374 258 374H190C175.088 374 163 361.912 163 347V165C163 150.088 175.088 138 190 138ZM214 198V314H258C298 314 325 291 325 256C325 221 298 198 258 198H214Z" fill="url(#markTint)"/>
+    <path fill-rule="evenodd" clip-rule="evenodd" d="M190 138H258C331 138 379 184 379 256C379 328 331 374 258 374H190C175.088 374 163 361.912 163 347V165C163 150.088 175.088 138 190 138ZM214 198V314H258C298 314 325 291 325 256C325 221 298 198 258 198H214Z" stroke="url(#markEdge)" stroke-width="3"/>
+  </g>
+</svg>
