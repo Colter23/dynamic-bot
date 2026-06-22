@@ -59,14 +59,11 @@ let platformTag;
 let withButtonLoading;
 let loadSubscriberTargets;
 let loadSubscriberTargetPlatforms;
-let cachedSubscriberTargetCandidates;
-let loadSubscriberTargetCandidates;
 let messageTargetChoiceHtml;
 let messageTargetSearchHtml;
 let messageTargetToolbarHtml;
-let messageTargetFetchPromptHtml;
-let loadingRow;
 let applyTargetChoiceSearch;
+let createMessageTargetCandidateController;
 let bindTargetSourceToggles;
 let beginPageRequest;
 let isCurrentPageRequest;
@@ -100,14 +97,11 @@ function bindContext(nextCtx) {
     withButtonLoading,
     loadSubscriberTargets,
     loadSubscriberTargetPlatforms,
-    cachedSubscriberTargetCandidates,
-    loadSubscriberTargetCandidates,
     messageTargetChoiceHtml,
     messageTargetSearchHtml,
     messageTargetToolbarHtml,
-    messageTargetFetchPromptHtml,
-    loadingRow,
     applyTargetChoiceSearch,
+    createMessageTargetCandidateController,
     bindTargetSourceToggles,
   } = ctx.ui);
   beginPageRequest = ctx.beginPageRequest;
@@ -711,9 +705,9 @@ async function openMessageTargetFilterPicker(kind, button) {
       loadSubscriberTargetPlatforms(false).catch(() => []),
     ]);
     const fallbackPlatforms = targetPlatforms.length ? targetPlatforms : [{ platformId: "qq", pluginName: "手动", supportedTypes: ["GROUP", "USER"] }];
-    let candidateTargets = [];
+    let targetController;
     openModal(kind === "incoming" ? "选择入站筛选目标" : "选择出站筛选目标", messageTargetFilterPickerHtml(kind, existingTargets, fallbackPlatforms), async () => {
-      const target = collectMessageTargetFilterCandidate(candidateTargets, existingTargets);
+      const target = collectMessageTargetFilterCandidate(targetController, existingTargets);
       if (!target) throw new Error("请选择消息目标");
       applyMessageTargetFilter(kind, target);
       closeModal();
@@ -723,9 +717,7 @@ async function openMessageTargetFilterPicker(kind, button) {
       size: "medium",
       confirmText: "使用目标",
     });
-    bindMessageTargetFilterPicker(kind, candidateTargets, existingTargets, fallbackPlatforms, next => {
-      candidateTargets = next;
-    });
+    targetController = bindMessageTargetFilterPicker(kind, existingTargets, fallbackPlatforms);
   });
 }
 
@@ -766,8 +758,8 @@ function messageTargetFilterPickerHtml(kind, existingTargets, platforms) {
   </div>`;
 }
 
-function bindMessageTargetFilterPicker(kind, candidateTargets, existingTargets, platforms, updateCandidates) {
-  let candidateMode = "prompt";
+function bindMessageTargetFilterPicker(kind, existingTargets, platforms) {
+  let targetController;
   const refreshMode = () => {
     const mode = selectedMessageTargetFilterMode();
     document.getElementById("messageExistingTargetBlock").hidden = mode !== "existing";
@@ -779,51 +771,31 @@ function bindMessageTargetFilterPicker(kind, candidateTargets, existingTargets, 
   });
   document.getElementById("messageTargetFilterSearch").oninput = () => {
     applyMessageTargetFilterPickerSearch();
-    if (selectedMessageTargetFilterMode() === "candidate" && candidateTargets.length) {
-      setMessageTargetFilterStatus(messageTargetFilterStatusText(candidateTargets.length));
+    if (selectedMessageTargetFilterMode() === "candidate" && targetController.candidates().length) {
+      setMessageTargetFilterStatus(messageTargetFilterStatusText(targetController.candidates().length));
     }
   };
   ctx.hydrateMediaImages(document.getElementById("messageExistingTargetList")).catch(handleError);
-  const resetCandidateTargets = (text = "") => {
-    candidateTargets = [];
-    candidateMode = "prompt";
-    updateCandidates([]);
-    document.getElementById("messageTargetRefresh").textContent = "获取";
-    document.getElementById("messageTargetRefresh").hidden = true;
-    document.getElementById("messageCandidateTargetList").innerHTML = messageTargetFetchPromptHtml("messageTargetFetchPrompt");
-    document.getElementById("messageTargetFetchPrompt").onclick = () => refreshCandidates(false).catch(handleError);
-    setMessageTargetFilterStatus(text);
-  };
-  const renderCandidateTargets = async (targets) => {
-    const list = document.getElementById("messageCandidateTargetList");
-    candidateTargets = targets || [];
-    updateCandidates(candidateTargets);
-    document.getElementById("messageTargetRefresh").hidden = false;
-    document.getElementById("messageTargetRefresh").textContent = "刷新";
-    if (candidateTargets.length) {
-      candidateMode = "candidates";
-      list.innerHTML = candidateTargets.map((target, index) => messageTargetFilterChoiceHtml(target, index, "messageCandidateTarget")).join("");
-      bindTargetSourceToggles(list);
-      applyMessageTargetFilterPickerSearch();
-      applyMessageCandidateTargetSearch();
-      await ctx.hydrateMediaImages(list);
-      setMessageTargetFilterStatus(messageTargetFilterStatusText(candidateTargets.length));
-    } else {
-      candidateMode = "empty";
-      list.innerHTML = `<div class="empty">暂无可用目标</div>`;
-      setMessageTargetFilterStatus("未获取到目标");
-    }
-  };
-  const showCachedCandidateTargetsOrPrompt = () => {
-    const platformId = document.getElementById("messageTargetPlatform").value;
-    const targetKind = document.getElementById("messageTargetKind").value;
-    const cached = cachedSubscriberTargetCandidates(platformId, targetKind);
-    if (!cached) {
-      resetCandidateTargets();
-      return;
-    }
-    renderCandidateTargets(cached.items || []).catch(handleError);
-  };
+  targetController = createMessageTargetCandidateController({
+    wrapId: "messageCandidateTargetBlock",
+    listId: "messageCandidateTargetList",
+    refreshId: "messageTargetRefresh",
+    searchId: "messageTargetFilterSearch",
+    fetchPromptId: "messageTargetFetchPrompt",
+    inputName: "messageCandidateTarget",
+    prefix: "messageCandidateTarget",
+    inputType: "radio",
+    multiple: false,
+    useSelectionState: true,
+    showSources: false,
+    searchMode: "dom",
+    platformId: () => document.getElementById("messageTargetPlatform").value,
+    targetKind: () => document.getElementById("messageTargetKind").value,
+    setStatus: setMessageTargetFilterStatus,
+    renderCandidate: (target, index, checked) => messageTargetFilterChoiceHtml(target, index, "messageCandidateTarget", checked),
+    onRender: applyMessageCandidateTargetSearch,
+    handleError,
+  });
   const refreshKinds = async () => {
     const platformId = document.getElementById("messageTargetPlatform").value;
     const platform = platforms.find(item => item.platformId === platformId);
@@ -831,38 +803,15 @@ function bindMessageTargetFilterPicker(kind, candidateTargets, existingTargets, 
       ? platform.supportedTypes
       : ["GROUP", "USER", "CHANNEL", "OTHER"];
     document.getElementById("messageTargetKind").innerHTML = kinds.map(value => `<option value="${attr(value)}">${esc(label(value))}</option>`).join("");
-    showCachedCandidateTargetsOrPrompt();
-  };
-  const refreshCandidates = async (force = false) => {
-    const platformId = document.getElementById("messageTargetPlatform").value;
-    const targetKind = document.getElementById("messageTargetKind").value;
-    const list = document.getElementById("messageCandidateTargetList");
-    candidateMode = "loading";
-    list.innerHTML = loadingRow(force ? "正在刷新可用目标..." : "正在获取可用目标...");
-    document.getElementById("messageTargetRefresh").hidden = false;
-    document.getElementById("messageTargetRefresh").disabled = true;
-    try {
-      const result = await loadSubscriberTargetCandidates(platformId, targetKind, force);
-      await renderCandidateTargets(result.items || []);
-    } catch (error) {
-      candidateTargets = [];
-      candidateMode = "error";
-      updateCandidates([]);
-      document.getElementById("messageTargetRefresh").textContent = "重试";
-      list.innerHTML = `<div class="empty">目标列表获取失败</div>`;
-      setMessageTargetFilterStatus(error.message || "可用目标获取失败");
-    } finally {
-      document.getElementById("messageTargetRefresh").disabled = false;
-    }
+    await targetController.showCachedOrPrompt();
   };
   document.getElementById("messageTargetPlatform").onchange = () => refreshKinds().then(() => {
     return null;
   }).catch(handleError);
-  document.getElementById("messageTargetKind").onchange = () => {
-    showCachedCandidateTargetsOrPrompt();
-  };
-  document.getElementById("messageTargetRefresh").onclick = () => refreshCandidates(candidateMode !== "prompt").catch(handleError);
+  document.getElementById("messageTargetKind").onchange = () => targetController.showCachedOrPrompt().catch(handleError);
+  document.getElementById("messageTargetRefresh").onclick = () => targetController.refresh(targetController.mode() !== "prompt").catch(handleError);
   refreshKinds().then(refreshMode).catch(handleError);
+  return targetController;
 }
 
 function applyMessageTargetFilterPickerSearch() {
@@ -876,11 +825,12 @@ function applyMessageCandidateTargetSearch() {
   applyTargetChoiceSearch("#messageCandidateTargetList", keyword);
 }
 
-function messageTargetFilterChoiceHtml(target, index, inputName) {
+function messageTargetFilterChoiceHtml(target, index, inputName, checked = false) {
   return messageTargetChoiceHtml(target, index, {
     inputName,
     prefix: inputName,
     inputType: "radio",
+    checked,
     showSources: false,
   });
 }
@@ -890,13 +840,12 @@ function selectedMessageTargetFilterMode() {
   return input ? input.value : "candidate";
 }
 
-function collectMessageTargetFilterCandidate(candidateTargets, existingTargets) {
+function collectMessageTargetFilterCandidate(targetController, existingTargets) {
   if (selectedMessageTargetFilterMode() === "existing") {
     const input = document.querySelector(`input[name="messageExistingTarget"]:checked`);
     return input ? existingTargets[Number(input.dataset.index)] || null : null;
   }
-  const input = document.querySelector(`input[name="messageCandidateTarget"]:checked`);
-  return input ? candidateTargets[Number(input.dataset.index)] || null : null;
+  return targetController?.selectedTargets()[0] || null;
 }
 
 function applyMessageTargetFilter(kind, target) {

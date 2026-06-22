@@ -42,15 +42,12 @@ let linkParseModeLabel;
 let linkParseModeOptions;
 let loadSubscriberTargets;
 let loadSubscriberTargetPlatforms;
-let cachedSubscriberTargetCandidates;
-let loadSubscriberTargetCandidates;
 let messageTargetChoiceHtml;
 let messageTargetSearchHtml;
 let messageTargetToolbarHtml;
-let messageTargetFetchPromptHtml;
-let messageTargetManualPanelHtml;
 let applyTargetChoiceSearch;
 let filterExistingMessageTargets;
+let createMessageTargetCandidateController;
 let bindTargetSourceToggles;
 let selectedTargetPriorityAccount;
 let eventTypes;
@@ -117,15 +114,12 @@ function bindContext(nextCtx) {
     linkParseModeOptions,
     loadSubscriberTargets,
     loadSubscriberTargetPlatforms,
-    cachedSubscriberTargetCandidates,
-    loadSubscriberTargetCandidates,
     messageTargetChoiceHtml,
     messageTargetSearchHtml,
     messageTargetToolbarHtml,
-    messageTargetFetchPromptHtml,
-    messageTargetManualPanelHtml,
     applyTargetChoiceSearch,
     filterExistingMessageTargets,
+    createMessageTargetCandidateController,
     bindTargetSourceToggles,
     selectedTargetPriorityAccount,
     eventTypes,
@@ -807,8 +801,7 @@ async function openCreateSubscription() {
   const publisherMode = existingPublishers.length ? "existing" : "new";
   const initialPublisherPlatform = publisherMode === "existing" ? "" : publisherPlatforms[0]?.platformId;
   const initialSupportsLive = publisherPlatformSupportsLive(initialPublisherPlatform);
-  let targetCandidates = [];
-  let targetCandidateMode = "prompt";
+  let targetController;
   let publisherCandidates = [];
   let createFilterRules = [];
 
@@ -933,7 +926,7 @@ async function openCreateSubscription() {
     </div>
   `, async () => {
     setCreateSubscriptionResult("");
-    const selectedTargets = collectCreateSubscriptionTargets(targetCandidates);
+    const selectedTargets = collectCreateSubscriptionTargets(targetController);
     const selectedPublishers = collectCreateSubscriptionPublishers(publisherCandidates);
     if (selectedPublishers.length === 0) throw new Error("请选择发布者；如果填写的是用户名，请先搜索并选择结果");
     if (selectedTargets.length === 0) throw new Error("请选择或填写消息目标");
@@ -981,7 +974,7 @@ async function openCreateSubscription() {
     currentCreateSubscriptionLiveSupport,
   );
   const syncSelections = (changedSide = "", changedInput = null) => {
-    syncCreateSubscriptionSelections(targetCandidates, publisherCandidates, changedSide, changedInput);
+    syncCreateSubscriptionSelections(targetController, publisherCandidates, changedSide, changedInput);
     policyUpdater();
   };
   bindCreateSubscriptionMode(syncSelections);
@@ -996,137 +989,56 @@ async function openCreateSubscription() {
     if (!isModalActive()) return;
     $("subNewTargetKind").innerHTML = kinds.map(kind => `<option value="${attr(kind)}">${esc(label(kind))}</option>`).join("");
     policyUpdater();
-    resetTargetCandidates();
+    targetController.showPrompt();
   };
-  const syncTargetCandidateActions = (mode = targetCandidateMode, loading = false) => {
-    const showRefresh = ["candidates", "empty", "error"].includes(mode);
-    const showSelection = mode === "candidates";
-    const refreshButton = $("subNewTargetRefresh");
-    const selectButton = $("subNewTargetSelectAll");
-    const clearButton = $("subNewTargetClearAll");
-    const manualButton = $("subNewTargetManualToggle");
-    if (refreshButton) {
-      refreshButton.hidden = !showRefresh;
-      refreshButton.disabled = loading;
-      refreshButton.textContent = mode === "error" ? "重试" : showRefresh ? "刷新" : "获取";
-    }
-    if (selectButton) {
-      selectButton.hidden = !showSelection;
-      selectButton.disabled = loading || !targetCandidates.length;
-    }
-    if (clearButton) {
-      clearButton.hidden = !showSelection;
-      clearButton.disabled = loading || !targetCandidates.length;
-    }
-    if (manualButton) {
-      manualButton.hidden = false;
-      manualButton.disabled = loading;
-      manualButton.textContent = mode === "manual" ? "使用可用目标" : "手动填写";
-    }
-  };
-  const renderTargetCandidates = async () => {
-    if (!isModalActive()) return;
-    targetCandidateMode = "candidates";
-    $("subNewTargetCandidateWrap").hidden = false;
-    $("subNewTargetCandidateActions").hidden = false;
-    syncTargetCandidateActions("candidates");
-    const candidateList = $("subNewTargetCandidateList");
-    if (!candidateList) return;
-    candidateList.innerHTML = targetCandidates.map((target, index) => subscriptionTargetChoiceHtml(target, index, false)).join("");
-    bindTargetSourceToggles(candidateList);
-    bindCreateSubscriptionSelectionInputs(syncSelections);
-    applyCreateSubscriptionTargetSearch();
-    await hydrateMediaImages(candidateList);
-    if (!isModalActive()) return;
-    setCreateSubscriptionTargetStatus(`已加载 ${targetCandidates.length} 个目标`);
-    syncSelections("target");
-  };
-  const showCachedTargetCandidatesOrPrompt = async () => {
-    if (!isModalActive()) return;
-    const platform = $("subNewTargetPlatform").value;
-    const kind = $("subNewTargetKind").value;
-    const cached = cachedSubscriberTargetCandidates(platform, kind);
-    if (!cached) {
-      resetTargetCandidates();
-      return;
-    }
-    const allCandidates = cached.items || [];
-    targetCandidates = filterExistingMessageTargets(allCandidates, existingTargets);
-    if (targetCandidates.length) {
-      await renderTargetCandidates();
-      return;
-    }
-    targetCandidateMode = "empty";
-    $("subNewTargetCandidateWrap").hidden = false;
-    $("subNewTargetCandidateActions").hidden = false;
-    $("subNewTargetCandidateList").innerHTML = `<div class="empty">暂无可添加目标</div>`;
-    syncTargetCandidateActions("empty");
-    setCreateSubscriptionTargetStatus(allCandidates.length ? "无可添加目标" : "无目标");
-    syncSelections("target");
-  };
-  const resetTargetCandidates = (status = "") => {
-    if (!isModalActive()) return;
-    targetCandidates = [];
-    targetCandidateMode = "prompt";
-    $("subNewTargetCandidateWrap").hidden = false;
-    $("subNewTargetCandidateActions").hidden = false;
-    syncTargetCandidateActions("prompt");
-    $("subNewTargetCandidateList").innerHTML = messageTargetFetchPromptHtml("subNewTargetFetchPrompt");
-    $("subNewTargetFetchPrompt").onclick = () => refreshTargetCandidates(false).catch(handleError);
-    setCreateSubscriptionTargetStatus(status);
-    syncSelections("target");
-  };
-  const showManualTargetInput = () => {
-    if (!isModalActive()) return;
-    targetCandidateMode = "manual";
-    $("subNewTargetCandidateWrap").hidden = false;
-    $("subNewTargetCandidateActions").hidden = false;
-    syncTargetCandidateActions("manual");
-    $("subNewTargetCandidateList").innerHTML = messageTargetManualPanelHtml("subNewTargetManual", {
+  targetController = createMessageTargetCandidateController({
+    isActive: isModalActive,
+    wrapId: "subNewTargetCandidateWrap",
+    actionsId: "subNewTargetCandidateActions",
+    listId: "subNewTargetCandidateList",
+    refreshId: "subNewTargetRefresh",
+    selectAllId: "subNewTargetSelectAll",
+    clearAllId: "subNewTargetClearAll",
+    manualToggleId: "subNewTargetManualToggle",
+    searchId: "subTargetSearch",
+    fetchPromptId: "subNewTargetFetchPrompt",
+    manualInputId: "subNewTargetManual",
+    inputName: "subNewTargetCandidate",
+    prefix: "subNewTarget",
+    useSelectionState: true,
+    searchMode: "dom",
+    platformId: () => $("subNewTargetPlatform").value,
+    targetKind: () => $("subNewTargetKind").value,
+    filterCandidates: items => filterExistingMessageTargets(items, existingTargets),
+    emptyText: "暂无可添加目标",
+    cachedEmptyStatus: items => items.length ? "无可添加目标" : "无目标",
+    loadedEmptyStatus: items => items.length ? "无可添加目标" : "未获取到目标",
+    filteredEmptyStatus: "无可添加目标",
+    manualOptions: {
       placeholder: "填写目标 ID",
       note: "手动目标不指定优先账号，发送时使用全局路由。",
-    });
-    setCreateSubscriptionTargetStatus("手动填写目标 ID");
-    $("subNewTargetManual").oninput = () => syncSelections("target");
-    syncSelections("target");
-  };
-  const refreshTargetCandidates = async (force = false) => {
-    if (!isModalActive()) return;
-    const platform = $("subNewTargetPlatform").value;
-    const kind = $("subNewTargetKind").value;
-    const loadingActionMode = targetCandidateMode;
-    targetCandidateMode = "loading";
-    syncTargetCandidateActions(loadingActionMode, true);
-    setCreateSubscriptionTargetLoading(force ? "正在刷新可用目标..." : "正在获取可用目标...");
-    let allCandidates = [];
-    try {
-      const result = await loadSubscriberTargetCandidates(platform, kind, force);
-      if (!isModalActive()) return;
-      allCandidates = result.items;
-      targetCandidates = filterExistingMessageTargets(allCandidates, existingTargets);
-    } catch (error) {
-      if (!isModalActive()) return;
-      targetCandidateMode = "error";
-      $("subNewTargetCandidateWrap").hidden = false;
-      $("subNewTargetCandidateActions").hidden = false;
-      $("subNewTargetCandidateList").innerHTML = `<div class="empty">目标列表获取失败</div>`;
-      syncTargetCandidateActions("error");
-      setCreateSubscriptionTargetStatus("获取失败，可重试或手动填写");
-      syncSelections("target");
-      return;
-    }
-    if (targetCandidates.length) {
-      await renderTargetCandidates();
-    } else {
-      targetCandidateMode = "empty";
-      $("subNewTargetCandidateWrap").hidden = false;
-      $("subNewTargetCandidateActions").hidden = false;
-      $("subNewTargetCandidateList").innerHTML = `<div class="empty">暂无可添加目标</div>`;
-      syncTargetCandidateActions("empty");
-      setCreateSubscriptionTargetStatus(allCandidates.length ? "无可添加目标" : "未获取到目标");
-      syncSelections("target");
-    }
-  };
+    },
+    setStatus: setCreateSubscriptionTargetStatus,
+    renderCandidate: subscriptionTargetChoiceHtml,
+    onPrompt: () => syncSelections("target"),
+    onManual: () => syncSelections("target"),
+    onManualInput: () => syncSelections("target"),
+    onRender: () => syncSelections("target"),
+    onEmpty: () => syncSelections("target"),
+    onError: () => syncSelections("target"),
+    onSelectionChange: () => syncSelections("target"),
+    bindInputs: (list, targets, controllerState) => {
+      bindCreateSubscriptionSelectionInputs(syncSelections);
+      list.querySelectorAll(`input[name="subNewTargetCandidate"]`).forEach(input => {
+        input.onchange = event => {
+          controllerState.selectionState?.remember(controllerState.visibleCandidates, "subNewTargetCandidate", "subNewTarget");
+          syncSelections("target", event.currentTarget);
+        };
+      });
+      applyCreateSubscriptionTargetSearch();
+    },
+    handleError,
+  });
   const searchPublisher = async () => {
     if (!isModalActive()) return;
     const platformId = $("subNewPublisherPlatform").value.trim();
@@ -1155,25 +1067,23 @@ async function openCreateSubscription() {
     }
   };
   $("subNewTargetPlatform").onchange = refreshTargetKinds;
-  $("subNewTargetKind").onchange = async () => {
-    await showCachedTargetCandidatesOrPrompt();
-  };
-  $("subNewTargetRefresh").onclick = () => refreshTargetCandidates(targetCandidateMode !== "prompt").catch(handleError);
+  $("subNewTargetKind").onchange = () => targetController.showCachedOrPrompt().catch(handleError);
+  $("subNewTargetRefresh").onclick = () => targetController.refresh(targetController.mode() !== "prompt").catch(handleError);
   $("subNewTargetManualToggle").onclick = () => {
-    if (targetCandidateMode === "manual") {
-      if (targetCandidates.length) renderTargetCandidates().catch(handleError);
-      else resetTargetCandidates();
+    if (targetController.mode() === "manual") {
+      if (targetController.candidates().length) targetController.renderCandidates().catch(handleError);
+      else targetController.showPrompt();
     }
-    else showManualTargetInput();
+    else targetController.showManual();
   };
   $("subTargetSearch").oninput = () => {
     if (selectedSubscriptionMode("subTargetMode") === "existing") {
       applyCreateSubscriptionExistingTargetSearch();
     } else {
-      applyCreateSubscriptionTargetSearch();
-      setCreateSubscriptionTargetStatus(targetCandidates.length
-        ? `已加载 ${targetCandidates.length} 个目标`
-        : targetCandidateMode === "manual" ? "手动填写目标 ID" : "");
+      targetController.search();
+      setCreateSubscriptionTargetStatus(targetController.candidates().length
+        ? `已加载 ${targetController.candidates().length} 个目标`
+        : targetController.mode() === "manual" ? "手动填写目标 ID" : "");
     }
     syncSelections("target");
   };
@@ -1184,21 +1094,15 @@ async function openCreateSubscription() {
   $("subTargetClear").onclick = () => {
     if (selectedSubscriptionMode("subTargetMode") === "existing") {
       document.querySelectorAll(`input[name="subExistingTarget"]`).forEach(input => input.checked = false);
-    } else if (targetCandidateMode === "manual" && $("subNewTargetManual")) {
+    } else if (targetController.mode() === "manual" && $("subNewTargetManual")) {
       $("subNewTargetManual").value = "";
     } else {
-      setCreateSubscriptionTargetChecked(false);
+      targetController.setChecked(false);
     }
     syncSelections("target");
   };
-  $("subNewTargetSelectAll").onclick = () => {
-    setCreateSubscriptionTargetChecked(true);
-    syncSelections("target");
-  };
-  $("subNewTargetClearAll").onclick = () => {
-    setCreateSubscriptionTargetChecked(false);
-    syncSelections("target");
-  };
+  $("subNewTargetSelectAll").onclick = () => targetController.setChecked(true);
+  $("subNewTargetClearAll").onclick = () => targetController.setChecked(false);
   $("subExistingPublisherClear").onclick = () => {
     document.querySelectorAll(`input[name="subExistingPublisher"]`).forEach(input => input.checked = false);
     document.querySelectorAll(`input[name="subNewPublisherCandidate"]`).forEach(input => input.checked = false);
@@ -1351,13 +1255,6 @@ function currentCreateSubscriptionLiveSupport() {
   return null;
 }
 
-function setCreateSubscriptionTargetLoading(text) {
-  if (!$("subNewTargetCandidateList")) return;
-  $("subNewTargetCandidateWrap").hidden = false;
-  $("subNewTargetCandidateList").innerHTML = loadingRow(text);
-  setCreateSubscriptionTargetStatus("");
-}
-
 function setCreateSubscriptionTargetStatus(text) {
   if (!$("subNewTargetStatus")) return;
   $("subNewTargetStatus").textContent = text ? `· ${text}` : "";
@@ -1392,19 +1289,19 @@ function bindCreateSubscriptionSelectionInputs(selectionUpdater) {
   });
 }
 
-function syncCreateSubscriptionSelections(targetCandidates, publisherCandidates, changedSide = "", changedInput = null) {
-  enforceCreateSubscriptionSelectionLimit(targetCandidates, publisherCandidates, changedSide, changedInput);
-  let selectedTargets = collectCreateSubscriptionTargets(targetCandidates);
+function syncCreateSubscriptionSelections(targetController, publisherCandidates, changedSide = "", changedInput = null) {
+  enforceCreateSubscriptionSelectionLimit(targetController, publisherCandidates, changedSide, changedInput);
+  let selectedTargets = collectCreateSubscriptionTargets(targetController);
   let selectedPublishers = collectCreateSubscriptionPublishers(publisherCandidates);
   updateExistingSubscriptionChoiceVisibility(selectedTargets, selectedPublishers);
-  selectedTargets = collectCreateSubscriptionTargets(targetCandidates);
+  selectedTargets = collectCreateSubscriptionTargets(targetController);
   selectedPublishers = collectCreateSubscriptionPublishers(publisherCandidates);
   updateCreateSubscriptionChoiceDisabled(selectedTargets, selectedPublishers);
   updateCreateSubscriptionSelectionHint(selectedTargets, selectedPublishers);
 }
 
-function enforceCreateSubscriptionSelectionLimit(targetCandidates, publisherCandidates, changedSide, changedInput) {
-  const selectedTargets = collectCreateSubscriptionTargets(targetCandidates);
+function enforceCreateSubscriptionSelectionLimit(targetController, publisherCandidates, changedSide, changedInput) {
+  const selectedTargets = collectCreateSubscriptionTargets(targetController);
   const selectedPublishers = collectCreateSubscriptionPublishers(publisherCandidates);
   if (selectedTargets.length <= 1 || selectedPublishers.length <= 1) return;
   if (changedSide === "publisher") {
@@ -1594,12 +1491,6 @@ function subscriptionTargetChoiceHtml(target, index, checked) {
   });
 }
 
-function setCreateSubscriptionTargetChecked(checked) {
-  document.querySelectorAll(`input[name="subNewTargetCandidate"]`).forEach(input => {
-    if (!checked || !input.disabled) input.checked = checked;
-  });
-}
-
 function buildCreateSubscriptionImportDocument(publishers, targets, policy, filterRules = []) {
   const subscriptions = [];
   const existingPairs = existingSubscriptionPairSet();
@@ -1641,7 +1532,7 @@ function buildCreateSubscriptionImportDocument(publishers, targets, policy, filt
   };
 }
 
-function collectCreateSubscriptionTargets(candidates) {
+function collectCreateSubscriptionTargets(targetController) {
   if (selectedSubscriptionMode("subTargetMode") === "existing") {
     return Array.from(document.querySelectorAll(`input[name="subExistingTarget"]:checked`))
       .map(input => (state.cache.subscribers || [])[Number(input.dataset.index)])
@@ -1665,16 +1556,8 @@ function collectCreateSubscriptionTargets(candidates) {
     const manual = $("subNewTargetManual").value.trim();
     return manual ? [{ platformId, targetKind, externalId: manual, label: manual, linkParseTriggerMode }] : [];
   }
-  if (candidates.length === 0 || $("subNewTargetCandidateWrap").hidden) return [];
-  return Array.from(document.querySelectorAll(`input[name="subNewTargetCandidate"]:checked`))
-    .map(input => {
-      const index = Number(input.dataset.index);
-      const target = candidates[index];
-      if (!target) return null;
-      const accountId = selectedTargetPriorityAccount("subNewTarget", index);
-      return Object.assign({}, target, accountId ? { accountId } : { accountId: undefined });
-    })
-    .filter(Boolean)
+  if (!targetController || targetController.candidates().length === 0 || $("subNewTargetCandidateWrap").hidden) return [];
+  return targetController.selectedTargets()
     .map(target => ({
       platformId,
       targetKind,

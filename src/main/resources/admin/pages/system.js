@@ -19,25 +19,17 @@ let openModal;
 let confirmDanger;
 let loadingRow;
 let loadSubscriberTargetPlatforms;
-let cachedSubscriberTargetCandidates;
-let loadSubscriberTargetCandidates;
 let messageTargetChoiceHtml;
 let messageTargetSearchHtml;
 let messageTargetToolbarHtml;
-let messageTargetFetchPromptHtml;
-let messageTargetManualPanelHtml;
-let filterMessageTargets;
-let createMessageTargetSelectionState;
+let createMessageTargetCandidateController;
 let bindTargetSourceToggles;
 let beginPageRequest;
 let isCurrentPageRequest;
 let invalidatePageRequests;
 
 let forwardTargetPlatforms = [];
-let forwardTargetCandidates = [];
-let visibleForwardTargetCandidates = [];
-let forwardTargetSelection;
-let forwardTargetMode = "prompt";
+let forwardTargetController;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -60,15 +52,10 @@ function bindContext(nextCtx) {
     confirmDanger,
     loadingRow,
     loadSubscriberTargetPlatforms,
-    cachedSubscriberTargetCandidates,
-    loadSubscriberTargetCandidates,
     messageTargetChoiceHtml,
     messageTargetSearchHtml,
     messageTargetToolbarHtml,
-    messageTargetFetchPromptHtml,
-    messageTargetManualPanelHtml,
-    filterMessageTargets,
-    createMessageTargetSelectionState,
+    createMessageTargetCandidateController,
     bindTargetSourceToggles,
   } = ctx.ui);
   beginPageRequest = ctx.beginPageRequest;
@@ -213,9 +200,7 @@ function maintenanceOperationsHtml() {
 
 async function openForwardModal() {
   forwardTargetPlatforms = await loadForwardTargetPlatforms(false);
-  forwardTargetCandidates = [];
-  visibleForwardTargetCandidates = [];
-  forwardTargetSelection = createMessageTargetSelectionState();
+  forwardTargetController = null;
   openModal("消息转发", forwardFormHtml(forwardTargetPlatforms), async () => {
     await submitForwardMessage();
   }, {
@@ -272,29 +257,59 @@ function forwardFormHtml(platforms) {
 }
 
 function bindForwardForm() {
+  forwardTargetController = createMessageTargetCandidateController({
+    wrapId: "forwardTargetCandidateWrap",
+    actionsId: "forwardTargetCandidateActions",
+    listId: "forwardTargetCandidateList",
+    refreshId: "forwardTargetRefresh",
+    selectAllId: "forwardTargetSelectAll",
+    clearAllId: "forwardTargetClearAll",
+    manualToggleId: "forwardManualToggle",
+    searchId: "forwardTargetSearch",
+    fetchPromptId: "forwardTargetFetchPrompt",
+    manualInputId: "forwardManualTargets",
+    inputName: "forwardTargetCandidate",
+    prefix: "forwardTarget",
+    useSelectionState: true,
+    platformId: currentForwardPlatformId,
+    targetKind: () => $("forwardTargetKind").value,
+    canFetch: () => $("forwardPlatform").value !== "__manual__" && !!currentForwardPlatformId(),
+    fetchBlockedStatus: () => currentForwardPlatformId() ? "手动填写目标 ID" : "请填写目标平台 ID",
+    emptyText: "暂无可用目标",
+    manualOptions: {
+      label: "目标 ID",
+      placeholder: "多个目标 ID 可用逗号、空格或换行分隔",
+      textarea: true,
+      note: "手动目标不指定优先账号，发送时使用全局路由。",
+    },
+    setStatus: setForwardTargetStatus,
+    renderCandidate: (target, index, checked) => messageTargetChoiceHtml(target, index, {
+      inputName: "forwardTargetCandidate",
+      prefix: "forwardTarget",
+      checked,
+    }),
+    handleError,
+  });
   $("forwardPlatform").onchange = () => refreshForwardTargetKinds().catch(handleError);
-  $("forwardPlatformManual").oninput = () => resetForwardTargets();
-  $("forwardTargetKind").onchange = () => showCachedForwardTargetsOrPrompt();
-  $("forwardTargetRefresh").onclick = () => refreshForwardTargets(forwardTargetMode !== "prompt").catch(handleError);
-  $("forwardManualToggle").onclick = () => {
-    if (forwardTargetMode === "manual") {
-      if (forwardTargetCandidates.length) renderForwardTargetCandidates();
-      else resetForwardTargets();
+  $("forwardPlatformManual").oninput = () => {
+    if (forwardTargetController.mode() !== "manual") {
+      forwardTargetController.showManual("手动填写目标 ID");
+    } else {
+      setForwardTargetStatus("手动填写目标 ID");
     }
-    else showForwardManualInput();
   };
-  $("forwardTargetSearch").oninput = () => {
-    if (forwardTargetMode === "candidates") renderForwardTargetCandidates();
+  $("forwardTargetKind").onchange = () => forwardTargetController.showCachedOrPrompt().catch(handleError);
+  $("forwardTargetRefresh").onclick = () => forwardTargetController.refresh(forwardTargetController.mode() !== "prompt").catch(handleError);
+  $("forwardManualToggle").onclick = () => {
+    if (forwardTargetController.mode() === "manual") {
+      if (forwardTargetController.candidates().length) forwardTargetController.renderCandidates().catch(handleError);
+      else forwardTargetController.showCachedOrPrompt().catch(handleError);
+    }
+    else forwardTargetController.showManual();
   };
-  $("forwardTargetSelectAll").onclick = () => {
-    setForwardTargetChecked(true);
-    forwardTargetSelection.remember(visibleForwardTargetCandidates, "forwardTargetCandidate", "forwardTarget");
-  };
-  $("forwardTargetClearAll").onclick = () => {
-    setForwardTargetChecked(false);
-    forwardTargetSelection.clear();
-    renderForwardTargetCandidates();
-  };
+  $("forwardTargetSearch").oninput = () => forwardTargetController.search();
+  $("forwardTargetSelectAll").onclick = () => forwardTargetController.setChecked(true);
+  $("forwardTargetClearAll").onclick = () => forwardTargetController.setChecked(false);
   $("forwardForm").onsubmit = event => {
     event.preventDefault();
     submitForwardMessage().catch(handleError);
@@ -309,171 +324,13 @@ async function refreshForwardTargetKinds() {
     ? platform.supportedTypes
     : ["GROUP", "USER", "CHANNEL", "OTHER"];
   $("forwardTargetKind").innerHTML = kinds.map(kind => `<option value="${attr(kind)}">${esc(label(kind))}</option>`).join("");
-  resetForwardTargets(rawPlatformId === "__manual__" ? "手动填写目标 ID" : "");
-}
-
-function resetForwardTargets(status = "") {
-  forwardTargetMode = "prompt";
-  forwardTargetCandidates = [];
-  visibleForwardTargetCandidates = [];
-  forwardTargetSelection?.clear();
-  $("forwardTargetCandidateActions").hidden = false;
-  syncForwardTargetActions("prompt");
-  const rawPlatformId = $("forwardPlatform").value;
-  const platformId = currentForwardPlatformId();
-  if (rawPlatformId === "__manual__" || !platformId) {
-    showForwardManualInput(status);
-    return;
-  }
-  $("forwardTargetCandidateList").innerHTML = messageTargetFetchPromptHtml("forwardTargetFetchPrompt");
-  $("forwardTargetFetchPrompt").onclick = () => refreshForwardTargets(false).catch(handleError);
-  setForwardTargetStatus(status);
-}
-
-function showCachedForwardTargetsOrPrompt() {
-  const rawPlatformId = $("forwardPlatform").value;
-  const platformId = currentForwardPlatformId();
-  const kind = $("forwardTargetKind").value;
-  if (rawPlatformId === "__manual__" || !platformId) {
-    resetForwardTargets(rawPlatformId === "__manual__" ? "手动填写目标 ID" : "");
-    return;
-  }
-  const cached = cachedSubscriberTargetCandidates(platformId, kind);
-  if (!cached) {
-    resetForwardTargets();
-    return;
-  }
-  forwardTargetCandidates = cached.items || [];
-  visibleForwardTargetCandidates = [];
-  forwardTargetSelection?.clear();
-  if (forwardTargetCandidates.length) renderForwardTargetCandidates();
-  else {
-    forwardTargetMode = "empty";
-    $("forwardTargetCandidateActions").hidden = false;
-    syncForwardTargetActions("empty");
-    $("forwardTargetCandidateList").innerHTML = `<div class="empty">暂无可用目标</div>`;
-    setForwardTargetStatus("无目标");
-  }
-}
-
-function syncForwardTargetActions(mode = forwardTargetMode, loading = false) {
-  const showRefresh = ["candidates", "empty", "error"].includes(mode);
-  const showSelection = mode === "candidates";
-  const refreshButton = $("forwardTargetRefresh");
-  const selectButton = $("forwardTargetSelectAll");
-  const clearButton = $("forwardTargetClearAll");
-  const manualButton = $("forwardManualToggle");
-  if (refreshButton) {
-    refreshButton.hidden = !showRefresh;
-    refreshButton.disabled = loading;
-    refreshButton.textContent = mode === "error" ? "重试" : showRefresh ? "刷新" : "获取";
-  }
-  if (selectButton) {
-    selectButton.hidden = !showSelection;
-    selectButton.disabled = loading || !forwardTargetCandidates.length;
-  }
-  if (clearButton) {
-    clearButton.hidden = !showSelection;
-    clearButton.disabled = loading || !forwardTargetCandidates.length;
-  }
-  if (manualButton) {
-    manualButton.hidden = false;
-    manualButton.disabled = loading;
-    manualButton.textContent = mode === "manual" ? "使用可用目标" : "手动填写";
-  }
-}
-
-function showForwardManualInput(status = "手动填写目标 ID") {
-  forwardTargetMode = "manual";
-  visibleForwardTargetCandidates = [];
-  forwardTargetSelection?.clear();
-  $("forwardTargetCandidateActions").hidden = false;
-  syncForwardTargetActions("manual");
-  $("forwardTargetCandidateList").innerHTML = messageTargetManualPanelHtml("forwardManualTargets", {
-    label: "目标 ID",
-    placeholder: "多个目标 ID 可用逗号、空格或换行分隔",
-    textarea: true,
-    note: "手动目标不指定优先账号，发送时使用全局路由。",
-  });
-  setForwardTargetStatus(status);
-}
-
-async function refreshForwardTargets(force = false) {
-  const rawPlatformId = $("forwardPlatform").value;
-  const platformId = currentForwardPlatformId();
-  const kind = $("forwardTargetKind").value;
-  visibleForwardTargetCandidates = [];
-  const loadingActionMode = forwardTargetMode;
-  forwardTargetMode = "loading";
-  forwardTargetSelection?.clear();
-  syncForwardTargetActions(loadingActionMode, true);
-  setForwardTargetStatus("");
-  if (!platformId) {
-    showForwardManualInput("请填写目标平台 ID");
-    return;
-  }
-  if (rawPlatformId === "__manual__") {
-    showForwardManualInput("手动填写目标 ID");
-    return;
-  }
-
-  setForwardTargetLoading(force ? "正在刷新可用目标..." : "正在获取可用目标...");
-  try {
-    const result = await loadSubscriberTargetCandidates(platformId, kind, force);
-    forwardTargetCandidates = result.items || [];
-    renderForwardTargetCandidates();
-  } catch (error) {
-    forwardTargetCandidates = [];
-    forwardTargetMode = "error";
-    $("forwardTargetCandidateActions").hidden = false;
-    syncForwardTargetActions("error");
-    $("forwardTargetCandidateList").innerHTML = `<div class="empty">目标列表获取失败</div>`;
-    setForwardTargetStatus(error.message || "获取失败，可重试或手动填写");
-  }
-}
-
-function renderForwardTargetCandidates() {
-  const list = $("forwardTargetCandidateList");
-  forwardTargetSelection?.remember(visibleForwardTargetCandidates, "forwardTargetCandidate", "forwardTarget");
-  visibleForwardTargetCandidates = filterMessageTargets(forwardTargetCandidates, $("forwardTargetSearch")?.value || "");
-  if (forwardTargetCandidates.length) {
-    forwardTargetMode = "candidates";
-    $("forwardTargetCandidateActions").hidden = false;
-    syncForwardTargetActions("candidates");
-    list.innerHTML = visibleForwardTargetCandidates.length ? visibleForwardTargetCandidates.map((target, index) =>
-      messageTargetChoiceHtml(target, index, {
-        inputName: "forwardTargetCandidate",
-        prefix: "forwardTarget",
-        checked: forwardTargetSelection?.isSelected(target),
-      })
-    ).join("") : `<div class="empty">没有匹配的可用目标</div>`;
-    bindTargetSourceToggles(list);
-    list.querySelectorAll(`input[name="forwardTargetCandidate"]`).forEach(input => {
-      input.onchange = () => forwardTargetSelection?.remember(visibleForwardTargetCandidates, "forwardTargetCandidate", "forwardTarget");
-    });
-    hydrateMediaImages(list).catch(handleError);
-    setForwardTargetStatus(`已加载 ${forwardTargetCandidates.length} 个目标`);
-  } else {
-    forwardTargetMode = "empty";
-    $("forwardTargetCandidateActions").hidden = false;
-    syncForwardTargetActions("empty");
-    list.innerHTML = `<div class="empty">暂无可用目标</div>`;
-    setForwardTargetStatus("未获取到目标");
-  }
-}
-
-function setForwardTargetLoading(text) {
-  $("forwardTargetCandidateList").innerHTML = loadingRow(text);
-  setForwardTargetStatus("");
+  if (rawPlatformId === "__manual__") forwardTargetController.showManual("手动填写目标 ID");
+  else forwardTargetController.showPrompt();
 }
 
 function setForwardTargetStatus(text) {
   const node = $("forwardTargetStatus");
   if (node) node.textContent = text ? `· ${text}` : "";
-}
-
-function setForwardTargetChecked(checked) {
-  document.querySelectorAll(`input[name="forwardTargetCandidate"]`).forEach(input => input.checked = checked);
 }
 
 async function submitForwardMessage() {
@@ -492,9 +349,7 @@ async function submitForwardMessage() {
 }
 
 function collectForwardTargets() {
-  const selectedTargets = (forwardTargetSelection
-    ? forwardTargetSelection.selectedTargets(forwardTargetCandidates, "forwardTargetCandidate", "forwardTarget", document, visibleForwardTargetCandidates)
-    : [])
+  const selectedTargets = (forwardTargetController ? forwardTargetController.selectedTargets() : [])
     .map(target => normalizeForwardTarget({
         platformId: target.platformId,
         targetKind: target.targetKind,

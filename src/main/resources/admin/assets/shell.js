@@ -583,6 +583,273 @@ const $ = id => document.getElementById(id);
         },
       };
     }
+    function createMessageTargetCandidateController(options = {}) {
+      let mode = "prompt";
+      let candidates = [];
+      let visibleCandidates = [];
+      const inputName = options.inputName || "targetCandidate";
+      const prefix = options.prefix || inputName;
+      const selectionState = options.selectionState || (options.useSelectionState ? createMessageTargetSelectionState({ multiple: options.multiple !== false }) : null);
+      const searchMode = options.searchMode || "filter";
+      const isActive = () => !options.isActive || options.isActive();
+      const node = id => typeof id === "function" ? id() : document.getElementById(id);
+      const list = () => node(options.listId);
+      const refreshButton = () => node(options.refreshId);
+      const selectAllButton = () => node(options.selectAllId);
+      const clearAllButton = () => node(options.clearAllId);
+      const manualButton = () => node(options.manualToggleId);
+      const searchInput = () => node(options.searchId);
+      const setStatus = text => {
+        if (options.setStatus) options.setStatus(text || "");
+      };
+      const statusText = total => options.statusText ? options.statusText(total) : `已加载 ${total} 个目标`;
+      const setMode = nextMode => {
+        mode = nextMode;
+        if (options.onStateChange) options.onStateChange(state());
+      };
+      const state = () => ({ mode, candidates, visibleCandidates, selectionState });
+      const syncActions = (actionMode = mode, loading = false) => {
+        const showRefresh = ["candidates", "empty", "error"].includes(actionMode);
+        const showSelection = actionMode === "candidates";
+        const refresh = refreshButton();
+        const selectAll = selectAllButton();
+        const clearAll = clearAllButton();
+        const manual = manualButton();
+        if (refresh) {
+          refresh.hidden = !showRefresh;
+          refresh.disabled = loading;
+          refresh.textContent = actionMode === "error" ? "重试" : showRefresh ? "刷新" : "获取";
+        }
+        if (selectAll) {
+          selectAll.hidden = !showSelection;
+          selectAll.disabled = loading || !candidates.length;
+        }
+        if (clearAll) {
+          clearAll.hidden = !showSelection;
+          clearAll.disabled = loading || !candidates.length;
+        }
+        if (manual) {
+          manual.hidden = options.manual === false || !!(options.hideManualToggle && options.hideManualToggle(state()));
+          manual.disabled = loading;
+          manual.textContent = actionMode === "manual" ? "使用可用目标" : "手动填写";
+        }
+        if (options.syncActions) options.syncActions(actionMode, loading, state());
+      };
+      const bindFetchPrompt = () => {
+        const fetchButton = node(options.fetchPromptId);
+        if (fetchButton) fetchButton.onclick = () => refresh(false).catch(options.handleError || console.error);
+      };
+      const canFetch = () => !options.canFetch || options.canFetch();
+      const fetchBlockedStatus = () => options.fetchBlockedStatus ? options.fetchBlockedStatus() : "";
+      const platformId = () => options.platformId ? options.platformId() : "";
+      const targetKind = () => options.targetKind ? options.targetKind() : "";
+      const showPrompt = (status = "") => {
+        if (!isActive()) return;
+        candidates = [];
+        visibleCandidates = [];
+        if (selectionState) selectionState.clear();
+        setMode("prompt");
+        const wrap = node(options.wrapId);
+        const actions = node(options.actionsId);
+        if (wrap) wrap.hidden = false;
+        if (actions) actions.hidden = false;
+        syncActions("prompt");
+        const targetList = list();
+        if (targetList) targetList.innerHTML = messageTargetFetchPromptHtml(options.fetchPromptId || `${inputName}FetchPrompt`);
+        bindFetchPrompt();
+        setStatus(status);
+        if (options.onPrompt) options.onPrompt(state());
+      };
+      const showManual = (status = "手动填写目标 ID") => {
+        if (!isActive()) return;
+        visibleCandidates = [];
+        if (options.clearSelectionOnManual !== false && selectionState) selectionState.clear();
+        setMode("manual");
+        const wrap = node(options.wrapId);
+        const actions = node(options.actionsId);
+        if (wrap) wrap.hidden = false;
+        if (actions) actions.hidden = false;
+        syncActions("manual");
+        const targetList = list();
+        if (targetList) {
+          targetList.innerHTML = messageTargetManualPanelHtml(options.manualInputId || `${inputName}Manual`, options.manualOptions || {});
+          const manualInput = node(options.manualInputId || `${inputName}Manual`);
+          if (manualInput) manualInput.oninput = () => {
+            if (options.onManualInput) options.onManualInput(state());
+          };
+        }
+        setStatus(status);
+        if (options.onManual) options.onManual(state());
+      };
+      const setLoading = (text, previousMode = mode) => {
+        setMode("loading");
+        syncActions(previousMode, true);
+        const targetList = list();
+        if (targetList) targetList.innerHTML = loadingRow(text);
+        setStatus("");
+      };
+      const resolveEmptyStatus = (status, allItems) => typeof status === "function" ? status(allItems || [], state()) : status;
+      const applyLoadedItems = async (items, emptyStatus) => {
+        const allItems = Array.isArray(items) ? items : [];
+        candidates = options.filterCandidates ? options.filterCandidates(allItems) : allItems;
+        visibleCandidates = [];
+        if (options.resetSelectionOnLoad !== false && selectionState) selectionState.clear();
+        if (!isActive()) return;
+        if (candidates.length) {
+          await renderCandidates();
+          return;
+        }
+        setMode("empty");
+        const wrap = node(options.wrapId);
+        const actions = node(options.actionsId);
+        if (wrap) wrap.hidden = false;
+        if (actions) actions.hidden = false;
+        syncActions("empty");
+        const targetList = list();
+        if (targetList) targetList.innerHTML = `<div class="empty">${esc(options.emptyText || "暂无可用目标")}</div>`;
+        setStatus(emptyStatus !== undefined ? resolveEmptyStatus(emptyStatus, allItems) : (allItems.length && options.filteredEmptyStatus ? resolveEmptyStatus(options.filteredEmptyStatus, allItems) : "未获取到目标"));
+        if (options.onEmpty) options.onEmpty(state(), allItems);
+      };
+      const showCachedOrPrompt = async () => {
+        if (!isActive()) return;
+        if (!canFetch()) {
+          if (options.manualOnFetchBlocked !== false) showManual(fetchBlockedStatus() || "手动填写目标 ID");
+          else showPrompt(fetchBlockedStatus());
+          return;
+        }
+        const cached = cachedSubscriberTargetCandidates(platformId(), targetKind());
+        if (!cached) {
+          showPrompt();
+          return;
+        }
+        await applyLoadedItems(cached.items || [], options.cachedEmptyStatus);
+      };
+      async function refresh(force = false) {
+        if (!isActive()) return;
+        if (!canFetch()) {
+          if (options.manualOnFetchBlocked !== false) showManual(fetchBlockedStatus() || "手动填写目标 ID");
+          else showPrompt(fetchBlockedStatus());
+          return;
+        }
+        const previousMode = mode;
+        setLoading(force ? "正在刷新可用目标..." : "正在获取可用目标...", previousMode);
+        try {
+          const result = await loadSubscriberTargetCandidates(platformId(), targetKind(), force);
+          if (!isActive()) return;
+          await applyLoadedItems(result.items || [], options.loadedEmptyStatus);
+        } catch (error) {
+          if (!isActive()) return;
+          candidates = [];
+          visibleCandidates = [];
+          setMode("error");
+          const actions = node(options.actionsId);
+          if (actions) actions.hidden = false;
+          syncActions("error");
+          const targetList = list();
+          if (targetList) targetList.innerHTML = `<div class="empty">目标列表获取失败</div>`;
+          setStatus(error.message || "可用目标获取失败");
+          if (options.onError) options.onError(error, state());
+        } finally {
+          const refresh = refreshButton();
+          if (refresh) refresh.disabled = false;
+        }
+      }
+      async function renderCandidates() {
+        if (!isActive()) return;
+        if (selectionState) selectionState.remember(visibleCandidates, inputName, prefix, document);
+        visibleCandidates = searchMode === "filter"
+          ? filterMessageTargets(candidates, searchInput() && searchInput().value || "")
+          : candidates.slice();
+        setMode("candidates");
+        const wrap = node(options.wrapId);
+        const actions = node(options.actionsId);
+        if (wrap) wrap.hidden = false;
+        if (actions) actions.hidden = false;
+        syncActions("candidates");
+        const targetList = list();
+        if (!targetList) return;
+        const renderList = searchMode === "filter" ? visibleCandidates : candidates;
+        if (renderList.length) {
+          targetList.innerHTML = renderList.map((target, index) => {
+            const checked = selectionState ? selectionState.isSelected(target) : false;
+            if (options.renderCandidate) return options.renderCandidate(target, index, checked, state());
+            return messageTargetChoiceHtml(target, index, {
+              inputName,
+              prefix,
+              inputType: options.inputType || (options.multiple === false ? "radio" : "checkbox"),
+              checked,
+              showSources: options.showSources,
+              showPriority: options.showPriority,
+            });
+          }).join("");
+          bindTargetSourceToggles(targetList);
+          if (searchMode !== "filter") applyTargetChoiceSearch(targetList, searchInput() && searchInput().value || "");
+          if (options.bindInputs) {
+            options.bindInputs(targetList, renderList, state());
+          } else if (selectionState) {
+            targetList.querySelectorAll(`input[name="${inputName}"]`).forEach(input => {
+              input.onchange = () => {
+                selectionState.remember(renderList, inputName, prefix, document);
+                if (options.onSelectionChange) options.onSelectionChange(state());
+              };
+            });
+          }
+          await hydrateMediaImages(targetList);
+        } else {
+          targetList.innerHTML = `<div class="empty">${esc(options.noMatchText || "没有匹配的可用目标")}</div>`;
+        }
+        if (!isActive()) return;
+        setStatus(statusText(candidates.length));
+        if (options.onRender) options.onRender(state());
+      }
+      const search = () => {
+        if (mode !== "candidates") return;
+        if (searchMode === "filter") renderCandidates().catch(options.handleError || console.error);
+        else {
+          const targetList = list();
+          if (targetList) applyTargetChoiceSearch(targetList, searchInput() && searchInput().value || "");
+          setStatus(candidates.length ? statusText(candidates.length) : "");
+          if (options.onSearch) options.onSearch(state());
+        }
+      };
+      const setChecked = checked => {
+        if (options.setChecked) options.setChecked(checked, state());
+        else {
+          document.querySelectorAll(`input[name="${inputName}"]`).forEach(input => {
+            if (!checked || !input.disabled) input.checked = checked;
+          });
+        }
+        if (!checked && selectionState) selectionState.clear();
+        else if (selectionState) selectionState.remember(visibleCandidates, inputName, prefix, document);
+        if (options.onSelectionChange) options.onSelectionChange(state());
+        if (!checked && mode === "candidates" && searchMode === "filter") renderCandidates().catch(options.handleError || console.error);
+      };
+      const selectedTargets = () => selectionState
+        ? selectionState.selectedTargets(candidates, inputName, prefix, document, visibleCandidates)
+        : Array.from(document.querySelectorAll(`input[name="${inputName}"]:checked`))
+          .map(input => (searchMode === "filter" ? visibleCandidates : candidates)[Number(input.dataset.index)])
+          .filter(Boolean);
+      return {
+        state,
+        mode: () => mode,
+        candidates: () => candidates,
+        visibleCandidates: () => visibleCandidates,
+        selectionState: () => selectionState,
+        reset: showPrompt,
+        showPrompt,
+        showManual,
+        showCachedOrPrompt,
+        refresh,
+        renderCandidates,
+        search,
+        setChecked,
+        selectedTargets,
+        manualValue() {
+          const input = node(options.manualInputId || `${inputName}Manual`);
+          return input ? input.value : "";
+        },
+      };
+    }
     function bindTargetSourceToggles(root = document) {
       root.querySelectorAll("[data-target-source-toggle]").forEach(button => {
         button.onclick = event => {
@@ -953,6 +1220,7 @@ const $ = id => document.getElementById(id);
       applyTargetChoiceSearch,
       filterExistingMessageTargets,
       createMessageTargetSelectionState,
+      createMessageTargetCandidateController,
       bindTargetSourceToggles,
       selectedTargetPriorityAccount,
       eventTypes,
