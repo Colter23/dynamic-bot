@@ -47,6 +47,8 @@ async function loadDashboard(force) {
   const data = state.cache.dashboard;
   const system = data.system || {};
   const deliveryCounts = countMap(data.deliveryStatusCounts);
+  const deliveryHealth = normalizeDeliveryHealth(data.deliveryHealth, deliveryCounts);
+  const recentWindowLabel = formatRecentWindow(deliveryHealth.recentWindowSeconds);
   const pluginCounts = countMap(data.pluginStateCounts);
   const plugins = data.plugins || [];
   const logins = data.platformLogins || [];
@@ -58,12 +60,15 @@ async function loadDashboard(force) {
   const failedPlugins = pluginCounts.FAILED || plugins.filter(item => item.state === "FAILED").length;
   const loginSuccess = logins.filter(item => item.status === "SUCCESS").length;
   const loginFailed = logins.filter(item => item.status !== "SUCCESS").length;
-  const pendingDeliveries = deliveryCounts.PENDING || 0;
-  const sendingDeliveries = deliveryCounts.SENDING || 0;
-  const sentDeliveries = deliveryCounts.SENT || 0;
-  const failedDeliveries = deliveryCounts.FAILED || 0;
+  const pendingDeliveries = deliveryHealth.pendingCount;
+  const sendingDeliveries = deliveryHealth.sendingCount;
+  const sentDeliveries = deliveryHealth.sentCount;
+  const recentFailedDeliveries = deliveryHealth.recentFailedCount;
+  const historicalFailedDeliveries = deliveryHealth.historicalFailedCount;
+  const uncertainDeliveries = deliveryHealth.sendUnknownCount + deliveryHealth.partiallySentCount;
+  const deliveryNeedsAttention = deliveryHealth.needsAttentionCount;
   const memoryPercent = memoryUsagePercent(system);
-  const hasIssues = failedPlugins || loginFailed || failedDeliveries;
+  const hasIssues = failedPlugins || loginFailed || deliveryNeedsAttention;
 
   pageRoot().innerHTML = `
     <section class="page dashboard-page dashboard-clean-page">
@@ -98,12 +103,14 @@ async function loadDashboard(force) {
           infoRow("需处理", `${loginFailed} 个`, loginFailed ? "bad" : "ok"),
         ], renderLoginSummary(logins))}
 
-        ${summaryCard("消息链路", `${pendingDeliveries} 等待发送`, failedDeliveries ? `${failedDeliveries} 条失败` : "队列正常", "messages", [
+        ${summaryCard("消息链路", deliveryQueueTitle(pendingDeliveries, sendingDeliveries), deliveryHealthSubtitle(deliveryHealth, recentWindowLabel), "messages", [
           infoRow("已发送", sentDeliveries, "ok"),
           infoRow("发送中", sendingDeliveries),
           infoRow("等待中", pendingDeliveries, pendingDeliveries ? "warn" : ""),
-          infoRow("失败", failedDeliveries, failedDeliveries ? "bad" : "ok"),
-        ], renderFailureSummary(recentFailures))}
+          infoRow("待确认", uncertainDeliveries, uncertainDeliveries ? "warn" : "ok"),
+          infoRow(`${recentWindowLabel}失败`, recentFailedDeliveries, recentFailedDeliveries ? "bad" : "ok"),
+          infoRow("历史失败", historicalFailedDeliveries),
+        ], renderFailureSummary(recentFailures, recentWindowLabel))}
 
         ${summaryCard("系统环境", esc(fmtDuration(system.uptimeMs)), `启动于 ${fmtTime(system.startedAtEpochMillis, true)}`, "system", [
           infoRow("后台地址", `${system.webAdminHost}:${system.webAdminPort}`),
@@ -112,13 +119,62 @@ async function loadDashboard(force) {
           infoRow("系统", system.osName || "-"),
         ])}
 
-        ${recentCard(recentLogs, recentFailures)}
+        ${recentCard(recentLogs, recentFailures, recentWindowLabel)}
       </section>
     </section>`;
 }
 
 function countMap(rows) {
   return Object.fromEntries((rows || []).map(item => [item.state, item.count]));
+}
+
+function normalizeDeliveryHealth(health, counts) {
+  if (health) {
+    return {
+      pendingCount: Number(health.pendingCount || 0),
+      sendingCount: Number(health.sendingCount || 0),
+      sentCount: Number(health.sentCount || 0),
+      recentFailedCount: Number(health.recentFailedCount || 0),
+      historicalFailedCount: Number(health.historicalFailedCount || 0),
+      sendUnknownCount: Number(health.sendUnknownCount || 0),
+      partiallySentCount: Number(health.partiallySentCount || 0),
+      needsAttentionCount: Number(health.needsAttentionCount || 0),
+      recentWindowSeconds: Number(health.recentWindowSeconds || 24 * 60 * 60),
+    };
+  }
+  const failed = Number(counts.FAILED || 0);
+  const unknown = Number(counts.SEND_UNKNOWN || 0);
+  const partial = Number(counts.PARTIALLY_SENT || 0);
+  return {
+    pendingCount: Number(counts.PENDING || 0),
+    sendingCount: Number(counts.SENDING || 0),
+    sentCount: Number(counts.SENT || 0),
+    recentFailedCount: failed,
+    historicalFailedCount: 0,
+    sendUnknownCount: unknown,
+    partiallySentCount: partial,
+    needsAttentionCount: failed + unknown + partial,
+    recentWindowSeconds: 24 * 60 * 60,
+  };
+}
+
+function formatRecentWindow(seconds) {
+  const safeSeconds = Math.max(1, Number(seconds || 0));
+  const hours = Math.round(safeSeconds / 3600);
+  if (hours >= 24 && hours % 24 === 0) return `近${hours / 24}天`;
+  if (hours >= 1) return `近${hours}小时`;
+  return `近${Math.max(1, Math.round(safeSeconds / 60))}分钟`;
+}
+
+function deliveryQueueTitle(pending, sending) {
+  const active = Number(pending || 0) + Number(sending || 0);
+  return active ? `${active} 条待处理` : "队列空闲";
+}
+
+function deliveryHealthSubtitle(health, windowLabel) {
+  if (health.needsAttentionCount) return `${health.needsAttentionCount} 条需关注`;
+  if (health.historicalFailedCount) return `${health.historicalFailedCount} 条历史失败已归档`;
+  return `${windowLabel}无失败`;
 }
 
 function memoryUsagePercent(system) {
@@ -178,15 +234,15 @@ function renderLoginSummary(items) {
   }).join("")}</div>`;
 }
 
-function renderFailureSummary(failures) {
-  if (!failures.length) return `<div class="dashboard-clean-empty">暂无最近失败投递</div>`;
+function renderFailureSummary(failures, windowLabel) {
+  if (!failures.length) return `<div class="dashboard-clean-empty">${esc(windowLabel)}暂无失败投递</div>`;
   return `<div class="dashboard-clean-lines">${failures.slice(0, 3).map(row => `<div class="dashboard-clean-line bad">
     <strong>${esc(formatTargetKey(row.targetKey))}</strong>
     <span>${esc(row.lastError || row.messageId || "投递失败")}</span>
   </div>`).join("")}</div>`;
 }
 
-function recentCard(logs, failures) {
+function recentCard(logs, failures, windowLabel) {
   const rows = [
     ...failures.slice(0, 3).map(item => ({ tone: "bad", title: formatTargetKey(item.targetKey), text: item.lastError || item.messageId || "投递失败" })),
     ...logs.slice(0, 5).map(item => ({ tone: item.level === "ERROR" ? "bad" : "warn", title: `${item.level} · ${item.loggerName}`, text: item.message })),
@@ -196,14 +252,14 @@ function recentCard(logs, failures) {
     <div class="dashboard-clean-card-head">
       <div>
         <h2>最近异常</h2>
-        <p>聚合展示投递失败和警告日志</p>
+        <p>聚合展示${esc(windowLabel)}投递失败和警告日志</p>
       </div>
       <button type="button" class="secondary compact" data-action="goto" data-page="logs">查看日志</button>
     </div>
     ${rows.length ? `<div class="dashboard-clean-lines">${rows.map(row => `<div class="dashboard-clean-line ${attr(row.tone)}">
       <strong>${esc(row.title || "-")}</strong>
       <span>${esc(row.text || "-")}</span>
-    </div>`).join("")}</div>` : `<div class="dashboard-clean-empty">暂无需要关注的异常</div>`}
+    </div>`).join("")}</div>` : `<div class="dashboard-clean-empty">${esc(windowLabel)}暂无需要关注的异常</div>`}
   </article>`;
 }
 

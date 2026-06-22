@@ -93,6 +93,12 @@ public object PublisherRepository {
         }
     }
 
+    public fun countAll(): Long {
+        return transaction {
+            PublisherTable.selectAll().count()
+        }
+    }
+
     public fun upsertInfo(info: PublisherInfo, createUser: Int = 0): UpsertResult<Publisher> {
         val existed = findByKey(info.key)
         if (existed != null) {

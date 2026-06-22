@@ -102,10 +102,24 @@ public data class DashboardResponse(
     val subscriptionCount: Long,
     val pluginStateCounts: List<StateCountDto>,
     val deliveryStatusCounts: List<StateCountDto>,
+    val deliveryHealth: DeliveryHealthDto,
     val plugins: List<PluginDto>,
     val platformLogins: List<PlatformLoginDto>,
     val recentLogs: List<AdminLogEntryDto>,
     val recentDeliveries: List<MessageDeliveryDto>,
+)
+
+@Serializable
+public data class DeliveryHealthDto(
+    val pendingCount: Long,
+    val sendingCount: Long,
+    val sentCount: Long,
+    val recentFailedCount: Long,
+    val historicalFailedCount: Long,
+    val sendUnknownCount: Long,
+    val partiallySentCount: Long,
+    val needsAttentionCount: Long,
+    val recentWindowSeconds: Long,
 )
 
 @Serializable

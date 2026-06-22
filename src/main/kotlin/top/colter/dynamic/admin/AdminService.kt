@@ -90,6 +90,7 @@ import top.colter.dynamic.repository.IncomingMessageAuditRepository
 import top.colter.dynamic.repository.IncomingMessageAuditWithProcessing
 import top.colter.dynamic.repository.IncomingProcessingAuditRecord
 import top.colter.dynamic.repository.LinkParseTargetConfigRepository
+import top.colter.dynamic.repository.MessageDeliveryHealth
 import top.colter.dynamic.repository.MessageDeliveryRepository
 import top.colter.dynamic.repository.MessageDeliveryResultFilter
 import top.colter.dynamic.repository.PublisherDrawTheme
@@ -216,23 +217,38 @@ public class AdminService(
 
     public suspend fun dashboard(): DashboardResponse {
         val pluginDtos = plugins()
+        val deliveryHealthWindowSeconds = DASHBOARD_DELIVERY_HEALTH_WINDOW_SECONDS
+        val deliveryStatusCounts = MessageDeliveryRepository.countsByStatus(includeInternalRecords = false)
+        val deliveryHealth = MessageDeliveryRepository.healthSummary(
+            recentWindowSeconds = deliveryHealthWindowSeconds,
+            includeInternalRecords = false,
+            statusCounts = deliveryStatusCounts,
+        )
+        val recentCutoffEpochSeconds = (System.currentTimeMillis() / 1_000 - deliveryHealthWindowSeconds).coerceAtLeast(0)
         return DashboardResponse(
             generatedAtEpochMillis = System.currentTimeMillis(),
             system = systemStatus(),
             commandCount = commandRegistry.listCommands().size,
-            publisherCount = PublisherRepository.findAll().size,
-            subscriberCount = SubscriberRepository.findAll().size,
+            publisherCount = PublisherRepository.countAll().toInt(),
+            subscriberCount = SubscriberRepository.countAll().toInt(),
             subscriptionCount = SubscriptionRepository.countAll(),
             pluginStateCounts = pluginDtos
                 .groupingBy { it.state }
                 .eachCount()
                 .toStateCounts(pluginDtos.size.toLong()),
-            deliveryStatusCounts = MessageDeliveryRepository.countsByStatus(includeInternalRecords = false)
-                .map { (status, count) -> StateCountDto(status.name, count) },
+            deliveryStatusCounts = deliveryStatusCounts.map { (status, count) -> StateCountDto(status.name, count) },
+            deliveryHealth = deliveryHealth.toDto(),
             plugins = pluginDtos,
             platformLogins = platformLogins(),
-            recentLogs = AdminLogBuffer.snapshot(level = "WARN,ERROR", limit = 8).entries.map { it.toDto() },
-            recentDeliveries = deliveries(status = "FAILED", limit = 8),
+            recentLogs = AdminLogBuffer.snapshot(level = "WARN,ERROR", limit = 24).entries
+                .filter { it.timestampEpochMillis >= recentCutoffEpochSeconds * 1_000 }
+                .takeLast(8)
+                .map { it.toDto() },
+            recentDeliveries = deliveries(
+                status = "FAILED",
+                limit = 8,
+                updatedSinceEpochSeconds = recentCutoffEpochSeconds,
+            ),
         )
     }
 
@@ -336,6 +352,7 @@ public class AdminService(
         sinkAccountId: String? = null,
         result: String? = null,
         query: String? = null,
+        updatedSinceEpochSeconds: Long? = null,
         limit: Int? = null,
         includeInternal: Boolean = false,
     ): List<MessageDeliveryDto> {
@@ -386,6 +403,7 @@ public class AdminService(
                 sinkAccountId = sinkAccountId,
                 resultFilter = deliveryResultFilter,
                 query = query,
+                updatedSinceEpochSeconds = updatedSinceEpochSeconds,
                 limit = limit ?: 50,
                 includeInternalRecords = includeInternalRecords,
             )
@@ -2937,6 +2955,18 @@ private fun MessageDelivery.toForwardDto(newDelivery: Boolean): MessageForwardDe
     newDelivery = newDelivery,
 )
 
+private fun MessageDeliveryHealth.toDto(): DeliveryHealthDto = DeliveryHealthDto(
+    pendingCount = pendingCount,
+    sendingCount = sendingCount,
+    sentCount = sentCount,
+    recentFailedCount = recentFailedCount,
+    historicalFailedCount = historicalFailedCount,
+    sendUnknownCount = sendUnknownCount,
+    partiallySentCount = partiallySentCount,
+    needsAttentionCount = needsAttentionCount,
+    recentWindowSeconds = recentWindowSeconds,
+)
+
 private fun AdminLogRecord.toDto(): AdminLogEntryDto = AdminLogEntryDto(
     seq = seq,
     timestampEpochMillis = timestampEpochMillis,
@@ -3532,6 +3562,7 @@ private const val ADMIN_PUBLISHER_SEARCH_LIMIT: Int = 10
 private const val ADMIN_PUBLISHER_SEARCH_CACHE_MAX_SIZE: Int = 128
 private const val ADMIN_PUBLISHER_CANDIDATE_CACHE_MAX_SIZE: Int = 256
 private const val ADMIN_TARGET_CANDIDATE_CACHE_MAX_SIZE: Int = 1_000
+private const val DASHBOARD_DELIVERY_HEALTH_WINDOW_SECONDS: Long = 24 * 60 * 60
 private const val PUBLISHER_LOOKUP_MODE_VERIFY: String = "VERIFY"
 private const val PUBLISHER_LOOKUP_MODE_PLACEHOLDER: String = "PLACEHOLDER"
 private const val TASK_OWNER_MAIN: String = "MAIN"

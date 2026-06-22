@@ -6,6 +6,7 @@ import org.jetbrains.exposed.v1.core.ResultRow
 import org.jetbrains.exposed.v1.core.SortOrder
 import org.jetbrains.exposed.v1.core.and
 import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.core.greaterEq
 import org.jetbrains.exposed.v1.core.inList
 import org.jetbrains.exposed.v1.core.less
 import org.jetbrains.exposed.v1.core.lessEq
@@ -51,6 +52,20 @@ public data class MessageDeliveryWithMessage(
     val delivery: MessageDelivery,
     val message: Message?,
 )
+
+public data class MessageDeliveryHealth(
+    val pendingCount: Long,
+    val sendingCount: Long,
+    val sentCount: Long,
+    val recentFailedCount: Long,
+    val historicalFailedCount: Long,
+    val sendUnknownCount: Long,
+    val partiallySentCount: Long,
+    val recentWindowSeconds: Long,
+) {
+    public val needsAttentionCount: Long
+        get() = recentFailedCount + sendUnknownCount + partiallySentCount
+}
 
 public enum class MessageDeliveryResultFilter {
     HAS_RECEIPT,
@@ -365,6 +380,33 @@ public object MessageDeliveryRepository {
         }
     }
 
+    public fun healthSummary(
+        recentWindowSeconds: Long,
+        nowEpochSeconds: Long = nowInstant().epochSeconds,
+        includeInternalRecords: Boolean = false,
+        statusCounts: Map<DeliveryStatus, Long>? = null,
+    ): MessageDeliveryHealth {
+        val safeWindowSeconds = recentWindowSeconds.coerceAtLeast(1)
+        val recentCutoff = Instant.fromEpochSeconds((nowEpochSeconds - safeWindowSeconds).coerceAtLeast(0))
+        val counts = statusCounts ?: countsByStatus(includeInternalRecords = includeInternalRecords)
+        val recentFailed = countByStatusSince(
+            status = DeliveryStatus.FAILED,
+            since = recentCutoff,
+            includeInternalRecords = includeInternalRecords,
+        )
+        val failed = counts[DeliveryStatus.FAILED] ?: 0L
+        return MessageDeliveryHealth(
+            pendingCount = counts[DeliveryStatus.PENDING] ?: 0L,
+            sendingCount = counts[DeliveryStatus.SENDING] ?: 0L,
+            sentCount = counts[DeliveryStatus.SENT] ?: 0L,
+            recentFailedCount = recentFailed,
+            historicalFailedCount = (failed - recentFailed).coerceAtLeast(0L),
+            sendUnknownCount = counts[DeliveryStatus.SEND_UNKNOWN] ?: 0L,
+            partiallySentCount = counts[DeliveryStatus.PARTIALLY_SENT] ?: 0L,
+            recentWindowSeconds = safeWindowSeconds,
+        )
+    }
+
     public fun findRecent(
         status: DeliveryStatus? = null,
         platformId: String? = null,
@@ -378,6 +420,7 @@ public object MessageDeliveryRepository {
         sinkAccountId: String? = null,
         resultFilter: MessageDeliveryResultFilter? = null,
         query: String? = null,
+        updatedSinceEpochSeconds: Long? = null,
         limit: Int = 50,
         includeInternalRecords: Boolean = true,
     ): List<MessageDelivery> = findRecentWithMessages(
@@ -393,6 +436,7 @@ public object MessageDeliveryRepository {
         sinkAccountId = sinkAccountId,
         resultFilter = resultFilter,
         query = query,
+        updatedSinceEpochSeconds = updatedSinceEpochSeconds,
         limit = limit,
         includeInternalRecords = includeInternalRecords,
     ).map { it.delivery }
@@ -410,6 +454,7 @@ public object MessageDeliveryRepository {
         sinkAccountId: String? = null,
         resultFilter: MessageDeliveryResultFilter? = null,
         query: String? = null,
+        updatedSinceEpochSeconds: Long? = null,
         limit: Int = 50,
         includeInternalRecords: Boolean = true,
     ): List<MessageDeliveryWithMessage> {
@@ -438,6 +483,7 @@ public object MessageDeliveryRepository {
                 messageRecordPolicy = messageRecordPolicy,
                 sinkRouteId = normalizedSinkRouteId,
                 sinkAccountId = normalizedSinkAccountId,
+                updatedSinceEpochSeconds = updatedSinceEpochSeconds,
                 includeInternalRecords = includeInternalRecords,
             )
             val rows = mutableListOf<MessageDeliveryWithMessage>()
@@ -704,6 +750,7 @@ private fun deliveryFilter(
     messageRecordPolicy: MessageRecordPolicyType? = null,
     sinkRouteId: String? = null,
     sinkAccountId: String? = null,
+    updatedSinceEpochSeconds: Long? = null,
     includeInternalRecords: Boolean = true,
 ): Op<Boolean>? {
     val filters = buildList {
@@ -717,9 +764,25 @@ private fun deliveryFilter(
         messageRecordPolicy?.let { add(MessageDeliveryTable.messageRecordPolicy eq it) }
         sinkRouteId?.let { add(MessageDeliveryTable.sinkRouteId eq it) }
         sinkAccountId?.let { add(MessageDeliveryTable.sinkAccountId eq it) }
+        updatedSinceEpochSeconds?.let { add(MessageDeliveryTable.updatedAt greaterEq Instant.fromEpochSeconds(it)) }
         if (!includeInternalRecords) add(defaultVisibleDeliveryFilter())
     }
     return filters.reduceOrNull { acc, op -> acc and op }
+}
+
+private fun countByStatusSince(
+    status: DeliveryStatus,
+    since: Instant,
+    includeInternalRecords: Boolean,
+): Long {
+    return transaction {
+        val baseFilter = (MessageDeliveryTable.status eq status) and
+            (MessageDeliveryTable.updatedAt greaterEq since)
+        val filter = if (includeInternalRecords) baseFilter else baseFilter and defaultVisibleDeliveryFilter()
+        MessageDeliveryTable.selectAll()
+            .where { filter }
+            .count()
+    }
 }
 
 private fun defaultVisibleDeliveryFilter(): Op<Boolean> {

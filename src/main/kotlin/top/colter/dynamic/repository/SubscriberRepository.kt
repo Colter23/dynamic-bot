@@ -70,6 +70,12 @@ public object SubscriberRepository {
         }
     }
 
+    public fun countAll(): Long {
+        return transaction {
+            SubscriberTable.selectAll().count()
+        }
+    }
+
     public fun findNonActiveStates(): Map<String, SubscriberState> {
         return transaction {
             SubscriberTable

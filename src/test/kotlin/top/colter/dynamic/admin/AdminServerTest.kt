@@ -1,6 +1,7 @@
 package top.colter.dynamic.admin
 
 import kotlin.io.path.createTempDirectory
+import kotlin.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -118,8 +119,12 @@ import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.testPublisherInfo
+import top.colter.dynamic.table.MessageDeliveryTable
 import java.io.File
 import kotlin.time.Duration.Companion.seconds
+import org.jetbrains.exposed.v1.core.eq
+import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import org.jetbrains.exposed.v1.jdbc.update
 import top.colter.dynamic.task.DefaultTaskScheduler
 
 class AdminServerTest {
@@ -2048,6 +2053,10 @@ class AdminServerTest {
         assertEquals(deliveries.single().id, filtered.single().id)
         assertTrue(missed.isEmpty())
         assertTrue(dashboard.deliveryStatusCounts.any { it.state == DeliveryStatus.FAILED.name && it.count == 1L })
+        assertEquals(1L, dashboard.deliveryHealth.recentFailedCount)
+        assertEquals(0L, dashboard.deliveryHealth.historicalFailedCount)
+        assertEquals(1L, dashboard.deliveryHealth.needsAttentionCount)
+        assertEquals(delivery.id, dashboard.recentDeliveries.single().id)
 
         val detail = service.delivery(delivery.id)
         assertEquals(delivery.id, detail.delivery.id)
@@ -2056,6 +2065,47 @@ class AdminServerTest {
         assertEquals("bot-1", detail.delivery.targetAccountId)
         assertEquals("hello", detail.delivery.messagePreview)
         assertEquals("message-admin", assertNotNull(detail.message).jsonObject["id"]?.jsonPrimitive?.content)
+    }
+
+    @Test
+    fun dashboardShouldSeparateHistoricalDeliveryFailuresFromCurrentHealth() = runBlocking {
+        initDb("admin-dashboard-delivery-health")
+        val service = service(FakePublisherFollowPlugin())
+        val target = TargetAddress.of(
+            platformId = "qq",
+            kind = TargetKind.GROUP,
+            externalId = "100",
+        )
+        val oldMessage = Message(
+            id = "message-old-failure",
+            time = 1L,
+            targets = listOf(target),
+            batches = listOf(MessageBatch(listOf(MessageContent.Text("old")))),
+        )
+        MessageDeliveryRepository.enqueue(oldMessage)
+        val oldDelivery = MessageDeliveryRepository.findByMessageId(oldMessage.id).single()
+        MessageDeliveryRepository.markFailed(oldDelivery.id, "old network")
+        transaction {
+            MessageDeliveryTable.update({ MessageDeliveryTable.id eq oldDelivery.id }) {
+                it[updatedAt] = Instant.fromEpochSeconds(1)
+            }
+        }
+
+        val pendingMessage = Message(
+            id = "message-current-pending",
+            time = 2L,
+            targets = listOf(TargetAddress.of("qq", TargetKind.USER, "200")),
+            batches = listOf(MessageBatch(listOf(MessageContent.Text("pending")))),
+        )
+        MessageDeliveryRepository.enqueue(pendingMessage)
+
+        val dashboard = service.dashboard()
+
+        assertTrue(dashboard.deliveryStatusCounts.any { it.state == DeliveryStatus.FAILED.name && it.count == 1L })
+        assertEquals(1L, dashboard.deliveryHealth.historicalFailedCount)
+        assertEquals(0L, dashboard.deliveryHealth.recentFailedCount)
+        assertEquals(0L, dashboard.deliveryHealth.needsAttentionCount)
+        assertTrue(dashboard.recentDeliveries.isEmpty())
     }
 
     @Test
@@ -2354,7 +2404,7 @@ class AdminServerTest {
     }
 
     @Test
-    fun dashboardShouldReadRecentWarningsAndErrorsFromFullLogBuffer() = runBlocking {
+    fun dashboardShouldShowOnlyRecentWarningsAndErrorsFromFullLogBuffer() = runBlocking {
         initDb("admin-dashboard-log-buffer")
         AdminLogBuffer.clearForTest(capacity = 100)
         try {
@@ -2366,6 +2416,17 @@ class AdminServerTest {
                     loggerName = "test.dashboard",
                     threadName = "test",
                     message = "early boom",
+                )
+            )
+            val recentTimestamp = System.currentTimeMillis()
+            AdminLogBuffer.append(
+                AdminLogRecord(
+                    seq = AdminLogBuffer.nextSequence(),
+                    timestampEpochMillis = recentTimestamp,
+                    level = "WARN",
+                    loggerName = "test.dashboard",
+                    threadName = "test",
+                    message = "recent warning",
                 )
             )
             repeat(50) { index ->
@@ -2383,7 +2444,7 @@ class AdminServerTest {
 
             val dashboard = service(FakePublisherFollowPlugin()).dashboard()
 
-            assertEquals(listOf("early boom"), dashboard.recentLogs.map { it.message })
+            assertEquals(listOf("recent warning"), dashboard.recentLogs.map { it.message })
         } finally {
             AdminLogBuffer.clearForTest()
         }
