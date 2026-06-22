@@ -57,7 +57,7 @@ QQ群：734922374
 从 [Releases](https://github.com/Colter23/dynamic-bot/releases) 下载最新的 `dynamic-bot-*-all.jar`，然后运行：
 
 ```powershell
-java -jar dynamic-bot-0.0.5-all.jar
+java -jar dynamic-bot-0.0.6-all.jar
 ```
 
 默认后台地址：

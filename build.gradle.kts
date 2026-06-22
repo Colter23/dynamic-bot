@@ -7,7 +7,7 @@ plugins {
 }
 
 group = "top.colter.dynamic"
-version = "0.0.5"
+version = "0.0.6"
 
 repositories {
     mavenLocal()
@@ -74,7 +74,7 @@ dependencies {
     implementation("io.ktor:ktor-server-content-negotiation:$ktorVersion")
     implementation("io.ktor:ktor-serialization-kotlinx-json:$ktorVersion")
 
-    implementation("top.colter.dynamic:dynamic-bot-core:0.0.2")
+    implementation("top.colter.dynamic:dynamic-bot-core:0.0.3")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$coroutinesVersion")
     implementation("io.github.oshai:kotlin-logging-jvm:8.0.4")
     implementation("ch.qos.logback:logback-classic:1.5.34")
