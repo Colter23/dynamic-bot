@@ -39,11 +39,19 @@ let uniqueValues;
 let filterOptions;
 let linkParseModeLabel;
 let linkParseModeOptions;
+let loadSubscriberTargets;
+let loadSubscriberTargetPlatforms;
+let cachedSubscriberTargetCandidates;
 let loadSubscriberTargetCandidates;
-let subscriberTargetAddressKey;
 let messageTargetChoiceHtml;
+let messageTargetSearchHtml;
+let messageTargetToolbarHtml;
+let messageTargetFetchPromptHtml;
+let messageTargetManualPanelHtml;
+let filterMessageTargets;
+let filterExistingMessageTargets;
+let createMessageTargetSelectionState;
 let bindTargetSourceToggles;
-let selectedTargetPriorityAccount;
 let eventTypes;
 let blockKinds;
 let publisherKey;
@@ -103,11 +111,19 @@ function bindContext(nextCtx) {
     filterOptions,
     linkParseModeLabel,
     linkParseModeOptions,
+    loadSubscriberTargets,
+    loadSubscriberTargetPlatforms,
+    cachedSubscriberTargetCandidates,
     loadSubscriberTargetCandidates,
-    subscriberTargetAddressKey,
     messageTargetChoiceHtml,
+    messageTargetSearchHtml,
+    messageTargetToolbarHtml,
+    messageTargetFetchPromptHtml,
+    messageTargetManualPanelHtml,
+    filterMessageTargets,
+    filterExistingMessageTargets,
+    createMessageTargetSelectionState,
     bindTargetSourceToggles,
-    selectedTargetPriorityAccount,
     eventTypes,
     blockKinds,
     publisherKey,
@@ -930,10 +946,13 @@ async function openCreateSubscriber() {
   const modalSeq = ++createSubscriberModalSeq;
   let modalClosed = false;
   const isModalActive = () => !modalClosed && createSubscriberModalSeq === modalSeq && !!$("newTargetCandidateList");
-  if (!state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
-  const targetPlatforms = await api("/subscriber-target-platforms").catch(() => []);
+  const existingSubscribers = await loadSubscriberTargets(false);
+  const targetPlatforms = await loadSubscriberTargetPlatforms(false);
   const fallbackTargets = targetPlatforms.length ? targetPlatforms : [{ platformId: "qq", pluginName: "手动", supportedTypes: ["GROUP", "USER"] }];
   let targetCandidates = [];
+  let visibleTargetCandidates = [];
+  let targetCandidateMode = "prompt";
+  const targetSelection = createMessageTargetSelectionState();
 
   openModal("添加消息目标", `
     <div class="subscription-create">
@@ -953,21 +972,22 @@ async function openCreateSubscriber() {
                 <label>可用目标</label>
                 <span id="newTargetStatus" class="field-inline-status"></span>
               </div>
+              ${messageTargetSearchHtml("newTargetSearch", "", "搜索目标名称或 ID", { compact: true })}
               <div class="row-actions" id="newTargetCandidateActions">
-                <button type="button" class="secondary compact choice-tool-button choice-refresh-button" id="newTargetRefresh">刷新</button>
-                <button type="button" class="secondary compact choice-tool-button" id="newTargetSelectAll">全选</button>
-                <button type="button" class="secondary compact choice-tool-button choice-clear-button" id="newTargetClearAll">清空</button>
+                <button type="button" class="secondary compact choice-tool-button choice-refresh-button" id="newTargetRefresh" hidden>获取</button>
+                <button type="button" class="secondary compact choice-tool-button" id="newTargetSelectAll" hidden>全选</button>
+                <button type="button" class="secondary compact choice-tool-button choice-clear-button" id="newTargetClearAll" hidden>清空</button>
+                <button type="button" class="secondary compact choice-tool-button" id="newTargetManualToggle">手动填写</button>
               </div>
             </div>
             <div id="newTargetCandidateList" class="target-choice-list"></div>
           </div>
-          <div class="field full" id="newTargetManualWrap"><label>目标 ID</label><input id="newTargetManual" placeholder="插件无法枚举目标时手动填写"></div>
           <div class="field full"><label>链接解析</label><select id="newTargetLinkParse">${linkParseModeOptions("INHERIT")}</select><span class="inline-note">使用全局回退时，会跟随主配置里的回退触发方式。</span></div>
         </div>
       </section>
     </div>
   `, async () => {
-    const selectedTargets = collectCreateSubscriberTargets(targetCandidates);
+    const selectedTargets = collectCreateSubscriberTargets(targetCandidates, visibleTargetCandidates, targetSelection);
     const platformId = $("newTargetPlatform").value.trim();
     const targetKind = $("newTargetKind").value;
     const mode = $("newTargetLinkParse").value;
@@ -1006,63 +1026,177 @@ async function openCreateSubscriber() {
       : ["GROUP", "USER", "CHANNEL", "OTHER"];
     if (!isModalActive()) return;
     $("newTargetKind").innerHTML = kinds.map(kind => `<option value="${attr(kind)}">${esc(label(kind))}</option>`).join("");
-    await refreshTargetCandidates();
+    resetTargetCandidates();
+  };
+  const syncTargetCandidateActions = (mode = targetCandidateMode, loading = false) => {
+    const showRefresh = ["candidates", "empty", "error"].includes(mode);
+    const showSelection = mode === "candidates";
+    const refreshButton = $("newTargetRefresh");
+    const selectButton = $("newTargetSelectAll");
+    const clearButton = $("newTargetClearAll");
+    const manualButton = $("newTargetManualToggle");
+    if (refreshButton) {
+      refreshButton.hidden = !showRefresh;
+      refreshButton.disabled = loading;
+      refreshButton.textContent = mode === "error" ? "重试" : showRefresh ? "刷新" : "获取";
+    }
+    if (selectButton) {
+      selectButton.hidden = !showSelection;
+      selectButton.disabled = loading || !targetCandidates.length;
+    }
+    if (clearButton) {
+      clearButton.hidden = !showSelection;
+      clearButton.disabled = loading || !targetCandidates.length;
+    }
+    if (manualButton) {
+      manualButton.hidden = false;
+      manualButton.disabled = loading;
+      manualButton.textContent = mode === "manual" ? "使用可用目标" : "手动填写";
+    }
+  };
+  const resetTargetCandidates = (status = "") => {
+    if (!isModalActive()) return;
+    targetCandidates = [];
+    visibleTargetCandidates = [];
+    targetCandidateMode = "prompt";
+    targetSelection.clear();
+    $("newTargetCandidateWrap").hidden = false;
+    $("newTargetCandidateActions").hidden = false;
+    syncTargetCandidateActions("prompt");
+    $("newTargetCandidateList").innerHTML = messageTargetFetchPromptHtml("newTargetFetchPrompt");
+    $("newTargetFetchPrompt").onclick = () => refreshTargetCandidates(false).catch(handleError);
+    setTargetInlineStatus(status);
+  };
+  const showManualTargetInput = () => {
+    if (!isModalActive()) return;
+    visibleTargetCandidates = [];
+    targetCandidateMode = "manual";
+    targetSelection.clear();
+    $("newTargetCandidateWrap").hidden = false;
+    $("newTargetCandidateActions").hidden = false;
+    syncTargetCandidateActions("manual");
+    $("newTargetCandidateList").innerHTML = messageTargetManualPanelHtml("newTargetManual", {
+      placeholder: "填写目标 ID",
+      note: "手动目标不指定优先账号，发送时使用全局路由。",
+    });
+    $("newTargetManual").oninput = () => {};
+    setTargetInlineStatus("手动填写目标 ID");
   };
   const refreshTargetCandidates = async (force = false) => {
     if (!isModalActive()) return;
     const platform = $("newTargetPlatform").value;
     const kind = $("newTargetKind").value;
-    targetCandidates = [];
+    visibleTargetCandidates = [];
+    const loadingActionMode = targetCandidateMode;
+    targetCandidateMode = "loading";
+    targetSelection.clear();
+    syncTargetCandidateActions(loadingActionMode, true);
     setCreateSubscriberTargetLoading(force ? "正在刷新可用目标..." : "正在获取可用目标...");
     let allCandidates = [];
-    let source = "后端";
     try {
       const result = await loadSubscriberTargetCandidates(platform, kind, force);
       if (!isModalActive()) return;
       allCandidates = result.items;
-      source = result.stale ? "过期缓存" : result.fromCache ? "缓存" : "后端";
-      targetCandidates = filterExistingSubscriberTargets(allCandidates);
+      targetCandidates = filterExistingMessageTargets(allCandidates, existingSubscribers);
     } catch (error) {
       if (!isModalActive()) return;
+      targetCandidateMode = "error";
       $("newTargetCandidateWrap").hidden = false;
-      $("newTargetCandidateActions").hidden = true;
-      $("newTargetManualWrap").hidden = false;
       $("newTargetCandidateList").innerHTML = `<div class="empty">目标列表获取失败</div>`;
-      setTargetInlineStatus("目标列表获取失败，请手动填写目标 ID");
+      $("newTargetCandidateActions").hidden = false;
+      syncTargetCandidateActions("error");
+      setTargetInlineStatus("获取失败，可重试或手动填写");
       return;
     }
     if (targetCandidates.length) {
+      targetCandidateMode = "candidates";
+      await renderCreateSubscriberTargets();
+    } else {
+      targetCandidateMode = "empty";
       $("newTargetCandidateWrap").hidden = false;
       $("newTargetCandidateActions").hidden = false;
-      $("newTargetManualWrap").hidden = true;
-      const candidateList = $("newTargetCandidateList");
-      if (!candidateList) return;
-      candidateList.innerHTML = targetCandidates.map((target, index) => subscriberTargetChoiceHtml(target, index, false)).join("");
-      bindTargetSourceToggles(candidateList);
-      await hydrateMediaImages(candidateList);
-      if (!isModalActive()) return;
-      setTargetInlineStatus(`${targetCandidates.length} 个可添加目标，已添加目标不显示，来自${source}`);
-    } else {
-      $("newTargetCandidateWrap").hidden = false;
-      $("newTargetCandidateActions").hidden = true;
-      $("newTargetManualWrap").hidden = false;
+      syncTargetCandidateActions("empty");
       $("newTargetCandidateList").innerHTML = `<div class="empty">暂无可添加目标</div>`;
-      setTargetInlineStatus(allCandidates.length ? `已添加过的目标已排除，可手动填写目标 ID，来自${source}` : `未获取到目标，请手动填写目标 ID，来自${source}`);
+      setTargetInlineStatus(allCandidates.length ? "无可添加目标" : "未获取到目标");
     }
   };
+  const renderCreateSubscriberTargets = async () => {
+    if (!isModalActive()) return;
+    targetSelection.remember(visibleTargetCandidates, "newTargetCandidate", "newTarget");
+    visibleTargetCandidates = filterMessageTargets(targetCandidates, $("newTargetSearch")?.value || "");
+    targetCandidateMode = "candidates";
+    $("newTargetCandidateWrap").hidden = false;
+    $("newTargetCandidateActions").hidden = false;
+    syncTargetCandidateActions("candidates");
+    const candidateList = $("newTargetCandidateList");
+    if (!candidateList) return;
+    if (visibleTargetCandidates.length) {
+      candidateList.innerHTML = visibleTargetCandidates.map((target, index) =>
+        subscriberTargetChoiceHtml(target, index, targetSelection.isSelected(target))
+      ).join("");
+      bindTargetSourceToggles(candidateList);
+      candidateList.querySelectorAll(`input[name="newTargetCandidate"]`).forEach(input => {
+        input.onchange = () => targetSelection.remember(visibleTargetCandidates, "newTargetCandidate", "newTarget");
+      });
+      await hydrateMediaImages(candidateList);
+    } else {
+      candidateList.innerHTML = `<div class="empty">没有匹配的可添加目标</div>`;
+    }
+    if (!isModalActive()) return;
+    setTargetInlineStatus(`已加载 ${targetCandidates.length} 个目标`);
+  };
+  const showCachedTargetCandidatesOrPrompt = async () => {
+    if (!isModalActive()) return;
+    const platform = $("newTargetPlatform").value;
+    const kind = $("newTargetKind").value;
+    const cached = cachedSubscriberTargetCandidates(platform, kind);
+    if (!cached) {
+      resetTargetCandidates();
+      return;
+    }
+    const allCandidates = cached.items || [];
+    targetCandidates = filterExistingMessageTargets(allCandidates, existingSubscribers);
+    visibleTargetCandidates = [];
+    targetSelection.clear();
+    if (targetCandidates.length) {
+      await renderCreateSubscriberTargets();
+      return;
+    }
+    targetCandidateMode = "empty";
+    $("newTargetCandidateWrap").hidden = false;
+    $("newTargetCandidateActions").hidden = false;
+    syncTargetCandidateActions("empty");
+    $("newTargetCandidateList").innerHTML = `<div class="empty">暂无可添加目标</div>`;
+    setTargetInlineStatus(allCandidates.length ? "无可添加目标" : "无目标");
+  };
   $("newTargetPlatform").onchange = refreshTargetKinds;
-  $("newTargetKind").onchange = () => refreshTargetCandidates();
-  $("newTargetRefresh").onclick = () => refreshTargetCandidates(true).catch(handleError);
-  $("newTargetSelectAll").onclick = () => setCreateSubscriberTargetChecked(true);
-  $("newTargetClearAll").onclick = () => setCreateSubscriberTargetChecked(false);
+  $("newTargetKind").onchange = () => showCachedTargetCandidatesOrPrompt().catch(handleError);
+  $("newTargetRefresh").onclick = () => refreshTargetCandidates(targetCandidateMode !== "prompt").catch(handleError);
+  $("newTargetManualToggle").onclick = () => {
+    if (targetCandidateMode === "manual") {
+      if (targetCandidates.length) renderCreateSubscriberTargets().catch(handleError);
+      else resetTargetCandidates();
+    }
+    else showManualTargetInput();
+  };
+  $("newTargetSearch").oninput = () => {
+    if (targetCandidateMode === "candidates") renderCreateSubscriberTargets().catch(handleError);
+  };
+  $("newTargetSelectAll").onclick = () => {
+    setCreateSubscriberTargetChecked(true);
+    targetSelection.remember(visibleTargetCandidates, "newTargetCandidate", "newTarget");
+  };
+  $("newTargetClearAll").onclick = () => {
+    setCreateSubscriberTargetChecked(false);
+    targetSelection.clear();
+    renderCreateSubscriberTargets().catch(handleError);
+  };
   await refreshTargetKinds();
 }
 
 function setCreateSubscriberTargetLoading(text) {
   if (!$("newTargetCandidateList")) return;
   $("newTargetCandidateWrap").hidden = false;
-  $("newTargetCandidateActions").hidden = true;
-  $("newTargetManualWrap").hidden = true;
   $("newTargetCandidateList").innerHTML = loadingRow(text);
   setTargetInlineStatus("");
 }
@@ -1085,29 +1219,13 @@ function setCreateSubscriberTargetChecked(checked) {
   document.querySelectorAll(`input[name="newTargetCandidate"]`).forEach(input => input.checked = checked);
 }
 
-function collectCreateSubscriberTargets(candidates) {
-  if (candidates.length === 0 || $("newTargetCandidateWrap").hidden) {
+function collectCreateSubscriberTargets(candidates, visibleCandidates, selectionState) {
+  if ($("newTargetManual")) {
     const manual = $("newTargetManual").value.trim();
     return manual ? [{ externalId: manual, name: manual }] : [];
   }
-  return Array.from(document.querySelectorAll(`input[name="newTargetCandidate"]:checked`))
-    .map(input => {
-      const index = Number(input.dataset.index);
-      const target = candidates[index];
-      if (!target) return null;
-      const accountId = selectedTargetPriorityAccount("newTarget", index);
-      return Object.assign({}, target, accountId ? { accountId } : { accountId: undefined });
-    })
-    .filter(Boolean);
-}
-
-function filterExistingSubscriberTargets(candidates) {
-  const existed = new Set((state.cache.subscribers || []).map(target =>
-    subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId)
-  ));
-  return (candidates || []).filter(target =>
-    !existed.has(subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId))
-  );
+  if (candidates.length === 0 || $("newTargetCandidateWrap").hidden) return [];
+  return selectionState.selectedTargets(candidates, "newTargetCandidate", "newTarget", document, visibleCandidates);
 }
 
 async function openEditPublisher(id) {

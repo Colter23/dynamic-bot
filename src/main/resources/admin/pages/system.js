@@ -18,16 +18,26 @@ let notify;
 let openModal;
 let confirmDanger;
 let loadingRow;
+let loadSubscriberTargetPlatforms;
+let cachedSubscriberTargetCandidates;
 let loadSubscriberTargetCandidates;
 let messageTargetChoiceHtml;
+let messageTargetSearchHtml;
+let messageTargetToolbarHtml;
+let messageTargetFetchPromptHtml;
+let messageTargetManualPanelHtml;
+let filterMessageTargets;
+let createMessageTargetSelectionState;
 let bindTargetSourceToggles;
-let selectedTargetPriorityAccount;
 let beginPageRequest;
 let isCurrentPageRequest;
 let invalidatePageRequests;
 
 let forwardTargetPlatforms = [];
 let forwardTargetCandidates = [];
+let visibleForwardTargetCandidates = [];
+let forwardTargetSelection;
+let forwardTargetMode = "prompt";
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -49,10 +59,17 @@ function bindContext(nextCtx) {
     openModal,
     confirmDanger,
     loadingRow,
+    loadSubscriberTargetPlatforms,
+    cachedSubscriberTargetCandidates,
     loadSubscriberTargetCandidates,
     messageTargetChoiceHtml,
+    messageTargetSearchHtml,
+    messageTargetToolbarHtml,
+    messageTargetFetchPromptHtml,
+    messageTargetManualPanelHtml,
+    filterMessageTargets,
+    createMessageTargetSelectionState,
     bindTargetSourceToggles,
-    selectedTargetPriorityAccount,
   } = ctx.ui);
   beginPageRequest = ctx.beginPageRequest;
   isCurrentPageRequest = ctx.isCurrentPageRequest;
@@ -176,9 +193,7 @@ async function loadSystemStatus(force) {
 }
 
 async function loadForwardTargetPlatforms(force) {
-  if (!force && state.cache.subscriberTargetPlatforms) return state.cache.subscriberTargetPlatforms;
-  state.cache.subscriberTargetPlatforms = await api("/subscriber-target-platforms").catch(() => []);
-  return state.cache.subscriberTargetPlatforms || [];
+  return loadSubscriberTargetPlatforms(force);
 }
 
 function maintenanceOperationsHtml() {
@@ -199,6 +214,8 @@ function maintenanceOperationsHtml() {
 async function openForwardModal() {
   forwardTargetPlatforms = await loadForwardTargetPlatforms(false);
   forwardTargetCandidates = [];
+  visibleForwardTargetCandidates = [];
+  forwardTargetSelection = createMessageTargetSelectionState();
   openModal("消息转发", forwardFormHtml(forwardTargetPlatforms), async () => {
     await submitForwardMessage();
   }, {
@@ -232,22 +249,15 @@ function forwardFormHtml(platforms) {
             <label>可用目标</label>
             <span id="forwardTargetStatus" class="field-inline-status"></span>
           </div>
+          ${messageTargetSearchHtml("forwardTargetSearch", "", "搜索目标名称或 ID", { compact: true })}
           <div class="row-actions" id="forwardTargetCandidateActions">
-            <button type="button" class="secondary compact choice-tool-button choice-refresh-button" id="forwardTargetRefresh">刷新</button>
-            <button type="button" class="secondary compact choice-tool-button" id="forwardTargetSelectAll">全选</button>
-            <button type="button" class="secondary compact choice-tool-button choice-clear-button" id="forwardTargetClearAll">清空</button>
+            <button type="button" class="secondary compact choice-tool-button choice-refresh-button" id="forwardTargetRefresh" hidden>获取</button>
+            <button type="button" class="secondary compact choice-tool-button" id="forwardTargetSelectAll" hidden>全选</button>
+            <button type="button" class="secondary compact choice-tool-button choice-clear-button" id="forwardTargetClearAll" hidden>清空</button>
+            <button type="button" class="secondary compact choice-tool-button" id="forwardManualToggle">手动填写</button>
           </div>
         </div>
         <div id="forwardTargetCandidateList" class="target-choice-list system-forward-target-list"></div>
-      </div>
-      <div class="field full system-forward-manual" id="forwardManualWrap">
-        <details id="forwardManualDetails">
-          <summary>手动补充目标 ID</summary>
-          <div class="system-forward-manual-body">
-            <textarea id="forwardManualTargets" placeholder="多个目标 ID 可用逗号、空格或换行分隔"></textarea>
-            <span class="inline-note">当插件无法枚举目标，或临时转发到未列出的目标时使用。手动目标不指定优先账号。</span>
-          </div>
-        </details>
       </div>
       <div class="field full">
         <label>消息内容<span class="required-mark">*</span></label>
@@ -263,11 +273,28 @@ function forwardFormHtml(platforms) {
 
 function bindForwardForm() {
   $("forwardPlatform").onchange = () => refreshForwardTargetKinds().catch(handleError);
-  $("forwardPlatformManual").oninput = () => refreshForwardTargets(false).catch(handleError);
-  $("forwardTargetKind").onchange = () => refreshForwardTargets(false).catch(handleError);
-  $("forwardTargetRefresh").onclick = () => refreshForwardTargets(true).catch(handleError);
-  $("forwardTargetSelectAll").onclick = () => setForwardTargetChecked(true);
-  $("forwardTargetClearAll").onclick = () => setForwardTargetChecked(false);
+  $("forwardPlatformManual").oninput = () => resetForwardTargets();
+  $("forwardTargetKind").onchange = () => showCachedForwardTargetsOrPrompt();
+  $("forwardTargetRefresh").onclick = () => refreshForwardTargets(forwardTargetMode !== "prompt").catch(handleError);
+  $("forwardManualToggle").onclick = () => {
+    if (forwardTargetMode === "manual") {
+      if (forwardTargetCandidates.length) renderForwardTargetCandidates();
+      else resetForwardTargets();
+    }
+    else showForwardManualInput();
+  };
+  $("forwardTargetSearch").oninput = () => {
+    if (forwardTargetMode === "candidates") renderForwardTargetCandidates();
+  };
+  $("forwardTargetSelectAll").onclick = () => {
+    setForwardTargetChecked(true);
+    forwardTargetSelection.remember(visibleForwardTargetCandidates, "forwardTargetCandidate", "forwardTarget");
+  };
+  $("forwardTargetClearAll").onclick = () => {
+    setForwardTargetChecked(false);
+    forwardTargetSelection.clear();
+    renderForwardTargetCandidates();
+  };
   $("forwardForm").onsubmit = event => {
     event.preventDefault();
     submitForwardMessage().catch(handleError);
@@ -282,68 +309,160 @@ async function refreshForwardTargetKinds() {
     ? platform.supportedTypes
     : ["GROUP", "USER", "CHANNEL", "OTHER"];
   $("forwardTargetKind").innerHTML = kinds.map(kind => `<option value="${attr(kind)}">${esc(label(kind))}</option>`).join("");
-  await refreshForwardTargets(false);
+  resetForwardTargets(rawPlatformId === "__manual__" ? "手动填写目标 ID" : "");
+}
+
+function resetForwardTargets(status = "") {
+  forwardTargetMode = "prompt";
+  forwardTargetCandidates = [];
+  visibleForwardTargetCandidates = [];
+  forwardTargetSelection?.clear();
+  $("forwardTargetCandidateActions").hidden = false;
+  syncForwardTargetActions("prompt");
+  const rawPlatformId = $("forwardPlatform").value;
+  const platformId = currentForwardPlatformId();
+  if (rawPlatformId === "__manual__" || !platformId) {
+    showForwardManualInput(status);
+    return;
+  }
+  $("forwardTargetCandidateList").innerHTML = messageTargetFetchPromptHtml("forwardTargetFetchPrompt");
+  $("forwardTargetFetchPrompt").onclick = () => refreshForwardTargets(false).catch(handleError);
+  setForwardTargetStatus(status);
+}
+
+function showCachedForwardTargetsOrPrompt() {
+  const rawPlatformId = $("forwardPlatform").value;
+  const platformId = currentForwardPlatformId();
+  const kind = $("forwardTargetKind").value;
+  if (rawPlatformId === "__manual__" || !platformId) {
+    resetForwardTargets(rawPlatformId === "__manual__" ? "手动填写目标 ID" : "");
+    return;
+  }
+  const cached = cachedSubscriberTargetCandidates(platformId, kind);
+  if (!cached) {
+    resetForwardTargets();
+    return;
+  }
+  forwardTargetCandidates = cached.items || [];
+  visibleForwardTargetCandidates = [];
+  forwardTargetSelection?.clear();
+  if (forwardTargetCandidates.length) renderForwardTargetCandidates();
+  else {
+    forwardTargetMode = "empty";
+    $("forwardTargetCandidateActions").hidden = false;
+    syncForwardTargetActions("empty");
+    $("forwardTargetCandidateList").innerHTML = `<div class="empty">暂无可用目标</div>`;
+    setForwardTargetStatus("无目标");
+  }
+}
+
+function syncForwardTargetActions(mode = forwardTargetMode, loading = false) {
+  const showRefresh = ["candidates", "empty", "error"].includes(mode);
+  const showSelection = mode === "candidates";
+  const refreshButton = $("forwardTargetRefresh");
+  const selectButton = $("forwardTargetSelectAll");
+  const clearButton = $("forwardTargetClearAll");
+  const manualButton = $("forwardManualToggle");
+  if (refreshButton) {
+    refreshButton.hidden = !showRefresh;
+    refreshButton.disabled = loading;
+    refreshButton.textContent = mode === "error" ? "重试" : showRefresh ? "刷新" : "获取";
+  }
+  if (selectButton) {
+    selectButton.hidden = !showSelection;
+    selectButton.disabled = loading || !forwardTargetCandidates.length;
+  }
+  if (clearButton) {
+    clearButton.hidden = !showSelection;
+    clearButton.disabled = loading || !forwardTargetCandidates.length;
+  }
+  if (manualButton) {
+    manualButton.hidden = false;
+    manualButton.disabled = loading;
+    manualButton.textContent = mode === "manual" ? "使用可用目标" : "手动填写";
+  }
+}
+
+function showForwardManualInput(status = "手动填写目标 ID") {
+  forwardTargetMode = "manual";
+  visibleForwardTargetCandidates = [];
+  forwardTargetSelection?.clear();
+  $("forwardTargetCandidateActions").hidden = false;
+  syncForwardTargetActions("manual");
+  $("forwardTargetCandidateList").innerHTML = messageTargetManualPanelHtml("forwardManualTargets", {
+    label: "目标 ID",
+    placeholder: "多个目标 ID 可用逗号、空格或换行分隔",
+    textarea: true,
+    note: "手动目标不指定优先账号，发送时使用全局路由。",
+  });
+  setForwardTargetStatus(status);
 }
 
 async function refreshForwardTargets(force = false) {
   const rawPlatformId = $("forwardPlatform").value;
   const platformId = currentForwardPlatformId();
   const kind = $("forwardTargetKind").value;
-  forwardTargetCandidates = [];
-  $("forwardTargetCandidateActions").hidden = true;
+  visibleForwardTargetCandidates = [];
+  const loadingActionMode = forwardTargetMode;
+  forwardTargetMode = "loading";
+  forwardTargetSelection?.clear();
+  syncForwardTargetActions(loadingActionMode, true);
   setForwardTargetStatus("");
   if (!platformId) {
-    $("forwardTargetCandidateList").innerHTML = `<div class="empty">请填写目标平台 ID</div>`;
-    openForwardManualDetails(true);
+    showForwardManualInput("请填写目标平台 ID");
     return;
   }
   if (rawPlatformId === "__manual__") {
-    $("forwardTargetCandidateList").innerHTML = `<div class="empty">手动平台不加载候选目标</div>`;
-    openForwardManualDetails(true);
+    showForwardManualInput("手动填写目标 ID");
     return;
   }
 
   setForwardTargetLoading(force ? "正在刷新可用目标..." : "正在获取可用目标...");
-  $("forwardTargetRefresh").disabled = true;
   try {
     const result = await loadSubscriberTargetCandidates(platformId, kind, force);
     forwardTargetCandidates = result.items || [];
-    renderForwardTargetCandidates(result);
+    renderForwardTargetCandidates();
   } catch (error) {
     forwardTargetCandidates = [];
+    forwardTargetMode = "error";
+    $("forwardTargetCandidateActions").hidden = false;
+    syncForwardTargetActions("error");
     $("forwardTargetCandidateList").innerHTML = `<div class="empty">目标列表获取失败</div>`;
-    setForwardTargetStatus(error.message || "可用目标获取失败，请手动填写目标 ID");
-    openForwardManualDetails(true);
-  } finally {
-    $("forwardTargetRefresh").disabled = false;
+    setForwardTargetStatus(error.message || "获取失败，可重试或手动填写");
   }
 }
 
-function renderForwardTargetCandidates(result) {
+function renderForwardTargetCandidates() {
   const list = $("forwardTargetCandidateList");
+  forwardTargetSelection?.remember(visibleForwardTargetCandidates, "forwardTargetCandidate", "forwardTarget");
+  visibleForwardTargetCandidates = filterMessageTargets(forwardTargetCandidates, $("forwardTargetSearch")?.value || "");
   if (forwardTargetCandidates.length) {
+    forwardTargetMode = "candidates";
     $("forwardTargetCandidateActions").hidden = false;
-    list.innerHTML = forwardTargetCandidates.map((target, index) =>
+    syncForwardTargetActions("candidates");
+    list.innerHTML = visibleForwardTargetCandidates.length ? visibleForwardTargetCandidates.map((target, index) =>
       messageTargetChoiceHtml(target, index, {
         inputName: "forwardTargetCandidate",
         prefix: "forwardTarget",
+        checked: forwardTargetSelection?.isSelected(target),
       })
-    ).join("");
+    ).join("") : `<div class="empty">没有匹配的可用目标</div>`;
     bindTargetSourceToggles(list);
+    list.querySelectorAll(`input[name="forwardTargetCandidate"]`).forEach(input => {
+      input.onchange = () => forwardTargetSelection?.remember(visibleForwardTargetCandidates, "forwardTargetCandidate", "forwardTarget");
+    });
     hydrateMediaImages(list).catch(handleError);
-    const source = result.stale ? "缓存" : result.fromCache ? "缓存" : "实时接口";
-    setForwardTargetStatus(`${forwardTargetCandidates.length} 个可选目标，来自${source}`);
-    openForwardManualDetails(false);
+    setForwardTargetStatus(`已加载 ${forwardTargetCandidates.length} 个目标`);
   } else {
-    $("forwardTargetCandidateActions").hidden = true;
+    forwardTargetMode = "empty";
+    $("forwardTargetCandidateActions").hidden = false;
+    syncForwardTargetActions("empty");
     list.innerHTML = `<div class="empty">暂无可用目标</div>`;
-    setForwardTargetStatus("未获取到目标，请手动填写目标 ID");
-    openForwardManualDetails(true);
+    setForwardTargetStatus("未获取到目标");
   }
 }
 
 function setForwardTargetLoading(text) {
-  $("forwardTargetCandidateActions").hidden = true;
   $("forwardTargetCandidateList").innerHTML = loadingRow(text);
   setForwardTargetStatus("");
 }
@@ -373,30 +492,27 @@ async function submitForwardMessage() {
 }
 
 function collectForwardTargets() {
-  const selectedTargets = Array.from(document.querySelectorAll(`input[name="forwardTargetCandidate"]:checked`))
-    .map(input => {
-      const index = Number(input.dataset.index);
-      const target = forwardTargetCandidates[index];
-      if (!target) return null;
-      const accountId = selectedTargetPriorityAccount("forwardTarget", index);
-      return normalizeForwardTarget({
+  const selectedTargets = (forwardTargetSelection
+    ? forwardTargetSelection.selectedTargets(forwardTargetCandidates, "forwardTargetCandidate", "forwardTarget", document, visibleForwardTargetCandidates)
+    : [])
+    .map(target => normalizeForwardTarget({
         platformId: target.platformId,
         targetKind: target.targetKind,
         externalId: target.externalId,
         scopeId: target.scopeId,
         threadId: target.threadId,
-        accountId,
-      });
-    })
+        accountId: target.accountId,
+      }))
     .filter(Boolean);
 
   const platformId = currentForwardPlatformId();
   const targetKind = $("forwardTargetKind").value;
-  const manualTargets = splitManualTargetIds($("forwardManualTargets").value).map(externalId => normalizeForwardTarget({
-    platformId,
-    targetKind,
-    externalId,
-  }));
+  const manualInput = $("forwardManualTargets");
+  const manualTargets = manualInput ? splitManualTargetIds(manualInput.value).map(externalId => normalizeForwardTarget({
+      platformId,
+      targetKind,
+      externalId,
+    })) : [];
   return dedupeForwardTargets(selectedTargets.concat(manualTargets));
 }
 
@@ -468,11 +584,6 @@ function forwardPlatformOptionText(platform) {
   const transports = Number(platform.transportCount || 0);
   const suffix = transports > 1 ? ` · ${transports} 个发送来源` : "";
   return `${platform.platformId}${suffix}`;
-}
-
-function openForwardManualDetails(open) {
-  const details = $("forwardManualDetails");
-  if (details) details.open = !!open;
 }
 
 async function stopApplication() {

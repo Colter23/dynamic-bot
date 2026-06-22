@@ -372,6 +372,20 @@ const $ = id => document.getElementById(id);
     function subscriberTargetAddressKey(platformId, kind, externalId, scopeId, threadId) {
       return [platformId, kind, externalId, scopeId || "", threadId || ""].join("\u001F");
     }
+    function messageTargetAddressKey(target) {
+      if (!target) return "";
+      return subscriberTargetAddressKey(target.platformId, target.targetKind, target.externalId, target.scopeId, target.threadId);
+    }
+    async function loadSubscriberTargets(force = false) {
+      if (force || !state.cache.subscribers) state.cache.subscribers = await api("/subscribers");
+      return state.cache.subscribers || [];
+    }
+    async function loadSubscriberTargetPlatforms(force = false) {
+      if (force || !state.cache.subscriberTargetPlatforms) {
+        state.cache.subscriberTargetPlatforms = await api("/subscriber-target-platforms").catch(() => []);
+      }
+      return state.cache.subscriberTargetPlatforms || [];
+    }
     function targetSources(target) {
       return Array.isArray(target && target.sources) ? target.sources : [];
     }
@@ -424,20 +438,150 @@ const $ = id => document.getElementById(id);
       const inputType = options.inputType || "checkbox";
       const checked = !!options.checked;
       const title = target && (target.name || target.externalId) || "-";
+      const showPlatform = options.showPlatform !== false;
+      const showSources = options.showSources !== false;
       const parts = [
         title,
+        target && target.platformId,
         label(target && target.targetKind),
         target && target.externalId,
+        target && target.accountId ? `优先账号 ${target.accountId}` : "",
       ].filter(Boolean).join(" · ");
-      return `<div class="target-choice target-choice-rich">
+      return `<div class="target-choice target-choice-rich" data-target-search="${attr(messageTargetSearchText(target))}">
         <label class="target-choice-main">
           <input type="${attr(inputType)}" name="${attr(inputName)}" value="${attr(target && target.externalId || "")}" data-index="${attr(index)}"${checked ? " checked" : ""}>
           ${mediaImage(target && target.avatarUri, "target-choice-avatar", target && target.platformId, "AVATAR")}
-          <span class="target-choice-text" title="${attr(parts)}">${esc(parts)}</span>
+          <span class="target-choice-text target-choice-meta-line" title="${attr(parts)}">
+            ${showPlatform ? platformTag(target && target.platformId, target && target.platformId) : ""}
+            <span class="target-choice-name">${esc(title)}</span>
+            <span class="target-choice-sub">${esc(label(target && target.targetKind))}</span>
+            <span class="target-choice-sub">${esc(target && target.externalId || "-")}</span>
+            ${target && target.accountId ? `<span class="target-choice-sub">${esc(`优先账号 ${target.accountId}`)}</span>` : ""}
+          </span>
         </label>
-        <div class="target-choice-tools">${targetSourceToggleHtml(target, index, prefix)}</div>
-        ${targetSourcePanelHtml(target, index, prefix, options)}
+        ${showSources ? `<div class="target-choice-tools">${targetSourceToggleHtml(target, index, prefix)}</div>` : ""}
+        ${showSources ? targetSourcePanelHtml(target, index, prefix, options) : ""}
       </div>`;
+    }
+    function messageTargetSearchHtml(id, value = "", placeholder = "搜索目标名称或 ID", options = {}) {
+      const classes = [
+        "target-picker-search",
+        options.compact ? "compact" : "",
+        options.className || "",
+      ].filter(Boolean).join(" ");
+      return `<div class="${attr(classes)}">
+        <input id="${attr(id)}" value="${attr(value)}" placeholder="${attr(placeholder)}" autocomplete="off">
+      </div>`;
+    }
+    function messageTargetToolbarHtml(options = {}) {
+      return `<div class="message-target-picker-toolbar${options.className ? ` ${attr(options.className)}` : ""}">
+        ${options.tabsHtml ? `<div class="message-target-picker-tabs">${options.tabsHtml}</div>` : ""}
+        ${options.leftHtml || ""}
+        ${options.searchId ? messageTargetSearchHtml(options.searchId, options.searchValue || "", options.searchPlaceholder || "搜索目标名称或 ID", { compact: true }) : ""}
+        ${options.searchId ? "" : `<div class="message-target-picker-spacer"></div>`}
+        ${options.actionsHtml ? `<div class="row-actions message-target-picker-actions">${options.actionsHtml}</div>` : ""}
+      </div>`;
+    }
+    function messageTargetFetchPromptHtml(buttonId, text = "点击获取可用目标", description = "") {
+      return `<button type="button" class="target-fetch-empty" id="${attr(buttonId)}">
+        <span>${esc(text)}</span>
+        ${description ? `<small>${esc(description)}</small>` : ""}
+      </button>`;
+    }
+    function messageTargetManualPanelHtml(inputId, options = {}) {
+      const labelText = options.label || "目标 ID";
+      const placeholder = options.placeholder || "填写目标 ID";
+      const value = options.value || "";
+      const note = options.note || "";
+      const extraHtml = options.extraHtml || "";
+      const inputHtml = options.textarea
+        ? `<textarea id="${attr(inputId)}" placeholder="${attr(placeholder)}">${esc(value)}</textarea>`
+        : `<input id="${attr(inputId)}" value="${attr(value)}" placeholder="${attr(placeholder)}">`;
+      return `<div class="target-manual-panel">
+        <div class="field full"><label>${esc(labelText)}</label>${inputHtml}</div>
+        ${extraHtml}
+        ${note ? `<span class="inline-note">${esc(note)}</span>` : ""}
+      </div>`;
+    }
+    function messageTargetSearchText(target) {
+      return [
+        target && target.externalId,
+        target && target.name,
+      ].filter(Boolean).join(" ").toLowerCase();
+    }
+    function filterMessageTargets(targets, keyword) {
+      const queryText = String(keyword || "").trim().toLowerCase();
+      if (!queryText) return targets || [];
+      const tokens = queryText.split(/\s+/).filter(Boolean);
+      return (targets || []).filter(target => {
+        const text = messageTargetSearchText(target);
+        return tokens.every(token => text.includes(token));
+      });
+    }
+    function applyTargetChoiceSearch(selectorOrRoot, keyword) {
+      const root = typeof selectorOrRoot === "string" ? document.querySelector(selectorOrRoot) : selectorOrRoot;
+      if (!root) return;
+      const tokens = String(keyword || "").trim().toLowerCase().split(/\s+/).filter(Boolean);
+      root.querySelectorAll(".target-choice").forEach(choice => {
+        if (choice.dataset.targetSearchPinned === "true") {
+          choice.classList.remove("target-search-hidden");
+          return;
+        }
+        const text = String(choice.dataset.targetSearch || choice.textContent || "").toLowerCase();
+        choice.classList.toggle("target-search-hidden", tokens.length > 0 && !tokens.every(token => text.includes(token)));
+      });
+    }
+    function filterExistingMessageTargets(candidates, existingTargets) {
+      const existed = new Set((existingTargets || []).map(messageTargetAddressKey).filter(Boolean));
+      return (candidates || []).filter(target => !existed.has(messageTargetAddressKey(target)));
+    }
+    function createMessageTargetSelectionState(options = {}) {
+      const multiple = options.multiple !== false;
+      const selectedKeys = new Set();
+      const accountByKey = new Map();
+      const keyOf = target => messageTargetAddressKey(target);
+      const remember = (visibleTargets, inputName, prefix, root = document) => {
+        const checkedInputs = [];
+        root.querySelectorAll(`input[name="${inputName}"]`).forEach(input => {
+          const target = visibleTargets[Number(input.dataset.index)];
+          const key = keyOf(target);
+          if (!key) return;
+          if (input.checked) checkedInputs.push({ input, target, key });
+          else if (multiple) {
+            selectedKeys.delete(key);
+            accountByKey.delete(key);
+          }
+        });
+        if (!multiple) {
+          selectedKeys.clear();
+          accountByKey.clear();
+        }
+        checkedInputs.forEach(({ input, key }) => {
+          if (!multiple && selectedKeys.size > 0) input.checked = false;
+          if (!input.checked) return;
+          selectedKeys.add(key);
+          const accountId = selectedTargetPriorityAccount(prefix, Number(input.dataset.index), root);
+          if (accountId) accountByKey.set(key, accountId);
+          else accountByKey.delete(key);
+        });
+      };
+      return {
+        remember,
+        clear() {
+          selectedKeys.clear();
+          accountByKey.clear();
+        },
+        isSelected(target) {
+          const key = keyOf(target);
+          return !!key && selectedKeys.has(key);
+        },
+        selectedTargets(allTargets, inputName, prefix, root = document, visibleTargets = allTargets) {
+          remember(visibleTargets || [], inputName, prefix, root);
+          return (allTargets || [])
+            .filter(target => selectedKeys.has(keyOf(target)))
+            .map(target => Object.assign({}, target, accountByKey.get(keyOf(target)) ? { accountId: accountByKey.get(keyOf(target)) } : { accountId: undefined }));
+        },
+      };
     }
     function bindTargetSourceToggles(root = document) {
       root.querySelectorAll("[data-target-source-toggle]").forEach(button => {
@@ -484,14 +628,19 @@ const $ = id => document.getElementById(id);
     function subscriberTargetCandidateCacheKey(platform, kind) {
       return `${platform || ""}\u001F${kind || ""}`;
     }
+    function cachedSubscriberTargetCandidates(platform, kind) {
+      if (!state.cache.subscriberTargetCandidates) return null;
+      const entry = state.cache.subscriberTargetCandidates[subscriberTargetCandidateCacheKey(platform, kind)];
+      if (!entry || !Array.isArray(entry.items)) return null;
+      if (Date.now() - entry.loadedAt >= targetCandidateCacheTtlMillis) return null;
+      return { items: entry.items, fromCache: true, stale: false };
+    }
     async function loadSubscriberTargetCandidates(platform, kind, force = false) {
       if (!state.cache.subscriberTargetCandidates) state.cache.subscriberTargetCandidates = {};
       const key = subscriberTargetCandidateCacheKey(platform, kind);
       const entry = state.cache.subscriberTargetCandidates[key];
       const now = Date.now();
-      if (!force && entry && now - entry.loadedAt < targetCandidateCacheTtlMillis) {
-        return { items: entry.items, fromCache: true, stale: false };
-      }
+      if (!force && entry && now - entry.loadedAt < targetCandidateCacheTtlMillis) return { items: entry.items, fromCache: true, stale: false };
       try {
         const items = await api(`/subscriber-targets?platformId=${encodeURIComponent(platform)}&type=${encodeURIComponent(kind)}`) || [];
         state.cache.subscriberTargetCandidates[key] = { items, loadedAt: Date.now() };
@@ -788,10 +937,22 @@ const $ = id => document.getElementById(id);
       matchesAnyContains,
       linkParseModeLabel,
       linkParseModeOptions,
+      loadSubscriberTargets,
+      loadSubscriberTargetPlatforms,
+      cachedSubscriberTargetCandidates,
       loadSubscriberTargetCandidates,
       clearSubscriberTargetCandidateCache,
       subscriberTargetAddressKey,
+      messageTargetAddressKey,
       messageTargetChoiceHtml,
+      messageTargetSearchHtml,
+      messageTargetToolbarHtml,
+      messageTargetFetchPromptHtml,
+      messageTargetManualPanelHtml,
+      filterMessageTargets,
+      applyTargetChoiceSearch,
+      filterExistingMessageTargets,
+      createMessageTargetSelectionState,
       bindTargetSourceToggles,
       selectedTargetPriorityAccount,
       eventTypes,

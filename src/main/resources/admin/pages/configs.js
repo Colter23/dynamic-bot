@@ -21,9 +21,16 @@ let closeModal;
 let confirmDanger;
 let withButtonLoading;
 let loadingRow;
+let loadSubscriberTargetPlatforms;
+let cachedSubscriberTargetCandidates;
 let loadSubscriberTargetCandidates;
 let hydrateMediaImages;
 let messageTargetChoiceHtml;
+let messageTargetSearchHtml;
+let messageTargetToolbarHtml;
+let messageTargetFetchPromptHtml;
+let messageTargetManualPanelHtml;
+let applyTargetChoiceSearch;
 let bindTargetSourceToggles;
 let selectedTargetPriorityAccount;
 let beginPageRequest;
@@ -52,8 +59,15 @@ function bindContext(nextCtx) {
     confirmDanger,
     withButtonLoading,
     loadingRow,
+    loadSubscriberTargetPlatforms,
+    cachedSubscriberTargetCandidates,
     loadSubscriberTargetCandidates,
     messageTargetChoiceHtml,
+    messageTargetSearchHtml,
+    messageTargetToolbarHtml,
+    messageTargetFetchPromptHtml,
+    messageTargetManualPanelHtml,
+    applyTargetChoiceSearch,
     bindTargetSourceToggles,
     selectedTargetPriorityAccount,
   } = ctx.ui);
@@ -1921,30 +1935,20 @@ async function openNotificationTargetModal(index = null) {
             <label>可用目标</label>
             <span id="notifyTargetStatus" class="field-inline-status"></span>
           </div>
+          ${messageTargetSearchHtml("notifyTargetSearch", "", "搜索目标名称或 ID", { compact: true })}
           <div class="row-actions">
-            <button type="button" id="notifyRefreshTargets" class="secondary compact choice-tool-button choice-refresh-button">刷新</button>
-            <button type="button" id="notifyManualTargetToggle" class="secondary compact choice-tool-button">手动输入</button>
+            <button type="button" id="notifyRefreshTargets" class="secondary compact choice-tool-button choice-refresh-button" hidden>获取</button>
+            <button type="button" id="notifyManualTargetToggle" class="secondary compact choice-tool-button">手动填写</button>
           </div>
         </div>
         <div id="notifyTargetCandidateList" class="target-choice-list"></div>
       </div>
       <div class="field full" id="notifyManualTargetWrap" hidden>
-        <div class="notification-target-manual-panel">
-          <span id="notifyManualHint" class="inline-note">找不到目标时可以手动填写目标信息；不指定优先账号时会使用全局路由。</span>
-          <div class="form-grid notification-target-manual-grid">
-            <div class="field">
-              <label>目标 ID</label>
-              <input id="notifyTargetId" value="${attr(current.externalId)}">
-            </div>
-            <div class="field">
-              <label>显示名称</label>
-              <input id="notifyTargetName" value="${attr(current.name)}" placeholder="留空时使用目标名称或 ID">
-            </div>
-            <div class="field"><label>作用域 ID</label><input id="notifyScopeId" value="${attr(current.scopeId || "")}"></div>
-            <div class="field"><label>线程 ID</label><input id="notifyThreadId" value="${attr(current.threadId || "")}"></div>
-            <div class="field full"><label>优先账号</label><input id="notifyAccountId" value="${attr(current.accountId || "")}" placeholder="不填则使用全局路由"></div>
-          </div>
-        </div>
+        <input id="notifyTargetId" type="hidden" value="${attr(current.externalId)}">
+        <input id="notifyTargetName" type="hidden" value="${attr(current.name)}">
+        <input id="notifyScopeId" type="hidden" value="${attr(current.scopeId || "")}">
+        <input id="notifyThreadId" type="hidden" value="${attr(current.threadId || "")}">
+        <input id="notifyAccountId" type="hidden" value="${attr(current.accountId || "")}">
       </div>
     </div>
   `, async () => {
@@ -1963,14 +1967,18 @@ async function openNotificationTargetModal(index = null) {
     manualTargetMode = !!enabled;
     const wrap = $("notifyManualTargetWrap");
     if (wrap) wrap.hidden = !manualTargetMode;
-    const hint = $("notifyManualHint");
-    if (hint && reason) hint.textContent = reason;
+    if (manualTargetMode) renderNotificationManualTargetForm(reason);
     const toggle = $("notifyManualTargetToggle");
+    const refresh = $("notifyRefreshTargets");
+    if (refresh) {
+      refresh.hidden = manualTargetMode;
+      refresh.disabled = false;
+    }
     if (toggle) {
       const manualPlatform = $("notifyPlatform") && $("notifyPlatform").value === "__manual__";
-      toggle.hidden = manualPlatform || (!targetCandidates.length && manualTargetMode);
-      toggle.disabled = !targetCandidates.length && !manualTargetMode;
-      toggle.textContent = manualTargetMode ? "使用可用目标" : "手动输入";
+      toggle.hidden = manualPlatform;
+      toggle.disabled = false;
+      toggle.textContent = manualTargetMode ? "使用可用目标" : "手动填写";
     }
   };
 
@@ -1983,8 +1991,75 @@ async function openNotificationTargetModal(index = null) {
       : ["GROUP", "USER", "CHANNEL", "OTHER"];
     $("notifyTargetKind").innerHTML = kinds.map(kind => `<option value="${attr(kind)}">${esc(label(kind))}</option>`).join("");
     if (kinds.includes(current.targetKind)) $("notifyTargetKind").value = current.targetKind;
-    if (rawPlatformId !== "__manual__") setManualTargetMode(false);
-    await refreshTargets(false);
+    if (rawPlatformId === "__manual__") {
+      showNotificationTargetPrompt("手动填写目标 ID");
+      setManualTargetMode(true, "手动输入目标平台时，请填写目标 ID；不指定优先账号时使用全局路由。");
+    } else {
+      setManualTargetMode(false);
+      showNotificationTargetPrompt();
+    }
+  };
+  const showNotificationTargetPrompt = (status = "") => {
+    targetCandidates = [];
+    $("notifyTargetCandidateWrap").hidden = false;
+    $("notifyManualTargetWrap").hidden = true;
+    manualTargetMode = false;
+    $("notifyRefreshTargets").textContent = "获取";
+    $("notifyRefreshTargets").hidden = true;
+    $("notifyManualTargetToggle").hidden = $("notifyPlatform").value === "__manual__";
+    $("notifyManualTargetToggle").disabled = false;
+    $("notifyManualTargetToggle").textContent = "手动填写";
+    $("notifyTargetCandidateList").innerHTML = messageTargetFetchPromptHtml("notifyTargetFetchPrompt");
+    $("notifyTargetFetchPrompt").onclick = () => refreshTargets(false).catch(handleError);
+    setNotificationTargetStatus(status);
+  };
+  const showCachedNotificationTargetsOrPrompt = async () => {
+    const rawPlatformId = $("notifyPlatform").value;
+    const platformId = notificationPlatformValue();
+    const kind = $("notifyTargetKind").value;
+    if (!platformId || rawPlatformId === "__manual__") {
+      showNotificationTargetPrompt(platformId ? "手动填写目标 ID" : "请先填写目标平台");
+      setManualTargetMode(true, platformId ? "手动输入目标平台时，请填写目标 ID；不指定优先账号时会使用全局路由。" : "请先填写目标平台。");
+      return;
+    }
+    const cached = cachedSubscriberTargetCandidates(platformId, kind);
+    if (!cached) {
+      showNotificationTargetPrompt();
+      return;
+    }
+    targetCandidates = cached.items || [];
+    if (targetCandidates.length) {
+      $("notifyRefreshTargets").hidden = false;
+      $("notifyRefreshTargets").textContent = "刷新";
+      $("notifyManualTargetWrap").hidden = true;
+      manualTargetMode = false;
+      await renderNotificationTargetCandidates(targetCandidates, current);
+      const selected = selectedNotificationTargetCandidate(targetCandidates);
+      if (selected) applyNotificationCandidate(selected, { keepName: !!current.name });
+      setNotificationTargetStatus(notificationTargetStatusText(targetCandidates.length));
+      setManualTargetMode(editing && !!current.externalId && !selected, "当前目标没有出现在可用目标列表中，请手动确认目标 ID；不指定优先账号时会使用全局路由。");
+    } else {
+      $("notifyRefreshTargets").hidden = false;
+      $("notifyRefreshTargets").textContent = "刷新";
+      $("notifyTargetCandidateList").innerHTML = `<div class="empty">暂无可用目标</div>`;
+      setNotificationTargetStatus("无目标");
+      setManualTargetMode(true, "没有获取到可用目标，请手动填写目标 ID；不指定优先账号时使用全局路由。");
+    }
+  };
+  const restoreNotificationTargetCandidates = async () => {
+    if (!targetCandidates.length) {
+      await showCachedNotificationTargetsOrPrompt();
+      return;
+    }
+    const selectedCurrent = Object.assign({}, current, {
+      externalId: $("notifyTargetId")?.value || current.externalId || "",
+      accountId: $("notifyAccountId")?.value || current.accountId || "",
+    });
+    $("notifyRefreshTargets").hidden = false;
+    $("notifyRefreshTargets").textContent = "刷新";
+    setManualTargetMode(false);
+    await renderNotificationTargetCandidates(targetCandidates, selectedCurrent);
+    setNotificationTargetStatus(notificationTargetStatusText(targetCandidates.length));
   };
   const refreshTargets = async (force = false) => {
     const rawPlatformId = $("notifyPlatform").value;
@@ -1993,47 +2068,37 @@ async function openNotificationTargetModal(index = null) {
     targetCandidates = [];
     setNotificationTargetStatus("");
     if (!platformId || rawPlatformId === "__manual__") {
-      $("notifyTargetCandidateWrap").hidden = true;
+      showNotificationTargetPrompt(platformId ? "手动填写目标 ID" : "请先填写目标平台");
       setManualTargetMode(true, platformId ? "手动输入目标平台时，请填写目标 ID；不指定优先账号时会使用全局路由。" : "请先填写目标平台。");
       return;
     }
     $("notifyTargetCandidateWrap").hidden = false;
+    $("notifyRefreshTargets").hidden = false;
     setNotificationTargetLoading(force ? "正在刷新可用目标..." : "正在获取可用目标...");
     $("notifyRefreshTargets").disabled = true;
     try {
       const result = await loadSubscriberTargetCandidates(platformId, kind, force);
       targetCandidates = result.items || [];
       if (targetCandidates.length) {
-        const candidateList = $("notifyTargetCandidateList");
-        candidateList.innerHTML = targetCandidates.map((target, targetIndex) => {
-          const viewTarget = target.externalId === current.externalId
-            ? Object.assign({}, target, { accountId: current.accountId || target.accountId })
-            : target;
-          return messageTargetChoiceHtml(viewTarget, targetIndex, {
-            inputName: "notifyTargetCandidate",
-            prefix: "notifyTarget",
-            inputType: "radio",
-            checked: target.externalId === current.externalId,
-          });
-        }).join("");
-        bindTargetSourceToggles(candidateList);
-        await hydrateMediaImages(candidateList);
-        candidateList.querySelectorAll(`input[name="notifyTargetCandidate"]`).forEach(input => {
-          input.onchange = () => applyNotificationCandidate(selectedNotificationTargetCandidate(targetCandidates));
-        });
+        $("notifyRefreshTargets").textContent = "刷新";
+        $("notifyManualTargetWrap").hidden = true;
+        manualTargetMode = false;
+        await renderNotificationTargetCandidates(targetCandidates, current);
         const selected = selectedNotificationTargetCandidate(targetCandidates);
         if (selected) applyNotificationCandidate(selected, { keepName: !!current.name });
-        setNotificationTargetStatus(`${targetCandidates.length} 个可用目标`);
+        setNotificationTargetStatus(notificationTargetStatusText(targetCandidates.length));
         setManualTargetMode(editing && !!current.externalId && !selected, "当前目标没有出现在可用目标列表中，请手动确认目标 ID；不指定优先账号时会使用全局路由。");
       } else {
+        $("notifyRefreshTargets").textContent = "刷新";
         $("notifyTargetCandidateList").innerHTML = `<div class="empty">暂无可用目标</div>`;
-        setNotificationTargetStatus("可手动填写目标 ID");
-        setManualTargetMode(true, "没有获取到可用目标，请手动填写目标 ID；不指定优先账号时会使用全局路由。");
+        setNotificationTargetStatus("未获取到目标");
+        setManualTargetMode(true, "没有获取到可用目标，请手动填写目标 ID；不指定优先账号时使用全局路由。");
       }
     } catch (error) {
+      $("notifyRefreshTargets").textContent = "重试";
       $("notifyTargetCandidateList").innerHTML = `<div class="empty">目标列表获取失败</div>`;
       setNotificationTargetStatus(error.message || "可用目标获取失败");
-      setManualTargetMode(true, "目标列表获取失败，请手动填写目标 ID；不指定优先账号时会使用全局路由。");
+      setManualTargetMode(true, "目标列表获取失败，请手动填写目标 ID；不指定优先账号时使用全局路由。");
     } finally {
       $("notifyRefreshTargets").disabled = false;
     }
@@ -2041,17 +2106,61 @@ async function openNotificationTargetModal(index = null) {
 
   $("notifyPlatform").value = selectedPlatformId;
   $("notifyPlatform").onchange = () => refreshKinds().catch(handleError);
-  $("notifyPlatformManual").oninput = () => refreshTargets(false).catch(handleError);
-  $("notifyTargetKind").onchange = () => refreshTargets(false).catch(handleError);
-  $("notifyRefreshTargets").onclick = () => refreshTargets(true).catch(handleError);
+  $("notifyPlatformManual").oninput = () => {
+    const platformId = notificationPlatformValue();
+    showNotificationTargetPrompt(platformId ? "手动填写目标 ID" : "请先填写目标平台");
+    setManualTargetMode(true, platformId ? "手动输入目标平台时，请填写目标 ID；不指定优先账号时会使用全局路由。" : "请先填写目标平台。");
+  };
+  $("notifyTargetKind").onchange = () => showCachedNotificationTargetsOrPrompt().catch(handleError);
+  $("notifyRefreshTargets").onclick = () => refreshTargets($("notifyRefreshTargets").textContent !== "获取").catch(handleError);
+  $("notifyTargetSearch").oninput = () => {
+    applyTargetChoiceSearch("#notifyTargetCandidateList", $("notifyTargetSearch")?.value || "");
+    if (targetCandidates.length) setNotificationTargetStatus(notificationTargetStatusText(targetCandidates.length));
+  };
   $("notifyManualTargetToggle").onclick = () => {
     if (!manualTargetMode) {
       const selected = selectedNotificationTargetCandidate(targetCandidates);
       if (selected) applyNotificationCandidate(selected);
     }
-    setManualTargetMode(!manualTargetMode);
+    if (manualTargetMode) {
+      restoreNotificationTargetCandidates().catch(handleError);
+    } else {
+      setManualTargetMode(true, "不指定优先账号时使用全局路由。");
+    }
   };
   await refreshKinds();
+}
+
+async function renderNotificationTargetCandidates(targetCandidates, current) {
+  const candidateList = $("notifyTargetCandidateList");
+  $("notifyManualTargetWrap").hidden = true;
+  const toggle = $("notifyManualTargetToggle");
+  if (toggle) {
+    toggle.hidden = $("notifyPlatform").value === "__manual__";
+    toggle.disabled = false;
+    toggle.textContent = "手动填写";
+  }
+  candidateList.innerHTML = targetCandidates.map((target, targetIndex) => {
+    const viewTarget = target.externalId === current.externalId
+      ? Object.assign({}, target, { accountId: current.accountId || target.accountId })
+      : target;
+    return messageTargetChoiceHtml(viewTarget, targetIndex, {
+      inputName: "notifyTargetCandidate",
+      prefix: "notifyTarget",
+      inputType: "radio",
+      checked: target.externalId === current.externalId,
+    });
+  }).join("");
+  bindTargetSourceToggles(candidateList);
+  applyTargetChoiceSearch(candidateList, $("notifyTargetSearch")?.value || "");
+  await hydrateMediaImages(candidateList);
+  candidateList.querySelectorAll(`input[name="notifyTargetCandidate"]`).forEach(input => {
+    input.onchange = () => applyNotificationCandidate(selectedNotificationTargetCandidate(targetCandidates));
+  });
+}
+
+function notificationTargetStatusText(total) {
+  return `已加载 ${total} 个目标`;
 }
 
 function defaultNotificationTarget(targetPlatforms) {
@@ -2073,6 +2182,34 @@ function setNotificationTargetLoading(text) {
 function setNotificationTargetStatus(text) {
   const node = $("notifyTargetStatus");
   if (node) node.textContent = text ? `· ${text}` : "";
+}
+
+function renderNotificationManualTargetForm(reason = "") {
+  const candidateList = $("notifyTargetCandidateList");
+  if (!candidateList) return;
+  candidateList.innerHTML = messageTargetManualPanelHtml("notifyTargetIdInput", {
+    label: "目标 ID",
+    placeholder: "填写目标 ID",
+    value: $("notifyTargetId")?.value || "",
+    note: reason || "不指定优先账号时使用全局路由。",
+    extraHtml: `<div class="form-grid notification-target-manual-grid">
+      <div class="field"><label>显示名称</label><input id="notifyTargetNameInput" value="${attr($("notifyTargetName")?.value || "")}" placeholder="留空时使用目标名称或 ID"></div>
+      <div class="field"><label>作用域 ID</label><input id="notifyScopeIdInput" value="${attr($("notifyScopeId")?.value || "")}"></div>
+      <div class="field"><label>线程 ID</label><input id="notifyThreadIdInput" value="${attr($("notifyThreadId")?.value || "")}"></div>
+      <div class="field full"><label>优先账号</label><input id="notifyAccountIdInput" value="${attr($("notifyAccountId")?.value || "")}" placeholder="不填则使用全局路由"></div>
+    </div>`,
+  });
+  [
+    ["notifyTargetIdInput", "notifyTargetId"],
+    ["notifyTargetNameInput", "notifyTargetName"],
+    ["notifyScopeIdInput", "notifyScopeId"],
+    ["notifyThreadIdInput", "notifyThreadId"],
+    ["notifyAccountIdInput", "notifyAccountId"],
+  ].forEach(([inputId, hiddenId]) => {
+    const input = $(inputId);
+    const hidden = $(hiddenId);
+    if (input && hidden) input.oninput = () => hidden.value = input.value;
+  });
 }
 
 function notificationPlatformValue() {
@@ -2250,8 +2387,9 @@ async function openCommandPermissionModal() {
             <label>可用目标</label>
             <span id="permTargetInlineStatus" class="field-inline-status"></span>
           </div>
+          ${messageTargetSearchHtml("permTargetSearch", "", "搜索目标名称或 ID", { compact: true })}
           <div class="row-actions">
-            <button type="button" id="permRefreshTargets" class="secondary compact choice-tool-button choice-refresh-button">刷新</button>
+            <button type="button" id="permRefreshTargets" class="secondary compact choice-tool-button choice-refresh-button" hidden>获取</button>
           </div>
         </div>
         <div id="permTargetCandidateList" class="target-choice-list"></div>
@@ -2288,7 +2426,74 @@ async function openCommandPermissionModal() {
       ? ["*"]
       : ["*"].concat((platform && platform.supportedTypes && platform.supportedTypes.length) ? platform.supportedTypes : ["GROUP", "USER", "CHANNEL", "OTHER"]);
     $("permTargetKind").innerHTML = kinds.map(kind => `<option value="${attr(kind)}">${esc(kind === "*" ? "全部类型" : label(kind))}</option>`).join("");
-    await refreshTargets(false);
+    resetPermissionTargets();
+  };
+  const resetPermissionTargets = (status = "") => {
+    targetCandidates = [];
+    $("permTargetCandidateWrap").hidden = true;
+    $("permTargetManualWrap").hidden = true;
+    $("permTargetInlineStatus").textContent = "";
+    setPermissionAdvancedFields(null);
+    refreshPermissionSenderField(targetCandidates);
+    const rawPlatformId = $("permPlatform").value;
+    const platformId = permissionPlatformValue();
+    const kind = $("permTargetKind").value;
+    if (rawPlatformId === "*" || kind === "*") {
+      $("permTargetId").value = "*";
+      setPermissionTargetStatus("当前规则匹配全部目标");
+      return;
+    }
+    if (!platformId) {
+      $("permTargetManualWrap").hidden = false;
+      setPermissionTargetStatus("请填写平台 ID");
+      return;
+    }
+    $("permTargetCandidateWrap").hidden = false;
+    $("permRefreshTargets").textContent = "获取";
+    $("permRefreshTargets").hidden = true;
+    $("permTargetCandidateList").innerHTML = messageTargetFetchPromptHtml("permTargetFetchPrompt");
+    $("permTargetFetchPrompt").onclick = () => refreshTargets(false).catch(handleError);
+    setPermissionTargetStatus(status);
+  };
+  const showCachedPermissionTargetsOrPrompt = async () => {
+    const rawPlatformId = $("permPlatform").value;
+    const platformId = permissionPlatformValue();
+    const kind = $("permTargetKind").value;
+    if (rawPlatformId === "*" || kind === "*" || !platformId) {
+      resetPermissionTargets(platformId ? "" : "请填写平台 ID");
+      return;
+    }
+    const cached = cachedSubscriberTargetCandidates(platformId, kind);
+    if (!cached) {
+      resetPermissionTargets();
+      return;
+    }
+    targetCandidates = cached.items || [];
+    $("permTargetCandidateWrap").hidden = false;
+    $("permTargetManualWrap").hidden = true;
+    $("permTargetInlineStatus").textContent = "";
+    setPermissionAdvancedFields(null);
+    refreshPermissionSenderField(targetCandidates);
+    $("permRefreshTargets").hidden = false;
+    $("permRefreshTargets").textContent = "刷新";
+    if (targetCandidates.length) {
+      const candidateList = $("permTargetCandidateList");
+      await renderPermissionTargetCandidates(targetCandidates);
+      setPermissionTargetStatus(permissionTargetStatusText(targetCandidates.length));
+      candidateList.querySelectorAll(`input[name="permTargetCandidate"]`).forEach(input => {
+        input.onchange = () => {
+          const target = selectedPermissionTargetCandidate(targetCandidates);
+          setPermissionAdvancedFields(target);
+          refreshPermissionSenderField(targetCandidates);
+        };
+      });
+      refreshPermissionSenderField(targetCandidates);
+    } else {
+      $("permTargetCandidateList").innerHTML = `<div class="empty">暂无可用目标</div>`;
+      $("permTargetManualWrap").hidden = false;
+      setPermissionTargetStatus("无目标，可手动填写");
+      refreshPermissionSenderField(targetCandidates);
+    }
   };
   const refreshTargets = async (force = false) => {
     const rawPlatformId = $("permPlatform").value;
@@ -2310,23 +2515,20 @@ async function openCommandPermissionModal() {
       setPermissionTargetStatus("请填写平台 ID");
       return;
     }
+    $("permRefreshTargets").hidden = false;
     setPermissionTargetLoading(force ? "正在刷新可用目标..." : "正在获取可用目标...");
     $("permRefreshTargets").disabled = true;
     let targetLoadFailed = false;
     try {
       const result = await loadSubscriberTargetCandidates(platformId, kind, force);
       targetCandidates = result.items || [];
-      if (result.stale) {
-        setPermissionTargetStatus(`接口暂不可用，显示 ${targetCandidates.length} 个缓存目标`);
-      } else if (result.fromCache) {
-        setPermissionTargetStatus(`已从缓存读取 ${targetCandidates.length} 个目标`);
-      } else {
-        setPermissionTargetStatus(`已获取 ${targetCandidates.length} 个目标`);
-      }
+      $("permRefreshTargets").textContent = "刷新";
+      setPermissionTargetStatus(permissionTargetStatusText(targetCandidates.length));
     } catch (error) {
       targetLoadFailed = true;
       targetCandidates = [];
       $("permTargetCandidateWrap").hidden = false;
+      $("permRefreshTargets").textContent = "重试";
       $("permTargetCandidateList").innerHTML = `<div class="empty">目标列表获取失败</div>`;
       setPermissionTargetStatus(error.message || "可用目标获取失败");
     } finally {
@@ -2339,17 +2541,8 @@ async function openCommandPermissionModal() {
     if (targetCandidates.length) {
       $("permTargetCandidateWrap").hidden = false;
       const candidateList = $("permTargetCandidateList");
-      candidateList.innerHTML = permissionAllTargetChoiceHtml() + targetCandidates.map((target, index) =>
-        messageTargetChoiceHtml(target, index, {
-          inputName: "permTargetCandidate",
-          prefix: "permTarget",
-          inputType: "radio",
-          checked: false,
-          showPriority: false
-        })
-      ).join("");
-      bindTargetSourceToggles(candidateList);
-      await hydrateMediaImages(candidateList);
+      await renderPermissionTargetCandidates(targetCandidates);
+      setPermissionTargetStatus(permissionTargetStatusText(targetCandidates.length));
       setPermissionAdvancedFields(null);
       candidateList.querySelectorAll(`input[name="permTargetCandidate"]`).forEach(input => {
         input.onchange = () => {
@@ -2363,18 +2556,42 @@ async function openCommandPermissionModal() {
       $("permTargetCandidateWrap").hidden = false;
       $("permTargetCandidateList").innerHTML = `<div class="empty">暂无可用目标</div>`;
       $("permTargetManualWrap").hidden = false;
-      setPermissionTargetStatus("未获取到可用目标，请手动填写目标 ID");
+      setPermissionTargetStatus("未获取到目标，可手动填写目标 ID");
       refreshPermissionSenderField(targetCandidates);
     }
   };
   $("permPlatform").onchange = () => refreshKinds().catch(handleError);
-  $("permPlatformManual").oninput = () => refreshTargets(false).catch(handleError);
-  $("permTargetKind").onchange = () => refreshTargets(false).catch(handleError);
-  $("permRefreshTargets").onclick = () => refreshTargets(true).catch(handleError);
+  $("permPlatformManual").oninput = () => resetPermissionTargets(permissionPlatformValue() ? "" : "请填写平台 ID");
+  $("permTargetKind").onchange = () => showCachedPermissionTargetsOrPrompt().catch(handleError);
+  $("permRefreshTargets").onclick = () => refreshTargets($("permRefreshTargets").textContent !== "获取").catch(handleError);
+  $("permTargetSearch").oninput = () => {
+    applyTargetChoiceSearch("#permTargetCandidateList", $("permTargetSearch")?.value || "");
+    if (targetCandidates.length) setPermissionTargetStatus(permissionTargetStatusText(targetCandidates.length));
+  };
   $("permCommandPath").onchange = refreshCommandField;
   $("permRole").onchange = refreshPermissionRoleHint;
   refreshCommandField();
   await refreshKinds();
+}
+
+async function renderPermissionTargetCandidates(targetCandidates) {
+  const candidateList = $("permTargetCandidateList");
+  candidateList.innerHTML = permissionAllTargetChoiceHtml() + targetCandidates.map((target, index) =>
+    messageTargetChoiceHtml(target, index, {
+      inputName: "permTargetCandidate",
+      prefix: "permTarget",
+      inputType: "radio",
+      checked: false,
+      showPriority: false
+    })
+  ).join("");
+  bindTargetSourceToggles(candidateList);
+  applyTargetChoiceSearch(candidateList, $("permTargetSearch")?.value || "");
+  await hydrateMediaImages(candidateList);
+}
+
+function permissionTargetStatusText(total) {
+  return `已加载 ${total} 个目标`;
 }
 
 async function loadPermissionCommands() {
@@ -2384,9 +2601,7 @@ async function loadPermissionCommands() {
 }
 
 async function loadPermissionTargetPlatforms() {
-  if (state.cache.subscriberTargetPlatforms) return state.cache.subscriberTargetPlatforms;
-  state.cache.subscriberTargetPlatforms = await api("/subscriber-target-platforms").catch(() => []);
-  return state.cache.subscriberTargetPlatforms;
+  return loadSubscriberTargetPlatforms(false);
 }
 
 function setPermissionTargetStatus(text) {
@@ -2402,7 +2617,7 @@ function setPermissionTargetLoading(text) {
 }
 
 function permissionAllTargetChoiceHtml() {
-  return `<label class="target-choice">
+  return `<label class="target-choice" data-target-search-pinned="true">
     <input type="radio" name="permTargetCandidate" value="*" data-index="-1" checked>
     <span class="target-choice-avatar media-placeholder" aria-hidden="true"></span>
     <span class="target-choice-text" title="全部目标">全部目标</span>

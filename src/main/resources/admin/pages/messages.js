@@ -57,6 +57,17 @@ let closeModal;
 let confirmDanger;
 let platformTag;
 let withButtonLoading;
+let loadSubscriberTargets;
+let loadSubscriberTargetPlatforms;
+let cachedSubscriberTargetCandidates;
+let loadSubscriberTargetCandidates;
+let messageTargetChoiceHtml;
+let messageTargetSearchHtml;
+let messageTargetToolbarHtml;
+let messageTargetFetchPromptHtml;
+let loadingRow;
+let applyTargetChoiceSearch;
+let bindTargetSourceToggles;
 let beginPageRequest;
 let isCurrentPageRequest;
 let invalidatePageRequests;
@@ -87,6 +98,17 @@ function bindContext(nextCtx) {
     confirmDanger,
     platformTag,
     withButtonLoading,
+    loadSubscriberTargets,
+    loadSubscriberTargetPlatforms,
+    cachedSubscriberTargetCandidates,
+    loadSubscriberTargetCandidates,
+    messageTargetChoiceHtml,
+    messageTargetSearchHtml,
+    messageTargetToolbarHtml,
+    messageTargetFetchPromptHtml,
+    loadingRow,
+    applyTargetChoiceSearch,
+    bindTargetSourceToggles,
   } = ctx.ui);
   beginPageRequest = ctx.beginPageRequest;
   isCurrentPageRequest = ctx.isCurrentPageRequest;
@@ -158,6 +180,10 @@ export async function handleAction(nextCtx, { action, button, id }) {
     await applyDeliveryFilter(button);
     return true;
   }
+  if (action === "select-delivery-target") {
+    await openMessageTargetFilterPicker("delivery", button);
+    return true;
+  }
   if (action === "reset-delivery-filter") {
     resetDeliveryFilterControls();
     await applyDeliveryFilter(button);
@@ -182,6 +208,10 @@ export async function handleAction(nextCtx, { action, button, id }) {
   }
   if (action === "apply-incoming-filter") {
     await applyIncomingFilter(button);
+    return true;
+  }
+  if (action === "select-incoming-target") {
+    await openMessageTargetFilterPicker("incoming", button);
     return true;
   }
   if (action === "reset-incoming-filter") {
@@ -266,7 +296,10 @@ function renderLayout() {
                 <select id="deliveryFilterTargetKind" data-delivery-filter="targetKind">
                   ${targetKindOptions(filters.targetKind)}
                 </select>
-                <input id="deliveryFilterTargetId" data-delivery-filter="targetId" value="${attr(filters.targetId)}" placeholder="目标 ID">
+                <span class="message-target-filter-control">
+                  <input id="deliveryFilterTargetId" data-delivery-filter="targetId" value="${attr(filters.targetId)}" placeholder="目标 ID">
+                  <button type="button" class="secondary compact" data-action="select-delivery-target">选择目标</button>
+                </span>
                 <select id="deliveryFilterMessageKind" data-delivery-filter="messageKind">
                   ${messageKindOptions(filters.messageKind)}
                 </select>
@@ -320,7 +353,10 @@ function renderLayout() {
                 <select id="incomingFilterTargetKind" data-incoming-filter="targetKind">
                   ${targetKindOptions(incoming.targetKind)}
                 </select>
-                <input id="incomingFilterTargetId" data-incoming-filter="targetId" value="${attr(incoming.targetId)}" placeholder="目标 ID">
+                <span class="message-target-filter-control">
+                  <input id="incomingFilterTargetId" data-incoming-filter="targetId" value="${attr(incoming.targetId)}" placeholder="目标 ID">
+                  <button type="button" class="secondary compact" data-action="select-incoming-target">选择目标</button>
+                </span>
                 <input id="incomingFilterSender" data-incoming-filter="senderId" value="${attr(incoming.senderId)}" placeholder="发送者 ID">
                 <input id="incomingFilterPlugin" data-incoming-filter="sourcePlugin" value="${attr(incoming.sourcePlugin)}" placeholder="来源插件">
                 <input id="incomingFilterTrace" data-incoming-filter="traceId" value="${attr(incoming.traceId)}" placeholder="traceId">
@@ -666,6 +702,220 @@ function resetIncomingFilterControls() {
       control.value = DEFAULT_INCOMING_FILTERS[key] || "";
     }
   });
+}
+
+async function openMessageTargetFilterPicker(kind, button) {
+  await withButtonLoading(button, "读取中...", async () => {
+    const [existingTargets, targetPlatforms] = await Promise.all([
+      loadSubscriberTargets(false).catch(() => []),
+      loadSubscriberTargetPlatforms(false).catch(() => []),
+    ]);
+    const fallbackPlatforms = targetPlatforms.length ? targetPlatforms : [{ platformId: "qq", pluginName: "手动", supportedTypes: ["GROUP", "USER"] }];
+    let candidateTargets = [];
+    openModal(kind === "incoming" ? "选择入站筛选目标" : "选择出站筛选目标", messageTargetFilterPickerHtml(kind, existingTargets, fallbackPlatforms), async () => {
+      const target = collectMessageTargetFilterCandidate(candidateTargets, existingTargets);
+      if (!target) throw new Error("请选择消息目标");
+      applyMessageTargetFilter(kind, target);
+      closeModal();
+      if (kind === "incoming") await applyIncomingFilter();
+      else await applyDeliveryFilter();
+    }, {
+      size: "medium",
+      confirmText: "使用目标",
+    });
+    bindMessageTargetFilterPicker(kind, candidateTargets, existingTargets, fallbackPlatforms, next => {
+      candidateTargets = next;
+    });
+  });
+}
+
+function messageTargetFilterPickerHtml(kind, existingTargets, platforms) {
+  return `<div class="form-grid message-target-picker-modal">
+    <div class="field full">
+      ${messageTargetToolbarHtml({
+        tabsHtml: `<div class="subscription-mode-switch">
+          <label class="subscription-mode-option">
+            <input type="radio" name="messageTargetFilterMode" value="existing"${existingTargets.length ? " checked" : " disabled"}>
+            <span>已有目标</span>
+          </label>
+          <label class="subscription-mode-option">
+            <input type="radio" name="messageTargetFilterMode" value="candidate"${existingTargets.length ? "" : " checked"}>
+            <span>从平台拉取</span>
+          </label>
+        </div>`,
+        searchId: "messageTargetFilterSearch",
+        searchPlaceholder: "搜索目标名称或 ID",
+      })}
+    </div>
+    <div class="field full" id="messageExistingTargetBlock">
+      <div id="messageExistingTargetList" class="target-choice-list">${existingTargets.length
+        ? existingTargets.map((target, index) => messageTargetFilterChoiceHtml(target, index, "messageExistingTarget")).join("")
+        : `<div class="empty">还没有消息目标，请切换到从平台拉取。</div>`}</div>
+    </div>
+    <div id="messageCandidateTargetBlock" class="form-grid field full">
+      <div class="field"><label>目标平台</label><select id="messageTargetPlatform">${platforms.map(platform => `<option value="${attr(platform.platformId)}">${esc(platform.platformId)} · ${esc(platform.pluginName || platform.pluginId || "")}</option>`).join("")}</select></div>
+      <div class="field"><label>目标类型</label><select id="messageTargetKind"></select></div>
+      <div class="field full">
+        <div class="field-head">
+          <div class="field-title-line"><label>可用目标</label><span id="messageTargetStatus" class="field-inline-status"></span></div>
+          <div class="row-actions"><button type="button" id="messageTargetRefresh" class="secondary compact choice-tool-button choice-refresh-button" hidden>获取</button></div>
+        </div>
+        <div id="messageCandidateTargetList" class="target-choice-list"></div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function bindMessageTargetFilterPicker(kind, candidateTargets, existingTargets, platforms, updateCandidates) {
+  let candidateMode = "prompt";
+  const refreshMode = () => {
+    const mode = selectedMessageTargetFilterMode();
+    document.getElementById("messageExistingTargetBlock").hidden = mode !== "existing";
+    document.getElementById("messageCandidateTargetBlock").hidden = mode !== "candidate";
+    applyMessageTargetFilterPickerSearch();
+  };
+  document.querySelectorAll(`input[name="messageTargetFilterMode"]`).forEach(input => {
+    input.onchange = refreshMode;
+  });
+  document.getElementById("messageTargetFilterSearch").oninput = () => {
+    applyMessageTargetFilterPickerSearch();
+    if (selectedMessageTargetFilterMode() === "candidate" && candidateTargets.length) {
+      setMessageTargetFilterStatus(messageTargetFilterStatusText(candidateTargets.length));
+    }
+  };
+  ctx.hydrateMediaImages(document.getElementById("messageExistingTargetList")).catch(handleError);
+  const resetCandidateTargets = (text = "") => {
+    candidateTargets = [];
+    candidateMode = "prompt";
+    updateCandidates([]);
+    document.getElementById("messageTargetRefresh").textContent = "获取";
+    document.getElementById("messageTargetRefresh").hidden = true;
+    document.getElementById("messageCandidateTargetList").innerHTML = messageTargetFetchPromptHtml("messageTargetFetchPrompt");
+    document.getElementById("messageTargetFetchPrompt").onclick = () => refreshCandidates(false).catch(handleError);
+    setMessageTargetFilterStatus(text);
+  };
+  const renderCandidateTargets = async (targets) => {
+    const list = document.getElementById("messageCandidateTargetList");
+    candidateTargets = targets || [];
+    updateCandidates(candidateTargets);
+    document.getElementById("messageTargetRefresh").hidden = false;
+    document.getElementById("messageTargetRefresh").textContent = "刷新";
+    if (candidateTargets.length) {
+      candidateMode = "candidates";
+      list.innerHTML = candidateTargets.map((target, index) => messageTargetFilterChoiceHtml(target, index, "messageCandidateTarget")).join("");
+      bindTargetSourceToggles(list);
+      applyMessageTargetFilterPickerSearch();
+      applyMessageCandidateTargetSearch();
+      await ctx.hydrateMediaImages(list);
+      setMessageTargetFilterStatus(messageTargetFilterStatusText(candidateTargets.length));
+    } else {
+      candidateMode = "empty";
+      list.innerHTML = `<div class="empty">暂无可用目标</div>`;
+      setMessageTargetFilterStatus("未获取到目标");
+    }
+  };
+  const showCachedCandidateTargetsOrPrompt = () => {
+    const platformId = document.getElementById("messageTargetPlatform").value;
+    const targetKind = document.getElementById("messageTargetKind").value;
+    const cached = cachedSubscriberTargetCandidates(platformId, targetKind);
+    if (!cached) {
+      resetCandidateTargets();
+      return;
+    }
+    renderCandidateTargets(cached.items || []).catch(handleError);
+  };
+  const refreshKinds = async () => {
+    const platformId = document.getElementById("messageTargetPlatform").value;
+    const platform = platforms.find(item => item.platformId === platformId);
+    const kinds = platform && platform.supportedTypes && platform.supportedTypes.length
+      ? platform.supportedTypes
+      : ["GROUP", "USER", "CHANNEL", "OTHER"];
+    document.getElementById("messageTargetKind").innerHTML = kinds.map(value => `<option value="${attr(value)}">${esc(label(value))}</option>`).join("");
+    showCachedCandidateTargetsOrPrompt();
+  };
+  const refreshCandidates = async (force = false) => {
+    const platformId = document.getElementById("messageTargetPlatform").value;
+    const targetKind = document.getElementById("messageTargetKind").value;
+    const list = document.getElementById("messageCandidateTargetList");
+    candidateMode = "loading";
+    list.innerHTML = loadingRow(force ? "正在刷新可用目标..." : "正在获取可用目标...");
+    document.getElementById("messageTargetRefresh").hidden = false;
+    document.getElementById("messageTargetRefresh").disabled = true;
+    try {
+      const result = await loadSubscriberTargetCandidates(platformId, targetKind, force);
+      await renderCandidateTargets(result.items || []);
+    } catch (error) {
+      candidateTargets = [];
+      candidateMode = "error";
+      updateCandidates([]);
+      document.getElementById("messageTargetRefresh").textContent = "重试";
+      list.innerHTML = `<div class="empty">目标列表获取失败</div>`;
+      setMessageTargetFilterStatus(error.message || "可用目标获取失败");
+    } finally {
+      document.getElementById("messageTargetRefresh").disabled = false;
+    }
+  };
+  document.getElementById("messageTargetPlatform").onchange = () => refreshKinds().then(() => {
+    return null;
+  }).catch(handleError);
+  document.getElementById("messageTargetKind").onchange = () => {
+    showCachedCandidateTargetsOrPrompt();
+  };
+  document.getElementById("messageTargetRefresh").onclick = () => refreshCandidates(candidateMode !== "prompt").catch(handleError);
+  refreshKinds().then(refreshMode).catch(handleError);
+}
+
+function applyMessageTargetFilterPickerSearch() {
+  const keyword = document.getElementById("messageTargetFilterSearch")?.value || "";
+  applyTargetChoiceSearch("#messageExistingTargetList", keyword);
+  applyMessageCandidateTargetSearch();
+}
+
+function applyMessageCandidateTargetSearch() {
+  const keyword = document.getElementById("messageTargetFilterSearch")?.value || "";
+  applyTargetChoiceSearch("#messageCandidateTargetList", keyword);
+}
+
+function messageTargetFilterChoiceHtml(target, index, inputName) {
+  return messageTargetChoiceHtml(target, index, {
+    inputName,
+    prefix: inputName,
+    inputType: "radio",
+    showSources: false,
+  });
+}
+
+function selectedMessageTargetFilterMode() {
+  const input = document.querySelector(`input[name="messageTargetFilterMode"]:checked`);
+  return input ? input.value : "candidate";
+}
+
+function collectMessageTargetFilterCandidate(candidateTargets, existingTargets) {
+  if (selectedMessageTargetFilterMode() === "existing") {
+    const input = document.querySelector(`input[name="messageExistingTarget"]:checked`);
+    return input ? existingTargets[Number(input.dataset.index)] || null : null;
+  }
+  const input = document.querySelector(`input[name="messageCandidateTarget"]:checked`);
+  return input ? candidateTargets[Number(input.dataset.index)] || null : null;
+}
+
+function applyMessageTargetFilter(kind, target) {
+  const prefix = kind === "incoming" ? "incoming" : "delivery";
+  const platform = pageQuery(`#${prefix}FilterPlatform`);
+  const targetKind = pageQuery(`#${prefix}FilterTargetKind`);
+  const targetId = pageQuery(`#${prefix}FilterTargetId`);
+  if (platform) platform.value = target.platformId || "";
+  if (targetKind) targetKind.value = target.targetKind || "";
+  if (targetId) targetId.value = target.externalId || "";
+}
+
+function setMessageTargetFilterStatus(text) {
+  const node = document.getElementById("messageTargetStatus");
+  if (node) node.textContent = text ? `· ${text}` : "";
+}
+
+function messageTargetFilterStatusText(total) {
+  return `已加载 ${total} 个目标`;
 }
 
 function incomingFilterObjectActive(filters) {
