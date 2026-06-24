@@ -280,6 +280,7 @@ public object DynamicApplication : CoroutineScope {
             eventBus = eventBus,
             incomingConsumerDispatcher = pluginManager::dispatchIncomingMessageToConsumers,
             auditModeResolver = pluginManager::incomingAuditModeFor,
+            incomingBotAccountSelector = incomingBotAccountSelector,
         )
 
         listenerTokens += eventBus.subscribe(
@@ -295,6 +296,10 @@ public object DynamicApplication : CoroutineScope {
                 eventBus = eventBus,
                 incomingBotAccountSelector = incomingBotAccountSelector,
                 outboundMessageService = outboundMessageService,
+                pluginInfoProvider = pluginManager::getAllPlugins,
+                mainTaskSnapshotProvider = taskScheduler::snapshots,
+                pluginTaskInfoProvider = pluginManager::getPluginTasks,
+                startedAtEpochMillis = startedAtEpochMillis,
             ),
         )
         listenerTokens += eventBus.subscribe(

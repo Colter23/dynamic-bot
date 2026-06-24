@@ -10,6 +10,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.CommandConfig
+import top.colter.dynamic.CommandReceiveMode
 import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.data.IncomingMessage
@@ -123,6 +124,137 @@ class IncomingMessagePipelineTest {
         assertEquals(IncomingMessageIntent.Command, context.intent)
         assertEquals("reply-1", context.replyToMessageId)
         assertNull(withTimeoutOrNull(200) { textEvent.await() })
+        eventBus.shutdown()
+    }
+
+    @Test
+    fun `command should only dispatch on primary bot by default`() = runBlocking {
+        val eventBus = EventBus()
+        val commandEvent = CompletableDeferred<CommandEvent>()
+        eventBus.subscribe(
+            object : Listener<CommandEvent> {
+                override suspend fun onMessage(event: CommandEvent) {
+                    commandEvent.complete(event)
+                }
+            },
+        )
+        val dispatch = CompletableDeferred<IncomingMessageDispatchContext>()
+        var primaryResolverSawAccountId: String? = "not-called"
+        val pipeline = pipeline(
+            eventBus = eventBus,
+            incomingConsumerDispatcher = { dispatch.complete(it) },
+            incomingBotAccountSelector = IncomingBotAccountSelector(
+                primaryBotAccountResolver = { target ->
+                    primaryResolverSawAccountId = target.accountId
+                    "bot-a"
+                },
+            ),
+        )
+
+        pipeline.handle("onebot", request("/db help", botAccountId = "bot-b"))
+
+        val context = withTimeout(1_000) { dispatch.await() }
+        assertEquals(IncomingMessageIntent.Command, context.intent)
+        assertEquals("bot-b", context.commandContext.botAccountId)
+        assertEquals("bot-b", context.commandContext.target.accountId)
+        assertNull(primaryResolverSawAccountId)
+        assertNull(withTimeoutOrNull(200) { commandEvent.await() })
+        eventBus.shutdown()
+    }
+
+    @Test
+    fun `command should dispatch when current bot is primary`() = runBlocking {
+        val eventBus = EventBus()
+        val commandEvent = CompletableDeferred<CommandEvent>()
+        eventBus.subscribe(
+            object : Listener<CommandEvent> {
+                override suspend fun onMessage(event: CommandEvent) {
+                    commandEvent.complete(event)
+                }
+            },
+        )
+        val pipeline = pipeline(
+            eventBus = eventBus,
+            incomingBotAccountSelector = IncomingBotAccountSelector(
+                primaryBotAccountResolver = { "bot-a" },
+            ),
+        )
+
+        pipeline.handle("onebot", request("/db help", botAccountId = "bot-a"))
+
+        val command = withTimeout(1_000) { commandEvent.await() }
+        assertEquals("bot-a", command.context.botAccountId)
+        assertEquals("bot-a", command.context.target.accountId)
+        eventBus.shutdown()
+    }
+
+    @Test
+    fun `command should dispatch when non primary bot is explicitly mentioned`() = runBlocking {
+        val eventBus = EventBus()
+        val commandEvent = CompletableDeferred<CommandEvent>()
+        eventBus.subscribe(
+            object : Listener<CommandEvent> {
+                override suspend fun onMessage(event: CommandEvent) {
+                    commandEvent.complete(event)
+                }
+            },
+        )
+        val pipeline = pipeline(
+            eventBus = eventBus,
+            incomingBotAccountSelector = IncomingBotAccountSelector(
+                primaryBotAccountResolver = { "bot-a" },
+                knownBotAccountIdsResolver = { setOf("bot-a", "bot-b") },
+            ),
+        )
+        val message = testMessage(
+            text = "@bot-b /db help",
+            botAccountId = "bot-b",
+            segments = listOf(
+                IncomingMessageSegment.Mention("bot-b"),
+                IncomingMessageSegment.Text(" /db help"),
+            ),
+            mentions = setOf("bot-b"),
+        )
+
+        pipeline.handle("onebot", IncomingMessagePublishRequest(message = message, traceId = "trace-mentioned"))
+
+        val command = withTimeout(1_000) { commandEvent.await() }
+        assertEquals("/db help", command.rawText)
+        assertEquals("bot-b", command.context.botAccountId)
+        eventBus.shutdown()
+    }
+
+    @Test
+    fun `command should follow mentioned only mode`() = runBlocking {
+        val eventBus = EventBus()
+        val commandEvent = CompletableDeferred<CommandEvent>()
+        eventBus.subscribe(
+            object : Listener<CommandEvent> {
+                override suspend fun onMessage(event: CommandEvent) {
+                    commandEvent.complete(event)
+                }
+            },
+        )
+        val pipeline = pipeline(
+            eventBus = eventBus,
+            configProvider = {
+                MainDynamicConfig(
+                    command = CommandConfig(
+                        prefix = "/db",
+                        receiveMode = CommandReceiveMode.MENTIONED_ONLY,
+                        requirePermissionRule = false,
+                    ),
+                    linkParsing = LinkParsingConfig(maxLinksPerMessage = 3),
+                )
+            },
+            incomingBotAccountSelector = IncomingBotAccountSelector(
+                primaryBotAccountResolver = { "bot-a" },
+            ),
+        )
+
+        pipeline.handle("onebot", request("/db help", botAccountId = "bot-a"))
+
+        assertNull(withTimeoutOrNull(200) { commandEvent.await() })
         eventBus.shutdown()
     }
 
@@ -355,22 +487,25 @@ class IncomingMessagePipelineTest {
 
     private fun pipeline(
         eventBus: EventBus = EventBus(),
+        configProvider: () -> MainDynamicConfig = {
+            MainDynamicConfig(
+                command = CommandConfig(prefix = "/db", requirePermissionRule = false),
+                linkParsing = LinkParsingConfig(maxLinksPerMessage = 3),
+            )
+        },
         linkParseService: LinkParseService = LinkParseService(resolversProvider = { emptyList() }),
         incomingConsumerDispatcher: suspend (IncomingMessageDispatchContext) -> Unit = {},
         auditModeResolver: suspend (IncomingMessageDispatchContext) -> IncomingMessageAuditMode = { IncomingMessageAuditMode.NONE },
+        incomingBotAccountSelector: IncomingBotAccountSelector = IncomingBotAccountSelector(),
         auditRecorder: IncomingMessageAuditRecorder = IncomingMessageAuditRecorder { true },
     ): IncomingMessagePipeline {
         return IncomingMessagePipeline(
-            configProvider = {
-                MainDynamicConfig(
-                    command = CommandConfig(prefix = "/db", requirePermissionRule = false),
-                    linkParsing = LinkParsingConfig(maxLinksPerMessage = 3),
-                )
-            },
+            configProvider = configProvider,
             linkParseService = linkParseService,
             eventBus = eventBus,
             incomingConsumerDispatcher = incomingConsumerDispatcher,
             auditModeResolver = auditModeResolver,
+            incomingBotAccountSelector = incomingBotAccountSelector,
             auditRecorder = auditRecorder,
         )
     }
@@ -379,9 +514,10 @@ class IncomingMessagePipelineTest {
         text: String,
         traceId: String = "trace-1",
         replyToMessageId: String? = null,
+        botAccountId: String? = "bot-1",
     ): IncomingMessagePublishRequest {
         return IncomingMessagePublishRequest(
-            message = testMessage(text = text),
+            message = testMessage(text = text, botAccountId = botAccountId),
             traceId = traceId,
             replyToMessageId = replyToMessageId,
         )
@@ -392,12 +528,13 @@ class IncomingMessagePipelineTest {
         messageId: String = "message-1",
         segments: List<IncomingMessageSegment> = listOf(IncomingMessageSegment.Text(text)),
         mentions: Set<String> = setOf("bot-1"),
+        botAccountId: String? = "bot-1",
     ): IncomingMessage {
         return IncomingMessage(
             platformId = PlatformId.of("onebot"),
-            target = TargetAddress.of("onebot", TargetKind.GROUP, "10001"),
+            target = TargetAddress.of("onebot", TargetKind.GROUP, "10001", accountId = botAccountId),
             senderId = "sender",
-            botAccountId = "bot-1",
+            botAccountId = botAccountId,
             messageId = messageId,
             text = text,
             segments = segments,

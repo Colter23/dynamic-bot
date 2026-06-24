@@ -26,7 +26,6 @@ import top.colter.dynamic.core.config.loadOrCreate
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
-import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicBlockKind
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.FilterCondition
@@ -74,6 +73,12 @@ import top.colter.dynamic.link.LinkParseConfigCommandHandler
 import top.colter.dynamic.link.LinkParseCommandHandler
 import top.colter.dynamic.message.OutboundMessageService
 import top.colter.dynamic.message.RENDER_VARIANT_MANUAL_FORWARD
+import top.colter.dynamic.plugin.PluginInfo
+import top.colter.dynamic.plugin.PluginState
+import top.colter.dynamic.plugin.PluginTaskInfo
+import top.colter.dynamic.core.task.TaskSnapshot
+import top.colter.dynamic.core.task.TaskStatus
+import top.colter.dynamic.util.formatTime
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.nio.file.Files
@@ -101,6 +106,10 @@ public class CommandListener(
     private val publisherDrawThemeService: PublisherDrawThemeService = PublisherDrawThemeService(),
     private val incomingBotAccountSelector: IncomingBotAccountSelector = IncomingBotAccountSelector(),
     private val outboundMessageService: OutboundMessageService = OutboundMessageService(),
+    private val pluginInfoProvider: () -> List<PluginInfo> = { emptyList() },
+    private val mainTaskSnapshotProvider: () -> List<TaskSnapshot> = { emptyList() },
+    private val pluginTaskInfoProvider: () -> List<PluginTaskInfo> = { emptyList() },
+    private val startedAtEpochMillis: Long = System.currentTimeMillis(),
     publisherThemeInitializer: PublisherThemeInitializer? = null,
     private val incomingProcessingRecorder: (IncomingProcessingWriteRequest) -> Boolean = {
         IncomingMessageAuditRepository.recordProcessing(it)
@@ -146,7 +155,27 @@ public class CommandListener(
         }
 
         val match = commandRegistry.match(tokens)
+        val commandConfig = runtimeConfig.command
+        val defaultRole = if (commandConfig.requirePermissionRule) CommandRole.NONE else CommandRole.USER
+        val permissionResolver = CommandPermissionResolver(commandConfig.permissions)
         if (match == null) {
+            val role = permissionResolver.resolve(
+                context = event.context,
+                commandPath = tokens,
+                defaultRole = defaultRole,
+            )
+            if (!role.satisfies(CommandRole.USER)) {
+                recordCommandProcessing(
+                    event = event,
+                    stage = IncomingProcessingStage.COMMAND_PARSE,
+                    handlerId = "command-permission",
+                    result = IncomingProcessingResult.REJECTED,
+                    commandPath = tokens.joinToString(" "),
+                    role = role.name,
+                    errorMessage = "权限不足",
+                )
+                return
+            }
             recordCommandProcessing(
                 event = event,
                 stage = IncomingProcessingStage.COMMAND_PARSE,
@@ -167,9 +196,7 @@ public class CommandListener(
             commandPath = commandPath,
         )
 
-        val commandConfig = runtimeConfig.command
-        val defaultRole = if (commandConfig.requirePermissionRule) CommandRole.NONE else CommandRole.USER
-        val role = CommandPermissionResolver(commandConfig.permissions).resolve(
+        val role = permissionResolver.resolve(
             context = event.context,
             commandPath = match.spec.path,
             defaultRole = defaultRole,
@@ -184,7 +211,6 @@ public class CommandListener(
                 role = role.name,
                 errorMessage = "权限不足",
             )
-            reply(event, CommandExecutionResult.rejected("权限不足"))
             return
         }
 
@@ -264,7 +290,16 @@ public class CommandListener(
     private fun registerBuiltins() {
         commandRegistry.unregisterByOwner(MAIN_OWNER)
         commandRegistry.register(HelpCommandHandler(commandPrefixProvider, commandRegistry), MAIN_OWNER)
-        commandRegistry.register(StatusCommandHandler(commandRegistry), MAIN_OWNER)
+        commandRegistry.register(
+            StatusCommandHandler(
+                commandRegistry = commandRegistry,
+                pluginInfoProvider = pluginInfoProvider,
+                mainTaskSnapshotProvider = mainTaskSnapshotProvider,
+                pluginTaskInfoProvider = pluginTaskInfoProvider,
+                startedAtEpochMillis = startedAtEpochMillis,
+            ),
+            MAIN_OWNER,
+        )
         stopRequester?.let { commandRegistry.register(StopApplicationCommandHandler(it), MAIN_OWNER) }
         commandRegistry.register(
             LinkParseCommandHandler(
@@ -659,22 +694,103 @@ private class LoginQrCodeRenderer(
 
 private class StatusCommandHandler(
     private val commandRegistry: CommandRegistry,
+    private val pluginInfoProvider: () -> List<PluginInfo>,
+    private val mainTaskSnapshotProvider: () -> List<TaskSnapshot>,
+    private val pluginTaskInfoProvider: () -> List<PluginTaskInfo>,
+    private val startedAtEpochMillis: Long,
 ) : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("status"),
-        description = "显示运行状态",
+        aliases = listOf(listOf("health"), listOf("状态")),
+        description = "显示项目运行状态",
         usage = "status",
         requiredRole = CommandRole.ADMIN,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
         val commandCount = commandRegistry.listCommands().size
+        val publisherCount = PublisherRepository.countAll()
+        val subscriberCount = SubscriberRepository.countAll()
         val subscriptionCount = SubscriptionRepository.countAll()
-        val pendingDeliveries = MessageDeliveryRepository.countByStatus(DeliveryStatus.PENDING)
-        val failedDeliveries = MessageDeliveryRepository.countByStatus(DeliveryStatus.FAILED)
-        return CommandExecutionResult.success(
-            "运行正常，命令数=$commandCount，订阅数=$subscriptionCount，待发送=$pendingDeliveries，发送失败=$failedDeliveries",
+        val plugins = pluginInfoProvider()
+        val mainTasks = mainTaskSnapshotProvider()
+        val pluginTasks = pluginTaskInfoProvider()
+        val allTasks = mainTasks + pluginTasks.map { it.task }
+        val deliveryStatusCounts = MessageDeliveryRepository.countsByStatus(includeInternalRecords = false)
+        val deliveryHealth = MessageDeliveryRepository.healthSummary(
+            recentWindowSeconds = STATUS_DELIVERY_HEALTH_WINDOW_SECONDS,
+            includeInternalRecords = false,
+            statusCounts = deliveryStatusCounts,
         )
+        val summary = overallStatusText(plugins, allTasks, deliveryHealth.needsAttentionCount)
+        val runtime = Runtime.getRuntime()
+        val usedMemory = (runtime.totalMemory() - runtime.freeMemory()).coerceAtLeast(0)
+        val startedAt = (startedAtEpochMillis / 1_000).formatTime()
+        val uptime = formatDurationMillis(System.currentTimeMillis() - startedAtEpochMillis)
+        val taskText = if (allTasks.isEmpty()) {
+            "无任务"
+        } else {
+            "主任务 ${mainTasks.countByStatus(TaskStatus.RUNNING)}/${mainTasks.size} 运行，" +
+                "插件任务 ${pluginTasks.count { it.task.status == TaskStatus.RUNNING }}/${pluginTasks.size} 运行，" +
+                "失败 ${allTasks.countByStatus(TaskStatus.FAILED)}"
+        }
+
+        return CommandExecutionResult.success(
+            listOf(
+                "动态 Bot 状态：$summary",
+                "运行：$uptime，启动=$startedAt",
+                "系统：Java ${System.getProperty("java.version").orEmpty()}，内存 ${formatBytes(usedMemory)}/${formatBytes(runtime.maxMemory())}",
+                "插件：${plugins.size} 个，运行 ${plugins.count { it.state == PluginState.ACTIVE }}，已加载 ${plugins.count { it.state == PluginState.LOADED }}，失败 ${plugins.count { it.state == PluginState.FAILED }}",
+                "任务：$taskText",
+                "数据：发布者=$publisherCount，消息目标=$subscriberCount，订阅=$subscriptionCount，命令=$commandCount",
+                "投递：待发=${deliveryHealth.pendingCount}，发送中=${deliveryHealth.sendingCount}，近24小时失败=${deliveryHealth.recentFailedCount}，不确定=${deliveryHealth.sendUnknownCount}，部分成功=${deliveryHealth.partiallySentCount}",
+            ).joinToString("\n"),
+        )
+    }
+
+    private fun overallStatusText(
+        plugins: List<PluginInfo>,
+        tasks: List<TaskSnapshot>,
+        deliveryNeedsAttention: Long,
+    ): String {
+        return when {
+            plugins.any { it.state == PluginState.FAILED } || tasks.any { it.status == TaskStatus.FAILED } -> "异常"
+            deliveryNeedsAttention > 0 -> "需要关注"
+            else -> "正常"
+        }
+    }
+
+    private fun List<TaskSnapshot>.countByStatus(status: TaskStatus): Int {
+        return count { it.status == status }
+    }
+
+    private fun formatDurationMillis(value: Long): String {
+        var seconds = (value / 1_000).coerceAtLeast(0)
+        if (seconds < 60) return "${seconds}秒"
+        val days = seconds / 86_400
+        seconds %= 86_400
+        val hours = seconds / 3_600
+        seconds %= 3_600
+        val minutes = seconds / 60
+        return buildList {
+            if (days > 0) add("${days}天")
+            if (hours > 0) add("${hours}小时")
+            if (minutes > 0 || isEmpty()) add("${minutes}分钟")
+        }.joinToString("")
+    }
+
+    private fun formatBytes(value: Long): String {
+        val megabytes = (value / BYTES_PER_MEGABYTE).coerceAtLeast(0)
+        return if (megabytes >= 1_024) {
+            "${megabytes / 1_024}GB"
+        } else {
+            "${megabytes}MB"
+        }
+    }
+
+    private companion object {
+        private const val STATUS_DELIVERY_HEALTH_WINDOW_SECONDS: Long = 24L * 60L * 60L
+        private const val BYTES_PER_MEGABYTE: Long = 1_024L * 1_024L
     }
 }
 

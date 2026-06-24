@@ -1,6 +1,7 @@
 package top.colter.dynamic.incoming
 
 import java.util.UUID
+import top.colter.dynamic.CommandReceiveMode
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.command.CommandParser
 import top.colter.dynamic.core.data.CommandContext
@@ -31,6 +32,7 @@ internal class IncomingMessagePipeline(
     private val eventBus: EventBus,
     private val incomingConsumerDispatcher: suspend (IncomingMessageDispatchContext) -> Unit,
     private val auditModeResolver: suspend (IncomingMessageDispatchContext) -> IncomingMessageAuditMode = { IncomingMessageAuditMode.NONE },
+    private val incomingBotAccountSelector: IncomingBotAccountSelector = IncomingBotAccountSelector(),
     private val auditRecorder: IncomingMessageAuditRecorder = IncomingMessageAuditRecorder {
         IncomingMessageAuditRepository.recordMessage(it)
     },
@@ -100,15 +102,17 @@ internal class IncomingMessagePipeline(
             )
         }
         if (intent == IncomingMessageIntent.Command) {
-            eventBus.broadcast(
-                CommandEvent(
-                    sourcePlugin = sourcePlugin,
-                    context = commandContext,
-                    rawText = rawText,
-                    traceId = traceId,
-                    replyToMessageId = replyToMessageId,
-                ),
-            )
+            if (shouldDispatchCommand(commandContext)) {
+                eventBus.broadcast(
+                    CommandEvent(
+                        sourcePlugin = sourcePlugin,
+                        context = commandContext,
+                        rawText = rawText,
+                        traceId = traceId,
+                        replyToMessageId = replyToMessageId,
+                    ),
+                )
+            }
         } else if (rawText.isNotBlank()) {
             eventBus.broadcast(
                 IncomingTextMessageEvent(
@@ -124,6 +128,16 @@ internal class IncomingMessagePipeline(
         }
 
         incomingConsumerDispatcher(dispatchContext)
+    }
+
+    private suspend fun shouldDispatchCommand(context: CommandContext): Boolean {
+        val mode = configProvider().command.receiveMode
+        if (mode == CommandReceiveMode.ANY) return true
+        val selection = incomingBotAccountSelector.select(context)
+        if (selection.currentBotAccountId == null) return true
+        if (selection.currentBotMentioned) return true
+        if (mode == CommandReceiveMode.MENTIONED_ONLY) return false
+        return selection.acceptsCanonical()
     }
 
     private fun resolveRecordPolicy(

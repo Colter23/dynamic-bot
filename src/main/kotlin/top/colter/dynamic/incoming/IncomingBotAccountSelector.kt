@@ -32,7 +32,7 @@ public class IncomingBotAccountSelector(
             ?.takeIf { it.isNotBlank() }
         if (sender == currentBot) return true
 
-        return knownBotAccountIdsResolver(context.target)
+        return knownBotAccountIdsResolver(context.target.withoutAccountPreference())
             .mapNotNullTo(linkedSetOf()) { it.trim().takeIf(String::isNotBlank) }
             .contains(sender)
     }
@@ -51,7 +51,7 @@ public class IncomingBotAccountSelector(
         val mentionedKnownBots = if (currentBotMentioned || mentionedAccounts.isEmpty()) {
             emptySet()
         } else {
-            knownBotAccountIdsResolver(context.target)
+            knownBotAccountIdsResolver(context.target.withoutAccountPreference())
                 .mapNotNullTo(linkedSetOf()) { it.trim().takeIf(String::isNotBlank) }
                 .let { knownBotAccounts -> mentionedAccounts.filterTo(linkedSetOf()) { it in knownBotAccounts } }
         }
@@ -64,7 +64,7 @@ public class IncomingBotAccountSelector(
             ?: if (currentBotMentioned || mentionedKnownBots.isNotEmpty()) {
                 null
             } else {
-                primaryBotAccountResolver(context.target)
+                primaryBotAccountResolver(context.target.withoutAccountPreference())
                     ?.trim()
                     ?.takeIf { it.isNotBlank() }
             }
@@ -76,4 +76,6 @@ public class IncomingBotAccountSelector(
             hasExplicitBotSelection = currentBotMentioned || mentionedKnownBots.isNotEmpty(),
         )
     }
+
+    private fun TargetAddress.withoutAccountPreference(): TargetAddress = copy(accountId = null)
 }

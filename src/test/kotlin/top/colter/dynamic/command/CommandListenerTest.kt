@@ -16,14 +16,21 @@ import top.colter.dynamic.core.command.CommandPermissionRule
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
+import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicBlockKind
 import top.colter.dynamic.core.data.FilterCondition
+import top.colter.dynamic.core.data.Message
+import top.colter.dynamic.core.data.MessageBatch
 import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
+import top.colter.dynamic.core.plugin.PluginDescriptor
+import top.colter.dynamic.core.task.TaskSchedule
+import top.colter.dynamic.core.task.TaskSnapshot
+import top.colter.dynamic.core.task.TaskStatus
 import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
@@ -44,6 +51,9 @@ import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 import top.colter.dynamic.testPublisherInfo
+import top.colter.dynamic.plugin.PluginInfo
+import top.colter.dynamic.plugin.PluginState
+import top.colter.dynamic.plugin.PluginTaskInfo
 
 class CommandListenerTest {
     @Test
@@ -238,7 +248,7 @@ class CommandListenerTest {
     }
 
     @Test
-    fun commandShouldRejectWhenPermissionRuleIsRequiredAndNoRuleMatches() = runBlocking {
+    fun commandShouldNotReplyWhenPermissionRuleIsRequiredAndNoRuleMatches() = runBlocking {
         initDb("command-require-permission")
         val eventBus = EventBus()
         val listener = CommandListener(
@@ -248,9 +258,42 @@ class CommandListenerTest {
             eventBus = eventBus,
         )
 
-        val result = dispatch(eventBus, listener, commandEvent("/db help"))
+        val result = dispatchOrNull(eventBus, listener, commandEvent("/db help"))
 
-        assertEquals(CommandStatus.REJECTED, result.status)
+        assertEquals(null, result)
+    }
+
+    @Test
+    fun unknownCommandShouldNotReplyWhenSenderHasNoPermission() = runBlocking {
+        initDb("command-unknown-no-permission")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = MainDynamicConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val result = dispatchOrNull(eventBus, listener, commandEvent("/db unknown"))
+
+        assertEquals(null, result)
+    }
+
+    @Test
+    fun unknownCommandShouldReplyWhenSenderHasPermission() = runBlocking {
+        initDb("command-unknown-with-permission")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = adminConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db unknown"))
+
+        assertEquals(CommandStatus.FAILED, result.status)
+        assertTrue(renderMessage(result).contains("未知命令：unknown"))
     }
 
     @Test
@@ -269,6 +312,70 @@ class CommandListenerTest {
         assertEquals(CommandStatus.SUCCESS, result.status)
         assertTrue(renderMessage(result).contains("新增投递=2"))
         assertEquals(2, MessageDeliveryRepository.findRecent(limit = 10).size)
+    }
+
+    @Test
+    fun statusShouldReturnProjectHealthSummary() = runBlocking {
+        initDb("command-status")
+        seedSubscription()
+        val target = TargetAddress.of("onebot", TargetKind.GROUP, "100")
+        val message = Message(
+            id = "status-message",
+            time = 1L,
+            targets = listOf(target),
+            batches = listOf(MessageBatch(listOf(MessageContent.Text("hello")))),
+        )
+        MessageDeliveryRepository.createDeliveryRecord(message, target, DeliveryStatus.SEND_UNKNOWN, attempts = 1)
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = adminConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            pluginInfoProvider = {
+                listOf(
+                    PluginInfo(
+                        descriptor = PluginDescriptor("onebot", "OneBot", "1.0.0", "OneBotPlugin"),
+                        capabilities = emptySet(),
+                        state = PluginState.ACTIVE,
+                        sourceJarPath = "plugins/onebot.jar",
+                    ),
+                    PluginInfo(
+                        descriptor = PluginDescriptor("broken", "Broken", "1.0.0", "BrokenPlugin"),
+                        capabilities = emptySet(),
+                        state = PluginState.FAILED,
+                        sourceJarPath = "plugins/broken.jar",
+                    ),
+                )
+            },
+            mainTaskSnapshotProvider = {
+                listOf(taskSnapshot("main-delivery-dispatch", TaskStatus.RUNNING))
+            },
+            pluginTaskInfoProvider = {
+                listOf(
+                    PluginTaskInfo(
+                        pluginId = "bilibili",
+                        pluginName = "Bilibili",
+                        pluginVersion = "1.0.0",
+                        pluginState = PluginState.ACTIVE,
+                        task = taskSnapshot("bilibili-dynamic", TaskStatus.FAILED),
+                    ),
+                )
+            },
+            startedAtEpochMillis = System.currentTimeMillis() - 3_600_000,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db 状态"))
+        val text = renderMessage(result)
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        assertTrue(text.contains("动态 Bot 状态：异常"))
+        assertTrue(text.contains("插件：2 个，运行 1，已加载 0，失败 1"))
+        assertTrue(text.contains("任务：主任务 1/1 运行，插件任务 0/1 运行，失败 1"))
+        assertTrue(text.contains("数据：发布者=1，消息目标=1，订阅=1"))
+        assertTrue(text.contains("不确定=1"))
+        assertTrue(!text.contains("后台："))
+        assertTrue(!text.contains("数据库："))
     }
 
     private suspend fun dispatch(
@@ -370,6 +477,19 @@ class CommandListenerTest {
                 else -> content.fallbackText
             }
         }
+    }
+
+    private fun taskSnapshot(id: String, status: TaskStatus): TaskSnapshot {
+        return TaskSnapshot(
+            id = id,
+            status = status,
+            schedule = TaskSchedule.Once,
+            nextRunAtMillis = null,
+            lastRunAtMillis = null,
+            lastSuccessAtMillis = null,
+            runCount = 1,
+            lastErrorSummary = null,
+        )
     }
 
     private class FakePublisherFollowPlugin : PublisherFollowPlugin {
