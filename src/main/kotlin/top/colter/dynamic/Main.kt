@@ -1,6 +1,7 @@
 ﻿package top.colter.dynamic
 
 import java.util.concurrent.CountDownLatch
+import kotlin.system.exitProcess
 import top.colter.dynamic.core.tools.loggerFor
 
 private val logger = loggerFor("top.colter.dynamic.Main")
@@ -18,6 +19,11 @@ public fun main() {
     DynamicApplication.onShutdown {
         shutdownLatch.countDown()
     }
-    DynamicApplication.run()
+    try {
+        DynamicApplication.run()
+    } catch (error: DynamicStartupException) {
+        logger.error { error.userMessage }
+        exitProcess(1)
+    }
     shutdownLatch.await()
 }

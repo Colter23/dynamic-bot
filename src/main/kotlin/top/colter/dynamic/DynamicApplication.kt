@@ -334,7 +334,14 @@ public object DynamicApplication : CoroutineScope {
             stopRequester = { reason -> requestStop(reason) },
             startedAtEpochMillis = startedAtEpochMillis,
         )
-        server.start()
+        try {
+            server.start()
+        } catch (error: Throwable) {
+            if (error.isAddressAlreadyInUse()) {
+                throw DynamicStartupException(webAdminPortOccupiedMessage(config.webAdmin), error)
+            }
+            throw error
+        }
         adminServer = server
         logger.info { "管理后台已启动：http://${config.webAdmin.host}:${config.webAdmin.port}" }
     }
