@@ -70,24 +70,42 @@ EOF
 
 write_windows_launcher() {
   local root="$1"
-  cat > "$root/start.bat" <<'EOF'
-@echo off
-setlocal
-chcp 65001 >nul
-cd /d "%~dp0"
-
-set "JAVA_EXE=java"
-if exist "%~dp0runtime\jre\bin\java.exe" (
-  set "JAVA_EXE=%~dp0runtime\jre\bin\java.exe"
-)
-
-"%JAVA_EXE%" %JAVA_OPTS% -jar "%~dp0dynamic-bot.jar" %*
-if errorlevel 1 (
-  echo.
-  echo dynamic-bot 已退出，退出码：%errorlevel%
-  pause
-)
-EOF
+  # Windows cmd.exe 对 LF-only 的 bat 解析不稳定，会把命令行拆坏；这里显式写 CRLF。
+  printf '%s\r\n' \
+    '@echo off' \
+    'setlocal' \
+    'chcp 65001 >nul' \
+    'cd /d "%~dp0"' \
+    '' \
+    'set "JAVA_EXE=java"' \
+    'if exist "%~dp0runtime\jre\bin\java.exe" (' \
+    '  set "JAVA_EXE=%~dp0runtime\jre\bin\java.exe"' \
+    ')' \
+    '' \
+    'if not exist "%~dp0dynamic-bot.jar" (' \
+    '  echo 未找到 dynamic-bot.jar，请确认启动脚本位于一键包根目录。' \
+    '  pause' \
+    '  exit /b 1' \
+    ')' \
+    '' \
+    'if /i "%JAVA_EXE%"=="java" (' \
+    '  where java >nul 2>nul' \
+    '  if errorlevel 1 (' \
+    '    echo 未找到 Java，请安装 Java 17 或更高版本，或下载带 JRE 的一键包。' \
+    '    pause' \
+    '    exit /b 1' \
+    '  )' \
+    ')' \
+    '' \
+    '"%JAVA_EXE%" %JAVA_OPTS% -jar "%~dp0dynamic-bot.jar" %*' \
+    'set "EXIT_CODE=%ERRORLEVEL%"' \
+    'if not "%EXIT_CODE%"=="0" (' \
+    '  echo.' \
+    '  echo dynamic-bot 已退出，退出码：%EXIT_CODE%' \
+    '  pause' \
+    ')' \
+    'exit /b %EXIT_CODE%' \
+    > "$root/start.bat"
 }
 
 write_linux_launcher() {
@@ -96,11 +114,22 @@ write_linux_launcher() {
 #!/usr/bin/env bash
 set -euo pipefail
 
-cd "$(dirname "$0")"
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+cd "$script_dir"
 
 java_bin="java"
 if [[ -x "$PWD/runtime/jre/bin/java" ]]; then
   java_bin="$PWD/runtime/jre/bin/java"
+fi
+
+if [[ ! -f "$PWD/dynamic-bot.jar" ]]; then
+  echo "未找到 dynamic-bot.jar，请确认启动脚本位于一键包根目录。" >&2
+  exit 1
+fi
+
+if [[ "$java_bin" == "java" ]] && ! command -v java >/dev/null 2>&1; then
+  echo "未找到 Java，请安装 Java 17 或更高版本，或下载带 JRE 的一键包。" >&2
+  exit 1
 fi
 
 exec "$java_bin" ${JAVA_OPTS:-} -jar "$PWD/dynamic-bot.jar" "$@"
