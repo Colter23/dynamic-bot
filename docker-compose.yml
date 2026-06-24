@@ -12,6 +12,8 @@ services:
       - ./config:/app/config
       # 插件目录
       - ./plugins:/app/plugins
+      # 文件日志
+      - ./logs:/app/logs
     environment:
       # 启动脚本会先修复挂载目录权限，再以该 UID/GID 运行 Java 主进程
       APP_UID: ${APP_UID:-1000}
@@ -21,6 +23,8 @@ services:
       TZ: ${TZ:-Asia/Shanghai}
       # Skiko 原生库、临时文件等运行时缓存目录；默认不挂载，避免污染 data 目录
       APP_RUNTIME_DIR: ${APP_RUNTIME_DIR:-/app/.runtime}
+      # 文件日志目录；控制台日志仍然会输出到 docker logs
+      LOG_DIR: ${LOG_DIR:-/app/logs}
       # Docker 首次生成主配置时默认监听所有网卡，避免容器内 127.0.0.1 导致宿主机无法访问后台
       DYNAMIC_BOT_WEB_ADMIN_HOST: ${DYNAMIC_BOT_WEB_ADMIN_HOST:-0.0.0.0}
       # JVM 内存配置，可根据实际需求调整

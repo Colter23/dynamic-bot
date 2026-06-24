@@ -74,14 +74,15 @@ environment:
 | `./data` | `/app/data` | 数据库、插件私有状态、图片缓存 |
 | `./config` | `/app/config` | 配置文件 |
 | `./plugins` | `/app/plugins` | 插件 JAR 文件 |
+| `./logs` | `/app/logs` | 本地滚动日志 |
 
 如果要给绘图补充字体，可以把字体文件放到宿主机的 `data/fonts/`，容器启动后会自动读取并作为回退字体。
 
-容器启动时会自动创建这些目录，并在需要时修复目录权限。Java 主进程不会以 root 运行，启动脚本只在初始化挂载目录时短暂使用 root。
+容器启动时会自动创建这些目录，并在需要时修复目录权限。Java 主进程不会以 root 运行，启动脚本只在初始化挂载目录时短暂使用 root。应用日志会同时输出到 `docker logs` 和 `/app/logs/dynamic-bot.log`，文件日志默认按天和大小滚动。
 
 ```bash
-# 可选：提前创建目录，便于自己放插件或备份
-mkdir -p data config plugins
+# 可选：提前创建目录，便于自己放插件、查看日志或备份
+mkdir -p data config plugins logs
 ```
 
 默认使用 UID/GID `1000:1000` 运行应用。如果你的宿主机用户不是 1000，可以启动时指定：

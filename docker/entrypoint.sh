@@ -7,12 +7,13 @@ APP_GID="${APP_GID:-1000}"
 APP_UMASK="${APP_UMASK:-0022}"
 FIX_VOLUME_PERMISSIONS="${FIX_VOLUME_PERMISSIONS:-auto}"
 APP_RUNTIME_DIR="${APP_RUNTIME_DIR:-/app/.runtime}"
+LOG_DIR="${LOG_DIR:-/app/logs}"
 HOME="$APP_RUNTIME_DIR/home"
 XDG_CACHE_HOME="$APP_RUNTIME_DIR/cache"
 TMPDIR="$APP_RUNTIME_DIR/tmp"
 JAVA_RUNTIME_OPTS="-Duser.home=$HOME -Djava.io.tmpdir=$TMPDIR"
 JAVA_OPTS="${JAVA_OPTS:-} $JAVA_RUNTIME_OPTS"
-export HOME XDG_CACHE_HOME TMPDIR JAVA_OPTS
+export HOME XDG_CACHE_HOME TMPDIR JAVA_OPTS LOG_DIR
 
 case "$APP_UID" in
   ''|*[!0-9]*)
@@ -103,6 +104,7 @@ for dir in \
   /app/data \
   /app/config \
   /app/plugins \
+  "$LOG_DIR" \
   /app/data/images/source \
   /app/data/images/draw \
   /app/data/plugins \

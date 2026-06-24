@@ -15,6 +15,7 @@ build/
 out/
 
 # 日志
+logs/
 *.log
 
 # 临时文件

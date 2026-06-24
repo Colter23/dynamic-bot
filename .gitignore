@@ -47,3 +47,4 @@ bin/
 **/src/test/resources/cookie.json
 /config/
 /data/
+/logs/
