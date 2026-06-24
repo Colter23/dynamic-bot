@@ -17,6 +17,7 @@ import top.colter.skiko.layout.*
 
 private val attachmentSpacing: Dp = 20.dp
 private val mediaCardSpacing: Dp = 28.dp
+private const val singleLongImagePreviewRatio: Float = 1f / 2f
 
 internal fun Layout.drawDynamicBlocks(
     blocks: List<DynamicBlock>,
@@ -86,12 +87,17 @@ private fun Layout.drawDynamicImages(
         modifier = modifier
     ) {
         for ((pic, image) in imgList) {
+            val longImage = pic.isLongImage(image)
             DynamicImageTile(
                 image = image,
                 badge = pic.badge,
                 lineCount = lineCount,
-                ratio = if (imgList.size == 1) 0f else Ratio.SQUARE,
-                cropTop = imgList.size > 1 && pic.isLongImage(),
+                ratio = when {
+                    imgList.size == 1 && longImage -> singleLongImagePreviewRatio
+                    imgList.size == 1 -> 0f
+                    else -> Ratio.SQUARE
+                },
+                cropTop = longImage,
                 colors = colors,
                 modifier = imgModifier
             )
@@ -110,8 +116,8 @@ private fun Layout.DynamicImageTile(
 ) = Box(modifier = modifier) {
     val imgModifier = Modifier().border(2.dp, 10.dp, colors.coverBorderColor)
 
-    // 图片限高，最高为 1000dp 基准宽度的两倍。
-    if (image.height > image.width * 2) imgModifier.maxHeight(2000.dp)
+    // 原比例图片限高，长图预览使用固定比例，避免等比缩放成左侧窄条。
+    if (ratio == 0f && image.height > image.width * 2) imgModifier.maxHeight(2000.dp)
 
     // 绘制图片：长图取顶部，普通图片居中裁剪。
     Image(
@@ -144,9 +150,9 @@ private fun Layout.DynamicImageTile(
     }
 }
 
-private fun ImageItem.isLongImage(): Boolean {
-    val width = width ?: return false
-    val height = height ?: return false
+private fun ImageItem.isLongImage(image: Image): Boolean {
+    val width = width ?: image.width
+    val height = height ?: image.height
     return width > 0 && height > width * 2
 }
 
