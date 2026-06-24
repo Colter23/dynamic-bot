@@ -66,7 +66,7 @@ QQ群：734922374
 也可以直接下载 `dynamic-bot-*-all.jar` 手动运行：
 
 ```powershell
-java -jar dynamic-bot-0.0.6-all.jar
+java -jar dynamic-bot-0.0.7-all.jar
 ```
 
 默认后台地址：
@@ -178,7 +178,7 @@ Docker 首次生成主配置时，后台默认监听 `0.0.0.0`，方便从容器
 发布用的一键启动包由 CI 自动生成；本地需要验证包结构时，可以在 Linux/macOS Shell 或已安装 `zip`、`tar`、`curl` 等工具的环境中运行：
 
 ```bash
-INCLUDE_JRE_PACKAGES=false ./scripts/package-release.sh 0.0.6 build/libs/dynamic-bot-0.0.6-all.jar release
+INCLUDE_JRE_PACKAGES=false ./scripts/package-release.sh 0.0.7 build/libs/dynamic-bot-0.0.7-all.jar release
 ```
 
 开发插件时，请优先依赖 `dynamic-bot-core` 中的公开 API，不要直接依赖主程序内部实现。提交代码前建议至少运行：

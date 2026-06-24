@@ -5,9 +5,9 @@
       "id": "bilibili-publisher",
       "name": "Bilibili 动态源插件",
       "repo": "Colter23/dynamic-bot-bilibili",
-      "version": "0.0.4",
-      "tag": "v0.0.4",
-      "asset": "dynamic-bot-bilibili-0.0.4-all.jar"
+      "version": "0.0.5",
+      "tag": "v0.0.5",
+      "asset": "dynamic-bot-bilibili-0.0.5-all.jar"
     },
     {
       "id": "onebot-gateway",

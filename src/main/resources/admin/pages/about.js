@@ -9,7 +9,7 @@ let fmtDuration;
 let fmtBytes;
 let pill;
 
-const PROJECT_VERSION = "0.0.6";
+const PROJECT_VERSION = "0.0.7";
 const PROJECT_URL = "https://github.com/Colter23/dynamic-bot";
 const AUTHOR_URL = "https://github.com/Colter23";
 
