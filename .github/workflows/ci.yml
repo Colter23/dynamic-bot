@@ -135,18 +135,19 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install release packaging tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y zip unzip
+
+      - name: Make release scripts executable
+        run: chmod +x ./scripts/*.sh
+
       - name: Download application jar
         uses: actions/download-artifact@v4
         with:
           name: dynamic-bot
           path: release
-
-      - name: Generate SHA-256 checksum
-        shell: bash
-        run: |
-          cd release
-          jar_file="$(ls *-all.jar)"
-          sha256sum "$jar_file" > "$jar_file.sha256"
 
       - name: Check tag matches project version
         shell: bash
@@ -162,11 +163,48 @@ jobs:
             exit 1
           fi
 
+      - name: Prepare one-click packages
+        shell: bash
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          jar_file="$(ls release/*-all.jar | head -n 1)"
+          ./scripts/package-release.sh "$tag_version" "$jar_file" release
+
+      - name: Prepare official plugin package
+        shell: bash
+        run: |
+          tag_version="${GITHUB_REF_NAME#v}"
+          ./scripts/package-official-plugins.sh "$tag_version" packaging/official-plugins.lock.json release
+
+      - name: Generate SHA-256 checksums
+        shell: bash
+        run: |
+          cd release
+          shopt -s nullglob
+          files=(*-all.jar *.zip *.tar.gz)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "No release artifacts found"
+            exit 1
+          fi
+          sha256sum "${files[@]}" > SHA256SUMS.txt
+          for file in "${files[@]}"; do
+            sha256sum "$file" > "$file.sha256"
+          done
+
       - name: Prepare release body
         shell: bash
         run: |
           image_version="${GITHUB_REF_NAME#v}"
           cat > release/release-body.md <<EOF
+          一键启动包：
+          - \`dynamic-bot-v${image_version}-windows-x64-jre.zip\`：Windows x64，内置 Java 21。
+          - \`dynamic-bot-v${image_version}-linux-x64-jre.tar.gz\`：Linux x64，内置 Java 21。
+          - \`dynamic-bot-v${image_version}-windows-x64.zip\`：Windows x64，不带 JRE，需要 Java 17+。
+          - \`dynamic-bot-v${image_version}-linux-x64.tar.gz\`：Linux x64，不带 JRE，需要 Java 17+。
+
+          官方插件合集：
+          - \`dynamic-bot-v${image_version}-official-plugins.zip\`：包含本版本推荐搭配的 Bilibili、OneBot 和微博官方插件。
+
           Docker 镜像：
           - \`ghcr.io/colter23/dynamic-bot:${image_version}\`
           - \`ghcr.io/colter23/dynamic-bot:latest\`
@@ -179,6 +217,9 @@ jobs:
           body_path: release/release-body.md
           files: |
             release/*-all.jar
-            release/*-all.jar.sha256
+            release/*.zip
+            release/*.tar.gz
+            release/*.sha256
+            release/SHA256SUMS.txt
           fail_on_unmatched_files: true
           generate_release_notes: true

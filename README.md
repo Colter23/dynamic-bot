@@ -54,7 +54,16 @@ QQ群：734922374
 
 ### 本地运行
 
-从 [Releases](https://github.com/Colter23/dynamic-bot/releases) 下载最新的 `dynamic-bot-*-all.jar`，然后运行：
+从 [Releases](https://github.com/Colter23/dynamic-bot/releases) 下载适合当前系统的一键启动包：
+
+| 包 | 适用场景 |
+| --- | --- |
+| `dynamic-bot-v*-windows-x64-jre.zip` | Windows x64，内置 Java 21，解压后双击 `start.bat`。 |
+| `dynamic-bot-v*-linux-x64-jre.tar.gz` | Linux x64，内置 Java 21，解压后执行 `./start.sh`。 |
+| `dynamic-bot-v*-windows-x64.zip` | Windows x64，不带 JRE，需要本机已有 Java 17+。 |
+| `dynamic-bot-v*-linux-x64.tar.gz` | Linux x64，不带 JRE，需要本机已有 Java 17+。 |
+
+也可以直接下载 `dynamic-bot-*-all.jar` 手动运行：
 
 ```powershell
 java -jar dynamic-bot-0.0.6-all.jar
@@ -66,7 +75,20 @@ java -jar dynamic-bot-0.0.6-all.jar
 http://127.0.0.1:2233
 ```
 
-需要 JDK 17 或更高版本。首次启动时，如果 `config/main.yml` 中没有后台 token，程序会自动生成并写入配置文件，同时在日志中输出。
+不带 JRE 的包和手动运行 JAR 时需要 Java 17 或更高版本。首次启动时，如果 `config/main.yml` 中没有后台 token，程序会自动生成并写入配置文件，同时在日志中输出。
+
+### 升级
+
+使用一键启动包升级时：
+
+1. 停止正在运行的 dynamic-bot。
+2. 从 Releases 下载新版本对应系统的启动包。
+3. 解压到临时目录，只复制里面的 `dynamic-bot.jar` 覆盖旧运行目录根目录下的同名文件。
+4. 如需更新启动脚本，再复制新的 `start.bat` 或 `start.sh`。
+5. 保留旧运行目录中的 `config/`、`data/`、`plugins/` 和 `logs/`。
+6. 重新启动 dynamic-bot，并在 Web 后台确认插件和订阅状态。
+
+不要直接把新包完整解压覆盖旧运行目录，避免误覆盖配置、数据库、插件数据或日志。插件如有新版本，推荐在 Web 后台的插件页面单独更新。
 
 ### Docker 运行
 
@@ -89,7 +111,9 @@ Docker 首次生成主配置时，后台默认监听 `0.0.0.0`，方便从容器
 官方插件支持两种安装方式：
 
 1. 推荐方式：在 Web 后台的插件页面中直接下载和安装。
-2. 手动方式：从对应插件仓库下载 JAR，放到运行目录的 `plugins/` 下，然后重启主程序或在后台刷新插件。
+2. 手动方式：从 Releases 下载 `dynamic-bot-v*-official-plugins.zip`，或从对应插件仓库下载 JAR，放到运行目录的 `plugins/` 下，然后重启主程序或在后台刷新插件。
+
+官方插件合集包只包含主程序发布时推荐搭配的插件版本，具体版本以包内 `MANIFEST.json` 为准。后续单独升级插件时，仍推荐在 Web 后台的插件页面更新。
 
 | 插件              | 用途 | 仓库 |
 |-----------------| --- | --- |
@@ -149,6 +173,12 @@ Docker 首次生成主配置时，后台默认监听 `0.0.0.0`，方便从容器
 .\gradlew.bat fatJar -PskikoRuntimeTargets=windows-x64
 .\gradlew.bat fatJar -PskikoRuntimeTargets=linux-x64
 .\gradlew.bat fatJar -PskikoRuntimeTargets=linux-x64,linux-arm64
+```
+
+发布用的一键启动包由 CI 自动生成；本地需要验证包结构时，可以在 Linux/macOS Shell 或已安装 `zip`、`tar`、`curl` 等工具的环境中运行：
+
+```bash
+INCLUDE_JRE_PACKAGES=false ./scripts/package-release.sh 0.0.6 build/libs/dynamic-bot-0.0.6-all.jar release
 ```
 
 开发插件时，请优先依赖 `dynamic-bot-core` 中的公开 API，不要直接依赖主程序内部实现。提交代码前建议至少运行：

@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "plugins": [
+    {
+      "id": "bilibili-publisher",
+      "name": "Bilibili 动态源插件",
+      "repo": "Colter23/dynamic-bot-bilibili",
+      "version": "0.0.4",
+      "tag": "v0.0.4",
+      "asset": "dynamic-bot-bilibili-0.0.4-all.jar"
+    },
+    {
+      "id": "onebot-gateway",
+      "name": "OneBot 网关插件",
+      "repo": "Colter23/dynamic-bot-onebot",
+      "version": "0.0.6",
+      "tag": "v0.0.6",
+      "asset": "dynamic-bot-onebot-0.0.6-all.jar"
+    },
+    {
+      "id": "weibo-publisher",
+      "name": "微博动态源插件",
+      "repo": "Colter23/dynamic-bot-weibo",
+      "version": "0.0.2",
+      "tag": "v0.0.2",
+      "asset": "dynamic-bot-weibo-0.0.2-all.jar"
+    }
+  ]
+}
