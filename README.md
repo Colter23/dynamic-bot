@@ -196,6 +196,7 @@ INCLUDE_JRE_PACKAGES=false ./scripts/package-release.sh 0.0.7 build/libs/dynamic
 <p align="center">
   <img src="docs/assets/sponsor/weixin.jpg" alt="微信赞助码" width="180" loading="lazy">
   <img src="docs/assets/sponsor/aifadian.jpg" alt="爱发电赞助码" width="180" loading="lazy">
+  <img src="docs/assets/sponsor/zhifubao.jpg" alt="支付宝赞助码" width="180" loading="lazy">
 </p>
 
 ## 许可证
