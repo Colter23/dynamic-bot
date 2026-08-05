@@ -345,6 +345,84 @@ class MainConfigStoreTest {
         }
     }
 
+    @Test
+    fun pluginHookTimeoutShouldDefaultTo60SecondsAndBeExposed() {
+        val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-config"))
+        val store = MainConfigStore(configService)
+        val current = store.loadOrCreate(
+            adminTokenProvider = { "token" },
+            secretProvider = { "secret" },
+        )
+
+        assertEquals(60, current.plugin.hookTimeoutSeconds)
+        assertTrue(MainConfigForms.formSpec.fields.map { it.path }.contains("plugin.hookTimeoutSeconds"))
+
+        val invalid = assertFailsWith<IllegalArgumentException> {
+            MainConfigForms.validate(
+                MainDynamicConfig(plugin = PluginConfig(hookTimeoutSeconds = 0)),
+            )
+        }
+        assertTrue(invalid.message!!.contains("插件启动钩子超时"))
+
+        val tooLarge = assertFailsWith<IllegalArgumentException> {
+            MainConfigForms.validate(
+                MainDynamicConfig(plugin = PluginConfig(hookTimeoutSeconds = 3601)),
+            )
+        }
+        assertTrue(tooLarge.message!!.contains("插件启动钩子超时"))
+    }
+
+    @Test
+    fun pluginChangeShouldRequireRestart() {
+        val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-config"))
+        val store = MainConfigStore(configService)
+        val current = store.loadOrCreate(
+            adminTokenProvider = { "token" },
+            secretProvider = { "secret" },
+        )
+
+        val result = store.save(
+            current.copy(plugin = current.plugin.copy(hookTimeoutSeconds = 120)),
+        )
+
+        assertTrue(result.changed)
+        assertTrue(result.restartRequired)
+        assertEquals(listOf("主程序"), result.restartTargets)
+    }
+
+    @Test
+    fun currentShouldFallBackToInjectedDefaultConfigProvider() {
+        val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-config"))
+        val store = MainConfigStore(
+            configService = configService,
+            defaultConfigProvider = {
+                MainDynamicConfig(webAdmin = WebAdminConfig(host = "0.0.0.0"))
+            },
+        )
+
+        // current() 在未显式 loadOrCreate 时，也应使用注入的 provider 创建默认配置
+        val current = store.current()
+
+        assertEquals("0.0.0.0", current.webAdmin.host)
+        assertEquals(60, current.plugin.hookTimeoutSeconds)
+    }
+
+    @Test
+    fun pluginHookTimeoutShouldAcceptBoundaryValues() {
+        MainConfigForms.validate(
+            MainDynamicConfig(
+                webAdmin = WebAdminConfig(token = "token"),
+                plugin = PluginConfig(hookTimeoutSeconds = 1),
+            ),
+        )
+        MainConfigForms.validate(
+            MainDynamicConfig(
+                webAdmin = WebAdminConfig(token = "token"),
+                plugin = PluginConfig(hookTimeoutSeconds = 3600),
+            ),
+        )
+    }
+
     private fun assertContainsNone(actual: Collection<String>, removed: Collection<String>) {
         removed.forEach { value ->
             assertFalse(value in actual, "不应再展示配置字段：$value")

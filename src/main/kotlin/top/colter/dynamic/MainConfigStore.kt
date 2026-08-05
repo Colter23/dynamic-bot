@@ -24,6 +24,7 @@ import top.colter.dynamic.listener.PushTemplateRenderer
 
 public class MainConfigStore(
     private val configService: ConfigService = YamlConfigService(),
+    private val defaultConfigProvider: () -> MainDynamicConfig = { MainDynamicConfig() },
 ) {
     @Volatile
     private var currentConfig: MainDynamicConfig? = null
@@ -38,7 +39,7 @@ public class MainConfigStore(
     public fun loadOrCreate(
         adminTokenProvider: () -> String,
         secretProvider: () -> String,
-        defaultConfigProvider: () -> MainDynamicConfig = { MainDynamicConfig() },
+        defaultConfigProvider: () -> MainDynamicConfig = this.defaultConfigProvider,
     ): MainDynamicConfig {
         val loaded = configService.loadOrCreate(
             MainDynamicConfig.CONFIG_ID,
@@ -807,6 +808,13 @@ public object MainConfigForms {
                     description = "下载插件和插件目录时最多等待多久。\n支持小数，例如 0.5 表示 0.5 秒。",
                 ),
                 ConfigFieldSpec(
+                    path = "plugin.hookTimeoutSeconds",
+                    label = "插件启动钩子超时（秒）",
+                    type = ConfigFieldType.NUMBER,
+                    section = "插件目录",
+                    description = "插件 start/stop 钩子执行的最大等待时间。\n默认 60 秒；仅支持整数。来源平台插件启动时要访问平台 API，网络慢或冷启动时可适当调大，避免插件被判定启动失败。",
+                ),
+                ConfigFieldSpec(
                     path = "network.proxy.enabled",
                     label = "启用网络代理",
                     type = ConfigFieldType.BOOLEAN,
@@ -1171,6 +1179,7 @@ public object MainConfigForms {
         require(config.pluginCatalog.downloadTimeoutSeconds > 0.0) { "插件下载超时必须大于 0 秒" }
         require(config.pluginCatalog.maxDownloadMegabytes.isFiniteNumber()) { "插件最大下载大小必须是有效数字" }
         require(config.pluginCatalog.maxDownloadMegabytes > 0.0) { "插件最大下载大小必须大于 0 MB" }
+        require(config.plugin.hookTimeoutSeconds in 1L..3600L) { "插件启动钩子超时必须为 1 到 3600 秒" }
         val proxy = config.network.proxy
         if (proxy.enabled) {
             require(proxy.host.isNotBlank()) { "启用网络代理时代理主机不能为空" }
@@ -1270,6 +1279,9 @@ public object MainConfigForms {
             targets += "主程序"
         }
         if (previous.notifications.routeMonitorIntervalSeconds != next.notifications.routeMonitorIntervalSeconds) {
+            targets += "主程序"
+        }
+        if (previous.plugin != next.plugin) {
             targets += "主程序"
         }
         return targets.toList()

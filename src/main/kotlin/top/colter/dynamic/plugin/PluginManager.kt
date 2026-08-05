@@ -1302,7 +1302,7 @@ public class PluginManager(
 
     private companion object {
         private val PLUGIN_ID_REGEX: Regex = Regex("^[a-zA-Z0-9._-]+$")
-        private const val DEFAULT_PLUGIN_HOOK_TIMEOUT_MS: Long = 10_000
+        private const val DEFAULT_PLUGIN_HOOK_TIMEOUT_MS: Long = 60_000
         private const val DEFAULT_INCOMING_MESSAGE_PENDING_LIMIT: Int = 64
     }
 }
