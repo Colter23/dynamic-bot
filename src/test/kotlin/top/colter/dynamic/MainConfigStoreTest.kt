@@ -9,6 +9,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 import top.colter.dynamic.config.YamlConfigService
+import top.colter.dynamic.core.config.ConfigNumberKind
 import top.colter.dynamic.core.config.reload
 
 class MainConfigStoreTest {
@@ -355,7 +356,12 @@ class MainConfigStoreTest {
         )
 
         assertEquals(60, current.plugin.hookTimeoutSeconds)
-        assertTrue(MainConfigForms.formSpec.fields.map { it.path }.contains("plugin.hookTimeoutSeconds"))
+        val hookTimeoutField = MainConfigForms.formSpec.fields.single { it.path == "plugin.hookTimeoutSeconds" }
+        assertEquals(ConfigNumberKind.INTEGER, hookTimeoutField.numberKind)
+        assertEquals(1, hookTimeoutField.min)
+        assertEquals(3_600, hookTimeoutField.max)
+        assertTrue(hookTimeoutField.restartRequired)
+        assertEquals("主程序", hookTimeoutField.restartTarget)
 
         val invalid = assertFailsWith<IllegalArgumentException> {
             MainConfigForms.validate(

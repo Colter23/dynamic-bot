@@ -813,6 +813,11 @@ public object MainConfigForms {
                     type = ConfigFieldType.NUMBER,
                     section = "插件目录",
                     description = "插件 start/stop 钩子执行的最大等待时间。\n默认 60 秒；仅支持整数。来源平台插件启动时要访问平台 API，网络慢或冷启动时可适当调大，避免插件被判定启动失败。",
+                    numberKind = ConfigNumberKind.INTEGER,
+                    min = 1,
+                    max = 3_600,
+                    restartRequired = true,
+                    restartTarget = "主程序",
                 ),
                 ConfigFieldSpec(
                     path = "network.proxy.enabled",
