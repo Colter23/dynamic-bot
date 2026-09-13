@@ -19,6 +19,7 @@ public data class MainDynamicConfig(
     val messageRouting: MessageRoutingConfig = MessageRoutingConfig(),
     val delivery: DeliveryConfig = DeliveryConfig(),
     val draw: DrawSettings = DrawSettings(),
+    val plugin: PluginConfig = PluginConfig(),
     val pluginCatalog: PluginCatalogConfig = PluginCatalogConfig(),
     val network: NetworkConfig = NetworkConfig(),
     val webAdmin: WebAdminConfig = WebAdminConfig(),
@@ -61,6 +62,14 @@ public data class PluginCatalogConfig(
     public companion object {
         public const val DEFAULT_URL: String =
             "https://raw.githubusercontent.com/Colter23/dynamic-bot/main/plugins/catalog.json"
+    }
+}
+
+public data class PluginConfig(
+    val hookTimeoutSeconds: Long = DEFAULT_HOOK_TIMEOUT_SECONDS,
+) {
+    public companion object {
+        public const val DEFAULT_HOOK_TIMEOUT_SECONDS: Long = 60
     }
 }
 

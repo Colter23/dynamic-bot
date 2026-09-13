@@ -135,6 +135,10 @@ public object DynamicApplication : CoroutineScope {
             SourceUpdatePublishResult.failed("主项目来源更新处理器尚未初始化")
         }
     }
+    private val configStore: MainConfigStore = MainConfigStore(
+        configService = configService,
+        defaultConfigProvider = ::defaultMainConfig,
+    )
     private val pluginManager: PluginManager = PluginManager(
         pluginDirPath = "plugins",
         scope = this,
@@ -147,10 +151,12 @@ public object DynamicApplication : CoroutineScope {
         drawAssetRegistry = drawAssetRegistry,
         primaryBotAccountResolver = ::resolvePrimaryMessageBotAccount,
         knownBotAccountIdsResolver = ::resolveKnownMessageBotAccounts,
+        // 构造期读取一次：configStore.current() 会惰性加载配置（与 run() 共用 defaultMainConfig），
+        // 之后 hookTimeoutSeconds 的变更通过 save() 的 restartTargets 提示重启生效。
+        pluginHookTimeoutMs = configStore.current().plugin.hookTimeoutSeconds * 1000L,
     )
     private val listenerTokens: MutableList<ListenerToken> = mutableListOf()
     private val taskScheduler: DefaultTaskScheduler = DefaultTaskScheduler(scope = this)
-    private val configStore: MainConfigStore = MainConfigStore(configService)
     private val shutdownStarted: AtomicBoolean = AtomicBoolean(false)
     private val startedAtEpochMillis: Long = System.currentTimeMillis()
 
