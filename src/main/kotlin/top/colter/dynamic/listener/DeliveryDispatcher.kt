@@ -252,6 +252,7 @@ public class DeliveryDispatcher(
             routeId = candidate.route.routeId,
             accountId = candidate.route.accountId,
             advisor = candidate.sink as? MessageSinkMediaDeliveryAdvisor,
+            mediaDeliveryModel = candidate.sink.mediaDeliveryModel,
         )
     }
 
@@ -259,6 +260,7 @@ public class DeliveryDispatcher(
         return OutboundMediaRouteContext(
             transportId = sink.transportId,
             advisor = sink as? MessageSinkMediaDeliveryAdvisor,
+            mediaDeliveryModel = sink.mediaDeliveryModel,
         )
     }
 

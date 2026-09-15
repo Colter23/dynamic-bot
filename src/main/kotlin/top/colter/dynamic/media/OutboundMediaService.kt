@@ -30,11 +30,26 @@ import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryAdviceRequest
 import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryAdvisor
 import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryConfidence
 import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryMethod
+import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryModel
 import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryProbeRequest
 import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryProbeStatus
 import top.colter.dynamic.core.tools.loggerFor
 
 private val logger = loggerFor<OutboundMediaService>()
+
+// 媒体交付方式标签，用于"媒体交付方式已选择"日志
+private const val MEDIA_METHOD_LOCAL_FILE: String = "本地文件"
+private const val MEDIA_METHOD_SIGNED_URL: String = "签名链接"
+private const val MEDIA_METHOD_BASE64: String = "Base64 兜底"
+private const val MEDIA_METHOD_SELF_MANAGED: String = "插件自管媒体，跳过改写"
+
+// 未改写的原因：只在真的没能按配置准备好媒体时记录；正常流程（已是远程地址、非本地路径）不记录
+private const val MEDIA_KEEP_NO_PROFILE: String = "未找到媒体交付 profile"
+private const val MEDIA_KEEP_MISSING: String = "本地文件不存在"
+private const val MEDIA_KEEP_OUTSIDE_ROOT: String = "本地文件不在允许的根目录内"
+private const val MEDIA_KEEP_UNREADABLE: String = "本地文件大小读取失败"
+private const val MEDIA_KEEP_TOO_LARGE: String = "本地文件超出大小限制"
+private const val MEDIA_KEEP_REWRITE_FAILED: String = "媒体交付改写失败"
 
 public class OutboundMediaService(
     private val configProvider: () -> MainDynamicConfig,
@@ -158,21 +173,47 @@ public class OutboundMediaService(
         }
 
         suspend fun rewriteMedia(media: MediaRef): MediaRef {
-            val selectedProfile = profile ?: return media
+            if (routeContext.mediaDeliveryModel == MessageSinkMediaDeliveryModel.SELF_MANAGED) {
+                // 插件自己读取本地媒体并交付给平台，改写只会帮倒忙（例如把本地文件换成下游取不到的 URL）。
+                // 不记 profile：SELF_MANAGED 下 profile 被忽略，写出来反而会被误读成"用了这个 profile"。
+                logSelection(profileId = "", method = MEDIA_METHOD_SELF_MANAGED, routeContext = routeContext)
+                return media
+            }
+
+            val selectedProfile = profile
+            if (selectedProfile == null) {
+                logKeepUnchanged(profileId.orEmpty(), MEDIA_KEEP_NO_PROFILE, routeContext)
+                return media
+            }
             val uri = media.uri.trim()
+            // 已是远程地址/已编码、以及不是本地路径，都属设计内的正常流程，不记录以免刷屏
             if (uri.isBlank() || uri.isRemoteOrEncoded()) return media
             val path = uri.localPath() ?: return media
             val normalizedPath = path.toAbsolutePath().normalize()
-            if (!Files.isRegularFile(normalizedPath, LinkOption.NOFOLLOW_LINKS)) return media
+            if (!Files.isRegularFile(normalizedPath, LinkOption.NOFOLLOW_LINKS)) {
+                logKeepUnchanged(selectedProfile.id, MEDIA_KEEP_MISSING, routeContext)
+                return media
+            }
 
-            val root = findAllowedRoot(normalizedPath, config) ?: return media
-            val size = runCatching { Files.size(normalizedPath) }.getOrElse { return media }
-            if (!root.allowsSize(size)) return media
+            val root = findAllowedRoot(normalizedPath, config)
+            if (root == null) {
+                logKeepUnchanged(selectedProfile.id, MEDIA_KEEP_OUTSIDE_ROOT, routeContext)
+                return media
+            }
+            val size = runCatching { Files.size(normalizedPath) }.getOrNull()
+            if (size == null) {
+                logKeepUnchanged(selectedProfile.id, MEDIA_KEEP_UNREADABLE, routeContext)
+                return media
+            }
+            if (!root.allowsSize(size)) {
+                logKeepUnchanged(selectedProfile.id, MEDIA_KEEP_TOO_LARGE, routeContext)
+                return media
+            }
 
             val rewritten = when (selectedProfile.type) {
                 MediaDeliveryType.AUTO -> rewriteAuto(media, normalizedPath, root, size, selectedProfile)
                 MediaDeliveryType.BASE64 -> rewriteAsBase64(media, normalizedPath, root, selectedProfile)
-                MediaDeliveryType.LOCAL_FILE -> rewriteAsLocalFile(media, normalizedPath, selectedProfile, explicit = true)
+                MediaDeliveryType.LOCAL_FILE -> rewriteAsLocalFile(media, normalizedPath, selectedProfile)
                 MediaDeliveryType.SIGNED_URL -> rewriteAsSignedUrl(
                     media = media,
                     path = normalizedPath,
@@ -181,7 +222,26 @@ public class OutboundMediaService(
                     baseUrl = selectedProfile.signedUrl.publicBaseUrl,
                 )
             }
-            return rewritten ?: media
+            if (rewritten == null) {
+                logKeepUnchanged(selectedProfile.id, MEDIA_KEEP_REWRITE_FAILED, routeContext)
+                return media
+            }
+
+            // 统一在出口记录交付方式：显式 profile（LOCAL_FILE / SIGNED_URL）过去完全不记录，
+            // 出问题时无法从日志判断走的是本地直传还是公网 URL。
+            logSelection(selectedProfile.id, deliveryMethodLabel(rewritten.uri), routeContext)
+            return rewritten
+        }
+
+        /** 从改写结果反推实际交付方式，比在每个分支里各自记录更不容易漏。 */
+        private fun deliveryMethodLabel(uri: String): String {
+            val value = uri.trim()
+            return when {
+                value.startsWith("base64://", ignoreCase = true) -> MEDIA_METHOD_BASE64
+                value.startsWith("http://", ignoreCase = true) ||
+                    value.startsWith("https://", ignoreCase = true) -> MEDIA_METHOD_SIGNED_URL
+                else -> MEDIA_METHOD_LOCAL_FILE
+            }
         }
 
         private suspend fun rewriteContent(content: MessageContent): MessageContent {
@@ -228,11 +288,12 @@ public class OutboundMediaService(
             sizeBytes: Long,
             profile: MediaDeliveryProfile,
         ): MediaRef? {
-            val local = rewriteAsLocalFile(media, path, profile, explicit = false) ?: return null
+            val local = rewriteAsLocalFile(media, path, profile)
             val currentAdvice = advice()
             if (currentAdvice.localFileConfidence == MessageSinkMediaDeliveryConfidence.UNAVAILABLE) return null
 
-            val probeUri = localFileProbeUri(root) ?: local.uri
+            // 探测用的临时文件也要按映射换成客户端视角的路径，否则探测结果与实际交付的路径不一致
+            val probeUri = localFileProbePath(root)?.let { clientPath(it, profile).toUri().toString() } ?: local.uri
             val probeStatus = probe(
                 method = MessageSinkMediaDeliveryMethod.LOCAL_FILE,
                 uri = probeUri,
@@ -248,7 +309,6 @@ public class OutboundMediaService(
                 MessageSinkMediaDeliveryConfidence.UNAVAILABLE -> false
             }
             if (!usable) return null
-            logSelection(profile, "本地文件", routeContext)
             return local
         }
 
@@ -272,7 +332,6 @@ public class OutboundMediaService(
                 )
                 if (probeStatus != MessageSinkMediaDeliveryProbeStatus.AVAILABLE) continue
                 val signed = rewriteAsSignedUrl(media, path, root, profile, baseUrl) ?: continue
-                logSelection(profile, "签名链接", routeContext)
                 return signed
             }
             return null
@@ -292,27 +351,27 @@ public class OutboundMediaService(
             val encodedSize = (size * 4 + 2) / 3  // 向上取整
             if (encodedSize > maxBytes) return null
             val bytes = runCatching { Files.readAllBytes(path) }.getOrElse { return null }
-            logSelection(profile, "Base64 兜底", routeContext)
             return media.copy(uri = "base64://${Base64.getEncoder().encodeToString(bytes)}")
         }
 
-        private fun rewriteAsLocalFile(
-            media: MediaRef,
-            path: Path,
-            profile: MediaDeliveryProfile,
-            explicit: Boolean,
-        ): MediaRef? {
-            val mappedPath = if (explicit) {
-                profile.localFile.pathMappings
-                    .asSequence()
-                    .filter { it.enabled }
-                    .mapNotNull { mapping -> mapping.clientPathFor(path) }
-                    .firstOrNull()
-                    ?: path
-            } else {
-                path
-            }
-            return media.copy(uri = mappedPath.toUri().toString())
+        /**
+         * 把"主程序视角的路径"换成"下游客户端视角的路径"。
+         *
+         * 路径映射对**所有**本地文件交付生效。此前只有显式 LOCAL_FILE 分支套用映射，AUTO 分支不套，
+         * 导致客户端与主程序不在同一文件系统（如各自独立的容器）时，即使 operator 配了映射，
+         * AUTO 也会把主程序自己的路径交给客户端而失败。没有可用映射时原样返回。
+         */
+        private fun clientPath(path: Path, profile: MediaDeliveryProfile): Path {
+            return profile.localFile.pathMappings
+                .asSequence()
+                .filter { it.enabled }
+                .mapNotNull { mapping -> mapping.clientPathFor(path) }
+                .firstOrNull()
+                ?: path
+        }
+
+        private fun rewriteAsLocalFile(media: MediaRef, path: Path, profile: MediaDeliveryProfile): MediaRef {
+            return media.copy(uri = clientPath(path, profile).toUri().toString())
         }
 
         private fun rewriteAsSignedUrl(
@@ -442,12 +501,22 @@ public class OutboundMediaService(
             .distinct()
     }
 
-    private fun logSelection(profile: MediaDeliveryProfile, method: String, routeContext: OutboundMediaRouteContext) {
-        val key = "${routeContext.routeCacheKey().orEmpty()}|${profile.id}|$method"
+    private fun logSelection(profileId: String, method: String, routeContext: OutboundMediaRouteContext) {
+        val routeKey = routeContext.routeCacheKey().orEmpty()
+        val key = "$routeKey|$profileId|$method"
         if (selectionLogCache.putIfAbsent(key, true) == null) {
             logger.info {
-                "媒体交付方式已选择：route=${routeContext.routeCacheKey().orEmpty().ifBlank { "-" }}，profile=${profile.id}，方式=$method"
+                "媒体交付方式已选择：route=${routeKey.ifBlank { "-" }}，profile=${profileId.ifBlank { "-" }}，方式=$method"
             }
+        }
+    }
+
+    /** 未改写的原因按 route+profile+原因 去重：同一条路由的同一原因只报一次，避免刷屏。 */
+    private fun logKeepUnchanged(profileId: String, reason: String, routeContext: OutboundMediaRouteContext) {
+        val routeKey = routeContext.routeCacheKey().orEmpty()
+        if (selectionLogCache.putIfAbsent("keep|$routeKey|$profileId|$reason", true) != null) return
+        logger.warn {
+            "媒体交付未改写：route=${routeKey.ifBlank { "-" }}，profile=${profileId.ifBlank { "-" }}，原因=$reason"
         }
     }
 
@@ -462,7 +531,7 @@ public class OutboundMediaService(
         return clientRootPath.resolve(botRootPath.relativize(path)).normalize()
     }
 
-    private fun localFileProbeUri(root: OutboundMediaRoot): String? {
+    private fun localFileProbePath(root: OutboundMediaRoot): Path? {
         return runCatching {
             Files.createDirectories(root.path)
             val probePath = root.path.resolve(PROBE_FILE_NAME).normalize()
@@ -487,7 +556,7 @@ public class OutboundMediaService(
                     }
                 }
             }
-            probePath.toUri().toString()
+            probePath
         }.getOrNull()
     }
 
@@ -716,6 +785,8 @@ public data class OutboundMediaRouteContext(
     val routeId: String? = null,
     val accountId: String? = null,
     val advisor: MessageSinkMediaDeliveryAdvisor? = null,
+    /** 出口的媒体交付模型；[MessageSinkMediaDeliveryModel.SELF_MANAGED] 时跳过媒体改写。 */
+    val mediaDeliveryModel: MessageSinkMediaDeliveryModel = MessageSinkMediaDeliveryModel.RELAY,
 )
 
 public data class OutboundMediaResult(

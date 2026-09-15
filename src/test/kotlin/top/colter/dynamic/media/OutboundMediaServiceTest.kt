@@ -34,6 +34,7 @@ import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryAdviceRequest
 import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryAdvisor
 import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryConfidence
 import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryMethod
+import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryModel
 import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryProbeRequest
 import top.colter.dynamic.core.plugin.MessageSinkMediaDeliveryProbeResult
 
@@ -180,6 +181,62 @@ class OutboundMediaServiceTest {
         val rewritten = service.rewriteMedia(MediaRef(uri = image.toString(), kind = MediaKind.IMAGE))
 
         assertEquals(clientRoot.resolve("bilibili").resolve("demo.webp").toUri().toString(), rewritten.uri)
+    }
+
+    @Test
+    fun `auto 分支同样套用路径映射`() = runTest {
+        val renderedRoot = createTempDirectory("outbound-auto-mapped-rendered")
+        val clientRoot = createTempDirectory("outbound-auto-mapped-client")
+        val image = renderedRoot.resolve("bilibili").resolve("demo.png")
+        image.parent.createDirectories()
+        image.writeBytes(byteArrayOf(1, 2, 3))
+        val advisor = FakeAdvisor(localConfidence = MessageSinkMediaDeliveryConfidence.CONFIRMED)
+        val service = OutboundMediaService(
+            configProvider = {
+                MainDynamicConfig(
+                    imageCache = ImageCacheConfig(renderedRoot = renderedRoot.toString()),
+                    mediaDelivery = MediaDeliveryConfig(
+                        defaultProfileId = "auto",
+                        profiles = listOf(
+                            MediaDeliveryProfile(
+                                id = "auto",
+                                type = MediaDeliveryType.AUTO,
+                                localFile = MediaDeliveryLocalFileConfig(
+                                    pathMappings = listOf(
+                                        MediaDeliveryPathMapping(
+                                            botRoot = renderedRoot.toString(),
+                                            clientRoot = clientRoot.toString(),
+                                        ),
+                                    ),
+                                ),
+                                signedUrl = MediaDeliverySignedUrlConfig(signingSecret = "secret", ttlSeconds = 60),
+                            ),
+                        ),
+                    ),
+                )
+            },
+            nowEpochSeconds = { 1_000 },
+        )
+
+        val rewritten = service.rewriteMedia(
+            MediaRef(uri = image.toString(), kind = MediaKind.IMAGE),
+            routeContext = OutboundMediaRouteContext(
+                transportId = "onebot",
+                routeId = "onebot:qq:42",
+                accountId = "42",
+                advisor = advisor,
+            ),
+        )
+
+        // 交付给客户端的是"客户端视角"的路径
+        assertEquals(clientRoot.resolve("bilibili").resolve("demo.png").toUri().toString(), rewritten.uri)
+        // 探测用的临时文件同样要映射，否则探测结果与实际交付的路径不一致
+        val localProbe = advisor.probeRequests.single { it.method == MessageSinkMediaDeliveryMethod.LOCAL_FILE }
+        assertTrue(localProbe.uri.contains(".dynamic-bot-media-probe.png"))
+        assertTrue(
+            localProbe.uri.startsWith(clientRoot.toUri().toString()),
+            "探测路径应已映射到客户端根目录，实际为：${localProbe.uri}",
+        )
     }
 
     @Test
@@ -347,6 +404,30 @@ class OutboundMediaServiceTest {
         assertFailsWith<IllegalArgumentException> {
             service.resolve(parts.profile, parts.id, parts.expires, parts.signature)
         }
+    }
+
+    @Test
+    fun `插件自管媒体时原样交出本地路径且不做任何探测`() = runTest {
+        val renderedRoot = createTempDirectory("outbound-self-managed")
+        val image = renderedRoot.resolve("demo.png")
+        image.writeBytes(byteArrayOf(1, 2, 3))
+        val advisor = FakeAdvisor(localConfidence = MessageSinkMediaDeliveryConfidence.LIKELY)
+        val service = autoService(renderedRoot, advisor)
+
+        val rewritten = service.rewriteMedia(
+            MediaRef(uri = image.toString(), kind = MediaKind.IMAGE),
+            routeContext = OutboundMediaRouteContext(
+                transportId = "qqbot",
+                routeId = "qqbot:qq-official:102795391",
+                accountId = "102795391",
+                advisor = advisor,
+                mediaDeliveryModel = MessageSinkMediaDeliveryModel.SELF_MANAGED,
+            ),
+        )
+
+        // 本地路径原样交出（插件自己分片上传），且完全不读建议、不探测
+        assertEquals(image.toString(), rewritten.uri)
+        assertEquals(0, advisor.probeRequests.size)
     }
 
     private fun autoService(renderedRoot: java.nio.file.Path, advisor: FakeAdvisor): OutboundMediaService {
