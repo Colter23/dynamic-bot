@@ -2693,17 +2693,30 @@
       flex: 0 0 auto;
     }
     .target-choice-name {
-      min-width: 0;
+      /* 按内容宽度显示：不拉伸（拉伸会在名称后留白），也不收缩（收缩会被长 ID 挤没）；
+         名称自身过长时截断，上限 18em（约 250px）以免把后面的类型与 ID 顶出去 */
+      flex: 0 0 auto;
+      max-width: min(100%, 18em);
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       color: var(--text);
     }
     .target-choice-sub {
+      /* 类型等短标签固定宽度，不参与压缩 */
       flex: 0 0 auto;
       color: var(--muted);
       font-size: 12px;
       font-weight: 700;
+    }
+    /* 双类选择器（特异性 0,2,0），不依赖与 .target-choice-sub 的书写顺序 */
+    .target-choice-sub.target-choice-id {
+      /* 只有原始 ID 承担收缩：空间不足时自己省略号截断（如 QQ 官方 openid 有 32 位） */
+      flex: 0 1 auto;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
     }
     .target-choice-rich {
       grid-template-columns: minmax(0, 1fr) auto;

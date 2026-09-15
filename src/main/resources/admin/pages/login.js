@@ -167,8 +167,8 @@ function renderTargetPlatformAccountCard(item) {
   const accountId = item.accountId || "";
   const checkedText = item.checkedAtEpochMillis ? `检查：${fmtTime(item.checkedAtEpochMillis, true)}` : "";
   const transportText = item.transportName || item.transportId || "未知通道";
-  const pluginText = item.pluginName || item.pluginId || "未知插件";
-  const accountMeta = [accountId, transportText, pluginText, checkedText].filter(Boolean).join(" · ") || "暂无连接信息";
+  // 不再拼 pluginName：卡片标题已展示通道名，插件名基本是它的重复（如"QQ 官方机器人"与"QQ 官方机器人插件"）
+  const accountMeta = [accountId, transportText, checkedText].filter(Boolean).join(" · ") || "暂无连接信息";
   const status = item.enabled === false ? "DISABLED" : item.state;
   return `<article class="platform-login-card target-platform-account-card">
     <div class="platform-login-head">

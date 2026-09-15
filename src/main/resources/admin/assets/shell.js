@@ -455,7 +455,7 @@ const $ = id => document.getElementById(id);
             ${showPlatform ? platformTag(target && target.platformId, target && target.platformId) : ""}
             <span class="target-choice-name">${esc(title)}</span>
             <span class="target-choice-sub">${esc(label(target && target.targetKind))}</span>
-            <span class="target-choice-sub">${esc(target && target.externalId || "-")}</span>
+            <span class="target-choice-sub target-choice-id">${esc(target && target.externalId || "-")}</span>
             ${target && target.accountId ? `<span class="target-choice-sub">${esc(`优先账号 ${target.accountId}`)}</span>` : ""}
           </span>
         </label>

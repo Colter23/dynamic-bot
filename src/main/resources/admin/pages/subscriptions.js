@@ -1455,7 +1455,7 @@ function existingTargetChoiceHtml(target, index, checked) {
       ${platformTag(target.platformId, target.platformId)}
       <span class="target-choice-name">${esc(title)}</span>
       <span class="target-choice-sub">${esc(label(target.targetKind))}</span>
-      <span class="target-choice-sub">${esc(target.externalId || "-")}</span>
+      <span class="target-choice-sub target-choice-id">${esc(target.externalId || "-")}</span>
       ${target.accountId ? `<span class="target-choice-sub">${esc(`优先账号 ${target.accountId}`)}</span>` : ""}
     </span>
   </label>`;
@@ -1477,7 +1477,7 @@ function existingPublisherChoiceHtml(publisher, index, checked) {
       ${platformTag(publisher.platformId, publisher.platformId)}
       <span class="target-choice-name">${esc(title)}</span>
       <span class="target-choice-sub">${esc(label(publisher.kind))}</span>
-      <span class="target-choice-sub">${esc(publisher.externalId || "-")}</span>
+      <span class="target-choice-sub target-choice-id">${esc(publisher.externalId || "-")}</span>
     </span>
   </label>`;
 }
