@@ -4497,6 +4497,11 @@
       background: #fff8ea;
       color: var(--amber);
     }
+    .plugin-scan-button {
+      border-color: #a7d8cf;
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
     .plugin-card-grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));

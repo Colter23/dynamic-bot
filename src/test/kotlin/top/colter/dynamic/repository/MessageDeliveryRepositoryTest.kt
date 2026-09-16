@@ -97,7 +97,11 @@ class MessageDeliveryRepositoryTest {
         assertNotNull(MessageDeliveryRepository.findMessage(message.id))
 
         assertTrue(MessageDeliveryRepository.markFailed(message.id, user, "network"))
-        val terminal = MessageDeliveryRepository.cleanupHistory(cutoffEpochSeconds = cutoff)
+        // markFailed 会把 updatedAt 置为"此刻"，所以必须重新取 cutoff：
+        // 复用上面那个 now+1 时，若两步之间耗时超过 1 秒（机器负载高时会发生），
+        // 这条记录的 updatedAt 就会晚于 cutoff 而删不掉，导致断言偶发失败。
+        val terminalCutoff = System.currentTimeMillis() / 1000 + 1
+        val terminal = MessageDeliveryRepository.cleanupHistory(cutoffEpochSeconds = terminalCutoff)
 
         assertEquals(1, terminal.deletedDeliveries)
         assertEquals(1, terminal.deletedMessages)

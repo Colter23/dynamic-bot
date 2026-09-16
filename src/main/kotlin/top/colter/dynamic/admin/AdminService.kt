@@ -65,6 +65,7 @@ import top.colter.dynamic.plugin.PluginAdminPageInfo
 import top.colter.dynamic.plugin.PluginInfo
 import top.colter.dynamic.plugin.PluginManager
 import top.colter.dynamic.plugin.PluginReloadResult
+import top.colter.dynamic.plugin.PluginScanResult
 import top.colter.dynamic.plugin.PluginState
 import top.colter.dynamic.plugin.PluginTaskInfo
 import top.colter.dynamic.core.plugin.PublisherBatchLookupPlugin
@@ -160,6 +161,9 @@ public class AdminService(
     private val pluginStopper: (String) -> Unit = {
         throw IllegalStateException("插件停止功能未配置")
     },
+    private val pluginScanner: () -> PluginScanResult = {
+        throw IllegalStateException("插件扫描功能未配置")
+    },
     private val mainTaskScheduler: TaskScheduler? = null,
     private val pluginTaskProvider: () -> List<PluginTaskInfo> = { emptyList() },
     private val pluginTaskResolver: (String, String) -> PluginTaskInfo? = { _, _ -> null },
@@ -210,6 +214,7 @@ public class AdminService(
         pluginReloader = pluginManager::reloadPlugin,
         pluginStarter = pluginManager::startPlugin,
         pluginStopper = pluginManager::stopPlugin,
+        pluginScanner = pluginManager::scanAndLoadNewPlugins,
         mainTaskScheduler = mainTaskScheduler,
         pluginTaskProvider = pluginManager::getPluginTasks,
         pluginTaskResolver = pluginManager::getPluginTask,
@@ -579,6 +584,39 @@ public class AdminService(
         return withContext(Dispatchers.IO) {
             requirePluginCatalogService().update(id)
         }
+    }
+
+    /**
+     * 重新扫描插件目录并热加载其中尚未加载的插件。
+     *
+     * 与安装/重载不同，扫描是"尽力而为"：个别插件失败不影响其他插件，因此不抛异常，
+     * 由前端根据 [PluginScanResponse.failedPlugins] 提示。
+     */
+    public fun scanPlugins(): PluginScanResponse {
+        val result = pluginScanner()
+        return PluginScanResponse(
+            loadedPlugins = result.loadedPlugins.sorted(),
+            failedPlugins = result.failedPlugins,
+            skippedPlugins = result.skippedPlugins.sorted(),
+            message = describePluginScan(result),
+        )
+    }
+
+    private fun describePluginScan(result: PluginScanResult): String {
+        val parts = mutableListOf<String>()
+        if (result.loadedPlugins.isNotEmpty()) {
+            parts += "已热加载 ${result.loadedPlugins.size} 个新插件：${result.loadedPlugins.sorted().joinToString("、")}"
+        }
+        if (result.skippedPlugins.isNotEmpty()) {
+            parts += "跳过 ${result.skippedPlugins.size} 个已在运行的插件"
+        }
+        if (result.failedPlugins.isNotEmpty()) {
+            parts += "失败 ${result.failedPlugins.size} 个：" +
+                result.failedPlugins.entries.joinToString("；") { "${it.key}（${it.value}）" }
+        }
+        // 有失败但没成功时不能再说"未发现新插件"，否则前后矛盾
+        if (parts.isEmpty()) parts += "未发现新插件"
+        return parts.joinToString("；")
     }
 
     public fun reloadPlugin(id: String): PluginReloadResponse {

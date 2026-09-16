@@ -257,6 +257,15 @@ public data class PluginReloadResponse(
     val error: String? = null,
 )
 
+/** 重新扫描插件目录、热加载新插件的结果。 */
+@Serializable
+public data class PluginScanResponse(
+    val loadedPlugins: List<String> = emptyList(),
+    val failedPlugins: Map<String, String> = emptyMap(),
+    val skippedPlugins: List<String> = emptyList(),
+    val message: String,
+)
+
 @Serializable
 public data class PluginLifecycleResponse(
     val changed: Boolean,

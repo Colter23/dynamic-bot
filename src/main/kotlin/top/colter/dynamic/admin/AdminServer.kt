@@ -280,6 +280,10 @@ public fun Application.adminModule(context: AdminServerContext) {
                 val id = call.pathString("id")
                 call.respondApi { context.service.updateCatalogPlugin(id) }
             }
+            post("/plugins/scan") {
+                if (!call.ensureAuthorized(context)) return@post
+                call.respondApi { context.service.scanPlugins() }
+            }
             post("/plugins/{id}/start") {
                 if (!call.ensureAuthorized(context)) return@post
                 val id = call.pathString("id")

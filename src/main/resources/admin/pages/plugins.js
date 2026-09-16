@@ -84,6 +84,10 @@ export async function handleAction(nextCtx, { action, button, id }) {
     await runPluginLifecycleAction(action, id, button);
     return true;
   }
+  if (action === "plugin-scan") {
+    await runPluginScan(button);
+    return true;
+  }
   if (action === "plugin-config") {
     setPage("configs");
     return true;
@@ -179,6 +183,7 @@ function renderPage(plugins = state.cache.plugins || []) {
             <p>查看插件状态、能力和加载时间，并执行启动、停止、重启和配置操作。</p>
           </div>
           <div class="toolbar-actions">
+            <button class="plugin-scan-button" data-action="plugin-scan" title="重新扫描 plugins/ 目录，加载并启动新放入的插件">扫描新插件</button>
             <button class="plugin-check-update-button" data-action="check-plugin-updates">检查更新</button>
             <button class="add-button plugin-download-button" data-action="open-plugin-catalog">下载插件</button>
           </div>
@@ -558,6 +563,16 @@ async function runPluginLifecycleAction(action, id, button) {
     await reloadAfterOperation(false);
     const message = result.message ? result.message.replaceAll("重载", "重启") : `插件已${text}`;
     notify(message, false);
+  });
+}
+
+async function runPluginScan(button) {
+  await withButtonLoading(button, "扫描中...", async () => {
+    const result = await api("/plugins/scan", { method: "POST" });
+    const failedCount = Object.keys(result.failedPlugins || {}).length;
+    invalidate("plugins", "dashboard", "platformLogins", "configs");
+    await reloadAfterOperation(false);
+    notify(result.message || "扫描完成", failedCount > 0);
   });
 }
 

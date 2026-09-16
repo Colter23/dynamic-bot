@@ -172,6 +172,70 @@ public class PluginManager(
         }
     }
 
+    /**
+     * 重新扫描插件目录，加载并启动其中**尚未加载**的插件（运行中热加载新插件）。
+     *
+     * 与启动时的 [loadAllPlugins] 不同，这里只处理新出现的插件：`loadPlugin` 内部有
+     * `require(!plugins.containsKey(id))`，对已加载的插件会抛"插件 ID 重复"，所以不能直接重跑
+     * [loadAllPlugins]。已在运行中的插件会被跳过并计入 [PluginScanResult.skippedPlugins]。
+     *
+     * 失败不会中断整轮扫描，逐个记录到 [PluginScanResult.failedPlugins]；单个插件加载失败时
+     * [loadPlugin] 会自行回收类加载器与协程作用域。
+     */
+    public fun scanAndLoadNewPlugins(): PluginScanResult {
+        synchronized(lifecycleLock) {
+            val scanResults = scanner.scanForPlugins().sortedBy { it.descriptor.id }
+            val duplicatedIds = scanResults
+                .groupBy { it.descriptor.id }
+                .filterValues { it.size > 1 }
+                .keys
+
+            val loadedPlugins = mutableListOf<String>()
+            val failedPlugins = mutableMapOf<String, String>()
+            val skippedPlugins = mutableListOf<String>()
+
+            duplicatedIds.forEach { id ->
+                failedPlugins[id] = "插件 ID 重复：$id"
+            }
+
+            scanResults
+                .filterNot { it.descriptor.id in duplicatedIds }
+                .forEach { scanResult ->
+                    val pluginId = scanResult.descriptor.id
+                    if (plugins.containsKey(pluginId)) {
+                        skippedPlugins += pluginId
+                        return@forEach
+                    }
+                    runCatching {
+                        loadPlugin(scanResult)
+                        startPlugin(pluginId)
+                    }.onSuccess {
+                        // startPlugin 内部已捕获异常并置为 FAILED，这里要按最终状态判定
+                        val runtime = plugins[pluginId]
+                        if (runtime?.state == PluginState.ACTIVE) {
+                            loadedPlugins += pluginId
+                            logger.info {
+                                "插件已热加载：pluginId=$pluginId，version=${scanResult.descriptor.version}"
+                            }
+                        } else {
+                            failedPlugins[pluginId] =
+                                runtime?.error?.message ?: "插件启动后状态异常：${runtime?.state ?: "未加载"}"
+                        }
+                    }.onFailure { error ->
+                        failedPlugins[pluginId] = error.message ?: error::class.simpleName ?: "未知错误"
+                        logger.error(error) { "插件热加载失败：pluginId=$pluginId" }
+                        publishPluginFailure(pluginId, "scan_load", error, "插件热加载失败")
+                    }
+                }
+
+            return PluginScanResult(
+                loadedPlugins = loadedPlugins,
+                failedPlugins = failedPlugins,
+                skippedPlugins = skippedPlugins,
+            )
+        }
+    }
+
     public fun startAllPlugins() {
         synchronized(lifecycleLock) {
             ensureSubscriptionListenerRegistered()
@@ -1336,6 +1400,16 @@ private fun normalizePluginAdminResourcePath(path: String): String {
 public data class LoadResult(
     val loadedPlugins: MutableList<String> = mutableListOf(),
     val failedPlugins: MutableMap<String, String> = mutableMapOf(),
+)
+
+/** [PluginManager.scanAndLoadNewPlugins] 的结果。 */
+public data class PluginScanResult(
+    /** 本次新加载并成功启动的插件 ID。 */
+    val loadedPlugins: List<String> = emptyList(),
+    /** 加载或启动失败的插件：ID -> 原因。 */
+    val failedPlugins: Map<String, String> = emptyMap(),
+    /** 已在运行中、本次跳过的插件 ID。 */
+    val skippedPlugins: List<String> = emptyList(),
 )
 
 public data class PluginReloadResult(
