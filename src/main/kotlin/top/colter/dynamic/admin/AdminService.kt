@@ -121,6 +121,17 @@ import top.colter.dynamic.core.tools.loggerFor
 
 private val logger = loggerFor<AdminService>()
 
+/**
+ * 主程序版本，供后台“关于”页展示。
+ *
+ * 版本号由构建写入 jar manifest 的 `Implementation-Version`；从 IDE 或测试直接跑 class 文件时
+ * 该属性为 null，回退为 `dev`。这样前端不需要硬编码版本号，避免发版后忘记同步。
+ */
+private val APP_VERSION: String = AdminService::class.java.`package`
+    ?.implementationVersion
+    ?.takeIf { it.isNotBlank() }
+    ?: "dev"
+
 private val legacySubscriptionYamlMapper: ObjectMapper = ObjectMapper(YAMLFactory()).registerKotlinModule()
 
 public class AdminService(
@@ -258,6 +269,7 @@ public class AdminService(
         val freeMemory = runtime.freeMemory()
         val config = configProvider()
         return SystemStatusDto(
+            version = APP_VERSION,
             startedAtEpochMillis = startedAtEpochMillis,
             uptimeMs = (System.currentTimeMillis() - startedAtEpochMillis).coerceAtLeast(0),
             javaVersion = System.getProperty("java.version") ?: "",

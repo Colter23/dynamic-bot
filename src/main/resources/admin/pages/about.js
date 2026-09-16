@@ -2,24 +2,24 @@ let ctx;
 let root;
 let api;
 let state;
-let setPage;
 let esc;
-let fmtTime;
-let fmtDuration;
-let fmtBytes;
-let pill;
+let notify;
+let withButtonLoading;
 
-const PROJECT_VERSION = "0.0.7";
+const PROJECT_NAME = "dynamic-bot";
+const PROJECT_DESC = "面向动态订阅、直播提醒、链接解析和动态绘图推送的可扩展 Bot 主程序。";
 const PROJECT_URL = "https://github.com/Colter23/dynamic-bot";
-const AUTHOR_URL = "https://github.com/Colter23";
+const PROJECT_REPO = "Colter23/dynamic-bot";
+const LICENSE_NAME = "Apache License 2.0";
+const COPYRIGHT = "© 2026 Colter23";
+const RELEASES_API = `https://api.github.com/repos/${PROJECT_REPO}/releases/latest`;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
   root = ctx.root;
   api = ctx.api;
   state = ctx.state;
-  setPage = ctx.setPage;
-  ({ esc, fmtTime, fmtDuration, fmtBytes, pill } = ctx.ui);
+  ({ esc, notify, withButtonLoading } = ctx.ui);
 }
 
 function pageRoot() {
@@ -33,19 +33,16 @@ export async function mount(nextCtx) {
 
 export async function handleAction(nextCtx, { action, button }) {
   bindContext(nextCtx);
-  if (action === "about-goto") {
-    await setPage(button.dataset.page);
+  if (action === "about-check-update") {
+    await checkUpdate(button);
     return true;
   }
   return false;
 }
 
 async function loadAbout(force) {
-  const [status, plugins] = await Promise.all([
-    loadSystemStatus(force).catch(() => null),
-    loadPlugins(force).catch(() => []),
-  ]);
-  pageRoot().innerHTML = renderAbout(status, plugins);
+  const status = await loadSystemStatus(force).catch(() => null);
+  pageRoot().innerHTML = renderAbout(status);
 }
 
 async function loadSystemStatus(force) {
@@ -53,121 +50,91 @@ async function loadSystemStatus(force) {
   return state.cache.system;
 }
 
-async function loadPlugins(force) {
-  if (force || !state.cache.plugins) state.cache.plugins = await api("/plugins");
-  return state.cache.plugins || [];
+/** 当前版本；开发环境（直接跑 class 文件）后端返回 dev，此时视为未知。 */
+function currentVersion() {
+  const version = String(state.cache.system?.version || "").trim();
+  return version && version !== "dev" ? version : "";
 }
 
-function renderAbout(status, plugins) {
-  const activePlugins = plugins.filter(plugin => plugin.state === "ACTIVE").length;
-  const pluginSummary = plugins.length ? `${activePlugins}/${plugins.length}` : "-";
+function renderAbout(status) {
+  const version = String(status?.version || "").trim();
+  const versionText = !version || version === "dev" ? "开发版" : `v${version}`;
   return `
     <section class="page about-page">
-      <section class="panel about-hero">
-        <div class="about-hero-main">
-          <span class="dashboard-kicker">dynamic-bot</span>
-          <h2>Kotlin/JVM 动态转发系统</h2>
-          <p>将 Bilibili、X 等非即时通讯平台的动态统一处理后，转发到 QQ、Discord 等即时通讯平台。</p>
-          <div class="about-actions">
-            <a class="about-action primary" href="${PROJECT_URL}" target="_blank" rel="noreferrer">项目主页</a>
-            <button type="button" class="about-action secondary" data-action="about-goto" data-page="plugins">查看插件</button>
-            <button type="button" class="about-action secondary" data-action="about-goto" data-page="system">系统维护</button>
-          </div>
+      <article class="panel about-card">
+        <div class="about-brand">
+          <img class="about-logo" src="/admin/assets/logo-icon.svg" alt="" aria-hidden="true">
+          <h2 class="about-name">${esc(PROJECT_NAME)}</h2>
+          <p class="about-desc">${esc(PROJECT_DESC)}</p>
         </div>
-        <div class="about-version-card">
-          ${aboutMetric("主项目版本", `v${PROJECT_VERSION}`, "开发期版本")}
-          ${aboutMetric("已启用插件", pluginSummary, "运行中 / 已加载")}
-          ${aboutMetric("运行时间", status ? fmtDuration(status.uptimeMs) : "-", status ? `启动于 ${fmtTime(status.startedAtEpochMillis, true)}` : "运行信息未加载")}
-          ${aboutMetric("后台端口", status ? status.webAdminPort : "-", status ? status.webAdminHost : "-")}
+        <div class="about-meta">
+          ${metaRow("许可证", esc(LICENSE_NAME))}
+          ${metaRow("版权", esc(COPYRIGHT))}
+          ${metaRow("GitHub", `<a class="about-link" href="${PROJECT_URL}" target="_blank" rel="noreferrer">${esc(PROJECT_REPO)}</a>`)}
+          ${metaRow("版本", `<span class="about-version">${esc(versionText)}</span>${updateButton()}`)}
         </div>
-      </section>
-
-      <section class="about-grid">
-        ${infoCard("项目", [
-          infoRow("定位", "动态源到即时通讯平台的转发与运维系统"),
-          infoRow("主链路", "来源更新 -> 处理绘图 -> 投递队列 -> 消息出口"),
-          infoRow("插件模式", "前端来源插件和后端消息插件由主项目加载运行"),
-          infoRow("仓库", externalLink("Colter23/dynamic-bot", PROJECT_URL)),
-        ])}
-        ${infoCard("作者", [
-          infoRow("作者", "Colter"),
-          infoRow("GitHub", externalLink("Colter23", AUTHOR_URL)),
-          infoRow("项目语言", "Kotlin / JVM"),
-          infoRow("后台", "原生 HTML / CSS / JavaScript"),
-        ])}
-        ${moduleCard()}
-        ${runtimeCard(status)}
-      </section>
+      </article>
     </section>`;
 }
 
-function aboutMetric(title, value, hint) {
-  return `<div class="about-metric">
-    <span>${esc(title)}</span>
-    <b>${esc(String(value))}</b>
-    <small>${esc(String(hint || ""))}</small>
+function metaRow(label, valueHtml) {
+  return `<div class="about-meta-row">
+    <span class="about-meta-label">${esc(label)}</span>
+    <div class="about-meta-value">${valueHtml}</div>
   </div>`;
 }
 
-function infoCard(title, rows) {
-  return `<article class="panel about-card">
-    <div class="panel-head about-card-head">
-      <h2>${esc(title)}</h2>
-    </div>
-    <div class="about-info-list">${rows.join("")}</div>
-  </article>`;
+function updateButton() {
+  const known = Boolean(currentVersion());
+  const disabled = known ? "" : ' disabled title="开发环境下读不到版本号，无法比较"';
+  return `<button type="button" class="about-update-btn" data-action="about-check-update"${disabled}>
+    <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">
+      <path d="M13.2 8a5.2 5.2 0 1 1-1.5-3.7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path>
+      <path d="M13.4 2.6v3.1h-3.1" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"></path>
+    </svg>
+    <span>检查更新</span>
+  </button>`;
 }
 
-function infoRow(name, value) {
-  return `<div class="about-info-row">
-    <span>${esc(name)}</span>
-    <strong>${value}</strong>
-  </div>`;
-}
-
-function externalLink(label, href) {
-  return `<a class="about-inline-link" href="${href}" target="_blank" rel="noreferrer">${esc(label)}</a>`;
-}
-
-function moduleCard() {
-  const modules = [
-    ["core", "公共契约、数据模型、插件接口和配置表单定义"],
-    ["主项目", "加载插件、处理动态、绘图、投递和提供 Web 运维台"],
-    ["来源插件", "检测动态、直播状态和平台登录，例如 Bilibili"],
-    ["消息插件", "发送通用消息到目标平台，例如 OneBot / QQ"],
-  ];
-  return `<article class="panel about-card about-module-card">
-    <div class="panel-head about-card-head">
-      <h2>模块结构</h2>
-    </div>
-    <div class="about-module-list">
-      ${modules.map(([name, desc]) => `<div class="about-module-item">
-        <span>${esc(name)}</span>
-        <strong>${esc(desc)}</strong>
-      </div>`).join("")}
-    </div>
-  </article>`;
-}
-
-function runtimeCard(status) {
-  if (!status) {
-    return infoCard("运行环境", [
-      infoRow("状态", "运行信息暂未加载"),
-      infoRow("提示", "刷新页面后可重新读取当前进程状态"),
-    ]);
+async function checkUpdate(button) {
+  const current = currentVersion();
+  if (!current) {
+    notify("开发环境下读不到版本号，跳过检查", true);
+    return;
   }
-  const heapPercent = Math.round((Number(status.usedMemoryBytes || 0) / Math.max(Number(status.maxMemoryBytes || 1), 1)) * 100);
-  return `<article class="panel about-card">
-    <div class="panel-head about-card-head">
-      <h2>运行环境</h2>
-      ${pill(status.webAdminEnabled ? "ACTIVE" : "LOADED")}
-    </div>
-    <div class="about-info-list">
-      ${infoRow("Java", esc(status.javaVersion || "-"))}
-      ${infoRow("系统", esc(status.osName || "-"))}
-      ${infoRow("处理器", `${esc(String(status.availableProcessors || "-"))} 个`)}
-      ${infoRow("堆内存", `${esc(fmtBytes(status.usedMemoryBytes))} / ${esc(fmtBytes(status.maxMemoryBytes))} (${esc(String(heapPercent))}%)`)}
-      ${infoRow("配置文件", esc(status.mainConfigPath || "-"))}
-    </div>
-  </article>`;
+  try {
+    await withButtonLoading(button, "检查中...", async () => {
+      const latest = await fetchLatestVersion();
+      if (!latest) {
+        notify("没有找到已发布的版本", true);
+        return;
+      }
+      if (compareVersion(latest, current) > 0) {
+        notify(`发现新版本 v${latest}，当前 v${current}`);
+      } else {
+        notify(`已是最新版本 v${current}`);
+      }
+    });
+  } catch (error) {
+    notify(`检查更新失败：${error?.message || "网络不可用"}`, true);
+  }
+}
+
+async function fetchLatestVersion() {
+  const response = await fetch(RELEASES_API, { headers: { Accept: "application/vnd.github+json" } });
+  if (!response.ok) throw new Error(`GitHub 返回 HTTP ${response.status}`);
+  const data = await response.json();
+  return String(data?.tag_name || "").trim().replace(/^v/i, "");
+}
+
+/** 逐段数字比较：a > b 返回正数。段数不同时缺位按 0 处理。 */
+function compareVersion(a, b) {
+  const left = String(a).split(".");
+  const right = String(b).split(".");
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (Number(left[index]) || 0) - (Number(right[index]) || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
 }

@@ -98,7 +98,6 @@
     }
 
     [data-theme="dark"] .dashboard-hero,
-    [data-theme="dark"] .about-hero,
     [data-theme="dark"] .plugin-hero,
     [data-theme="dark"] .config-hero {
       background: linear-gradient(135deg, rgba(20, 184, 166, 0.08), rgba(59, 130, 246, 0.06)), var(--panel);
@@ -246,7 +245,6 @@
 
     [data-theme="dark"] .dashboard-metric-card,
     [data-theme="dark"] .dashboard-queue-card,
-    [data-theme="dark"] .about-metric,
     [data-theme="dark"] .plugin-summary-card {
       background: rgba(26, 31, 38, 0.8);
       border-color: var(--line-strong);
@@ -627,16 +625,9 @@
       color: #ef4444;
     }
 
-    [data-theme="dark"] .about-action.primary {
-      background: var(--accent-soft);
-      border-color: rgba(20, 184, 166, 0.4);
-      color: var(--accent);
-    }
-
-    [data-theme="dark"] .about-action.secondary {
-      background: rgba(156, 163, 175, 0.1);
+    [data-theme="dark"] .about-update-btn {
+      background: var(--panel-soft);
       border-color: var(--line-strong);
-      color: var(--muted);
     }
 
     [data-theme="dark"] .cookie-export-tab.active {
@@ -4174,165 +4165,107 @@
       font-family: ui-monospace, monospace;
     }
     .about-page {
-      gap: 14px;
-      width: min(1320px, 100%);
+      width: min(680px, 100%);
       margin: 0 auto;
     }
-    .about-hero {
+    .about-card {
       display: grid;
-      grid-template-columns: minmax(0, 1fr) minmax(420px, 0.9fr);
-      gap: 14px;
-      align-items: stretch;
-      border-color: #c8dde1;
-      background:
-        linear-gradient(135deg, rgba(230, 244, 241, 0.94), rgba(242, 246, 255, 0.92) 58%),
-        #fff;
-      overflow: hidden;
+      gap: 22px;
+      padding: 34px 30px 30px;
     }
-    .about-hero-main {
-      min-width: 0;
+    .about-brand {
       display: grid;
-      align-content: center;
-      gap: 10px;
+      justify-items: center;
+      gap: 12px;
+      text-align: center;
     }
-    .about-hero-main h2 {
-      font-size: 20px;
-      line-height: 1.2;
+    .about-logo {
+      width: 84px;
+      height: 84px;
+      border-radius: 20px;
+      box-shadow: 0 10px 26px rgba(24, 33, 45, 0.16);
     }
-    .about-hero-main p {
-      max-width: 720px;
+    .about-name {
+      font-size: 25px;
+      line-height: 1.15;
+      font-weight: 900;
+      color: var(--blue);
+      letter-spacing: 0.2px;
+    }
+    .about-desc {
+      max-width: 520px;
       color: var(--muted);
       font-size: 13px;
-      font-weight: 700;
-      overflow-wrap: anywhere;
-    }
-    .about-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      align-items: center;
-    }
-    .about-action {
-      min-height: 34px;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      gap: 6px;
-      border: 1px solid var(--line-strong);
-      border-radius: 7px;
-      padding: 7px 11px;
-      color: var(--text);
-      background: #fff;
-      font-weight: 800;
-      text-decoration: none;
-      cursor: pointer;
-    }
-    .about-action.primary {
-      border-color: #b9ded8;
-      background: var(--accent-soft);
-      color: var(--accent);
-    }
-    .about-action.secondary {
-      border-color: #cbd6e2;
-      background: rgba(255,255,255,.72);
-      color: #31546f;
-    }
-    .about-action:hover {
-      filter: brightness(0.97);
-    }
-    .about-version-card {
-      min-width: 0;
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 8px;
-    }
-    .about-metric {
-      min-width: 0;
-      display: grid;
-      gap: 4px;
-      padding: 10px;
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: rgba(255,255,255,0.82);
-      box-shadow: 0 5px 16px rgba(24, 33, 45, 0.055);
-    }
-    .about-metric span {
-      color: var(--text);
-      font-size: 12px;
-      font-weight: 900;
-    }
-    .about-metric b {
-      color: var(--text);
-      font-size: 20px;
-      line-height: 1.05;
-      overflow-wrap: anywhere;
-    }
-    .about-metric small {
-      color: var(--muted);
-      font-size: 10px;
       font-weight: 750;
       overflow-wrap: anywhere;
     }
-    .about-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 14px;
-      align-items: stretch;
-    }
-    .about-card {
-      min-width: 0;
-      display: grid;
-      grid-template-rows: auto minmax(0, 1fr);
-      gap: 10px;
-      animation: plugin-card-in 0.18s ease both;
-    }
-    .about-card-head {
-      margin-bottom: 0;
-      align-items: center;
-    }
-    .about-info-list,
-    .about-module-list {
-      display: grid;
-      gap: 8px;
-      min-width: 0;
-    }
-    .about-info-row,
-    .about-module-item {
-      min-width: 0;
-      display: grid;
-      grid-template-columns: 92px minmax(0, 1fr);
-      gap: 10px;
-      align-items: start;
-      padding: 9px 10px;
+    .about-meta {
       border: 1px solid var(--line);
-      border-radius: 8px;
-      background: var(--panel-soft);
+      border-radius: 10px;
+      overflow: hidden;
+      background: var(--panel);
     }
-    .about-info-row span,
-    .about-module-item span {
-      color: var(--muted);
-      font-size: 12px;
-      font-weight: 850;
+    .about-meta-row {
+      display: grid;
+      grid-template-columns: 104px minmax(0, 1fr);
+      gap: 12px;
+      align-items: center;
+      padding: 14px 16px;
     }
-    .about-info-row strong,
-    .about-module-item strong {
-      min-width: 0;
+    .about-meta-row + .about-meta-row {
+      border-top: 1px solid var(--line);
+    }
+    .about-meta-label {
       color: var(--text);
-      font-size: 13px;
-      font-weight: 850;
+      font-size: 14px;
+      font-weight: 900;
+    }
+    .about-meta-value {
+      min-width: 0;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 10px;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 800;
+      text-align: right;
       overflow-wrap: anywhere;
     }
-    .about-module-item {
-      grid-template-columns: 76px minmax(0, 1fr);
-      background: #fbfcfd;
-    }
-    .about-inline-link {
-      color: var(--accent);
+    .about-link {
+      color: var(--blue);
+      font-weight: 850;
       text-decoration: none;
-      border-bottom: 1px solid rgba(15, 118, 110, 0.25);
+      border-bottom: 1px solid rgba(37, 99, 235, 0.28);
     }
-    .about-inline-link:hover {
-      border-bottom-color: var(--accent);
+    .about-link:hover {
+      border-bottom-color: var(--blue);
+    }
+    .about-version {
+      font-family: ui-monospace, monospace;
+      font-weight: 850;
+    }
+    .about-update-btn {
+      min-height: 30px;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      border: 1px solid var(--line-strong);
+      border-radius: 7px;
+      padding: 5px 10px;
+      color: var(--text);
+      background: var(--panel);
+      font-size: 13px;
+      font-weight: 850;
+      cursor: pointer;
+    }
+    .about-update-btn:hover:not(:disabled) {
+      filter: brightness(0.97);
+    }
+    .about-update-btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
     }
     .plugin-page {
       gap: 14px;
@@ -8672,8 +8605,6 @@
       .plugin-hero { grid-template-columns: 1fr; }
       .plugin-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .plugin-skeleton-grid { grid-template-columns: 1fr; }
-      .about-hero { grid-template-columns: 1fr; }
-      .about-grid { grid-template-columns: 1fr; }
       .task-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .testing-workbench,
       .testing-preview-stage {
@@ -8749,14 +8680,6 @@
       button.dashboard-metric-card,
       button.dashboard-metric-card-new {
         min-height: 76px;
-      }
-      .about-version-card {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-      .about-info-row,
-      .about-module-item {
-        grid-template-columns: 1fr;
-        gap: 4px;
       }
       .subscription-create-subscription {
         grid-template-columns: 1fr;
@@ -9132,4 +9055,7 @@
         min-width: 40px;
         padding: 8px;
       }
+      .about-card { padding: 26px 18px 22px; }
+      .about-logo { width: 68px; height: 68px; border-radius: 16px; }
+      .about-meta-row { grid-template-columns: 84px minmax(0, 1fr); padding: 12px; }
     }

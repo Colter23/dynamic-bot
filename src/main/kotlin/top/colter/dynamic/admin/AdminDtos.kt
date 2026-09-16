@@ -173,6 +173,7 @@ public data class TaskOperationResponse(
 
 @Serializable
 public data class SystemStatusDto(
+    val version: String,
     val startedAtEpochMillis: Long,
     val uptimeMs: Long,
     val javaVersion: String,

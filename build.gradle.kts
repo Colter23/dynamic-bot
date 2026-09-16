@@ -106,6 +106,8 @@ tasks.test {
 tasks.jar {
     manifest {
         attributes["Main-Class"] = "top.colter.dynamic.MainKt"
+        // 后台“关于”页要展示版本，写入 manifest 避免前端硬编码版本号
+        attributes["Implementation-Version"] = project.version.toString()
     }
 }
 
@@ -118,6 +120,7 @@ tasks.register<Jar>("fatJar") {
     manifest {
         attributes["Main-Class"] = "top.colter.dynamic.MainKt"
         attributes["Multi-Release"] = "true"
+        attributes["Implementation-Version"] = project.version.toString()
     }
 
     from(sourceSets.main.get().output)
