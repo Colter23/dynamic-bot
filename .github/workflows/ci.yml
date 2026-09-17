@@ -203,7 +203,7 @@ jobs:
           - \`dynamic-bot-v${image_version}-linux-x64.tar.gz\`：Linux x64，不带 JRE，需要 Java 17+。
 
           官方插件合集：
-          - \`dynamic-bot-v${image_version}-official-plugins.zip\`：包含本版本推荐搭配的 Bilibili、OneBot 和微博官方插件。
+          - \`dynamic-bot-v${image_version}-official-plugins.zip\`：包含本版本推荐搭配的 Bilibili、微博、OneBot 和 QQ 官方机器人插件。
 
           Docker 镜像：
           - \`ghcr.io/colter23/dynamic-bot:${image_version}\`

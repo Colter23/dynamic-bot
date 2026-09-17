@@ -58,6 +58,22 @@
         "MESSAGE_SINK",
         "CONFIGURABLE"
       ]
+    },
+    {
+      "id": "qqbot-gateway",
+      "name": "QQ 官方机器人插件",
+      "description": "通过 QQ 开放平台的官方机器人收发 QQ 群和单聊消息，支持图片、视频、语音和引用回复。",
+      "release": {
+        "provider": "GITHUB_RELEASE",
+        "repository": "Colter23/dynamic-bot-qqbot",
+        "assetPattern": "dynamic-bot-qqbot-*-all.jar",
+        "checksumAssetPattern": "dynamic-bot-qqbot-*-all.jar.sha256"
+      },
+      "homepageUrl": "https://github.com/Colter23/dynamic-bot-qqbot",
+      "capabilities": [
+        "MESSAGE_SINK",
+        "CONFIGURABLE"
+      ]
     }
   ]
 }

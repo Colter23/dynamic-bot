@@ -88,7 +88,7 @@ dynamic-bot ${app_version} 官方插件合集包
 安装方式：
 1. 解压本文件。
 2. 将 plugins/ 下的 JAR 复制到 dynamic-bot 运行目录的 plugins/ 下。
-3. 重启 dynamic-bot，或在 Web 后台刷新插件。
+3. 在 Web 后台的插件页点「扫描新插件」加载，或重启 dynamic-bot。
 
 说明：
 - 本包只包含官方插件，不包含私有插件或实验插件。
