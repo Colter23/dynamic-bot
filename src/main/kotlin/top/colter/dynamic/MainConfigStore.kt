@@ -944,6 +944,7 @@ public object MainConfigForms {
         "imageCache.renderedCleanup.maxIdleDays",
         "pluginCatalog.url",
         "pluginCatalog.downloadTimeoutSeconds",
+        "plugin.hookTimeoutSeconds",
         "network.proxy.enabled",
         "network.proxy.type",
         "network.proxy.host",
@@ -964,6 +965,7 @@ public object MainConfigForms {
             path.startsWith("webAdmin.") ||
                 path.startsWith("imageCache.") ||
                 path.startsWith("pluginCatalog.") ||
+                path.startsWith("plugin.") ||
                 path.startsWith("network.") -> "系统维护"
             else -> section
         }
@@ -1039,6 +1041,7 @@ public object MainConfigForms {
             "webAdmin.token",
             "pluginCatalog.url",
             "pluginCatalog.downloadTimeoutSeconds",
+            "plugin.hookTimeoutSeconds",
             "network.proxy.enabled",
             "network.proxy.type",
             "network.proxy.host",

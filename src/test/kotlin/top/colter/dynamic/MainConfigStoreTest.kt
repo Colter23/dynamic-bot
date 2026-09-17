@@ -329,6 +329,10 @@ class MainConfigStoreTest {
         assertFalse(byPath.getValue("messageRouting.defaultPolicy.primaryAccountId").advanced)
         assertEquals("系统维护", byPath.getValue("network.proxy.enabled").section)
         assertTrue(byPath.getValue("network.proxy.enabled").advanced)
+        // 插件启动钩子超时归入"系统维护"的高级配置，不再单独占一个"插件目录"分组
+        assertEquals("系统维护", byPath.getValue("plugin.hookTimeoutSeconds").section)
+        assertTrue(byPath.getValue("plugin.hookTimeoutSeconds").advanced)
+        assertContainsNone(sections.toList(), listOf("插件目录"))
 
         assertContainsNone(
             paths,
