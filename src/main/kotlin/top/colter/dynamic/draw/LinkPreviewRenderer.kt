@@ -49,7 +49,7 @@ public class DefaultLinkPreviewRenderer(
         val update = buildLinkPreviewSourceUpdate(
             preview = preview,
             publisher = publisher,
-            occurredAtEpochSeconds = nowEpochSeconds(),
+            occurredAtEpochSeconds = preview.publishedAtEpochSeconds ?: nowEpochSeconds(),
         )
         return runtimeDrawService.render(update, storedPublisher)
     }
