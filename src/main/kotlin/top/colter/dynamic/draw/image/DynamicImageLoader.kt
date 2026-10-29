@@ -17,15 +17,21 @@ import java.time.Duration
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.roundToLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -37,6 +43,18 @@ import top.colter.dynamic.core.tools.loggerFor
 
 private val logger = loggerFor<CachedDynamicImageLoader>()
 
+/** 看守协程的轮询粒度。 */
+private const val MIN_WATCHDOG_TICK_MILLIS: Long = 50L
+private const val MAX_WATCHDOG_TICK_MILLIS: Long = 1_000L
+
+/** 空闲超时之外的绝对上限，避免服务端用极慢的持续传输把下载拖成无限期。 */
+private const val ABSOLUTE_TIMEOUT_MULTIPLIER: Long = 30L
+private const val MIN_ABSOLUTE_TIMEOUT_MILLIS: Long = 180_000L
+
+private fun absoluteTimeoutMillis(idleTimeoutMs: Long): Long {
+    return maxOf(idleTimeoutMs * ABSOLUTE_TIMEOUT_MULTIPLIER, MIN_ABSOLUTE_TIMEOUT_MILLIS)
+}
+
 public fun interface DynamicImageLoader {
     public suspend fun load(update: SourceUpdate)
 }
@@ -46,6 +64,9 @@ public class CachedDynamicImageLoader(
     private val downloader: ImageDownloader = HttpImageDownloader(),
 ) : DynamicImageLoader {
     private val inFlight: ConcurrentHashMap<String, CompletableDeferred<Unit>> = ConcurrentHashMap()
+
+    // 实例级上限：原先每次 load() 各自 new 一个信号量，等于没有全局下载并发上限。
+    private val downloadPermits: Semaphore = Semaphore(config.maxConcurrentDownloads.coerceAtLeast(1))
 
     init {
         DynamicImageCache.configure(
@@ -61,7 +82,7 @@ public class CachedDynamicImageLoader(
             .filter { it.media.uri.isNotBlank() }
         if (references.isEmpty()) return
 
-        val semaphore = Semaphore(config.maxConcurrentDownloads.coerceAtLeast(1))
+        val semaphore = downloadPermits
         coroutineScope {
             references
                 .map { reference ->
@@ -168,8 +189,71 @@ public class HttpImageDownloader(
         }
         response.headers().firstValueAsLong("Content-Length")
             .takeIf { it.isPresent && it.asLong > maxBytes }
-            ?.let { throw ImageDownloadException("图片超过大小限制：size=${it.asLong}，maxBytes=$maxBytes") }
-        return response.body().use { input -> readBytesLimited(input, maxBytes) }
+            ?.let {
+                response.body().close()
+                throw ImageDownloadException("图片超过大小限制：size=${it.asLong}，maxBytes=$maxBytes")
+            }
+        return readBodyLimited(response.body(), uri, timeoutMs, maxBytes)
+    }
+
+    /**
+     * HttpRequest.timeout 只覆盖到收到响应头为止，读取响应体不受它约束。
+     * 连接在 body 传输中途断流时，read() 会一直阻塞，且阻塞读无法被协程取消打断，
+     * 会把整条调用链（含检测任务和关闭流程）一起卡死。
+     *
+     * 这里在独立线程上做阻塞读取，并用“空闲超时”看守：连续 idleTimeoutMs 收不到新数据
+     * 就关闭响应体让 read() 抛错退出。这样慢速但持续推进的大图不会被误杀，
+     * 真正断流的连接也能在有限时间内失败；调用方协程被取消时同样会立刻关闭连接。
+     */
+    private suspend fun readBodyLimited(
+        body: InputStream,
+        uri: String,
+        idleTimeoutMs: Long,
+        maxBytes: Long,
+    ): ByteArray = coroutineScope {
+        val idleTimeout = idleTimeoutMs.coerceAtLeast(1L)
+        val startedAt = System.currentTimeMillis()
+        val lastProgressAt = AtomicLong(startedAt)
+        val aborted = AtomicBoolean(false)
+        val reader = CompletableFuture.supplyAsync(
+            {
+                body.use { input ->
+                    readBytesLimited(input, maxBytes) {
+                        lastProgressAt.set(System.currentTimeMillis())
+                    }
+                }
+            },
+            Dispatchers.IO.asExecutor(),
+        )
+        val abort: () -> Unit = {
+            aborted.set(true)
+            runCatching { body.close() }
+            reader.cancel(true)
+        }
+        val watchdog = launch {
+            val tick = (idleTimeout / 4).coerceIn(MIN_WATCHDOG_TICK_MILLIS, MAX_WATCHDOG_TICK_MILLIS)
+            while (isActive) {
+                delay(tick)
+                val now = System.currentTimeMillis()
+                if (now - lastProgressAt.get() < idleTimeout && now - startedAt < absoluteTimeoutMillis(idleTimeout)) {
+                    continue
+                }
+                abort()
+                return@launch
+            }
+        }
+        try {
+            awaitBody(reader, abort)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            if (aborted.get()) {
+                throw ImageDownloadException("读取图片响应体超时：uri=$uri，idleTimeoutMs=$idleTimeout", t)
+            }
+            throw t
+        } finally {
+            watchdog.cancel()
+        }
     }
 
     private fun readFileLimited(path: Path, maxBytes: Long): ByteArray {
@@ -188,13 +272,14 @@ public class HttpImageDownloader(
         throw ImageDownloadException("不支持的图片地址协议：$scheme")
     }
 
-    private fun readBytesLimited(input: InputStream, maxBytes: Long): ByteArray {
+    private fun readBytesLimited(input: InputStream, maxBytes: Long, onProgress: () -> Unit = {}): ByteArray {
         val output = ByteArrayOutputStream()
         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
         var total = 0L
         while (true) {
             val read = input.read(buffer)
             if (read < 0) break
+            onProgress()
             total += read
             if (total > maxBytes) {
                 throw ImageDownloadException("图片超过大小限制：maxBytes=$maxBytes")
@@ -202,6 +287,20 @@ public class HttpImageDownloader(
             output.write(buffer, 0, read)
         }
         return output.toByteArray()
+    }
+}
+
+/** 等待 body 读取完成；调用方被取消时先执行 [onCancel] 打断阻塞读，避免线程滞留。 */
+private suspend fun <T> awaitBody(future: CompletableFuture<T>, onCancel: () -> Unit): T {
+    return suspendCancellableCoroutine { continuation ->
+        continuation.invokeOnCancellation { onCancel() }
+        future.whenComplete { value, error ->
+            if (error == null) {
+                continuation.resume(value)
+            } else {
+                continuation.resumeWithException((error as? CompletionException)?.cause ?: error)
+            }
+        }
     }
 }
 

@@ -1,8 +1,13 @@
-﻿package top.colter.dynamic.listener
+package top.colter.dynamic.listener
 
+import com.sun.net.httpserver.HttpServer
 import java.awt.Color
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
+import java.net.InetSocketAddress
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import javax.imageio.ImageIO
 import kotlin.io.path.createTempDirectory
@@ -112,6 +117,71 @@ class CachedDynamicImageLoaderTest {
         val loaded = HttpImageDownloader().download(file.toAbsolutePath().toString(), timeoutMs = 1_000, maxBytes = 1024)
 
         assertEquals(bytes.size, loaded.size)
+    }
+
+    /**
+     * 响应头正常返回、body 传到一半断流时，HttpRequest.timeout 不会生效。
+     * 这里必须靠读取超时失败退出，否则检测协程会被永久阻塞（issue #1）。
+     */
+    @Test
+    fun httpDownloaderShouldFailFastWhenBodyStalls(): Unit = runBlocking {
+        val release = CountDownLatch(1)
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/stall.png") { exchange ->
+            exchange.sendResponseHeaders(200, 1024)
+            exchange.responseBody.write(ByteArray(8))
+            exchange.responseBody.flush()
+            release.await(10, TimeUnit.SECONDS)
+            runCatching { exchange.close() }
+        }
+        server.executor = Executors.newCachedThreadPool()
+        server.start()
+        try {
+            val url = "http://127.0.0.1:${server.address.port}/stall.png"
+            val startAt = System.currentTimeMillis()
+            try {
+                HttpImageDownloader().download(url, timeoutMs = 500, maxBytes = 1_000_000)
+                fail("stalled body should time out")
+            } catch (e: ImageDownloadException) {
+                assertTrue(e.message.orEmpty().contains("超时"), "message=${e.message}")
+            }
+            val elapsed = System.currentTimeMillis() - startAt
+            assertTrue(elapsed < 5_000, "stalled body should not block: elapsed=${elapsed}ms")
+        } finally {
+            release.countDown()
+            server.stop(0)
+        }
+    }
+
+    /**
+     * 空闲超时不能误杀“慢但持续有数据”的下载：整体耗时远超超时值，但每次间隔都很短。
+     */
+    @Test
+    fun httpDownloaderShouldTolerateSlowButProgressingBody(): Unit = runBlocking {
+        val chunks = 20
+        val chunkSize = 16
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        server.createContext("/slow.png") { exchange ->
+            exchange.sendResponseHeaders(200, (chunks * chunkSize).toLong())
+            exchange.responseBody.use { output ->
+                repeat(chunks) {
+                    output.write(ByteArray(chunkSize))
+                    output.flush()
+                    Thread.sleep(100)
+                }
+            }
+            runCatching { exchange.close() }
+        }
+        server.executor = Executors.newCachedThreadPool()
+        server.start()
+        try {
+            val url = "http://127.0.0.1:${server.address.port}/slow.png"
+            // 空闲超时 600ms，每 100ms 有数据；整体耗时约 2s，远大于空闲超时
+            val bytes = HttpImageDownloader().download(url, timeoutMs = 600, maxBytes = 1_000_000)
+            assertEquals(chunks * chunkSize, bytes.size)
+        } finally {
+            server.stop(0)
+        }
     }
 
     private fun loader(

@@ -1,6 +1,7 @@
 ﻿package top.colter.dynamic.listener
 
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import top.colter.dynamic.MainConfigForms
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.config.ConfigService
@@ -69,7 +70,7 @@ public class SourceUpdateProcessor(
     }
 
     public suspend fun process(request: SourceUpdatePublishRequest): SourceUpdatePublishResult {
-        return runCatching {
+        return try {
             logger.debug {
                 "开始处理来源更新：source=${request.sourcePlugin}，event=${request.update.eventType.value}，update=${request.update.key.stableValue()}"
             }
@@ -77,7 +78,10 @@ public class SourceUpdateProcessor(
                 is DynamicPayload -> handleDynamic(request, request.update)
                 is LivePayload -> handleLive(request, request.update)
             }
-        }.getOrElse { error ->
+        } catch (e: CancellationException) {
+            // 取消要原样向上抛：这里吞掉会让插件停止和检测超时都打不断这条链路。
+            throw e
+        } catch (error: Throwable) {
             logger.error(error) { "来源更新处理失败：update=${request.update.key.stableValue()}" }
             SourceUpdatePublishResult.failed(error.message ?: "来源更新处理失败")
         }
@@ -260,11 +264,14 @@ public class SourceUpdateProcessor(
     }
 
     private suspend fun renderImage(update: SourceUpdate, storedPublisher: Publisher?): MediaRef? {
-        return runCatching {
+        return try {
             runtimeDrawService.render(update, storedPublisher)
-        }.onFailure {
-            logger.warn(it) { "绘图失败，回退为文本消息：update=${update.key.stableValue()}" }
-        }.getOrNull()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            logger.warn(t) { "绘图失败，回退为文本消息：update=${update.key.stableValue()}" }
+            null
+        }
     }
 
     private fun resolveDynamicTemplate(): String {
