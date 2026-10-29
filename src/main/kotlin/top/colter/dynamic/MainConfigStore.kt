@@ -1,4 +1,4 @@
-﻿package top.colter.dynamic
+package top.colter.dynamic
 
 import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.config.ConfigFieldOption
@@ -28,6 +28,9 @@ public class MainConfigStore(
 ) {
     @Volatile
     private var currentConfig: MainDynamicConfig? = null
+
+    /** 串行化配置写入，避免读改写互相覆盖。 */
+    private val configLock: Any = Any()
 
     public fun loadOrCreate(adminTokenProvider: () -> String): MainDynamicConfig {
         return loadOrCreate(
@@ -67,6 +70,24 @@ public class MainConfigStore(
     }
 
     public fun save(next: MainDynamicConfig): ConfigApplyResult {
+        return synchronized(configLock) {
+            saveLocked(next)
+        }
+    }
+
+    /**
+     * 原子地"读取-修改-写回"主配置。
+     *
+     * 命令授权等场景只改一个字段，如果各自读写整份配置，会与后台保存配置互相覆盖。
+     * transform 返回同一实例表示无需改动。
+     */
+    public fun update(transform: (MainDynamicConfig) -> MainDynamicConfig): ConfigApplyResult {
+        return synchronized(configLock) {
+            saveLocked(transform(current()))
+        }
+    }
+
+    private fun saveLocked(next: MainDynamicConfig): ConfigApplyResult {
         val previous = current()
         MainConfigForms.validate(next)
         val changed = previous != next

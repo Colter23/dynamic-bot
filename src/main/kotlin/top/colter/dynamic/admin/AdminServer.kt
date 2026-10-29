@@ -1,4 +1,4 @@
-﻿package top.colter.dynamic.admin
+package top.colter.dynamic.admin
 
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -35,6 +35,7 @@ import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.WebAdminConfig
+import top.colter.dynamic.command.CommandBootstrapService
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.config.ConfigService
@@ -72,6 +73,7 @@ public class AdminServer(
     private val taskScheduler: TaskScheduler? = null,
     private val stopRequester: ((String) -> Unit)? = null,
     private val startedAtEpochMillis: Long = System.currentTimeMillis(),
+    private val commandBootstrapService: CommandBootstrapService? = null,
 ) {
     private var engine: EmbeddedServer<NettyApplicationEngine, NettyApplicationEngine.Configuration>? = null
     private var loginService: AdminLoginService? = null
@@ -98,6 +100,7 @@ public class AdminServer(
                 outboundMessageService = outboundMessageService,
                 mainTaskScheduler = taskScheduler,
                 startedAtEpochMillis = startedAtEpochMillis,
+                commandBootstrapService = commandBootstrapService,
             ),
             loginService = adminLoginService,
             mediaService = AdminMediaService(
@@ -302,6 +305,14 @@ public fun Application.adminModule(context: AdminServerContext) {
             get("/system/status") {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.service.systemStatus() }
+            }
+            get("/command-bootstrap") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi { context.service.commandBootstrap() }
+            }
+            post("/command-bootstrap/rotate") {
+                if (!call.ensureAuthorized(context)) return@post
+                call.respondApi { context.service.rotateCommandBootstrap() }
             }
             get("/tasks") {
                 if (!call.ensureAuthorized(context)) return@get

@@ -29,6 +29,7 @@ function pageRoot() {
 export async function mount(nextCtx) {
   bindContext(nextCtx);
   await loadDashboard(ctx.force);
+  await maybeShowCommandBootstrap();
 }
 
 export function unmount() {
@@ -39,8 +40,70 @@ export async function handleAction() {
   return false;
 }
 
-async function loadDashboard(force) {
-  const request = beginPageRequest("dashboard");
+const BOOTSTRAP_MODAL_KEY = "dynamicBotCommandBootstrapShown";
+
+/** 命令系统未初始化时，登录后弹一次验证码提示（每个后台会话只弹一次）。 */
+async function maybeShowCommandBootstrap() {
+  const dashboard = state.cache && state.cache.dashboard;
+  if (!dashboard || dashboard.commandBootstrapStatus !== "PENDING") return;
+  if (sessionStorage.getItem(BOOTSTRAP_MODAL_KEY) === "1") return;
+
+  let info;
+  try {
+    info = await api("/command-bootstrap");
+  } catch (_) {
+    return;
+  }
+  if (!info || info.status !== "PENDING" || !info.code) return;
+  sessionStorage.setItem(BOOTSTRAP_MODAL_KEY, "1");
+  showCommandBootstrapModal(info);
+}
+
+function showCommandBootstrapModal(info) {
+  const { openModal } = ctx.ui;
+  const deadline = Date.now() + Number(info.remainingSeconds || 0) * 1000;
+  let timer = null;
+
+  openModal("命令系统未初始化", `
+    <div>
+      <p>还没有任何系统管理员。请用 QQ <strong>私聊</strong>机器人发送下面的验证码完成认领。</p>
+      <div class="system-bootstrap-code">${esc(info.code)}</div>
+      <p class="system-bootstrap-hint">剩余 <strong id="dashboardBootstrapCountdown">--:--</strong>；过期后可在「系统维护」页重新生成。</p>
+    </div>
+  `, null, {
+    confirmHidden: true,
+    cancelText: "关闭",
+    cleanup: () => {
+      if (timer) {
+        clearInterval(timer);
+        timer = null;
+      }
+    },
+  });
+
+  timer = setInterval(() => {
+    const el = document.getElementById("dashboardBootstrapCountdown");
+    if (!el) {
+      clearInterval(timer);
+      timer = null;
+      return;
+    }
+    const remaining = Math.max(0, Math.round((deadline - Date.now()) / 1000));
+    el.textContent = formatBootstrapCountdown(remaining);
+    if (remaining <= 0) {
+      clearInterval(timer);
+      timer = null;
+      el.textContent = "已过期";
+    }
+  }, 1000);
+}
+
+function formatBootstrapCountdown(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds || 0)));
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+async function loadDashboard(force) {  const request = beginPageRequest("dashboard");
   if (force || !state.cache.dashboard) state.cache.dashboard = await api("/dashboard");
   if (!isCurrentPageRequest(request)) return;
 

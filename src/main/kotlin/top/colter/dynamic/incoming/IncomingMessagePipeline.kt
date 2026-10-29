@@ -3,17 +3,26 @@ package top.colter.dynamic.incoming
 import java.util.UUID
 import top.colter.dynamic.CommandReceiveMode
 import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.command.CommandBootstrapService
+import top.colter.dynamic.command.CommandBootstrapStatus
+import top.colter.dynamic.command.CommandClaimOutcome
 import top.colter.dynamic.command.CommandParser
 import top.colter.dynamic.core.data.CommandContext
+import top.colter.dynamic.core.data.CommandStatus
+import top.colter.dynamic.core.data.CommandTarget
 import top.colter.dynamic.core.data.IncomingMessageAuditMode
+import top.colter.dynamic.core.data.MessageBatch
+import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.IncomingMessage
 import top.colter.dynamic.core.data.IncomingMessageRecordPolicy
 import top.colter.dynamic.core.data.IncomingMessageSegment
+import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.plugin.IncomingMessageDispatchContext
 import top.colter.dynamic.core.plugin.IncomingMessageIntent
 import top.colter.dynamic.core.plugin.IncomingMessagePublishRequest
 import top.colter.dynamic.event.CommandEvent
+import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.IncomingMessageEvent
 import top.colter.dynamic.event.IncomingTextMessageEvent
@@ -37,6 +46,7 @@ internal class IncomingMessagePipeline(
     private val auditRecorder: IncomingMessageAuditRecorder = IncomingMessageAuditRecorder {
         IncomingMessageAuditRepository.recordMessage(it)
     },
+    private val commandBootstrapService: CommandBootstrapService? = null,
 ) {
     suspend fun handle(sourcePlugin: String, request: IncomingMessagePublishRequest) {
         val message = request.message
@@ -72,6 +82,11 @@ internal class IncomingMessagePipeline(
             hasSupportedLinks -> IncomingMessageIntent.LinkText
             rawText.isNotBlank() -> IncomingMessageIntent.PlainText
             else -> IncomingMessageIntent.NonText
+        }
+
+        // 验证码消息在观测与审计之前拦截：它是一次性凭据，不该落库或进入插件消费链路。
+        if (handleBootstrapClaim(message, commandContext, rawText, traceId, replyToMessageId)) {
+            return
         }
 
         eventBus.broadcast(
@@ -138,8 +153,53 @@ internal class IncomingMessagePipeline(
         incomingConsumerDispatcher(dispatchContext)
     }
 
-    private suspend fun shouldDispatchCommand(context: CommandContext): Boolean {
-        val mode = configProvider().command.receiveMode
+    /**
+     * 命令系统未初始化时，拦截单聊里发来的验证码。
+     *
+     * 只有"整段消息恰好是 6 位数字"才认为是验证码，避免吞掉正常聊天；
+     * 除认领成功与过期提示外一律静默，不向试探者暴露进度。
+     *
+     * @return true 表示消息已被消费，不再进入后续分发。
+     */
+    private suspend fun handleBootstrapClaim(
+        message: IncomingMessage,
+        context: CommandContext,
+        rawText: String,
+        traceId: String,
+        replyToMessageId: String,
+    ): Boolean {
+        val service = commandBootstrapService ?: return false
+        if (message.target.kind != TargetKind.USER) return false
+        if (!service.isCandidate(rawText)) return false
+        if (service.snapshot().status == CommandBootstrapStatus.CLAIMED) return false
+
+        val replyText = when (service.claim(context, rawText)) {
+            CommandClaimOutcome.CLAIMED -> "已认领系统管理员，现在可以使用管理命令。"
+            CommandClaimOutcome.EXPIRED -> "验证码已失效，请在后台「系统」页重新生成，或重启主程序。"
+            else -> return true
+        }
+        eventBus.broadcast(
+            CommandResultEvent(
+                sourcePlugin = "main",
+                target = CommandTarget(
+                    address = message.target.withPreferredAccount(context.botAccountId),
+                    senderId = context.senderId,
+                ),
+                chain = listOf(MessageBatch(listOf(MessageContent.Text(replyText)))),
+                inReplyTo = replyToMessageId,
+                traceId = traceId,
+                status = CommandStatus.SUCCESS,
+            ),
+        )
+        return true
+    }
+
+    private fun TargetAddress.withPreferredAccount(accountId: String?): TargetAddress {
+        val normalized = accountId?.trim()?.takeIf { it.isNotBlank() } ?: return this
+        return copy(accountId = normalized)
+    }
+
+    private suspend fun shouldDispatchCommand(context: CommandContext): Boolean {        val mode = configProvider().command.receiveMode
         if (mode == CommandReceiveMode.ANY) return true
         val selection = incomingBotAccountSelector.select(context)
         if (selection.currentBotAccountId == null) return true

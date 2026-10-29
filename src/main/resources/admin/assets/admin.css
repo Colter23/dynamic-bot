@@ -9064,3 +9064,43 @@
       .about-logo { width: 68px; height: 68px; border-radius: 16px; }
       .about-meta-row { grid-template-columns: 84px minmax(0, 1fr); padding: 12px; }
     }
+
+/* 命令系统初始化引导 */
+.system-bootstrap-code {
+  margin: 10px 0 6px;
+  padding: 16px 20px;
+  border-radius: 10px;
+  background: rgba(127, 127, 127, 0.1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 38px;
+  font-weight: 600;
+  letter-spacing: 12px;
+  text-align: center;
+  user-select: all;
+}
+
+.system-bootstrap-code.expired {
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  opacity: 0.7;
+}
+
+.system-bootstrap-hint {
+  margin: 6px 0 0;
+  font-size: 13px;
+  opacity: 0.78;
+}
+
+.system-bootstrap-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.system-bootstrap-admins {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  font-size: 13px;
+  line-height: 1.7;
+}

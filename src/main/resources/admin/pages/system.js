@@ -30,6 +30,8 @@ let invalidatePageRequests;
 
 let forwardTargetPlatforms = [];
 let forwardTargetController;
+let bootstrapCountdownTimer = null;
+let bootstrapDeadlineMs = 0;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -72,7 +74,8 @@ export async function mount(nextCtx) {
   await loadSystem(ctx.force);
 }
 
-export function unmount() {
+export async function unmount() {
+  stopBootstrapCountdown();
   invalidatePageRequests("system");
 }
 
@@ -86,14 +89,19 @@ export async function handleAction(nextCtx, { action }) {
     await stopApplication();
     return true;
   }
+  if (action === "rotate-bootstrap") {
+    await rotateCommandBootstrap();
+    return true;
+  }
   return false;
 }
 
 async function loadSystem(force) {
   const request = beginPageRequest("system");
-  const [status, platforms] = await Promise.all([
+  const [status, platforms, bootstrap] = await Promise.all([
     loadSystemStatus(force),
     loadForwardTargetPlatforms(force),
+    loadCommandBootstrap(),
   ]);
   if (!isCurrentPageRequest(request)) return;
   forwardTargetPlatforms = platforms;
@@ -161,6 +169,8 @@ async function loadSystem(force) {
           ])}
         </section>
 
+        ${bootstrapPanelHtml(bootstrap)}
+
         <section class="panel full system-maintenance-panel">
           <div class="panel-head">
             <div>
@@ -172,6 +182,109 @@ async function loadSystem(force) {
         </section>
       </div>
     </section>`;
+
+  startBootstrapCountdown(bootstrap);
+}
+
+async function loadCommandBootstrap() {
+  try {
+    return await api("/command-bootstrap");
+  } catch (_) {
+    return null;
+  }
+}
+
+async function rotateCommandBootstrap() {
+  try {
+    const next = await api("/command-bootstrap/rotate", { method: "POST" });
+    notify(next && next.code ? "验证码已重新生成" : "命令系统已初始化", false);
+    await loadSystem(true);
+  } catch (error) {
+    handleError(error);
+  }
+}
+
+function bootstrapPanelHtml(info) {
+  if (!info) return "";
+  if (info.status === "CLAIMED") {
+    const admins = (info.admins || [])
+      .map(item => `<li><code>${esc(item.platformId)}</code> · <code>${esc(item.senderId)}</code></li>`)
+      .join("");
+    return `<section class="panel full system-bootstrap-panel">
+      <div class="panel-head">
+        <div>
+          <h2>命令系统</h2>
+          <p>已初始化，验证码不再可用</p>
+        </div>
+      </div>
+      <p class="system-bootstrap-hint">当前系统管理员：</p>
+      <ul class="system-bootstrap-admins">${admins || "<li>-</li>"}</ul>
+      <p class="system-bootstrap-hint">如需增删管理员，请到「配置 · 命令 · 权限规则」中调整。</p>
+    </section>`;
+  }
+
+  const expired = info.status !== "PENDING";
+  const attempts = Number(info.recentAttempts || 0);
+  const codeHtml = expired
+    ? `<div class="system-bootstrap-code expired">验证码已过期</div>`
+    : `<div class="system-bootstrap-code">${esc(info.code || "")}</div>`;
+  const hintHtml = expired
+    ? `<p class="system-bootstrap-hint">点击下方按钮生成新的验证码，或重启主程序。</p>`
+    : `<p class="system-bootstrap-hint">用 QQ <strong>私聊</strong>机器人发送上面的验证码即可完成认领，剩余 <strong id="bootstrapCountdown">--:--</strong>。</p>`;
+  const attemptsHtml = attempts > 0
+    ? `<p class="system-bootstrap-hint">最近 10 分钟内有 ${attempts} 次验证码尝试。</p>`
+    : "";
+
+  return `<section class="panel full system-bootstrap-panel">
+    <div class="panel-head">
+      <div>
+        <h2>命令系统</h2>
+        <p>${expired ? "验证码已过期，尚未初始化" : "还没有系统管理员，请先完成初始化"}</p>
+      </div>
+    </div>
+    ${codeHtml}
+    ${hintHtml}
+    <div class="system-bootstrap-actions">
+      <button type="button" class="secondary compact" data-action="rotate-bootstrap">${expired ? "生成验证码" : "重新生成"}</button>
+    </div>
+    ${attemptsHtml}
+    <p class="system-bootstrap-hint">验证码仅 10 分钟有效；认领后立即失效，如需添加更多管理员请使用命令授权或权限规则。</p>
+  </section>`;
+}
+
+function startBootstrapCountdown(info) {
+  stopBootstrapCountdown();
+  if (!info || info.status !== "PENDING" || !info.code) return;
+  bootstrapDeadlineMs = Date.now() + Number(info.remainingSeconds || 0) * 1000;
+  const tick = () => {
+    const el = $("bootstrapCountdown");
+    if (!el) {
+      stopBootstrapCountdown();
+      return;
+    }
+    const remaining = Math.max(0, Math.round((bootstrapDeadlineMs - Date.now()) / 1000));
+    el.textContent = formatCountdown(remaining);
+    if (remaining <= 0) {
+      stopBootstrapCountdown();
+      el.textContent = "已过期";
+    }
+  };
+  tick();
+  bootstrapCountdownTimer = setInterval(tick, 1000);
+}
+
+function stopBootstrapCountdown() {
+  if (bootstrapCountdownTimer) {
+    clearInterval(bootstrapCountdownTimer);
+    bootstrapCountdownTimer = null;
+  }
+}
+
+function formatCountdown(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds || 0)));
+  const minutes = Math.floor(total / 60);
+  const rest = total % 60;
+  return `${String(minutes).padStart(2, "0")}:${String(rest).padStart(2, "0")}`;
 }
 
 async function loadSystemStatus(force) {

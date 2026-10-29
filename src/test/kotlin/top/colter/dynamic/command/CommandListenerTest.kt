@@ -294,8 +294,8 @@ class CommandListenerTest {
     }
 
     @Test
-    fun commandShouldNotReplyWhenPermissionRuleIsRequiredAndNoRuleMatches() = runBlocking {
-        initDb("command-require-permission")
+    fun helpShouldReplyEvenWhenNoPermissionRuleMatches() = runBlocking {
+        initDb("command-help-no-permission")
         val eventBus = EventBus()
         val listener = CommandListener(
             publisherLookupResolver = { null },
@@ -304,9 +304,71 @@ class CommandListenerTest {
             eventBus = eventBus,
         )
 
-        val result = dispatchOrNull(eventBus, listener, commandEvent("/db help"))
+        val result = dispatch(eventBus, listener, commandEvent("/db help"))
 
-        assertEquals(null, result)
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        assertTrue(renderMessage(result).contains("help"))
+    }
+
+    @Test
+    fun whoamiShouldReplyEvenWhenNoPermissionRuleMatches() = runBlocking {
+        initDb("command-whoami-no-permission")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = MainDynamicConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db whoami"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        val text = renderMessage(result)
+        assertTrue(text.contains("sender"), "应包含发送者 ID：$text")
+        assertTrue(text.contains("onebot"), "应包含平台：$text")
+    }
+
+    @Test
+    fun permissionDeniedShouldReplyOncePerCommand() = runBlocking {
+        initDb("command-permission-denied")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = MainDynamicConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val first = dispatch(eventBus, listener, commandEvent("/db status"))
+        assertEquals(CommandStatus.FAILED, first.status)
+        assertTrue(renderMessage(first).contains("没有该命令的权限"))
+
+        val second = dispatchOrNull(eventBus, listener, commandEvent("/db status"))
+        assertEquals(null, second, "同一用户同一命令不应重复提示")
+    }
+
+    @Test
+    fun stopShouldRequireConfirmation() = runBlocking {
+        initDb("command-stop-confirm")
+        val eventBus = EventBus()
+        var stopReason: String? = null
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = adminConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            stopRequester = { reason -> stopReason = reason },
+        )
+
+        val prompt = dispatch(eventBus, listener, commandEvent("/db stop"))
+        assertEquals(CommandStatus.SUCCESS, prompt.status)
+        assertTrue(renderMessage(prompt).contains("确认停止"))
+        assertEquals(null, stopReason, "首条消息不应直接停机")
+
+        val confirmed = dispatch(eventBus, listener, commandEvent("/db stop confirm"))
+        assertEquals(CommandStatus.SUCCESS, confirmed.status)
+        assertNotNull(stopReason)
     }
 
     @Test

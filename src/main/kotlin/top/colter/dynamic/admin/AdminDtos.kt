@@ -1,4 +1,4 @@
-﻿package top.colter.dynamic.admin
+package top.colter.dynamic.admin
 
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
@@ -107,6 +107,24 @@ public data class DashboardResponse(
     val platformLogins: List<PlatformLoginDto>,
     val recentLogs: List<AdminLogEntryDto>,
     val recentDeliveries: List<MessageDeliveryDto>,
+    val commandBootstrapStatus: String? = null,
+)
+
+@Serializable
+public data class CommandBootstrapDto(
+    val status: String,
+    val code: String? = null,
+    val expiresAtEpochSeconds: Long,
+    val remainingSeconds: Long,
+    val recentAttempts: Int,
+    val lastAttemptAtEpochSeconds: Long,
+    val admins: List<CommandAdminAccountDto>,
+)
+
+@Serializable
+public data class CommandAdminAccountDto(
+    val platformId: String,
+    val senderId: String,
 )
 
 @Serializable

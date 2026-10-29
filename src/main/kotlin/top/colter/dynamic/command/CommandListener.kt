@@ -20,6 +20,7 @@ import top.colter.dynamic.command.CommandParser
 import top.colter.dynamic.core.command.CommandPermissionResolver
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.command.CommandSpec
+import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.config.YamlConfigService
 import top.colter.dynamic.core.config.loadOrCreate
@@ -85,6 +86,7 @@ import java.awt.image.BufferedImage
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import java.util.concurrent.ConcurrentHashMap
 import javax.imageio.ImageIO
 
 private val commandListenerLogger = loggerFor<CommandListener>()
@@ -102,6 +104,8 @@ public class CommandListener(
     config: MainDynamicConfig? = null,
     configProvider: (() -> MainDynamicConfig)? = null,
     private val stopRequester: ((String) -> Unit)? = null,
+    private val commandBootstrapService: CommandBootstrapService? = null,
+    private val configUpdater: (((MainDynamicConfig) -> MainDynamicConfig) -> ConfigApplyResult)? = null,
     private val configService: ConfigService = YamlConfigService(),
     private val commandRegistry: CommandRegistry = CommandRegistry(),
     private val eventBus: EventBus = EventBus(),
@@ -119,7 +123,19 @@ public class CommandListener(
 ) : Listener<CommandEvent> {
     private companion object {
         private const val MAIN_OWNER: String = "main"
+        private const val PERMISSION_DENIED_NOTIFY_INTERVAL_MILLIS: Long = 10 * 60 * 1000L
+        private const val PERMISSION_DENIED_NOTIFY_MAX_ENTRIES: Int = 512
+
+        /** 即使没有命中任何权限规则也必须可用的命令。 */
+        private val PERMISSION_FREE_COMMAND_PATHS: Set<List<String>> = setOf(
+            listOf("help"),
+            listOf("whoami"),
+            listOf("claim"),
+        )
     }
+
+    /** 权限拒绝提示的去重时间戳，键 = senderId|commandPath。 */
+    private val permissionDeniedNotifiedAt: ConcurrentHashMap<String, Long> = ConcurrentHashMap()
 
     private val fixedConfig: MainDynamicConfig by lazy {
         config ?: configService.loadOrCreate(MainDynamicConfig.CONFIG_ID, MainConfigForms.migrations) {
@@ -203,7 +219,8 @@ public class CommandListener(
             commandPath = match.spec.path,
             defaultRole = defaultRole,
         )
-        if (!role.satisfies(match.spec.requiredRole)) {
+        val permissionFree = isPermissionFree(match.spec.path)
+        if (!permissionFree && !role.satisfies(match.spec.requiredRole)) {
             recordCommandProcessing(
                 event = event,
                 stage = IncomingProcessingStage.COMMAND_EXECUTE,
@@ -213,6 +230,7 @@ public class CommandListener(
                 role = role.name,
                 errorMessage = "权限不足",
             )
+            replyPermissionDenied(event, match.spec)
             return
         }
 
@@ -225,7 +243,8 @@ public class CommandListener(
             tokens = tokens,
             matchedPath = match.matchedPath,
             args = match.args,
-            role = role,
+            // 免权限命令至少要按普通用户执行，否则 help 会因为角色是 NONE 而列出空列表。
+            role = if (permissionFree && role.level < CommandRole.USER.level) CommandRole.USER else role,
         )
 
         val started = System.nanoTime()
@@ -247,6 +266,8 @@ public class CommandListener(
     }
 
     private fun reply(event: CommandEvent, result: CommandExecutionResult) {
+        // 空回复表示"不回复"：用于去重后的静默处理，避免向出口发一条空消息。
+        if (result.reply.isEmpty()) return
         CommandResultEvent(
             sourcePlugin = MAIN_OWNER,
             target = CommandTarget(
@@ -259,6 +280,41 @@ public class CommandListener(
             status = result.status,
             errorMessage = result.errorMessage,
         ).let { eventBus.broadcast(it) }
+    }
+
+    private fun isPermissionFree(path: List<String>): Boolean {
+        return path.map { it.lowercase() } in PERMISSION_FREE_COMMAND_PATHS
+    }
+
+    /**
+     * 权限不足必须给出反馈，否则用户会以为 Bot 坏了。
+     * 但同一个人对同一条命令 10 分钟内只提示一次，避免被用来刷屏。
+     */
+    private fun replyPermissionDenied(event: CommandEvent, spec: CommandSpec) {
+        val commandPath = spec.path.joinToString(" ")
+        val key = "${event.context.senderId}|$commandPath"
+        val now = System.currentTimeMillis()
+        val previous = permissionDeniedNotifiedAt[key]
+        if (previous != null && now - previous < PERMISSION_DENIED_NOTIFY_INTERVAL_MILLIS) return
+        if (permissionDeniedNotifiedAt.size >= PERMISSION_DENIED_NOTIFY_MAX_ENTRIES) {
+            permissionDeniedNotifiedAt.entries.removeIf { now - it.value >= PERMISSION_DENIED_NOTIFY_INTERVAL_MILLIS }
+        }
+        permissionDeniedNotifiedAt[key] = now
+        reply(
+            event,
+            CommandExecutionResult.failed(
+                "没有该命令的权限：$commandPrefix $commandPath（需要${requiredRoleLabel(spec.requiredRole)}）",
+            ),
+        )
+    }
+
+    private fun requiredRoleLabel(role: CommandRole): String {
+        return when (role) {
+            CommandRole.ADMIN -> "系统管理员"
+            CommandRole.MANAGER -> "目标管理员"
+            CommandRole.USER -> "普通用户"
+            CommandRole.NONE -> "配置授权"
+        }
     }
 
     private fun recordCommandProcessing(
@@ -291,7 +347,10 @@ public class CommandListener(
 
     private fun registerBuiltins() {
         commandRegistry.unregisterByOwner(MAIN_OWNER)
-        commandRegistry.register(HelpCommandHandler(commandPrefixProvider, commandRegistry), MAIN_OWNER)
+        commandRegistry.register(
+            HelpCommandHandler(commandPrefixProvider, commandRegistry, commandBootstrapService),
+            MAIN_OWNER,
+        )
         commandRegistry.register(
             StatusCommandHandler(
                 commandRegistry = commandRegistry,
@@ -302,7 +361,9 @@ public class CommandListener(
             ),
             MAIN_OWNER,
         )
-        stopRequester?.let { commandRegistry.register(StopApplicationCommandHandler(it), MAIN_OWNER) }
+        stopRequester?.let {
+            commandRegistry.register(StopApplicationCommandHandler(it, commandPrefixProvider), MAIN_OWNER)
+        }
         commandRegistry.register(
             LinkParseCommandHandler(
                 linkParseService = linkParseService,
@@ -344,6 +405,20 @@ public class CommandListener(
         commandRegistry.register(FilterRemoveCommandHandler(commandPrefixProvider), MAIN_OWNER)
         commandRegistry.register(FilterClearCommandHandler(commandPrefixProvider), MAIN_OWNER)
         commandRegistry.register(ThemeCommandHandler(commandPrefixProvider, publisherDrawThemeService), MAIN_OWNER)
+        commandRegistry.register(WhoamiCommandHandler(), MAIN_OWNER)
+        commandBootstrapService?.let { service ->
+            commandRegistry.register(ClaimCommandHandler(service, commandPrefixProvider), MAIN_OWNER)
+        }
+        configUpdater?.let { updater ->
+            commandRegistry.register(
+                GrantCommandHandler(updater, commandPrefixProvider),
+                MAIN_OWNER,
+            )
+            commandRegistry.register(
+                RevokeCommandHandler(updater, commandPrefixProvider),
+                MAIN_OWNER,
+            )
+        }
     }
 
     private suspend fun shouldAcceptCommand(event: CommandEvent): Boolean {
@@ -449,6 +524,7 @@ private sealed interface FilterTargetResolveResult {
 private class HelpCommandHandler(
     private val commandPrefixProvider: () -> String,
     private val commandRegistry: CommandRegistry,
+    private val commandBootstrapService: CommandBootstrapService? = null,
 ) : CommandHandler {
     private val commandPrefix: String
         get() = commandPrefixProvider()
@@ -461,7 +537,10 @@ private class HelpCommandHandler(
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        val initialized = commandBootstrapService?.snapshot()?.status == CommandBootstrapStatus.CLAIMED
         val visibleCommands = commandRegistry.visibleCommandsFor(invocation.role)
+            // 已初始化后不再展示认领命令，避免用户误以为还能认领。
+            .filterNot { initialized && it.path.map { segment -> segment.lowercase() } == listOf("claim") }
         if (visibleCommands.isEmpty()) {
             return CommandExecutionResult.success("没有可用命令")
         }
@@ -814,7 +893,16 @@ private class StatusCommandHandler(
 
 private class StopApplicationCommandHandler(
     private val stopRequester: (String) -> Unit,
+    private val commandPrefixProvider: () -> String,
+    private val confirmWindowMillis: Long = STOP_CONFIRM_WINDOW_MILLIS,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
+    /** 待确认的停止请求，键 = 目标会话 + 发送者，值是过期时间。 */
+    private val pendingConfirmation = ConcurrentHashMap<String, Long>()
+
     override val spec: CommandSpec = CommandSpec(
         path = listOf("stop"),
         aliases = listOf(listOf("shutdown")),
@@ -824,15 +912,34 @@ private class StopApplicationCommandHandler(
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
-        if (invocation.args.isNotEmpty()) {
-            return failed("用法：${invocation.matchedPath.joinToString(" ")}")
+        val confirmKey = "${invocation.context.target.stableValue()}|${invocation.context.senderId}"
+        val args = invocation.args.map { it.lowercase() }
+
+        if (args == listOf("confirm")) {
+            val expiresAt = pendingConfirmation.remove(confirmKey)
+            if (expiresAt == null || clock() > expiresAt) {
+                return CommandExecutionResult.failed("没有待确认的停止请求，已过期或未发起。")
+            }
+            return CommandExecutionResult.success(
+                message = "已请求停止，程序正在关闭",
+                afterReply = {
+                    stopRequester("command:${invocation.context.target.stableValue()}")
+                },
+            )
         }
+
+        if (args.isNotEmpty()) {
+            return CommandExecutionResult.failed("用法：$commandPrefix ${spec.usage}")
+        }
+
+        pendingConfirmation[confirmKey] = clock() + confirmWindowMillis
         return CommandExecutionResult.success(
-            message = "已请求停止，程序正在关闭",
-            afterReply = {
-                stopRequester("command:${invocation.context.target.stableValue()}")
-            },
+            "确认停止？请在 ${confirmWindowMillis / 1000} 秒内回复 $commandPrefix stop confirm",
         )
+    }
+
+    private companion object {
+        private const val STOP_CONFIRM_WINDOW_MILLIS: Long = 60_000L
     }
 }
 

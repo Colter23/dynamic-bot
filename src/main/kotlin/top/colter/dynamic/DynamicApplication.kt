@@ -1,4 +1,4 @@
-﻿package top.colter.dynamic
+package top.colter.dynamic
 
 import java.nio.file.Paths
 import java.security.SecureRandom
@@ -12,6 +12,8 @@ import kotlinx.coroutines.runBlocking
 import kotlin.time.Duration.Companion.seconds
 import top.colter.dynamic.admin.AdminLogging
 import top.colter.dynamic.admin.AdminServer
+import top.colter.dynamic.command.CommandBootstrapService
+import top.colter.dynamic.command.CommandBootstrapStatus
 import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.config.ConfigService
@@ -139,6 +141,10 @@ public object DynamicApplication : CoroutineScope {
         configService = configService,
         defaultConfigProvider = ::defaultMainConfig,
     )
+    private val commandBootstrapService: CommandBootstrapService = CommandBootstrapService(
+        configProvider = configStore::current,
+        configUpdater = configStore::update,
+    )
     private val pluginManager: PluginManager = PluginManager(
         pluginDirPath = "plugins",
         scope = this,
@@ -211,7 +217,43 @@ public object DynamicApplication : CoroutineScope {
         startAdminServer(config)
 
         pluginManager.enableSystemNotifications()
+        noticeCommandBootstrapIfNeeded()
         logger.info { "主项目已启动，已加载插件=${loadResult.loadedPlugins}" }
+    }
+
+    /**
+     * 还没有任何系统管理员时，在控制台打印一次性验证码，引导管理员完成认领。
+     * 验证码只存在内存中：重启即重新生成，过期后需要后台重新生成或再次重启。
+     */
+    private fun noticeCommandBootstrapIfNeeded() {
+        val snapshot = commandBootstrapService.snapshot()
+        if (snapshot.status == CommandBootstrapStatus.CLAIMED) return
+        if (snapshot.status != CommandBootstrapStatus.PENDING) {
+            logger.warn {
+                "命令系统未初始化：验证码已过期，请在后台「系统」页重新生成，或重启主程序。"
+            }
+            return
+        }
+        val expiresAt = snapshot.expiresAtEpochSeconds
+            .takeIf { it > 0L }
+            ?.let { java.time.Instant.ofEpochSecond(it).atZone(java.time.ZoneId.systemDefault()).toLocalTime() }
+            ?.withNano(0)
+            ?.toString()
+            .orEmpty()
+        // 告警行不含验证码：后台「最近日志」只取 WARN/ERROR，避免验证码长期留在告警里。
+        logger.warn {
+            "命令系统未初始化：还没有任何系统管理员，验证码见下方控制台输出或后台「系统」页。"
+        }
+        logger.info {
+            """
+            |
+            |============================================================
+            | 请在 QQ 中【私聊】机器人发送验证码：${snapshot.code}
+            | 有效期至 ${expiresAt.ifBlank { "10 分钟内" }}（共 ${CommandBootstrapService.CODE_TTL_MILLIS / 60_000} 分钟）
+            | 过期后在后台「系统」页点「重新生成」，或重启程序
+            |============================================================
+            """.trimMargin()
+        }
     }
 
     private fun registerCoreListeners(config: MainDynamicConfig) {
@@ -292,6 +334,7 @@ public object DynamicApplication : CoroutineScope {
             incomingConsumerDispatcher = pluginManager::dispatchIncomingMessageToConsumers,
             auditModeResolver = pluginManager::incomingAuditModeFor,
             incomingBotAccountSelector = incomingBotAccountSelector,
+            commandBootstrapService = commandBootstrapService,
         )
 
         listenerTokens += eventBus.subscribe(
@@ -303,6 +346,8 @@ public object DynamicApplication : CoroutineScope {
                 publisherFollowResolver = { platformId -> pluginManager.findPublisherFollowPlugin(platformId) },
                 publisherLoginResolver = { platformId -> pluginManager.findPublisherLoginProvider(platformId) },
                 stopRequester = { reason -> requestStop(reason) },
+                commandBootstrapService = commandBootstrapService,
+                configUpdater = configStore::update,
                 configService = configService,
                 commandRegistry = commandRegistry,
                 eventBus = eventBus,
@@ -350,6 +395,7 @@ public object DynamicApplication : CoroutineScope {
             taskScheduler = taskScheduler,
             stopRequester = { reason -> requestStop(reason) },
             startedAtEpochMillis = startedAtEpochMillis,
+            commandBootstrapService = commandBootstrapService,
         )
         try {
             server.start()

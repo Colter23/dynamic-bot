@@ -12,6 +12,9 @@ import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.config.ConfigFormSpec
 import top.colter.dynamic.core.config.ConfigurablePlugin
 import top.colter.dynamic.config.YamlConfigService
+import top.colter.dynamic.command.CommandBootstrapService
+import top.colter.dynamic.command.CommandBootstrapSnapshot
+import top.colter.dynamic.command.CommandBootstrapStatus
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicBlockKind
@@ -175,6 +178,7 @@ public class AdminService(
     private val databasePathProvider: () -> String? = { PersistenceManager.currentPath() },
     private val publisherDrawThemeService: PublisherDrawThemeService = PublisherDrawThemeService(),
     private val publisherThemeInitializer: PublisherThemeInitializer = DefaultPublisherThemeInitializer(configProvider = configProvider),
+    private val commandBootstrapService: CommandBootstrapService? = null,
 ) {
     private val loginStateCache: ConcurrentHashMap<String, CachedLoginState> = ConcurrentHashMap()
     private val publisherCandidateCacheLock = Any()
@@ -196,6 +200,7 @@ public class AdminService(
         outboundMessageService: OutboundMessageService = OutboundMessageService(),
         mainTaskScheduler: TaskScheduler? = null,
         startedAtEpochMillis: Long = System.currentTimeMillis(),
+        commandBootstrapService: CommandBootstrapService? = null,
     ) : this(
         pluginProvider = { pluginManager.getAllPlugins() },
         messageSinkProvider = { pluginManager.getMessageSinkPlugins() },
@@ -229,6 +234,7 @@ public class AdminService(
             proxyConfigProvider = { configProvider().network.proxy },
         ),
         startedAtEpochMillis = startedAtEpochMillis,
+        commandBootstrapService = commandBootstrapService,
     )
 
     public suspend fun dashboard(): DashboardResponse {
@@ -265,7 +271,36 @@ public class AdminService(
                 limit = 8,
                 updatedSinceEpochSeconds = recentCutoffEpochSeconds,
             ),
+            commandBootstrapStatus = commandBootstrapService?.snapshot()?.status?.name,
         )
+    }
+
+    public fun commandBootstrap(): CommandBootstrapDto {
+        val service = commandBootstrapService
+            ?: throw IllegalStateException("命令引导服务不可用")
+        return service.snapshot().toDto()
+    }
+
+    private fun CommandBootstrapSnapshot.toDto(): CommandBootstrapDto {
+        return CommandBootstrapDto(
+            status = status.name,
+            code = code,
+            expiresAtEpochSeconds = expiresAtEpochSeconds,
+            remainingSeconds = remainingSeconds,
+            recentAttempts = recentAttempts,
+            lastAttemptAtEpochSeconds = lastAttemptAtEpochSeconds,
+            admins = admins.map { CommandAdminAccountDto(platformId = it.platformId, senderId = it.senderId) },
+        )
+    }
+
+    public fun rotateCommandBootstrap(): CommandBootstrapDto {
+        val service = commandBootstrapService
+            ?: throw IllegalStateException("命令引导服务不可用")
+        if (service.snapshot().status == CommandBootstrapStatus.CLAIMED) {
+            throw IllegalStateException("命令系统已初始化，无需重新生成验证码")
+        }
+        logger.info { "后台重新生成命令系统验证码" }
+        return service.rotate().toDto()
     }
 
     public fun systemStatus(): SystemStatusDto {

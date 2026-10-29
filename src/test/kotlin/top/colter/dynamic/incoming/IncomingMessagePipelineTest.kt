@@ -13,6 +13,11 @@ import top.colter.dynamic.CommandConfig
 import top.colter.dynamic.CommandReceiveMode
 import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.MainDynamicConfig
+import top.colter.dynamic.command.CommandBootstrapService
+import top.colter.dynamic.core.command.CommandPermissionRule
+import top.colter.dynamic.core.config.ConfigApplyResult
+import top.colter.dynamic.core.data.CommandRole
+import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.IncomingMessage
 import top.colter.dynamic.core.data.IncomingMessageAuditMode
 import top.colter.dynamic.core.data.IncomingMessageRecordPolicy
@@ -30,6 +35,7 @@ import top.colter.dynamic.core.plugin.IncomingMessageDispatchContext
 import top.colter.dynamic.core.plugin.IncomingMessageIntent
 import top.colter.dynamic.core.plugin.IncomingMessagePublishRequest
 import top.colter.dynamic.event.CommandEvent
+import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.IncomingMessageEvent
 import top.colter.dynamic.event.IncomingTextMessageEvent
@@ -60,6 +66,167 @@ class IncomingMessagePipelineTest {
         assertEquals(message, event.message)
         assertTrue(event.traceId.isNotBlank())
         assertEquals("message-1", event.replyToMessageId)
+        eventBus.shutdown()
+    }
+
+    @Test
+    fun `handle should claim admin from private verification code and stop dispatch`() = runBlocking {
+        val eventBus = EventBus()
+        var config = MainDynamicConfig(command = CommandConfig(prefix = "/db", requirePermissionRule = true))
+        val service = CommandBootstrapService(
+            configProvider = { config },
+            configUpdater = { transform ->
+                config = transform(config)
+                ConfigApplyResult(changed = true)
+            },
+            codeGenerator = { "123456" },
+        )
+        val dispatched = mutableListOf<IncomingMessageDispatchContext>()
+        val audited = mutableListOf<IncomingAuditWriteRequest>()
+        val reply = CompletableDeferred<String>()
+        eventBus.subscribe(
+            object : Listener<CommandResultEvent> {
+                override suspend fun onMessage(event: CommandResultEvent) {
+                    reply.complete(
+                        event.chain.flatMap { it.content }
+                            .filterIsInstance<MessageContent.Text>()
+                            .joinToString("") { it.fallbackText },
+                    )
+                }
+            },
+        )
+        val pipeline = pipeline(
+            eventBus = eventBus,
+            configProvider = { config },
+            commandBootstrapService = service,
+            incomingConsumerDispatcher = { dispatched += it },
+            auditRecorder = IncomingMessageAuditRecorder { request ->
+                audited += request
+                true
+            },
+        )
+
+        pipeline.handle(
+            "onebot",
+            IncomingMessagePublishRequest(
+                message = testMessage(text = "123456", targetKind = TargetKind.USER),
+                traceId = "trace-claim",
+            ),
+        )
+
+        val rule = config.command.permissions.singleOrNull()
+        assertEquals(CommandRole.ADMIN, rule?.role)
+        assertEquals("sender", rule?.senderId)
+        val replyText = withTimeout(1_000) { reply.await() }
+        assertTrue(replyText.contains("已认领"), "reply=$replyText")
+        assertTrue(dispatched.isEmpty(), "认领消息不应继续分发")
+        assertTrue(audited.isEmpty(), "验证码消息不应写入入站审计，避免长期留存")
+        eventBus.shutdown()
+    }
+
+    @Test
+    fun `handle should swallow wrong private verification code without granting admin`() = runBlocking {
+        val eventBus = EventBus()
+        var config = MainDynamicConfig(command = CommandConfig(prefix = "/db", requirePermissionRule = true))
+        val service = CommandBootstrapService(
+            configProvider = { config },
+            configUpdater = { transform ->
+                config = transform(config)
+                ConfigApplyResult(changed = true)
+            },
+            codeGenerator = { "123456" },
+        )
+        val dispatched = mutableListOf<IncomingMessageDispatchContext>()
+        val pipeline = pipeline(
+            eventBus = eventBus,
+            configProvider = { config },
+            commandBootstrapService = service,
+            incomingConsumerDispatcher = { dispatched += it },
+        )
+
+        pipeline.handle(
+            "onebot",
+            IncomingMessagePublishRequest(
+                message = testMessage(text = "000000", targetKind = TargetKind.USER),
+                traceId = "trace-wrong-code",
+            ),
+        )
+
+        assertTrue(config.command.permissions.isEmpty(), "错误验证码不应授予权限")
+        assertTrue(dispatched.isEmpty(), "错误验证码应静默丢弃")
+        eventBus.shutdown()
+    }
+
+    @Test
+    fun `handle should not intercept verification code sent in group`() = runBlocking {
+        val eventBus = EventBus()
+        var config = MainDynamicConfig(command = CommandConfig(prefix = "/db", requirePermissionRule = true))
+        val service = CommandBootstrapService(
+            configProvider = { config },
+            configUpdater = { transform ->
+                config = transform(config)
+                ConfigApplyResult(changed = true)
+            },
+            codeGenerator = { "123456" },
+        )
+        val dispatched = mutableListOf<IncomingMessageDispatchContext>()
+        val pipeline = pipeline(
+            eventBus = eventBus,
+            configProvider = { config },
+            commandBootstrapService = service,
+            incomingConsumerDispatcher = { dispatched += it },
+        )
+
+        pipeline.handle(
+            "onebot",
+            IncomingMessagePublishRequest(
+                message = testMessage(text = "123456", targetKind = TargetKind.GROUP),
+                traceId = "trace-group-code",
+            ),
+        )
+
+        assertTrue(config.command.permissions.isEmpty(), "群聊不应当被认领")
+        assertEquals(1, dispatched.size, "群里的数字消息应继续作为普通消息分发")
+        eventBus.shutdown()
+    }
+
+    @Test
+    fun `handle should dispatch numeric private message once command system initialized`() = runBlocking {
+        val eventBus = EventBus()
+        var config = MainDynamicConfig(
+            command = CommandConfig(
+                prefix = "/db",
+                requirePermissionRule = true,
+                permissions = listOf(
+                    CommandPermissionRule(platformId = "onebot", senderId = "other", role = CommandRole.ADMIN),
+                ),
+            ),
+        )
+        val service = CommandBootstrapService(
+            configProvider = { config },
+            configUpdater = { transform ->
+                config = transform(config)
+                ConfigApplyResult(changed = true)
+            },
+            codeGenerator = { "123456" },
+        )
+        val dispatched = mutableListOf<IncomingMessageDispatchContext>()
+        val pipeline = pipeline(
+            eventBus = eventBus,
+            configProvider = { config },
+            commandBootstrapService = service,
+            incomingConsumerDispatcher = { dispatched += it },
+        )
+
+        pipeline.handle(
+            "onebot",
+            IncomingMessagePublishRequest(
+                message = testMessage(text = "123456", targetKind = TargetKind.USER),
+                traceId = "trace-after-claimed",
+            ),
+        )
+
+        assertEquals(1, dispatched.size, "已初始化后数字消息按普通消息处理")
         eventBus.shutdown()
     }
 
@@ -576,6 +743,7 @@ class IncomingMessagePipelineTest {
         auditModeResolver: suspend (IncomingMessageDispatchContext) -> IncomingMessageAuditMode = { IncomingMessageAuditMode.NONE },
         incomingBotAccountSelector: IncomingBotAccountSelector = IncomingBotAccountSelector(),
         auditRecorder: IncomingMessageAuditRecorder = IncomingMessageAuditRecorder { true },
+        commandBootstrapService: CommandBootstrapService? = null,
     ): IncomingMessagePipeline {
         return IncomingMessagePipeline(
             configProvider = configProvider,
@@ -585,6 +753,7 @@ class IncomingMessagePipelineTest {
             auditModeResolver = auditModeResolver,
             incomingBotAccountSelector = incomingBotAccountSelector,
             auditRecorder = auditRecorder,
+            commandBootstrapService = commandBootstrapService,
         )
     }
 
@@ -607,10 +776,11 @@ class IncomingMessagePipelineTest {
         segments: List<IncomingMessageSegment> = listOf(IncomingMessageSegment.Text(text)),
         mentions: Set<String> = setOf("bot-1"),
         botAccountId: String? = "bot-1",
+        targetKind: TargetKind = TargetKind.GROUP,
     ): IncomingMessage {
         return IncomingMessage(
             platformId = PlatformId.of("onebot"),
-            target = TargetAddress.of("onebot", TargetKind.GROUP, "10001", accountId = botAccountId),
+            target = TargetAddress.of("onebot", targetKind, "10001", accountId = botAccountId),
             senderId = "sender",
             botAccountId = botAccountId,
             messageId = messageId,
