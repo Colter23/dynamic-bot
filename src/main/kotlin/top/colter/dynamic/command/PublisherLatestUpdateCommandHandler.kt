@@ -14,10 +14,11 @@ internal class PublisherLatestUpdateCommandHandler(
 ) : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("latest"),
-        aliases = listOf(listOf("new")),
+        aliases = listOf(listOf("new"), listOf("最新")),
         description = "获取发布者最新动态",
         usage = "latest <platform> <发布者ID或链接>",
         requiredRole = CommandRole.USER,
+        category = "内容",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {

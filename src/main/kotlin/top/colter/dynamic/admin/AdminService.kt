@@ -762,6 +762,7 @@ public class AdminService(
                 description = spec.description,
                 usage = spec.usage,
                 requiredRole = spec.requiredRole.name,
+                category = spec.category,
             )
         }
     }

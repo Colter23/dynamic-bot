@@ -28,6 +28,7 @@ import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
 import top.colter.dynamic.core.data.DynamicBlockKind
+import top.colter.dynamic.core.data.DynamicFilterAction
 import top.colter.dynamic.core.data.DynamicFilterRule
 import top.colter.dynamic.core.data.FilterCondition
 import top.colter.dynamic.core.data.IncomingProcessingResult
@@ -318,18 +319,9 @@ public class CommandListener(
         reply(
             event,
             CommandExecutionResult.failed(
-                "没有该命令的权限：$commandPrefix $commandPath（需要${requiredRoleLabel(spec.requiredRole)}）",
+                "没有该命令的权限：$commandPrefix $commandPath（需要${commandRoleLabel(spec.requiredRole)}）",
             ),
         )
-    }
-
-    private fun requiredRoleLabel(role: CommandRole): String {
-        return when (role) {
-            CommandRole.ADMIN -> "系统管理员"
-            CommandRole.MANAGER -> "目标管理员"
-            CommandRole.USER -> "普通用户"
-            CommandRole.NONE -> "配置授权"
-        }
     }
 
     private fun recordCommandProcessing(
@@ -472,6 +464,55 @@ private fun success(message: String): CommandExecutionResult {
     return CommandExecutionResult.success(message)
 }
 
+/** 单条回复的字符上限；超过就拆成多条消息，避免超出平台单条消息长度限制。 */
+internal const val MAX_REPLY_CHARS_PER_BATCH: Int = 1_200
+
+/** 按行拆分成长度受控的多条消息。 */
+internal fun splitIntoBatches(lines: List<String>): List<MessageBatch> {
+    if (lines.isEmpty()) return emptyList()
+    val batches = mutableListOf<MessageBatch>()
+    val current = StringBuilder()
+
+    fun flush() {
+        if (current.isEmpty()) return
+        batches += MessageBatch(listOf(MessageContent.Text(current.toString())))
+        current.setLength(0)
+    }
+
+    lines.forEach { line ->
+        if (line.length > MAX_REPLY_CHARS_PER_BATCH) {
+            flush()
+            line.chunked(MAX_REPLY_CHARS_PER_BATCH).forEach { chunk ->
+                batches += MessageBatch(listOf(MessageContent.Text(chunk)))
+            }
+            return@forEach
+        }
+        val needed = if (current.isEmpty()) line.length else line.length + 1
+        if (current.length + needed > MAX_REPLY_CHARS_PER_BATCH) flush()
+        if (current.isNotEmpty()) current.append('\n')
+        current.append(line)
+    }
+    flush()
+    return batches
+}
+
+/** 长文本回复：超过上限时自动分成多条消息。 */
+private fun successBatched(lines: List<String>): CommandExecutionResult {
+    return CommandExecutionResult(
+        status = CommandStatus.SUCCESS,
+        reply = splitIntoBatches(lines),
+    )
+}
+
+private fun commandRoleLabel(role: CommandRole): String {
+    return when (role) {
+        CommandRole.ADMIN -> "系统管理员"
+        CommandRole.MANAGER -> "目标管理员"
+        CommandRole.USER -> "普通用户"
+        CommandRole.NONE -> "配置授权"
+    }
+}
+
 private fun failed(message: String): CommandExecutionResult {
     return CommandExecutionResult.failed(message)
 }
@@ -525,9 +566,37 @@ private fun resolveFilterTarget(
     )
 }
 
-private fun formatFilterRule(rule: DynamicFilterRule, publisher: Publisher? = null): String {
+private fun formatFilterRule(
+    rule: DynamicFilterRule,
+    publisher: Publisher? = null,
+    commandPrefix: String? = null,
+): String {
     val owner = publisher?.let { "${it.platformId.value}:${it.externalId}" } ?: "subscriptionId=${rule.subscriptionId}"
-    return "#${rule.id} $owner ${rule.action.name.lowercase()} ${rule.condition}"
+    val head = "#${rule.id} $owner ${rule.action.name.lowercase()} ${rule.condition}"
+    // 附上可直接复制的重建命令：规则删掉也能照着加回来，不必重写正则。
+    val rebuild = commandPrefix?.let { rebuildFilterCommand(rule, it, publisher) } ?: return head
+    return "$head\n    重建：$rebuild"
+}
+
+private fun rebuildFilterCommand(
+    rule: DynamicFilterRule,
+    commandPrefix: String,
+    publisher: Publisher?,
+): String? {
+    if (publisher == null || rule.action != DynamicFilterAction.BLOCK) return null
+    val platform = publisher.platformId.value
+    val externalId = publisher.externalId
+    return when (val condition = rule.condition) {
+        is FilterCondition.HasElement ->
+            "$commandPrefix filter add element $platform $externalId ${condition.kind.name.lowercase()}"
+        is FilterCondition.TextMatch -> {
+            val matcher = when (condition.mode) {
+                TextMatchMode.REGEX -> "regex"
+                TextMatchMode.CONTAINS -> "keyword"
+            }
+            "$commandPrefix filter add content $platform $externalId $matcher ${condition.text}"
+        }
+    }
 }
 
 private data class ResolvedFilterTarget(
@@ -551,9 +620,11 @@ private class HelpCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("help"),
-        description = "显示可用命令",
-        usage = "help",
+        aliases = listOf(listOf("帮助")),
+        description = "显示可用命令；加命令名可查看详细用法",
+        usage = "help [命令]",
         requiredRole = CommandRole.USER,
+        category = "系统",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -565,13 +636,80 @@ private class HelpCommandHandler(
             return CommandExecutionResult.success("没有可用命令")
         }
 
-        val content = visibleCommands.joinToString("\n") { command ->
-            val usage = "$commandPrefix ${command.usage}".trim()
-            if (command.description.isBlank()) usage else "$usage - ${command.description}"
+        // /db help <命令>：查看单条命令的用法、说明与所需权限
+        if (invocation.args.isNotEmpty()) {
+            val matched = commandRegistry.match(invocation.args)
+            if (matched == null) {
+                // 允许用前缀查看一组命令，例如 `help filter`
+                val children = subCommandsOf(invocation.args, visibleCommands)
+                if (children.isEmpty()) {
+                    return failed("未找到命令：${invocation.args.joinToString(" ")}")
+                }
+                return successBatched(children.map { formatCommand(it) })
+            }
+            if (!invocation.role.satisfies(matched.spec.requiredRole)) {
+                return failed("没有该命令的权限：${matched.spec.path.joinToString(" ")}")
+            }
+            return success(describeCommand(matched.spec))
         }
-        return CommandExecutionResult.success(content)
+
+        return successBatched(buildGroupedHelp(visibleCommands))
     }
+
+    /** 按路径前缀过滤出一组子命令，用于 `help filter` 这类查询。 */
+    private fun subCommandsOf(prefixTokens: List<String>, commands: List<CommandSpec>): List<CommandSpec> {
+        val prefix = prefixTokens.map { it.lowercase() }
+        return commands.filter { spec ->
+            val path = spec.path.map { it.lowercase() }
+            path.size > prefix.size && path.take(prefix.size) == prefix
+        }
+    }
+
+    private fun buildGroupedHelp(commands: List<CommandSpec>): List<String> {
+        val lines = mutableListOf<String>()
+        // 主程序保留的分组按固定顺序展示；插件自定义分组按名称排序；未分组归入「其它」。
+        val known = KNOWN_COMMAND_CATEGORIES.filter { name -> commands.any { it.category == name } }
+        val extra = commands.map { it.category }
+            .filter { it.isNotBlank() && it !in KNOWN_COMMAND_CATEGORIES }
+            .distinct()
+            .sorted()
+        (known + extra).forEach { category ->
+            val items = commands.filter { it.category == category }
+            if (items.isEmpty()) return@forEach
+            if (lines.isNotEmpty()) lines += ""
+            lines += "【$category】"
+            items.forEach { lines += formatCommand(it) }
+        }
+        val others = commands.filter { it.category.isBlank() }
+        if (others.isNotEmpty()) {
+            if (lines.isNotEmpty()) lines += ""
+            lines += "【其它】"
+            others.forEach { lines += formatCommand(it) }
+        }
+        return lines
+    }
+
+    private fun formatCommand(spec: CommandSpec): String {
+        val usage = "$commandPrefix ${spec.usage}".trim()
+        return if (spec.description.isBlank()) usage else "$usage - ${spec.description}"
+    }
+
+    private fun describeCommand(spec: CommandSpec): String {
+        return buildString {
+            appendLine("命令：$commandPrefix ${spec.path.joinToString(" ")}")
+            if (spec.aliases.isNotEmpty()) {
+                appendLine("别名：${spec.aliases.joinToString("、") { "$commandPrefix ${it.joinToString(" ")}" }}")
+            }
+            appendLine("用法：$commandPrefix ${spec.usage}")
+            appendLine("说明：${spec.description.ifBlank { "-" }}")
+            append("权限：${commandRoleLabel(spec.requiredRole)}")
+        }
+    }
+
 }
+
+/** 主程序保留的分组与展示顺序；插件应使用自己的分组名，不要占用这些名字。 */
+private val KNOWN_COMMAND_CATEGORIES: List<String> = listOf("订阅", "链接", "内容", "过滤", "管理", "系统")
 
 private class LoginCommandHandler(
     private val loginProviderResolver: (String) -> PublisherLoginProvider?,
@@ -592,6 +730,7 @@ private class LoginCommandHandler(
         description = "登录来源平台账号",
         usage = "login <platform> <cookie|qr> [cookie]",
         requiredRole = CommandRole.ADMIN,
+        category = "管理",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -822,6 +961,7 @@ private class StatusCommandHandler(
         description = "显示项目运行状态",
         usage = "status",
         requiredRole = CommandRole.ADMIN,
+        category = "系统",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -929,6 +1069,7 @@ private class StopApplicationCommandHandler(
         description = "停止主程序",
         usage = "stop",
         requiredRole = CommandRole.ADMIN,
+        category = "系统",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -975,6 +1116,7 @@ private class ForwardCommandHandler(
         description = "批量转发文本消息到指定目标",
         usage = "forward <platform> <kind> <targetIds> <message...>",
         requiredRole = CommandRole.ADMIN,
+        category = "管理",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -1023,9 +1165,11 @@ private class SubscribeCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("subscribe"),
+        aliases = listOf(listOf("订阅")),
         description = "订阅来源平台发布者",
         usage = "subscribe <platform> <用户ID|用户名>",
         requiredRole = CommandRole.MANAGER,
+        category = "订阅",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -1076,9 +1220,11 @@ private class UnsubscribeCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("unsubscribe"),
+        aliases = listOf(listOf("退订")),
         description = "取消订阅发布者",
         usage = "unsubscribe <platform> <publisherUserId>",
         requiredRole = CommandRole.MANAGER,
+        category = "订阅",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -1109,9 +1255,11 @@ private class UnsubscribeCommandHandler(
 private class ListCommandHandler : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("list"),
+        aliases = listOf(listOf("列表")),
         description = "列出当前会话订阅",
         usage = "list",
         requiredRole = CommandRole.USER,
+        category = "订阅",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -1125,7 +1273,7 @@ private class ListCommandHandler : CommandHandler {
             .map { "${it.platformId.value}:${it.externalId} (${it.name})" }
 
         if (lines.isEmpty()) return CommandExecutionResult.success("当前会话没有订阅")
-        return CommandExecutionResult.success(lines.joinToString("\n"))
+        return successBatched(lines)
     }
 }
 
@@ -1137,6 +1285,7 @@ private class TemplateListCommandHandler(
         description = "列出消息模板",
         usage = "template list",
         requiredRole = CommandRole.USER,
+        category = "内容",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -1165,6 +1314,7 @@ private class ThemeCommandHandler(
         description = "查看或设置当前会话已订阅发布者的绘图主题色",
         usage = "theme <show|set|clear> <platform> <publisherUserId> [#FE65A6;#BFFAFF]",
         requiredRole = CommandRole.MANAGER,
+        category = "内容",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -1238,6 +1388,7 @@ private class FilterAddElementCommandHandler(
         description = "为订阅添加动态元素屏蔽规则",
         usage = "filter add element <platform> <publisherUserId> <text|image|video|card|poll|repost>",
         requiredRole = CommandRole.MANAGER,
+        category = "过滤",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -1274,6 +1425,7 @@ private class FilterAddContentCommandHandler(
         description = "为订阅添加内容屏蔽规则",
         usage = "filter add content <platform> <publisherUserId> <keyword|regex> <pattern...>",
         requiredRole = CommandRole.MANAGER,
+        category = "过滤",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -1318,6 +1470,7 @@ private class FilterListCommandHandler(
         description = "列出当前会话订阅过滤规则",
         usage = "filter list [platform] [publisherUserId]",
         requiredRole = CommandRole.USER,
+        category = "过滤",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -1347,10 +1500,10 @@ private class FilterListCommandHandler(
             rulesBySubscriptionId[target.subscription.id]
                 .orEmpty()
                 .sortedBy { it.id }
-                .map { rule -> formatFilterRule(rule, target.publisher) }
+                .map { rule -> formatFilterRule(rule, target.publisher, commandPrefix) }
         }
 
-        return success(lines.ifEmpty { listOf("过滤规则：（无）") }.joinToString("\n"))
+        return successBatched(lines.ifEmpty { listOf("过滤规则：（无）") })
     }
 
     private fun listOne(
@@ -1365,9 +1518,9 @@ private class FilterListCommandHandler(
         val lines = DynamicFilterRuleRepository
             .findBySubscriptionId(target.subscription.id)
             .sortedBy { it.id }
-            .map { rule -> formatFilterRule(rule, target.publisher) }
+            .map { rule -> formatFilterRule(rule, target.publisher, commandPrefix) }
 
-        return success(lines.ifEmpty { listOf("过滤规则：（无）") }.joinToString("\n"))
+        return successBatched(lines.ifEmpty { listOf("过滤规则：（无）") })
     }
 }
 
@@ -1382,6 +1535,7 @@ private class FilterRemoveCommandHandler(
         description = "删除订阅过滤规则",
         usage = "filter remove <ruleId>",
         requiredRole = CommandRole.MANAGER,
+        category = "过滤",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -1420,6 +1574,7 @@ private class FilterClearCommandHandler(
         description = "清空订阅过滤规则",
         usage = "filter clear <platform> <publisherUserId> [confirm]",
         requiredRole = CommandRole.MANAGER,
+        category = "过滤",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -1475,9 +1630,11 @@ private class PolicyCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("policy"),
+        aliases = listOf(listOf("策略")),
         description = "查看或修改当前会话的推送策略",
         usage = "policy <platform> <publisherUserId> [事件类型...]",
         requiredRole = CommandRole.MANAGER,
+        category = "订阅",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {

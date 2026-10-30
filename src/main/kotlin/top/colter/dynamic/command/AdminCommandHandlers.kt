@@ -37,6 +37,7 @@ internal class WhoamiCommandHandler : CommandHandler {
         description = "显示当前会话的标识",
         usage = "whoami",
         requiredRole = CommandRole.USER,
+        category = "系统",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -69,6 +70,7 @@ internal class ClaimCommandHandler(
         description = "使用验证码认领系统管理员",
         usage = "claim <验证码>",
         requiredRole = CommandRole.USER,
+        category = "管理",
     )
 
     /** 已初始化后的重复提示去重，避免这条免权限命令被用来刷屏。 */
@@ -114,6 +116,7 @@ internal class GrantCommandHandler(
         description = "授予指定用户命令权限",
         usage = "grant <platform> <senderId> <角色> [会话类型] [目标ID]",
         requiredRole = CommandRole.ADMIN,
+        category = "管理",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -180,6 +183,7 @@ internal class RevokeCommandHandler(
         description = "撤销指定用户的命令权限",
         usage = "revoke <platform> <senderId> [命令路径]",
         requiredRole = CommandRole.ADMIN,
+        category = "管理",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {

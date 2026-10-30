@@ -30,6 +30,7 @@ private class LinkParseStatusCommandHandler(
         description = "查看当前会话的链接解析触发方式",
         usage = "link",
         requiredRole = CommandRole.USER,
+        category = "链接",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -63,6 +64,7 @@ private class LinkParseSetCommandHandler(
         description = "设置当前会话的链接解析触发方式",
         usage = "link set <off|mention|always>",
         requiredRole = CommandRole.MANAGER,
+        category = "链接",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
@@ -95,6 +97,7 @@ private class LinkParseClearCommandHandler(
         description = "清除当前会话的链接解析配置",
         usage = "link clear",
         requiredRole = CommandRole.MANAGER,
+        category = "链接",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {

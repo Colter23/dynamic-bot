@@ -356,6 +356,7 @@ public data class CommandDto(
     val description: String = "",
     val usage: String = "",
     val requiredRole: String,
+    val category: String = "",
 )
 
 @Serializable

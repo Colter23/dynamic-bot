@@ -1,4 +1,4 @@
-﻿package top.colter.dynamic.link
+package top.colter.dynamic.link
 
 import top.colter.dynamic.core.command.CommandExecutionResult
 import top.colter.dynamic.core.command.CommandHandler
@@ -19,6 +19,7 @@ internal class LinkParseCommandHandler(
         description = "解析并转发链接",
         usage = "parse <link...>",
         requiredRole = CommandRole.USER,
+        category = "链接",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {

@@ -12,7 +12,11 @@ import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.LinkParseTriggerMode
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.command.CommandRegistry
+import top.colter.dynamic.core.command.CommandExecutionResult
+import top.colter.dynamic.core.command.CommandHandler
+import top.colter.dynamic.core.command.CommandInvocation
 import top.colter.dynamic.core.command.CommandPermissionRule
+import top.colter.dynamic.core.command.CommandSpec
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandStatus
@@ -298,6 +302,140 @@ class CommandListenerTest {
     }
 
     @Test
+    fun helpShouldGroupCommandsByCategory() = runBlocking {
+        initDb("command-help-grouped")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = adminConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db help"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        val text = renderMessage(result)
+        assertTrue(text.contains("【订阅】"), "text=$text")
+        assertTrue(text.contains("【过滤】"), "text=$text")
+        assertTrue(text.contains("【系统】"), "text=$text")
+        assertTrue(text.contains("/db subscribe"), "text=$text")
+    }
+
+    @Test
+    fun helpShouldShowSingleCommandDetail() = runBlocking {
+        initDb("command-help-detail")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = adminConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db help filter add element"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        val text = renderMessage(result)
+        assertTrue(text.contains("用法：/db filter add element"), "text=$text")
+        assertTrue(text.contains("权限：目标管理员"), "text=$text")
+    }
+
+    @Test
+    fun helpShouldGroupPluginCommandsByCategory() = runBlocking {
+        initDb("command-help-plugin-category")
+        val eventBus = EventBus()
+        val registry = CommandRegistry()
+        registry.register(
+            FakeCommandHandler(
+                CommandSpec(
+                    path = listOf("tool"),
+                    description = "插件命令",
+                    category = "工具",
+                ),
+            ),
+            "plugin-a",
+        )
+        registry.register(
+            FakeCommandHandler(
+                CommandSpec(
+                    path = listOf("plain"),
+                    description = "未分组命令",
+                ),
+            ),
+            "plugin-a",
+        )
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = publicUserConfig(),
+            commandRegistry = registry,
+            eventBus = eventBus,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db help"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        val text = renderMessage(result)
+        assertTrue(text.contains("【工具】"), "插件自定义分组应单独成组：$text")
+        assertTrue(text.contains("/db tool"), "text=$text")
+        assertTrue(text.contains("【其它】"), "未分组命令应归入其它：$text")
+        assertTrue(text.contains("/db plain"), "text=$text")
+    }
+
+    @Test
+    fun helpShouldListSubCommandsForPrefix() = runBlocking {
+        initDb("command-help-prefix")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = adminConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db help filter"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        val text = renderMessage(result)
+        assertTrue(text.contains("/db filter add element"), "text=$text")
+        assertTrue(text.contains("/db filter clear"), "text=$text")
+    }
+
+    @Test
+    fun helpShouldReportUnknownCommand() = runBlocking {
+        initDb("command-help-unknown")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = adminConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db help nope"))
+
+        assertEquals(CommandStatus.FAILED, result.status)
+        assertTrue(renderMessage(result).contains("未找到命令"))
+    }
+
+    @Test
+    fun chineseAliasShouldResolveCommand() = runBlocking {
+        initDb("command-chinese-alias")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = publicUserConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db 列表"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        assertTrue(renderMessage(result).contains("当前会话没有订阅"))
+    }
+
+    @Test
     fun helpShouldReplyEvenWhenNoPermissionRuleMatches() = runBlocking {
         initDb("command-help-no-permission")
         val eventBus = EventBus()
@@ -551,6 +689,29 @@ class CommandListenerTest {
     }
 
     @Test
+    fun filterListShouldShowRebuildCommand() = runBlocking {
+        initDb("command-filter-rebuild")
+        seedSubscription()
+        val subscription = currentSubscription()
+        DynamicFilterRuleRepository.addRule(subscription.id, FilterCondition.HasElement(DynamicBlockKind.TEXT))
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db filter list"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        assertTrue(
+            renderMessage(result).contains("重建：/db filter add element bilibili 123 text"),
+            "reply=${renderMessage(result)}",
+        )
+    }
+
+    @Test
     fun filterClearShouldRequireConfirmation() = runBlocking {
         initDb("command-filter-clear-confirm")
         seedSubscription()
@@ -714,6 +875,12 @@ class CommandListenerTest {
             runCount = 1,
             lastErrorSummary = null,
         )
+    }
+
+    private class FakeCommandHandler(override val spec: CommandSpec) : CommandHandler {
+        override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+            return CommandExecutionResult.success("ok")
+        }
     }
 
     private class FakePublisherFollowPlugin : PublisherFollowPlugin {
