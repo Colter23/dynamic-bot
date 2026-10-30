@@ -689,6 +689,247 @@ class CommandListenerTest {
     }
 
     @Test
+    fun listShouldNumberSubscriptionsForIndexUnsubscribe() = runBlocking {
+        initDb("command-list-index")
+        seedSubscription()
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+
+        val listed = dispatch(eventBus, listener, commandEvent("/db list"))
+        assertEquals(CommandStatus.SUCCESS, listed.status)
+        assertTrue(renderMessage(listed).contains("#1 bilibili:123"), "text=${renderMessage(listed)}")
+
+        val removed = dispatch(eventBus, listener, commandEvent("/db unsubscribe #1"))
+        assertEquals(CommandStatus.SUCCESS, removed.status)
+        assertTrue(renderMessage(removed).contains("已取消订阅"))
+
+        val subscriber = assertNotNull(
+            SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")),
+        )
+        assertTrue(SubscriptionRepository.findPublisherIdsBySubscriberId(subscriber.id).isEmpty())
+    }
+
+    @Test
+    fun unsubscribeByIndexWithoutListShouldFail() = runBlocking {
+        initDb("command-list-index-missing")
+        seedSubscription()
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db unsubscribe #1"))
+
+        assertEquals(CommandStatus.FAILED, result.status)
+        assertTrue(renderMessage(result).contains("请先发送"))
+    }
+
+    @Test
+    fun unsubscribeByIndexOutOfRangeShouldReportRange() = runBlocking {
+        initDb("command-list-index-range")
+        seedSubscription()
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+        dispatch(eventBus, listener, commandEvent("/db list"))
+
+        val result = dispatch(eventBus, listener, commandEvent("/db unsubscribe #9"))
+
+        assertEquals(CommandStatus.FAILED, result.status)
+        assertTrue(renderMessage(result).contains("序号超出范围"), "text=${renderMessage(result)}")
+    }
+
+    @Test
+    fun unsubscribeShouldAcceptPlatformColonIdForm() = runBlocking {
+        initDb("command-unsubscribe-colon")
+        seedSubscription()
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db unsubscribe bilibili:123"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        assertTrue(renderMessage(result).contains("已取消订阅"))
+    }
+
+    @Test
+    fun unsubscribeByIndexShouldReportInvalidIndices() = runBlocking {
+        initDb("command-unsubscribe-index-mixed")
+        seedSubscription()
+        seedSecondSubscription()
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+        dispatch(eventBus, listener, commandEvent("/db list"))
+
+        val result = dispatch(eventBus, listener, commandEvent("/db unsubscribe #1,#9"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        val text = renderMessage(result)
+        assertTrue(text.contains("已取消 1 个"), "text=$text")
+        assertTrue(text.contains("序号无效：#9"), "text=$text")
+    }
+
+    @Test
+    fun unsubscribeBatchShouldFailWhenNothingMatched() = runBlocking {
+        initDb("command-unsubscribe-batch-missing")
+        seedSubscription()
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db unsubscribe bilibili 999,888"))
+
+        assertEquals(CommandStatus.FAILED, result.status)
+        assertTrue(renderMessage(result).contains("未找到 2 个"), "text=${renderMessage(result)}")
+    }
+
+    @Test
+    fun unsubscribeShouldAcceptCommaSeparatedIds() = runBlocking {
+        initDb("command-unsubscribe-batch")
+        seedSubscription()
+        seedSecondSubscription()
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db unsubscribe bilibili 123,456"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        assertTrue(renderMessage(result).contains("已取消 2 个"), "text=${renderMessage(result)}")
+        val subscriber = assertNotNull(
+            SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")),
+        )
+        assertTrue(SubscriptionRepository.findPublisherIdsBySubscriberId(subscriber.id).isEmpty())
+    }
+
+    @Test
+    fun subscribeShouldSupportBatchIds() = runBlocking {
+        initDb("command-subscribe-batch")
+        val eventBus = EventBus()
+        val plugin = FakePublisherLookupPlugin()
+        val listener = CommandListener(
+            publisherLookupResolver = { id -> plugin.takeIf { id == "bilibili" } },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db subscribe bilibili 111,222"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        assertTrue(renderMessage(result).contains("已订阅 2 个"), "text=${renderMessage(result)}")
+        val subscriber = assertNotNull(
+            SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")),
+        )
+        assertEquals(2, SubscriptionRepository.findPublisherIdsBySubscriberId(subscriber.id).size)
+    }
+
+    @Test
+    fun subscribeBatchShouldReportMissingIds() = runBlocking {
+        initDb("command-subscribe-batch-missing")
+        val eventBus = EventBus()
+        val plugin = PartialLookupPlugin()
+        val listener = CommandListener(
+            publisherLookupResolver = { id -> plugin.takeIf { id == "bilibili" } },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db subscribe bilibili 111,999"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        val text = renderMessage(result)
+        assertTrue(text.contains("失败 1 个"), "text=$text")
+        assertTrue(text.contains("未找到发布者"), "text=$text")
+    }
+
+    @Test
+    fun subscribeBatchShouldRejectTooManyIds() = runBlocking {
+        initDb("command-subscribe-batch-limit")
+        val eventBus = EventBus()
+        val plugin = FakePublisherLookupPlugin()
+        val listener = CommandListener(
+            publisherLookupResolver = { id -> plugin.takeIf { id == "bilibili" } },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+
+        val ids = (1..11).joinToString(",")
+        val result = dispatch(eventBus, listener, commandEvent("/db subscribe bilibili $ids"))
+
+        assertEquals(CommandStatus.FAILED, result.status)
+        assertTrue(renderMessage(result).contains("一次最多订阅 10 个"))
+    }
+
+    private fun seedSecondSubscription() {
+        val publisher = PublisherRepository.upsertInfo(
+            testPublisherInfo(
+                key = PublisherKey.of("bilibili", PublisherKind.USER, "456"),
+                name = "demo-two",
+            ),
+        ).value
+        val subscriber = SubscriberRepository.ensure(
+            address = TargetAddress.of("onebot", TargetKind.GROUP, "100"),
+            name = "100",
+        )
+        SubscriptionRepository.subscribe(subscriber.id, publisher.id)
+    }
+
+    private class PartialLookupPlugin : PublisherLookupPlugin {
+        override val platformId: PlatformId = PlatformId.of("bilibili")
+
+        override suspend fun fetchPublisherInfo(userId: String): PublisherInfo? {
+            if (userId == "999") return null
+            return testPublisherInfo(
+                key = PublisherKey.of("bilibili", PublisherKind.USER, userId),
+                name = "user-$userId",
+            )
+        }
+    }
+
+    @Test
     fun filterListShouldShowRebuildCommand() = runBlocking {
         initDb("command-filter-rebuild")
         seedSubscription()

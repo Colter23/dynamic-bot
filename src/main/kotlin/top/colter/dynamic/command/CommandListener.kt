@@ -165,6 +165,9 @@ public class CommandListener(
         )
     }
 
+    /** `list` 输出的顺序快照，供 `unsubscribe #序号` 使用。 */
+    private val listSnapshots: SubscriptionListSnapshotStore = SubscriptionListSnapshotStore()
+
     private val commandPrefix: String
         get() = runtimeConfig.command.prefix
     private val commandPrefixProvider: () -> String = { commandPrefix }
@@ -410,10 +413,16 @@ public class CommandListener(
         commandRegistry.register(LoginCommandHandler(publisherLoginResolver, commandPrefixProvider, eventBus), MAIN_OWNER)
         commandRegistry.register(ForwardCommandHandler(commandPrefixProvider, outboundMessageService), MAIN_OWNER)
         commandRegistry.register(
-            UnsubscribeCommandHandler(publisherFollowResolver, { runtimeConfig }, commandPrefixProvider, eventBus),
+            UnsubscribeCommandHandler(
+                publisherFollowResolver,
+                { runtimeConfig },
+                commandPrefixProvider,
+                eventBus,
+                listSnapshots,
+            ),
             MAIN_OWNER,
         )
-        commandRegistry.register(ListCommandHandler(), MAIN_OWNER)
+        commandRegistry.register(ListCommandHandler(listSnapshots, commandPrefixProvider), MAIN_OWNER)
         commandRegistry.register(TemplateListCommandHandler { runtimeConfig }, MAIN_OWNER)
         commandRegistry.register(FilterAddElementCommandHandler(commandPrefixProvider), MAIN_OWNER)
         commandRegistry.register(FilterAddContentCommandHandler(commandPrefixProvider), MAIN_OWNER)
@@ -1167,7 +1176,7 @@ private class SubscribeCommandHandler(
         path = listOf("subscribe"),
         aliases = listOf(listOf("订阅")),
         description = "订阅来源平台发布者",
-        usage = "subscribe <platform> <用户ID|用户名>",
+        usage = "subscribe <platform> <用户ID|用户名|ID1,ID2...>",
         requiredRole = CommandRole.MANAGER,
         category = "订阅",
     )
@@ -1186,6 +1195,10 @@ private class SubscribeCommandHandler(
             ?: return CommandExecutionResult.failed("未找到发布者查询插件：$platform")
 
         // 纯数字按 ID 直接提交；其它文本按用户名搜索，必须再选一次。
+        val batchIds = parseBatchIds(query)
+        if (batchIds != null && batchIds.size > 1) {
+            return subscribeBatch(invocation, platform, lookupPlugin, batchIds)
+        }
         if (query.toLongOrNull() != null) {
             val publisherInfo = runCatching { lookupPlugin.fetchPublisherInfo(query) }
                 .getOrElse { return CommandExecutionResult.failed("获取发布者资料失败：${it.message ?: "未知错误"}") }
@@ -1207,6 +1220,57 @@ private class SubscribeCommandHandler(
             subscriptionComponent.offerCandidates(invocation.context, platform, candidates),
         )
     }
+
+    /** 逗号分隔且每段都是数字时视为批量 ID；含非数字则整体当用户名查询。 */
+    private fun parseBatchIds(query: String): List<String>? {
+        val parts = query.split(',', '，').map { it.trim() }.filter { it.isNotEmpty() }
+        if (parts.size < 2) return null
+        if (parts.any { it.toLongOrNull() == null }) return null
+        return parts
+    }
+
+    private suspend fun subscribeBatch(
+        invocation: CommandInvocation,
+        platform: String,
+        lookupPlugin: PublisherLookupPlugin,
+        ids: List<String>,
+    ): CommandExecutionResult {
+        val distinctIds = ids.distinct()
+        if (distinctIds.size > MAX_BATCH_SUBSCRIBE) {
+            return CommandExecutionResult.failed("一次最多订阅 $MAX_BATCH_SUBSCRIBE 个，请分批操作")
+        }
+        val service = subscriptionComponent.service()
+        val done = mutableListOf<String>()
+        val failed = mutableListOf<String>()
+        distinctIds.forEach { id ->
+            val info = runCatching { lookupPlugin.fetchPublisherInfo(id) }.getOrNull()
+            if (info == null) {
+                failed += "$id：未找到发布者"
+                return@forEach
+            }
+            runCatching { service.subscribeResolved(invocation.context, platform, info) }
+                .onSuccess { done += info.name }
+                .onFailure { failed += "$id：${it.message ?: "订阅失败"}" }
+        }
+
+        if (failed.isEmpty()) {
+            return CommandExecutionResult.success("已订阅 ${done.size} 个：${done.joinToString("、")}")
+        }
+        val message = buildList {
+            add("已订阅 ${done.size} 个，失败 ${failed.size} 个")
+            done.forEach { add("✔ $it") }
+            failed.forEach { add("✘ $it") }
+        }.joinToString("\n")
+        return if (done.isEmpty()) {
+            CommandExecutionResult.failed(message)
+        } else {
+            CommandExecutionResult.success(message)
+        }
+    }
+
+    private companion object {
+        private const val MAX_BATCH_SUBSCRIBE: Int = 10
+    }
 }
 
 private class UnsubscribeCommandHandler(
@@ -1214,6 +1278,7 @@ private class UnsubscribeCommandHandler(
     private val configProvider: () -> MainDynamicConfig,
     private val commandPrefixProvider: () -> String,
     private val eventBus: EventBus,
+    private val listSnapshots: SubscriptionListSnapshotStore,
 ) : CommandHandler {
     private val commandPrefix: String
         get() = commandPrefixProvider()
@@ -1222,37 +1287,226 @@ private class UnsubscribeCommandHandler(
         path = listOf("unsubscribe"),
         aliases = listOf(listOf("退订")),
         description = "取消订阅发布者",
-        usage = "unsubscribe <platform> <publisherUserId>",
+        usage = "unsubscribe <platform> <ID[,ID...]> | unsubscribe <platform>:<ID>[,...] | unsubscribe #序号[,序号...]",
         requiredRole = CommandRole.MANAGER,
         category = "订阅",
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
-        if (invocation.args.size < 2) {
+        val args = invocation.args
+        if (args.isEmpty()) {
             return CommandExecutionResult.failed("用法：$commandPrefix ${spec.usage}")
         }
-        val platform = invocation.args[0].lowercase()
-        val publisherUserId = invocation.args[1]
-        val publisher = PublisherRepository.findByKey(PublisherKey.of(platform, PublisherKind.USER, publisherUserId))
-            ?: return CommandExecutionResult.failed("未找到发布者：$platform:$publisherUserId")
-
         val subscriber = invocation.currentSubscriber()
             ?: return CommandExecutionResult.success("当前会话没有订阅")
+
+        val first = args[0].trim().replace('＃', '#')
+        // unsubscribe #1 / #1,#3：按 list 的序号退订
+        if (first.startsWith("#")) {
+            if (args.size > 1) {
+                return CommandExecutionResult.failed("用法：$commandPrefix ${spec.usage}")
+            }
+            return unsubscribeByIndex(invocation, subscriber, first)
+        }
+
+        val references = parseReferences(args)
+            ?: return CommandExecutionResult.failed("用法：$commandPrefix ${spec.usage}")
+        if (references.isEmpty()) {
+            return CommandExecutionResult.failed("用法：$commandPrefix ${spec.usage}")
+        }
+        if (references.size == 1) {
+            val reference = references.single()
+            return singleResult(
+                unsubscribeByReference(invocation, subscriber, reference.platformId, reference.externalId),
+            )
+        }
+        return batchUnsubscribe(invocation, subscriber, references)
+    }
+
+    /** 支持 `<platform> <id[,id...]>` 与 `<platform>:<id>[,...]`（后者可直接从 list 复制）。 */
+    private fun parseReferences(args: List<String>): List<UnsubscribeReference>? {
+        if (args.size >= 2) {
+            val platform = args[0].trim().lowercase()
+            if (platform.isBlank() || platform.contains(':')) return null
+            return args.drop(1)
+                .flatMap { it.split(',', '，') }
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .map { UnsubscribeReference(platform, it) }
+        }
+        return args.single()
+            .split(',', '，')
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .map { part ->
+                val separator = part.indexOf(':')
+                if (separator <= 0 || separator == part.length - 1) return null
+                UnsubscribeReference(part.substring(0, separator).lowercase(), part.substring(separator + 1))
+            }
+    }
+
+    private fun singleResult(outcome: UnsubscribeOutcome): CommandExecutionResult {
+        return when (outcome) {
+            is UnsubscribeOutcome.Done -> CommandExecutionResult.success(outcome.message)
+            is UnsubscribeOutcome.NotSubscribed -> CommandExecutionResult.success(outcome.message)
+            is UnsubscribeOutcome.NotFound -> CommandExecutionResult.failed(outcome.message)
+        }
+    }
+
+    private suspend fun batchUnsubscribe(
+        invocation: CommandInvocation,
+        subscriber: Subscriber,
+        references: List<UnsubscribeReference>,
+    ): CommandExecutionResult {
+        val done = mutableListOf<String>()
+        val skipped = mutableListOf<String>()
+        val missing = mutableListOf<String>()
+        references.distinct().forEach { reference ->
+            when (
+                val outcome = unsubscribeByReference(
+                    invocation,
+                    subscriber,
+                    reference.platformId,
+                    reference.externalId,
+                )
+            ) {
+                is UnsubscribeOutcome.Done -> done += outcome.name
+                is UnsubscribeOutcome.NotSubscribed -> skipped += outcome.name
+                is UnsubscribeOutcome.NotFound -> missing += "${reference.platformId}:${reference.externalId}"
+            }
+        }
+        val message = buildList {
+            if (done.isNotEmpty()) add("已取消 ${done.size} 个：${done.joinToString("、")}")
+            if (skipped.isNotEmpty()) add("未订阅 ${skipped.size} 个：${skipped.joinToString("、")}")
+            if (missing.isNotEmpty()) add("未找到 ${missing.size} 个：${missing.joinToString("、")}")
+        }.joinToString("\n")
+        // 一个都没处理成功才算失败；部分成功仍返回成功并逐条说明。
+        return if (done.isEmpty() && skipped.isEmpty()) {
+            CommandExecutionResult.failed(message.ifBlank { "没有可取消的订阅" })
+        } else {
+            CommandExecutionResult.success(message)
+        }
+    }
+
+    private suspend fun unsubscribeByIndex(
+        invocation: CommandInvocation,
+        subscriber: Subscriber,
+        input: String,
+    ): CommandExecutionResult {
+        val indices = input.split(',', '，')
+            .map { it.trim().removePrefix("#") }
+            .mapNotNull { it.toIntOrNull() }
+            .filter { it > 0 }
+        if (indices.isEmpty()) {
+            return CommandExecutionResult.failed("用法：$commandPrefix ${spec.usage}")
+        }
+        if (indices.size == 1) {
+            val index = indices.single()
+            val entry = listSnapshots.resolve(invocation.context, index)
+            if (entry == null) {
+                val total = listSnapshots.size(invocation.context)
+                return CommandExecutionResult.failed(
+                    if (total == null) {
+                        listSnapshotMissingMessage(invocation)
+                    } else {
+                        "序号超出范围：当前共 $total 项，请回复 #1 到 #$total"
+                    },
+                )
+            }
+            return when (val outcome = unsubscribeByReference(invocation, subscriber, entry.platformId, entry.externalId)) {
+                is UnsubscribeOutcome.Done -> CommandExecutionResult.success(outcome.message)
+                is UnsubscribeOutcome.NotSubscribed -> CommandExecutionResult.success(outcome.message)
+                is UnsubscribeOutcome.NotFound -> CommandExecutionResult.failed(outcome.message)
+            }
+        }
+
+        val done = mutableListOf<String>()
+        val skipped = mutableListOf<String>()
+        val invalid = mutableListOf<Int>()
+        indices.distinct().forEach { index ->
+            val entry = listSnapshots.resolve(invocation.context, index)
+            if (entry == null) {
+                invalid += index
+                return@forEach
+            }
+            when (unsubscribeByReference(invocation, subscriber, entry.platformId, entry.externalId)) {
+                is UnsubscribeOutcome.Done -> done += entry.name
+                is UnsubscribeOutcome.NotSubscribed -> skipped += entry.name
+                is UnsubscribeOutcome.NotFound -> invalid += index
+            }
+        }
+        if (done.isEmpty() && skipped.isEmpty()) {
+            val total = listSnapshots.size(invocation.context)
+            return CommandExecutionResult.failed(
+                if (total == null) {
+                    listSnapshotMissingMessage(invocation)
+                } else {
+                    "序号无效：${invalid.joinToString("、") { "#$it" }}，当前共 $total 项"
+                },
+            )
+        }
+        return CommandExecutionResult.success(
+            buildList {
+                if (done.isNotEmpty()) add("已取消 ${done.size} 个：${done.joinToString("、")}")
+                if (skipped.isNotEmpty()) add("未订阅 ${skipped.size} 个：${skipped.joinToString("、")}")
+                if (invalid.isNotEmpty()) add("序号无效：${invalid.joinToString("、") { "#$it" }}")
+            }.joinToString("\n"),
+        )
+    }
+
+    private fun listSnapshotMissingMessage(invocation: CommandInvocation): String {
+        return "没有可用的订阅列表快照，请先发送 $commandPrefix list 再按序号退订"
+    }
+
+    private suspend fun unsubscribeByReference(
+        invocation: CommandInvocation,
+        subscriber: Subscriber,
+        platform: String,
+        externalId: String,
+    ): UnsubscribeOutcome {
+        val publisher = PublisherRepository.findByKey(PublisherKey.of(platform, PublisherKind.USER, externalId))
+            ?: return UnsubscribeOutcome.NotFound("未找到发布者：$platform:$externalId")
+
         val mutation = SubscriptionRepository.unsubscribe(subscriber.id, publisher.id)
         mutation.event?.let { eventBus.broadcast(it) }
         val removed = mutation.changed
-        if (removed && configProvider().subscription.unfollowWhenNoSubscribers && SubscriptionRepository.countByPublisherId(publisher.id) == 0L) {
+        if (removed &&
+            configProvider().subscription.unfollowWhenNoSubscribers &&
+            SubscriptionRepository.countByPublisherId(publisher.id) == 0L
+        ) {
             followResolver(platform)?.unfollowPublisher(publisher.externalId)
         }
         return if (removed) {
-            CommandExecutionResult.success("已取消订阅：${publisher.name}")
+            UnsubscribeOutcome.Done("已取消订阅：${publisher.name}", publisher.name)
         } else {
-            CommandExecutionResult.success("未订阅：${publisher.name}")
+            UnsubscribeOutcome.NotSubscribed("未订阅：${publisher.name}", publisher.name)
+        }
+    }
+
+    private data class UnsubscribeReference(
+        val platformId: String,
+        val externalId: String,
+    )
+
+    private sealed interface UnsubscribeOutcome {
+        val message: String
+        val name: String
+
+        data class Done(override val message: String, override val name: String) : UnsubscribeOutcome
+        data class NotSubscribed(override val message: String, override val name: String) : UnsubscribeOutcome
+        data class NotFound(override val message: String) : UnsubscribeOutcome {
+            override val name: String get() = message
         }
     }
 }
 
-private class ListCommandHandler : CommandHandler {
+private class ListCommandHandler(
+    private val listSnapshots: SubscriptionListSnapshotStore,
+    private val commandPrefixProvider: () -> String,
+) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
     override val spec: CommandSpec = CommandSpec(
         path = listOf("list"),
         aliases = listOf(listOf("列表")),
@@ -1268,11 +1522,28 @@ private class ListCommandHandler : CommandHandler {
         val publisherIds = SubscriptionRepository.findPublisherIdsBySubscriberId(subscriber.id)
         if (publisherIds.isEmpty()) return CommandExecutionResult.success("当前会话没有订阅")
 
-        val lines = publisherIds
+        val publishers = publisherIds
             .mapNotNull { PublisherRepository.findById(it) }
-            .map { "${it.platformId.value}:${it.externalId} (${it.name})" }
+        if (publishers.isEmpty()) return CommandExecutionResult.success("当前会话没有订阅")
 
-        if (lines.isEmpty()) return CommandExecutionResult.success("当前会话没有订阅")
+        // 记录本次顺序，供 `unsubscribe #序号` 使用：数据库查询没有稳定排序保证。
+        listSnapshots.save(
+            invocation.context,
+            publishers.map {
+                SubscriptionListSnapshotStore.Entry(
+                    platformId = it.platformId.value,
+                    externalId = it.externalId,
+                    name = it.name,
+                )
+            },
+        )
+
+        val lines = publishers.mapIndexed { index, publisher ->
+            "#${index + 1} ${publisher.platformId.value}:${publisher.externalId} (${publisher.name})"
+        }.toMutableList()
+        lines += ""
+        lines += "取消订阅：$commandPrefix unsubscribe #序号"
+
         return successBatched(lines)
     }
 }
