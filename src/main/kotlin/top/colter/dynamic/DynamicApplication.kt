@@ -15,6 +15,8 @@ import top.colter.dynamic.admin.AdminServer
 import top.colter.dynamic.command.CommandBootstrapService
 import top.colter.dynamic.command.CommandBootstrapStatus
 import top.colter.dynamic.command.CommandListener
+import top.colter.dynamic.command.SubscriptionSelectionComponent
+import top.colter.dynamic.command.SubscriptionService
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.config.ConfigService
 import top.colter.dynamic.core.data.MessageImportance
@@ -50,6 +52,7 @@ import top.colter.dynamic.draw.image.DynamicImageCache
 import top.colter.dynamic.draw.image.ImageFileCleaner
 import top.colter.dynamic.draw.DefaultDynamicDrawService
 import top.colter.dynamic.draw.DefaultLinkPreviewRenderer
+import top.colter.dynamic.draw.DefaultPublisherThemeInitializer
 import top.colter.dynamic.draw.resource.PlatformDrawAssetRegistry
 import top.colter.dynamic.incoming.IncomingMessagePipeline
 import top.colter.dynamic.incoming.IncomingBotAccountSelector
@@ -162,6 +165,15 @@ public object DynamicApplication : CoroutineScope {
         pluginHookTimeoutMs = configStore.current().plugin.hookTimeoutSeconds * 1000L,
     )
     private val listenerTokens: MutableList<ListenerToken> = mutableListOf()
+    private val subscriptionSelectionComponent: SubscriptionSelectionComponent = SubscriptionSelectionComponent(
+        SubscriptionService(
+            publisherLookupResolver = { platformId -> pluginManager.findPublisherLookupPlugin(platformId) },
+            publisherFollowResolver = { platformId -> pluginManager.findPublisherFollowPlugin(platformId) },
+            configProvider = configStore::current,
+            eventBus = eventBus,
+            themeInitializer = DefaultPublisherThemeInitializer(configProvider = configStore::current),
+        ),
+    )
     private val taskScheduler: DefaultTaskScheduler = DefaultTaskScheduler(scope = this)
     private val shutdownStarted: AtomicBoolean = AtomicBoolean(false)
     private val startedAtEpochMillis: Long = System.currentTimeMillis()
@@ -335,6 +347,7 @@ public object DynamicApplication : CoroutineScope {
             auditModeResolver = pluginManager::incomingAuditModeFor,
             incomingBotAccountSelector = incomingBotAccountSelector,
             commandBootstrapService = commandBootstrapService,
+            pendingSelectionHandler = subscriptionSelectionComponent::handleSelection,
         )
 
         listenerTokens += eventBus.subscribe(
@@ -347,6 +360,7 @@ public object DynamicApplication : CoroutineScope {
                 publisherLoginResolver = { platformId -> pluginManager.findPublisherLoginProvider(platformId) },
                 stopRequester = { reason -> requestStop(reason) },
                 commandBootstrapService = commandBootstrapService,
+                subscriptionComponent = subscriptionSelectionComponent,
                 configUpdater = configStore::update,
                 configService = configService,
                 commandRegistry = commandRegistry,

@@ -26,8 +26,12 @@ import top.colter.dynamic.core.data.MessageContent
 import top.colter.dynamic.core.data.PlatformId
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.PublisherKey
+import top.colter.dynamic.core.data.PublisherKind
 import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
+import top.colter.dynamic.core.data.Subscription
+import top.colter.dynamic.core.data.SubscriptionEventKind
+import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.data.UpdateKey
@@ -485,6 +489,118 @@ class CommandListenerTest {
         assertTrue(!text.contains("后台："))
         assertTrue(!text.contains("数据库："))
     }
+
+    @Test
+    fun policyShouldShowAndUpdateEvents() = runBlocking {
+        initDb("command-policy-events")
+        seedSubscription()
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val shown = dispatch(eventBus, listener, commandEvent("/db policy bilibili 123"))
+        assertEquals(CommandStatus.SUCCESS, shown.status)
+        assertTrue(renderMessage(shown).contains("事件：动态"))
+
+        val updated = dispatch(eventBus, listener, commandEvent("/db policy bilibili 123 live"))
+        assertEquals(CommandStatus.SUCCESS, updated.status)
+        assertTrue(renderMessage(updated).contains("开播"))
+
+        assertEquals(setOf(SubscriptionEventKind.LIVE_STARTED), currentPolicy().enabledEvents)
+    }
+
+    @Test
+    fun policyShouldSetMentionAll() = runBlocking {
+        initDb("command-policy-mention")
+        seedSubscription()
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db policy bilibili 123 mention all"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        assertTrue(renderMessage(result).contains("@全体：动态、开播、下播"))
+        assertEquals(SubscriptionEventKind.entries.toSet(), currentPolicy().mentionAllEvents)
+    }
+
+    @Test
+    fun policyShouldRejectUnknownEventsAndKeepPolicy() = runBlocking {
+        initDb("command-policy-invalid")
+        seedSubscription()
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db policy bilibili 123 unknown_event"))
+
+        assertEquals(CommandStatus.FAILED, result.status)
+        assertEquals(setOf(SubscriptionEventKind.DYNAMIC), currentPolicy().enabledEvents)
+    }
+
+    @Test
+    fun filterClearShouldRequireConfirmation() = runBlocking {
+        initDb("command-filter-clear-confirm")
+        seedSubscription()
+        val subscription = currentSubscription()
+        DynamicFilterRuleRepository.addRule(subscription.id, FilterCondition.HasElement(DynamicBlockKind.TEXT))
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val prompt = dispatch(eventBus, listener, commandEvent("/db filter clear bilibili 123"))
+        assertEquals(CommandStatus.SUCCESS, prompt.status)
+        assertTrue(renderMessage(prompt).contains("确认清空"), "reply=${renderMessage(prompt)}")
+        assertEquals(1, DynamicFilterRuleRepository.findBySubscriptionId(subscription.id).size)
+
+        val confirmed = dispatch(eventBus, listener, commandEvent("/db filter clear bilibili 123 confirm"))
+        assertEquals(CommandStatus.SUCCESS, confirmed.status)
+        assertTrue(DynamicFilterRuleRepository.findBySubscriptionId(subscription.id).isEmpty())
+    }
+
+    @Test
+    fun filterClearConfirmWithoutPendingRequestFails() = runBlocking {
+        initDb("command-filter-clear-no-pending")
+        seedSubscription()
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = managerConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val result = dispatch(eventBus, listener, commandEvent("/db filter clear bilibili 123 confirm"))
+
+        assertEquals(CommandStatus.FAILED, result.status)
+    }
+
+    private fun currentSubscription(): Subscription {
+        val subscriber = SubscriberRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100"))
+            ?: error("subscriber missing")
+        val publisher = PublisherRepository.findByKey(PublisherKey.of("bilibili", PublisherKind.USER, "123"))
+            ?: error("publisher missing")
+        return SubscriptionRepository.findBySubscriberAndPublisher(subscriber.id, publisher.id)
+            ?: error("subscription missing")
+    }
+
+    private fun currentPolicy(): SubscriptionPolicy = currentSubscription().policy
 
     private suspend fun dispatch(
         eventBus: EventBus,

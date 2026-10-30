@@ -47,6 +47,7 @@ internal class IncomingMessagePipeline(
         IncomingMessageAuditRepository.recordMessage(it)
     },
     private val commandBootstrapService: CommandBootstrapService? = null,
+    private val pendingSelectionHandler: (suspend (CommandContext, String) -> String?)? = null,
 ) {
     suspend fun handle(sourcePlugin: String, request: IncomingMessagePublishRequest) {
         val message = request.message
@@ -86,6 +87,13 @@ internal class IncomingMessagePipeline(
 
         // 验证码消息在观测与审计之前拦截：它是一次性凭据，不该落库或进入插件消费链路。
         if (handleBootstrapClaim(message, commandContext, rawText, traceId, replyToMessageId)) {
+            return
+        }
+
+        // `#序号` 候选选择：命中即消费，不再作为普通文本分发。
+        val selectionReply = pendingSelectionHandler?.invoke(commandContext, rawText)
+        if (selectionReply != null) {
+            replyToUser(message, commandContext, selectionReply, traceId, replyToMessageId)
             return
         }
 
@@ -178,6 +186,17 @@ internal class IncomingMessagePipeline(
             CommandClaimOutcome.EXPIRED -> "验证码已失效，请在后台「系统」页重新生成，或重启主程序。"
             else -> return true
         }
+        replyToUser(message, context, replyText, traceId, replyToMessageId)
+        return true
+    }
+
+    private fun replyToUser(
+        message: IncomingMessage,
+        context: CommandContext,
+        text: String,
+        traceId: String,
+        replyToMessageId: String,
+    ) {
         eventBus.broadcast(
             CommandResultEvent(
                 sourcePlugin = "main",
@@ -185,13 +204,12 @@ internal class IncomingMessagePipeline(
                     address = message.target.withPreferredAccount(context.botAccountId),
                     senderId = context.senderId,
                 ),
-                chain = listOf(MessageBatch(listOf(MessageContent.Text(replyText)))),
+                chain = listOf(MessageBatch(listOf(MessageContent.Text(text)))),
                 inReplyTo = replyToMessageId,
                 traceId = traceId,
                 status = CommandStatus.SUCCESS,
             ),
         )
-        return true
     }
 
     private fun TargetAddress.withPreferredAccount(accountId: String?): TargetAddress {

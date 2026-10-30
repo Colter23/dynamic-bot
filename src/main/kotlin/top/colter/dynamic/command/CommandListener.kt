@@ -41,6 +41,8 @@ import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.data.PublisherKind
 import top.colter.dynamic.core.data.Subscriber
 import top.colter.dynamic.core.data.Subscription
+import top.colter.dynamic.core.data.SubscriptionEventKind
+import top.colter.dynamic.core.data.SubscriptionPolicy
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.data.TextMatchMode
@@ -49,7 +51,6 @@ import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.incoming.IncomingBotAccountSelector
-import top.colter.dynamic.core.plugin.FollowActionStatus
 import top.colter.dynamic.core.plugin.PublisherFollowPlugin
 import top.colter.dynamic.core.plugin.PublisherLoginMethod
 import top.colter.dynamic.core.plugin.PublisherLoginProvider
@@ -105,6 +106,7 @@ public class CommandListener(
     configProvider: (() -> MainDynamicConfig)? = null,
     private val stopRequester: ((String) -> Unit)? = null,
     private val commandBootstrapService: CommandBootstrapService? = null,
+    private val subscriptionComponent: SubscriptionSelectionComponent? = null,
     private val configUpdater: (((MainDynamicConfig) -> MainDynamicConfig) -> ConfigApplyResult)? = null,
     private val configService: ConfigService = YamlConfigService(),
     private val commandRegistry: CommandRegistry = CommandRegistry(),
@@ -147,6 +149,19 @@ public class CommandListener(
         get() = runtimeConfigProvider()
     private val runtimePublisherThemeInitializer: PublisherThemeInitializer by lazy {
         publisherThemeInitializer ?: DefaultPublisherThemeInitializer(configProvider = runtimeConfigProvider)
+    }
+
+    /** 订阅命令与"#序号 选择"共用同一个候选缓存；未注入时按默认依赖自建。 */
+    private val runtimeSubscriptionComponent: SubscriptionSelectionComponent by lazy {
+        subscriptionComponent ?: SubscriptionSelectionComponent(
+            SubscriptionService(
+                publisherLookupResolver = publisherLookupResolver,
+                publisherFollowResolver = publisherFollowResolver,
+                configProvider = runtimeConfigProvider,
+                eventBus = eventBus,
+                themeInitializer = runtimePublisherThemeInitializer,
+            ),
+        )
     }
 
     private val commandPrefix: String
@@ -347,6 +362,7 @@ public class CommandListener(
 
     private fun registerBuiltins() {
         commandRegistry.unregisterByOwner(MAIN_OWNER)
+        val rateLimiter = CommandRateLimiter()
         commandRegistry.register(
             HelpCommandHandler(commandPrefixProvider, commandRegistry, commandBootstrapService),
             MAIN_OWNER,
@@ -365,29 +381,37 @@ public class CommandListener(
             commandRegistry.register(StopApplicationCommandHandler(it, commandPrefixProvider), MAIN_OWNER)
         }
         commandRegistry.register(
-            LinkParseCommandHandler(
-                linkParseService = linkParseService,
-                commandPrefixProvider = commandPrefixProvider,
-                maxLinksProvider = { runtimeConfig.linkParsing.maxLinksPerMessage },
+            RateLimitedCommandHandler(
+                delegate = LinkParseCommandHandler(
+                    linkParseService = linkParseService,
+                    commandPrefixProvider = commandPrefixProvider,
+                    maxLinksProvider = { runtimeConfig.linkParsing.maxLinksPerMessage },
+                ),
+                limiter = rateLimiter,
+                perSenderLimit = 5,
+                perTargetLimit = 20,
             ),
             MAIN_OWNER,
         )
         latestPublisherUpdateService?.let { service ->
             commandRegistry.register(
-                PublisherLatestUpdateCommandHandler(service, commandPrefixProvider),
+                RateLimitedCommandHandler(
+                    delegate = PublisherLatestUpdateCommandHandler(service, commandPrefixProvider),
+                    limiter = rateLimiter,
+                    perSenderLimit = 3,
+                    perTargetLimit = 20,
+                ),
                 MAIN_OWNER,
             )
         }
         LinkParseConfigCommandHandler.handlers({ runtimeConfig }, commandPrefixProvider)
             .forEach { handler -> commandRegistry.register(handler, MAIN_OWNER) }
         commandRegistry.register(
-            SubscribeCommandHandler(
-                publisherLookupResolver,
-                publisherFollowResolver,
-                { runtimeConfig },
-                commandPrefixProvider,
-                eventBus,
-                runtimePublisherThemeInitializer,
+            RateLimitedCommandHandler(
+                delegate = SubscribeCommandHandler(runtimeSubscriptionComponent, commandPrefixProvider),
+                limiter = rateLimiter,
+                perSenderLimit = 5,
+                perTargetLimit = 10,
             ),
             MAIN_OWNER,
         )
@@ -405,6 +429,7 @@ public class CommandListener(
         commandRegistry.register(FilterRemoveCommandHandler(commandPrefixProvider), MAIN_OWNER)
         commandRegistry.register(FilterClearCommandHandler(commandPrefixProvider), MAIN_OWNER)
         commandRegistry.register(ThemeCommandHandler(commandPrefixProvider, publisherDrawThemeService), MAIN_OWNER)
+        commandRegistry.register(PolicyCommandHandler(commandPrefixProvider), MAIN_OWNER)
         commandRegistry.register(WhoamiCommandHandler(), MAIN_OWNER)
         commandBootstrapService?.let { service ->
             commandRegistry.register(ClaimCommandHandler(service, commandPrefixProvider), MAIN_OWNER)
@@ -509,11 +534,6 @@ private data class ResolvedFilterTarget(
     val publisher: Publisher,
     val subscriber: Subscriber,
     val subscription: Subscription,
-)
-
-private data class CommandAutoFollowOutcome(
-    val followed: Boolean,
-    val warning: String? = null,
 )
 
 private sealed interface FilterTargetResolveResult {
@@ -995,12 +1015,8 @@ private class ForwardCommandHandler(
 }
 
 private class SubscribeCommandHandler(
-    private val lookupResolver: (String) -> PublisherLookupPlugin?,
-    private val followResolver: (String) -> PublisherFollowPlugin?,
-    private val configProvider: () -> MainDynamicConfig,
+    private val subscriptionComponent: SubscriptionSelectionComponent,
     private val commandPrefixProvider: () -> String,
-    private val eventBus: EventBus,
-    private val publisherThemeInitializer: PublisherThemeInitializer,
 ) : CommandHandler {
     private val commandPrefix: String
         get() = commandPrefixProvider()
@@ -1008,7 +1024,7 @@ private class SubscribeCommandHandler(
     override val spec: CommandSpec = CommandSpec(
         path = listOf("subscribe"),
         description = "订阅来源平台发布者",
-        usage = "subscribe <platform> <publisherUserId>",
+        usage = "subscribe <platform> <用户ID|用户名>",
         requiredRole = CommandRole.MANAGER,
     )
 
@@ -1016,75 +1032,36 @@ private class SubscribeCommandHandler(
         if (invocation.args.size < 2) {
             return CommandExecutionResult.failed("用法：$commandPrefix ${spec.usage}")
         }
-
         val platform = invocation.args[0].lowercase()
-        val publisherUserId = invocation.args[1]
-        val lookupPlugin = lookupResolver(platform)
+        val query = invocation.args.drop(1).joinToString(" ").trim()
+        if (query.isBlank()) {
+            return CommandExecutionResult.failed("用法：$commandPrefix ${spec.usage}")
+        }
+        val service = subscriptionComponent.service()
+        val lookupPlugin = service.lookup(platform)
             ?: return CommandExecutionResult.failed("未找到发布者查询插件：$platform")
-        val autoFollowEnabled = configProvider().subscription.autoFollowPublisherOnSubscribe
-        val followPlugin = if (autoFollowEnabled) {
-            followResolver(platform)
-        } else {
-            null
-        }
 
-        val publisherInfo = lookupPlugin.fetchPublisherInfo(publisherUserId)
-            ?: return CommandExecutionResult.failed("未找到发布者：$platform:$publisherUserId")
-
-        val autoFollowOutcome = if (autoFollowEnabled) {
-            tryAutoFollow(followPlugin, platform, publisherUserId)
-        } else {
-            CommandAutoFollowOutcome(followed = false)
-        }
-
-        val publisherUpsert = PublisherRepository.upsertInfo(publisherInfo)
-        val previousSubscriptionCount = SubscriptionRepository.countByPublisherId(publisherUpsert.value.id)
-        val subscriber = SubscriberRepository.ensure(
-            address = invocation.context.target,
-            name = invocation.context.chatId,
-        )
-        val mutation = SubscriptionRepository.subscribe(subscriber.id, publisherUpsert.value.id)
-        mutation.event?.let { eventBus.broadcast(it) }
-        if (mutation.changed) {
-            publisherThemeInitializer.initializeAfterFirstSubscription(
-                publisher = publisherUpsert.value,
-                previousSubscriptionCount = previousSubscriptionCount,
+        // 纯数字按 ID 直接提交；其它文本按用户名搜索，必须再选一次。
+        if (query.toLongOrNull() != null) {
+            val publisherInfo = runCatching { lookupPlugin.fetchPublisherInfo(query) }
+                .getOrElse { return CommandExecutionResult.failed("获取发布者资料失败：${it.message ?: "未知错误"}") }
+                ?: return CommandExecutionResult.failed("未找到发布者：$platform:$query")
+            return CommandExecutionResult.success(
+                service.subscribeResolved(invocation.context, platform, publisherInfo),
             )
         }
 
-        val publisherState = if (publisherUpsert.created) "新建" else "已存在"
-        val subscriptionState = if (mutation.changed) "新建" else "已存在"
-        val followStateText = if (!autoFollowEnabled) "已关闭" else if (autoFollowOutcome.followed) "是" else "否"
-        val warningText = autoFollowOutcome.warning?.let { "，自动关注提示=$it" }.orEmpty()
+        val candidates = runCatching {
+            lookupPlugin.searchPublisherInfo(query, subscriptionComponent.maxCandidates())
+        }.getOrElse {
+            return CommandExecutionResult.failed("搜索发布者失败：${it.message ?: "未知错误"}")
+        }
+        if (candidates.isEmpty()) {
+            return CommandExecutionResult.failed("未找到发布者：$query。可改用平台用户 ID 直接订阅。")
+        }
         return CommandExecutionResult.success(
-            "已订阅：${publisherUpsert.value.name}（自动关注=$followStateText，发布者=$publisherState，订阅=$subscriptionState$warningText）",
+            subscriptionComponent.offerCandidates(invocation.context, platform, candidates),
         )
-    }
-
-    private suspend fun tryAutoFollow(
-        followPlugin: PublisherFollowPlugin?,
-        platform: String,
-        publisherUserId: String,
-    ): CommandAutoFollowOutcome {
-        if (followPlugin == null) {
-            return CommandAutoFollowOutcome(
-                followed = false,
-                warning = "未找到发布者关注插件：$platform",
-            )
-        }
-        val followResult = followPlugin.followPublisher(publisherUserId)
-        return when (followResult.status) {
-            FollowActionStatus.DONE -> CommandAutoFollowOutcome(followed = true)
-            FollowActionStatus.NOOP -> CommandAutoFollowOutcome(followed = false)
-            FollowActionStatus.FAILED -> CommandAutoFollowOutcome(
-                followed = false,
-                warning = followResult.message ?: "关注发布者失败：$platform",
-            )
-            FollowActionStatus.UNSUPPORTED -> CommandAutoFollowOutcome(
-                followed = false,
-                warning = "$platform 不支持自动关注",
-            )
-        }
     }
 }
 
@@ -1430,28 +1407,161 @@ private class FilterRemoveCommandHandler(
 
 private class FilterClearCommandHandler(
     private val commandPrefixProvider: () -> String,
+    private val clock: () -> Long = System::currentTimeMillis,
+) : CommandHandler {
+    private val commandPrefix: String
+        get() = commandPrefixProvider()
+
+    /** 待确认的清空请求，键 = 会话 + 订阅，值是过期时间。 */
+    private val pending = ConcurrentHashMap<String, Long>()
+
+    override val spec: CommandSpec = CommandSpec(
+        path = listOf("filter", "clear"),
+        description = "清空订阅过滤规则",
+        usage = "filter clear <platform> <publisherUserId> [confirm]",
+        requiredRole = CommandRole.MANAGER,
+    )
+
+    override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        val args = invocation.args
+        val confirmed = args.lastOrNull()?.equals("confirm", ignoreCase = true) == true
+        val effective = if (confirmed) args.dropLast(1) else args
+        if (effective.size != 2) {
+            return failed("用法：$commandPrefix ${spec.usage}")
+        }
+        val target = when (val resolved = resolveFilterTarget(invocation, effective[0], effective[1])) {
+            is FilterTargetResolveResult.Failed -> return resolved.result
+            is FilterTargetResolveResult.Found -> resolved.target
+        }
+        val confirmKey = "${invocation.context.target.stableValue()}|${invocation.context.senderId}|${target.subscription.id}"
+
+        if (!confirmed) {
+            val count = DynamicFilterRuleRepository.findBySubscriptionId(target.subscription.id).size
+            if (count == 0) {
+                return success("没有可清空的过滤规则：${target.publisher.platformId.value}:${target.publisher.externalId}")
+            }
+            pending.entries.removeIf { now -> now.value < clock() }
+            pending[confirmKey] = clock() + FILTER_CLEAR_CONFIRM_WINDOW_MILLIS
+            return success(
+                "确认清空 ${target.publisher.name} 的 $count 条过滤规则？" +
+                    "请在 ${FILTER_CLEAR_CONFIRM_WINDOW_MILLIS / 1000} 秒内回复 " +
+                    "$commandPrefix filter clear ${effective[0]} ${effective[1]} confirm",
+            )
+        }
+
+        val expiresAt = pending.remove(confirmKey)
+        if (expiresAt == null || clock() > expiresAt) {
+            return failed("没有待确认的清空请求，已过期或未发起。")
+        }
+        val removed = DynamicFilterRuleRepository.clearBySubscriptionId(target.subscription.id)
+        return success("已清空过滤规则：数量=$removed")
+    }
+
+    private companion object {
+        private const val FILTER_CLEAR_CONFIRM_WINDOW_MILLIS: Long = 60_000L
+    }
+}
+
+/**
+ * 查看与修改当前会话对某个发布者的推送策略。
+ *
+ * 对应 `PATCH /api/subscriptions/{id}` 里的事件类型与 @全体 部分。
+ */
+private class PolicyCommandHandler(
+    private val commandPrefixProvider: () -> String,
 ) : CommandHandler {
     private val commandPrefix: String
         get() = commandPrefixProvider()
 
     override val spec: CommandSpec = CommandSpec(
-        path = listOf("filter", "clear"),
-        description = "清空订阅过滤规则",
-        usage = "filter clear <platform> <publisherUserId>",
+        path = listOf("policy"),
+        description = "查看或修改当前会话的推送策略",
+        usage = "policy <platform> <publisherUserId> [事件类型...]",
         requiredRole = CommandRole.MANAGER,
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
-        if (invocation.args.size != 2) {
+        if (invocation.args.size < 2) {
             return failed("用法：$commandPrefix ${spec.usage}")
         }
         val target = when (val resolved = resolveFilterTarget(invocation, invocation.args[0], invocation.args[1])) {
             is FilterTargetResolveResult.Failed -> return resolved.result
             is FilterTargetResolveResult.Found -> resolved.target
         }
-        val removed = DynamicFilterRuleRepository.clearBySubscriptionId(target.subscription.id)
-        return success("已清空过滤规则：数量=$removed")
+        val rest = invocation.args.drop(2)
+        val policy = target.subscription.policy
+        if (rest.isEmpty()) {
+            return success(describe(target.publisher, policy))
+        }
+
+        if (rest.first().equals("mention", ignoreCase = true)) {
+            if (rest.size > 2) {
+                return failed("用法：$commandPrefix ${spec.usage}")
+            }
+            val mentionAllEvents = when (rest.getOrNull(1)?.lowercase()) {
+                "all", "全部" -> SubscriptionEventKind.entries.toSet()
+                "none", "无" -> emptySet()
+                else -> return failed(
+                    "mention 只能是 all 或 none，例如 $commandPrefix policy bilibili 123 mention all",
+                )
+            }
+            val updated = SubscriptionRepository.updatePolicy(
+                target.subscription.id,
+                policy.copy(mentionAllEvents = mentionAllEvents),
+            )
+            return success(describe(target.publisher, updated.policy))
+        }
+
+        val events = parseSubscriptionEvents(rest)
+            ?: return failed("事件类型无效：${rest.joinToString(" ")}（可选 dynamic / live / live_end / all）")
+        val updated = SubscriptionRepository.updatePolicy(
+            target.subscription.id,
+            policy.copy(enabledEvents = events),
+        )
+        val warning = if (events.isEmpty()) "\n注意：当前没有启用任何事件，该订阅不会推送任何内容。" else ""
+        return success(describe(target.publisher, updated.policy) + warning)
     }
+
+    private fun describe(publisher: Publisher, policy: SubscriptionPolicy): String {
+        val events = policy.enabledEvents.sortedBy { it.ordinal }.map { it.label() }
+        // 展示用户实际配置的值；未启用的事件就算配了 @全体 也不会触发，不必在展示层做裁剪。
+        val mentions = policy.mentionAllEvents.sortedBy { it.ordinal }.map { it.label() }
+        return listOf(
+            "推送策略：${publisher.platformId.value}:${publisher.externalId} ${publisher.name}",
+            "事件：${events.ifEmpty { listOf("无") }.joinToString("、")}",
+            "@全体：${mentions.ifEmpty { listOf("无") }.joinToString("、")}",
+        ).joinToString("\n")
+    }
+}
+
+private fun SubscriptionEventKind.label(): String {
+    return when (this) {
+        SubscriptionEventKind.DYNAMIC -> "动态"
+        SubscriptionEventKind.LIVE_STARTED -> "开播"
+        SubscriptionEventKind.LIVE_ENDED -> "下播"
+    }
+}
+
+/** 解析事件类型参数，支持逗号分隔与中文别名；无法识别时返回 null。 */
+private fun parseSubscriptionEvents(tokens: List<String>): Set<SubscriptionEventKind>? {
+    val normalized = tokens
+        .flatMap { it.split(',', '，') }
+        .map { it.trim().lowercase() }
+        .filter { it.isNotEmpty() }
+    if (normalized.isEmpty()) return null
+
+    val result = linkedSetOf<SubscriptionEventKind>()
+    normalized.forEach { token ->
+        when (token) {
+            "all", "全部" -> result += SubscriptionEventKind.entries
+            "dynamic", "动态" -> result += SubscriptionEventKind.DYNAMIC
+            "live", "live_started", "开播" -> result += SubscriptionEventKind.LIVE_STARTED
+            "live_end", "live_ended", "下播" -> result += SubscriptionEventKind.LIVE_ENDED
+            "none", "无" -> Unit
+            else -> return null
+        }
+    }
+    return result
 }
 
 private fun DynamicFilterRule.belongsToCurrentSubscriber(invocation: CommandInvocation): Boolean {
