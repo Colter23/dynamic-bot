@@ -373,7 +373,7 @@ public object MainConfigForms {
                     label = "最大视频时长（秒）",
                     type = ConfigFieldType.NUMBER,
                     section = "链接解析",
-                    description = "链接解析模板包含 {video} 时，只下载不超过这个时长的视频。\n设为 0 表示不限制时长。",
+                    description = "链接解析模板包含 {video} 时，只下载不超过这个时长的视频。\n设为 0 表示不限制时长（此时时长未知的视频也会尝试下载）；设置了上限时，时长未知的视频会被跳过。",
                     min = 0,
                     numberKind = ConfigNumberKind.INTEGER,
                 ),

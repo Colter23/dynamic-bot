@@ -871,6 +871,206 @@ class LinkParseServiceTest {
     }
 
     @Test
+    fun `dynamic attached video should download and send video after card`() = runBlocking {
+        initDb("dynamic-attached-video")
+        val cacheRoot = createTempDirectory("dynamic-bot-attached-video-cache")
+        val videoFile = cacheRoot.resolve("video.mp4")
+        videoFile.writeBytes(byteArrayOf(0, 0, 0, 1))
+        val sourceUpdates = RecordingSourceUpdatePublisher()
+        val downloader = FakeVideoDownloader(
+            result = LinkVideoDownloadResult(
+                video = MediaRef(videoFile.toString(), MediaKind.VIDEO, mimeType = "video/mp4"),
+                fileSizeBytes = 4,
+                title = "demo video",
+                durationSeconds = 120,
+            ),
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeAttachedVideoLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{video}"),
+                        videoDownload = LinkVideoDownloadConfig(cacheRoot = cacheRoot.toString()),
+                    ),
+                )
+            },
+            sourceUpdatePublisher = sourceUpdates,
+            videoDownloadersProvider = { listOf(downloader) },
+        )
+
+        val result = service.parseAndDispatch(
+            text = "https://t.bilibili.com/123456",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(1, result.forwarded.size)
+        assertEquals("123456", sourceUpdates.receive().update.key.externalId)
+        assertEquals("123456", downloader.requests.single().parsedLink.targetId)
+
+        val messages = MessageDeliveryRepository.findRecent(limit = 10)
+            .mapNotNull { message -> MessageDeliveryRepository.findMessage(message.messageId) }
+        val videoMessage = messages.single { message -> message.batches.single().content.any { it is MessageContent.Video } }
+        val video = videoMessage.batches.single().content.single() as MessageContent.Video
+        assertEquals(videoFile.toString(), video.video.uri)
+        assertTrue(
+            messages.any { message ->
+                message.batches.single().content.any { content ->
+                    content is MessageContent.Text && content.fallbackText.contains("视频下载中")
+                }
+            },
+        )
+    }
+
+    @Test
+    fun `dynamic attached video should not download without video placeholder`() = runBlocking {
+        initDb("dynamic-attached-video-no-placeholder")
+        val sourceUpdates = RecordingSourceUpdatePublisher()
+        val downloader = FakeVideoDownloader(
+            result = LinkVideoDownloadResult(
+                video = MediaRef("https://example.com/video.mp4", MediaKind.VIDEO),
+                fileSizeBytes = 4,
+            ),
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeAttachedVideoLinkResolver()) },
+            sourceUpdatePublisher = sourceUpdates,
+            videoDownloadersProvider = { listOf(downloader) },
+        )
+
+        service.parseAndDispatch(
+            text = "https://t.bilibili.com/223344",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals("223344", sourceUpdates.receive().update.key.externalId)
+        assertTrue(downloader.requests.isEmpty())
+    }
+
+    @Test
+    fun `dynamic attached video with unknown duration downloads when duration limit disabled`() = runBlocking {
+        initDb("dynamic-attached-video-unknown-duration")
+        val cacheRoot = createTempDirectory("dynamic-bot-attached-video-unknown")
+        val videoFile = cacheRoot.resolve("video.mp4")
+        videoFile.writeBytes(byteArrayOf(0, 0, 0, 1))
+        val downloader = FakeVideoDownloader(
+            result = LinkVideoDownloadResult(
+                video = MediaRef(videoFile.toString(), MediaKind.VIDEO, mimeType = "video/mp4"),
+                fileSizeBytes = 4,
+            ),
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeAttachedVideoLinkResolver(durationSeconds = null)) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{video}"),
+                        videoDownload = LinkVideoDownloadConfig(
+                            cacheRoot = cacheRoot.toString(),
+                            maxDurationSeconds = 0,
+                        ),
+                    ),
+                )
+            },
+            sourceUpdatePublisher = RecordingSourceUpdatePublisher(),
+            videoDownloadersProvider = { listOf(downloader) },
+        )
+
+        service.parseAndDispatch(
+            text = "https://t.bilibili.com/334455",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(1, downloader.requests.size)
+    }
+
+    @Test
+    fun `dynamic attached video with unknown duration is rejected when duration limit enabled`() = runBlocking {
+        initDb("dynamic-attached-video-duration-limit")
+        val downloader = FakeVideoDownloader(
+            result = LinkVideoDownloadResult(
+                video = MediaRef("https://example.com/video.mp4", MediaKind.VIDEO),
+                fileSizeBytes = 4,
+            ),
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeAttachedVideoLinkResolver(durationSeconds = null)) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        templates = LinkParseTemplates(message = "{video}"),
+                        videoDownload = LinkVideoDownloadConfig(maxDurationSeconds = 300),
+                    ),
+                )
+            },
+            sourceUpdatePublisher = RecordingSourceUpdatePublisher(),
+            videoDownloadersProvider = { listOf(downloader) },
+        )
+
+        service.parseAndDispatch(
+            text = "https://t.bilibili.com/445566",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertTrue(downloader.requests.isEmpty())
+        val texts = MessageDeliveryRepository.findRecent(limit = 10)
+            .mapNotNull { message -> MessageDeliveryRepository.findMessage(message.messageId) }
+            .mapNotNull { message -> message.batches.single().content.singleOrNull() as? MessageContent.Text }
+            .map { text -> text.fallbackText }
+        assertTrue(texts.any { it.contains("时长未知") })
+    }
+
+    @Test
+    fun `dynamic attached video download failure only sends failure prompt`() = runBlocking {
+        initDb("dynamic-attached-video-failure")
+        val cacheRoot = createTempDirectory("dynamic-bot-attached-video-failure")
+        val downloader = FakeVideoDownloader(
+            result = LinkVideoDownloadResult(
+                video = MediaRef("https://example.com/video.mp4", MediaKind.VIDEO),
+                fileSizeBytes = 4,
+            ),
+            onRequest = { error("boom") },
+        )
+        val service = LinkParseService(
+            resolversProvider = { listOf(FakeAttachedVideoLinkResolver()) },
+            configProvider = {
+                MainDynamicConfig(
+                    linkParsing = LinkParsingConfig(
+                        // 让"无视频回退"可辨识：回退会渲染出「（demo video）」
+                        templates = LinkParseTemplates(message = "{video}（{title}）"),
+                        videoDownload = LinkVideoDownloadConfig(cacheRoot = cacheRoot.toString()),
+                    ),
+                )
+            },
+            sourceUpdatePublisher = RecordingSourceUpdatePublisher(),
+            videoDownloadersProvider = { listOf(downloader) },
+        )
+
+        service.parseAndDispatch(
+            text = "https://t.bilibili.com/556677",
+            context = commandEvent("").context,
+            maxLinks = 1,
+        )
+
+        assertEquals(1, downloader.requests.size)
+        val messages = MessageDeliveryRepository.findRecent(limit = 10)
+            .mapNotNull { message -> MessageDeliveryRepository.findMessage(message.messageId) }
+        // 卡片已通过来源更新发出；下载失败时是"下载中提示 + 失败提示"，且不再渲染"无视频"的回退卡片
+        assertEquals(2, messages.size)
+        assertTrue(messages.none { message -> message.batches.single().content.any { it is MessageContent.Video } })
+        val texts = messages
+            .mapNotNull { message -> message.batches.singleOrNull()?.content?.singleOrNull() as? MessageContent.Text }
+            .map { text -> text.fallbackText }
+        assertTrue(texts.any { it.contains("视频下载中") })
+        assertTrue(texts.any { it.contains("视频下载或推送未完成") })
+        assertFalse(texts.any { it.contains("（demo video）") })
+    }
+
+    @Test
     fun `video preview stats placeholder should render metrics`() = runBlocking {
         initDb("video-preview-stats")
         val service = LinkParseService(
@@ -1769,6 +1969,59 @@ class LinkParseServiceTest {
                     ),
                     durationSeconds = 120,
                 ),
+            )
+        }
+    }
+
+    private class FakeAttachedVideoLinkResolver(
+        private val publisher: PublisherInfo = testPublisherInfo(
+            key = testPublisherKey(platformId = "bilibili", externalId = "123"),
+            name = "demo-up",
+        ),
+        private val durationSeconds: Long? = 120,
+        private val withAttachedVideo: Boolean = true,
+    ) : LinkResolver {
+        override val platformId: PlatformId = PlatformId.of("bilibili")
+
+        override fun matchesLink(inputUrl: String): Boolean {
+            return inputUrl.startsWith("https://t.bilibili.com/")
+        }
+
+        override suspend fun parseLink(inputUrl: String): ParsedLink? {
+            val id = inputUrl.substringAfter("https://t.bilibili.com/", missingDelimiterValue = "")
+                .takeWhile { it.isDigit() }
+                .takeIf { it.isNotBlank() }
+                ?: return null
+            return ParsedLink(
+                platformId = platformId,
+                kind = LinkKinds.DYNAMIC,
+                targetId = id,
+                normalizedUrl = "https://t.bilibili.com/$id",
+                sourceUrl = inputUrl,
+            )
+        }
+
+        override suspend fun resolveLink(parsedLink: ParsedLink): LinkResolution {
+            val update = testDynamicUpdate(publisher = publisher, externalId = parsedLink.targetId)
+                .copy(link = parsedLink.normalizedUrl)
+            val attachedVideo = if (withAttachedVideo) {
+                LinkPreview(
+                    platformId = platformId,
+                    kind = LinkKinds.VIDEO,
+                    id = parsedLink.targetId,
+                    url = parsedLink.normalizedUrl,
+                    title = "demo video",
+                    cover = MediaRef("https://example.com/cover.png", MediaKind.IMAGE),
+                    publisher = publisher,
+                    durationSeconds = durationSeconds,
+                )
+            } else {
+                null
+            }
+            return LinkResolution.Dynamic(
+                parsedLink = parsedLink,
+                update = update,
+                attachedVideo = attachedVideo,
             )
         }
     }

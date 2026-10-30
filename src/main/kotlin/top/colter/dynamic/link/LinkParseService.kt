@@ -169,7 +169,14 @@ public class LinkParseService(
 
             results += runCatching {
                 when (val resolution = candidate.resolver.resolveLink(parsedLink)) {
-                    is LinkResolution.Dynamic -> forwardDynamic(resolution.update, parsedLink, context, correlationId)
+                    is LinkResolution.Dynamic -> forwardDynamic(
+                        update = resolution.update,
+                        attachedVideo = resolution.attachedVideo,
+                        parsedLink = parsedLink,
+                        context = context,
+                        inReplyTo = inReplyTo,
+                        correlationId = correlationId,
+                    )
                     is LinkResolution.Preview -> forwardPreview(resolution.preview, parsedLink, context, inReplyTo, correlationId)
                     is LinkResolution.Message -> forwardMessage(resolution.batches, parsedLink, context, correlationId)
                     is LinkResolution.Failed -> LinkParseItemResult.Failed(parsedLink, resolution.reason)
@@ -261,8 +268,10 @@ public class LinkParseService(
 
     private suspend fun forwardDynamic(
         update: SourceUpdate,
+        attachedVideo: LinkPreview?,
         parsedLink: ParsedLink,
         context: CommandContext,
+        inReplyTo: String?,
         correlationId: String?,
     ): LinkParseItemResult {
         val enrichedUpdate = enrichPublisherForLinkParse(update)
@@ -285,10 +294,34 @@ public class LinkParseService(
             return LinkParseItemResult.Failed(parsedLink, result.message.ifBlank { "链接转发失败" })
         }
 
-        return LinkParseItemResult.Forwarded(
+        val forwarded = LinkParseItemResult.Forwarded(
             parsedLink = parsedLink,
             target = context.target,
             deliveryCount = result.deliveryCount,
+        )
+        if (attachedVideo == null) return forwarded
+
+        // 动态里的视频是"附件"：卡片（含正文）已经通过来源更新发出，这里按模板补发视频。
+        val template = configProvider().linkParsing.templates.message
+        val templatePlan = runCatching { templateRenderer.plan(template) }.getOrElse { error ->
+            linkParseLogger.warn(error) {
+                "链接解析模板解析失败，跳过动态附带视频：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
+            }
+            return forwarded
+        }
+        if (!templatePlan.requiresVideo) return forwarded
+
+        return forwardVideoIfRequested(
+            templatePlan = templatePlan,
+            // 复用卡片已经补全过的发布者信息：附带视频的 publisher 通常没有 banner，
+            // 再走一次 enrich 会因 needsLookup() 触发一次平台接口查询，白白多打请求。
+            preview = attachedVideo.copy(publisher = enrichedUpdate.publisher),
+            parsedLink = parsedLink,
+            context = context,
+            inReplyTo = inReplyTo,
+            correlationId = correlationId,
+            currentResult = forwarded,
+            renderFallbackOnFailure = false,
         )
     }
 
@@ -339,19 +372,51 @@ public class LinkParseService(
             }
         }
 
+        return forwardVideoIfRequested(
+            templatePlan = templatePlan,
+            preview = enrichedPreview,
+            parsedLink = parsedLink,
+            context = context,
+            inReplyTo = inReplyTo,
+            correlationId = correlationId,
+            currentResult = currentResult,
+            renderFallbackOnFailure = true,
+        )
+    }
+
+    /**
+     * 模板要求视频（含 `{video}`）时的统一下载/发送流程。
+     *
+     * - 视频链接（[LinkResolution.Preview]）：[renderFallbackOnFailure] = true，失败时回退渲染一次"无视频"模板，
+     *   因为卡片本身就是链接解析的产物，需要兜底。
+     * - 动态附带视频（[LinkResolution.Dynamic.attachedVideo]）：动态卡片已经发过，失败时只发失败提示，
+     *   不重复渲染卡片，[renderFallbackOnFailure] = false。
+     */
+    private suspend fun forwardVideoIfRequested(
+        templatePlan: LinkPreviewTemplatePlan,
+        preview: LinkPreview,
+        parsedLink: ParsedLink,
+        context: CommandContext,
+        inReplyTo: String?,
+        correlationId: String?,
+        currentResult: LinkParseItemResult.Forwarded?,
+        renderFallbackOnFailure: Boolean,
+    ): LinkParseItemResult {
         if (!templatePlan.requiresVideo) {
-            return currentResult
-                ?: forwardMessage(
-                    listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText())))),
-                    parsedLink,
-                    context,
-                    correlationId,
-                )
+            return currentResult ?: forwardMessage(
+                listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))),
+                parsedLink,
+                context,
+                correlationId,
+            )
         }
 
-        val downloadPlan = when (val planned = videoDownloadPlan(enrichedPreview, parsedLink)) {
+        val downloadPlan = when (val planned = videoDownloadPlan(preview, parsedLink)) {
             null -> {
-                val fallbackBatches = renderVideoFallbackBatches(templatePlan, enrichedPreview, parsedLink)
+                if (!renderFallbackOnFailure) {
+                    return currentResult ?: LinkParseItemResult.Failed(parsedLink, "视频下载不可用")
+                }
+                val fallbackBatches = renderVideoFallbackBatches(templatePlan, preview, parsedLink)
                 return when {
                     fallbackBatches.isNotEmpty() -> {
                         val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context, correlationId)
@@ -360,7 +425,7 @@ public class LinkParseService(
                                 ?: fallbackResult
                             else -> currentResult
                                 ?: forwardMessage(
-                                    listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText())))),
+                                    listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))),
                                     parsedLink,
                                     context,
                                     correlationId,
@@ -369,7 +434,7 @@ public class LinkParseService(
                     }
                     currentResult != null -> currentResult
                     else -> forwardMessage(
-                        listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText())))),
+                        listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))),
                         parsedLink,
                         context,
                         correlationId,
@@ -384,7 +449,12 @@ public class LinkParseService(
                     inReplyTo = inReplyTo,
                     correlationId = correlationId,
                 )
-                val fallbackBatches = renderVideoFallbackBatches(templatePlan, enrichedPreview, parsedLink)
+                if (!renderFallbackOnFailure) {
+                    return currentResult?.withAdditionalDeliveries(feedback.deliveryCount)
+                        ?: videoPromptOnlyResult(feedback, parsedLink, context)
+                        ?: LinkParseItemResult.Failed(parsedLink, planned.message.ifBlank { "视频无法下载或推送" })
+                }
+                val fallbackBatches = renderVideoFallbackBatches(templatePlan, preview, parsedLink)
                 if (fallbackBatches.isNotEmpty()) {
                     val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context, correlationId)
                     return if (fallbackResult is LinkParseItemResult.Forwarded) {
@@ -411,35 +481,37 @@ public class LinkParseService(
             inReplyTo = inReplyTo,
             correlationId = correlationId,
         )
-        currentResult = currentResult?.withAdditionalDeliveries(downloadPrompt.deliveryCount)
+        val withPrompt = currentResult?.withAdditionalDeliveries(downloadPrompt.deliveryCount)
             ?: forwardedForContext(parsedLink, context, downloadPrompt.deliveryCount)
         val scope = backgroundScope
         if (scope != null && !templatePlan.requiresVideoInForward) {
             launchVideoDownloadFollowUp(
                 scope = scope,
                 templatePlan = templatePlan,
-                preview = enrichedPreview,
+                preview = preview,
                 parsedLink = parsedLink,
                 context = context,
                 downloader = downloadPlan.downloader,
-                currentResult = currentResult,
+                currentResult = withPrompt,
                 downloadPromptReceipt = downloadPrompt.receipt,
                 inReplyTo = inReplyTo,
                 correlationId = correlationId,
+                renderFallbackOnFailure = renderFallbackOnFailure,
             )
-            return currentResult
+            return withPrompt
         }
 
         return forwardVideoAfterDownload(
             templatePlan = templatePlan,
-            preview = enrichedPreview,
+            preview = preview,
             parsedLink = parsedLink,
             context = context,
             downloader = downloadPlan.downloader,
-            currentResult = currentResult,
+            currentResult = withPrompt,
             downloadPromptReceipt = downloadPrompt.receipt,
             inReplyTo = inReplyTo,
             correlationId = correlationId,
+            renderFallbackOnFailure = renderFallbackOnFailure,
         )
     }
 
@@ -454,10 +526,11 @@ public class LinkParseService(
         downloadPromptReceipt: LinkParseProgressReceipt?,
         inReplyTo: String?,
         correlationId: String?,
+        renderFallbackOnFailure: Boolean,
     ) {
         scope.launch {
             try {
-                forwardVideoAfterDownload(
+                val result = forwardVideoAfterDownload(
                     templatePlan = templatePlan,
                     preview = preview,
                     parsedLink = parsedLink,
@@ -467,7 +540,14 @@ public class LinkParseService(
                     downloadPromptReceipt = downloadPromptReceipt,
                     inReplyTo = inReplyTo,
                     correlationId = correlationId,
+                    renderFallbackOnFailure = renderFallbackOnFailure,
                 )
+                val addedDeliveries = (result.deliveryCount - currentResult.deliveryCount).coerceAtLeast(0)
+                if (addedDeliveries > 0) {
+                    linkParseLogger.info {
+                        "链接视频补发完成：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，附加投递=$addedDeliveries"
+                    }
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -488,6 +568,7 @@ public class LinkParseService(
         downloadPromptReceipt: LinkParseProgressReceipt?,
         inReplyTo: String?,
         correlationId: String?,
+        renderFallbackOnFailure: Boolean,
     ): LinkParseItemResult.Forwarded {
         try {
             val video = when (val outcome = downloadVideo(preview, parsedLink, downloader)) {
@@ -500,6 +581,9 @@ public class LinkParseService(
                         inReplyTo = inReplyTo,
                         correlationId = correlationId,
                     )
+                    if (!renderFallbackOnFailure) {
+                        return currentResult.withAdditionalDeliveries(feedback.deliveryCount)
+                    }
                     val fallbackBatches = runCatching {
                         templateRenderer.renderPlanVideoFallback(templatePlan, preview)
                     }.getOrElse { error ->
@@ -573,15 +657,21 @@ public class LinkParseService(
         }
 
         val duration = preview.durationSeconds
-        if (duration == null) {
+        // 与 videoDownloadPlan 保持同一规则：仅在设置了时长上限且时长未知时拒绝。
+        if (duration == null && config.maxDurationSeconds > 0) {
             linkParseLogger.info {
-                "链接视频下载跳过：时长未知，platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}"
+                "链接视频下载跳过：时长未知且设置了时长上限，platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，max=${config.maxDurationSeconds}"
             }
             return VideoDownloadOutcome.NotSent(
-                videoFailurePrompt(config, preview, parsedLink, "视频时长未知"),
+                videoFailurePrompt(
+                    config,
+                    preview,
+                    parsedLink,
+                    "视频时长未知；如需下载，可在后台把「最大视频时长」设为 0 或调大",
+                ),
             )
         }
-        if (config.maxDurationSeconds > 0 && duration > config.maxDurationSeconds) {
+        if (duration != null && config.maxDurationSeconds > 0 && duration > config.maxDurationSeconds) {
             linkParseLogger.info {
                 "链接视频下载跳过：时长超限，platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，duration=$duration，max=${config.maxDurationSeconds}"
             }
@@ -659,12 +749,19 @@ public class LinkParseService(
         if (preview.kind != LinkKinds.VIDEO) return null
 
         val duration = preview.durationSeconds
-        if (duration == null) {
+        // 时长未知时：只有明确设置了时长上限才拒绝（无法判断是否超限）。
+        // 上限为 0 表示用户不要时长限制，此时允许下载，大小由 maxFileBytes 与下载器自身校验兜底。
+        if (duration == null && config.maxDurationSeconds > 0) {
             return VideoDownloadPlan.NotSent(
-                videoFailurePrompt(config, preview, parsedLink, "视频时长未知"),
+                videoFailurePrompt(
+                    config,
+                    preview,
+                    parsedLink,
+                    "视频时长未知；如需下载，可在后台把「最大视频时长」设为 0 或调大",
+                ),
             )
         }
-        if (config.maxDurationSeconds > 0 && duration > config.maxDurationSeconds) {
+        if (duration != null && config.maxDurationSeconds > 0 && duration > config.maxDurationSeconds) {
             return VideoDownloadPlan.NotSent(
                 videoFailurePrompt(
                     config,
