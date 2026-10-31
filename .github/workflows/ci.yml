@@ -47,6 +47,18 @@ jobs:
       - name: Run tests and build application jar
         run: ./gradlew --no-daemon test fatJar
 
+      - name: Set up release validation Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Check release packaging
+        run: |
+          python3 -m pip install -r scripts/requirements-release.txt
+          python3 -m unittest discover -s scripts -p 'test_*.py'
+          bash -n scripts/package-release.sh
+          bash -n scripts/package-official-plugins.sh
+
       - name: Upload application jar
         uses: actions/upload-artifact@v4
         with:
@@ -143,6 +155,14 @@ jobs:
       - name: Make release scripts executable
         run: chmod +x ./scripts/*.sh
 
+      - name: Set up release validation Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install release validation dependencies
+        run: python3 -m pip install -r scripts/requirements-release.txt
+
       - name: Download application jar
         uses: actions/download-artifact@v4
         with:
@@ -204,6 +224,10 @@ jobs:
 
           官方插件合集：
           - \`dynamic-bot-v${image_version}-official-plugins.zip\`：包含本版本推荐搭配的 Bilibili、微博、OneBot 和 QQ 官方机器人插件。
+
+          升级注意：
+          - 本版本使用插件 API 4，旧 API 3 插件需要配套更新。
+          - 升级前停止程序并备份 \`config/\`、\`data/\`；手动替换插件时移除对应旧 JAR，同一插件只保留一个 JAR。
 
           Docker 镜像：
           - \`ghcr.io/colter23/dynamic-bot:${image_version}\`

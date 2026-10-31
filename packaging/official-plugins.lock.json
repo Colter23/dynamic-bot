@@ -1,37 +1,38 @@
 {
   "schemaVersion": 1,
+  "apiVersion": "4.0.0",
   "plugins": [
     {
       "id": "bilibili-publisher",
       "name": "Bilibili 动态源插件",
       "repo": "Colter23/dynamic-bot-bilibili",
-      "version": "0.0.7",
-      "tag": "v0.0.7",
-      "asset": "dynamic-bot-bilibili-0.0.7-all.jar"
+      "version": "0.0.8",
+      "tag": "v0.0.8",
+      "asset": "dynamic-bot-bilibili-0.0.8-all.jar"
     },
     {
       "id": "onebot-gateway",
       "name": "OneBot 网关插件",
       "repo": "Colter23/dynamic-bot-onebot",
-      "version": "0.0.7",
-      "tag": "v0.0.7",
-      "asset": "dynamic-bot-onebot-0.0.7-all.jar"
+      "version": "0.0.8",
+      "tag": "v0.0.8",
+      "asset": "dynamic-bot-onebot-0.0.8-all.jar"
     },
     {
       "id": "weibo-publisher",
       "name": "微博动态源插件",
       "repo": "Colter23/dynamic-bot-weibo",
-      "version": "0.0.3",
-      "tag": "v0.0.3",
-      "asset": "dynamic-bot-weibo-0.0.3-all.jar"
+      "version": "0.0.4",
+      "tag": "v0.0.4",
+      "asset": "dynamic-bot-weibo-0.0.4-all.jar"
     },
     {
       "id": "qqbot-gateway",
       "name": "QQ 官方机器人插件",
       "repo": "Colter23/dynamic-bot-qqbot",
-      "version": "0.0.1",
-      "tag": "v0.0.1",
-      "asset": "dynamic-bot-qqbot-0.0.1-all.jar"
+      "version": "0.0.2",
+      "tag": "v0.0.2",
+      "asset": "dynamic-bot-qqbot-0.0.2-all.jar"
     }
   ]
 }

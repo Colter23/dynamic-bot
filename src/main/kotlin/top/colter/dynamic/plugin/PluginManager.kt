@@ -427,6 +427,7 @@ public class PluginManager(
             ensureNoConflictingJar(pluginId, targetFile)
 
             val oldVersion = existing?.descriptor?.version
+                ?: targetFile.takeIf(File::isFile)?.let { scanner.parsePluginDescriptor(it).version }
             val oldState = existing?.state
             val shouldStartAfterLoad = oldState == PluginState.ACTIVE || (existing == null && startAfterInstall)
             val backupFile = targetFile.resolveSibling("${targetFile.name}.${System.currentTimeMillis()}.bak")
@@ -836,7 +837,21 @@ public class PluginManager(
                     file.extension.equals("jar", ignoreCase = true)
             }
 
-        return existingFile ?: pluginDir.resolve("$pluginId.jar").canonicalFile
+        if (existingFile != null) return existingFile
+
+        // API 不兼容等加载失败不会注册 runtime，安装新版时仍需替换磁盘上的原 JAR。
+        val diskPlugins = scanner.scanForPlugins().filter { it.descriptor.id == pluginId }
+        require(diskPlugins.size <= 1) {
+            "插件 ID 重复：$pluginId，冲突文件=${diskPlugins.joinToString { it.jarFile.name }}"
+        }
+        val diskFile = diskPlugins.singleOrNull()?.jarFile?.canonicalFile
+        if (diskFile != null) {
+            require(diskFile.parentFile == pluginDirCanonical) {
+                "插件文件不在插件目录内：$pluginId"
+            }
+            return diskFile
+        }
+        return pluginDir.resolve("$pluginId.jar").canonicalFile
     }
 
     private fun ensureNoConflictingJar(pluginId: String, targetFile: File) {
@@ -946,7 +961,7 @@ public class PluginManager(
             logger.warn(it) { "插件安装更新回滚文件失败：pluginId=$pluginId" }
         }
 
-        if ((backupCreated || shouldRestoreExisting) && targetFile.exists()) {
+        if (shouldRestoreExisting && targetFile.exists()) {
             runCatching {
                 val descriptor = scanner.parsePluginDescriptor(targetFile)
                 loadPlugin(PluginScanner.ScanResult(descriptor, targetFile))

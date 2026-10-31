@@ -2673,6 +2673,10 @@ class AdminServerTest {
         private val sha256: String = "a".repeat(64),
     ) : PluginCatalogDownloader {
         override fun downloadToByteArray(url: String, timeoutSeconds: Double, maxBytes: Long): ByteArray {
+            if (url.endsWith("/plugin.yml")) {
+                return "id: demo-plugin\nname: Demo Plugin\nversion: 1.0.0\nmainClass: Demo\napiVersion: ${top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION}"
+                    .toByteArray(Charsets.UTF_8)
+            }
             if (!url.contains("api.github.com/repos/")) return catalogBytes
             return """
                 {
@@ -2684,6 +2688,11 @@ class AdminServerTest {
                       "browser_download_url": "https://github.com/Colter23/demo-plugin/releases/download/v1.0.0/demo-plugin-1.0.0-all.jar",
                       "size": 128,
                       "digest": "sha256:$sha256"
+                    },
+                    {
+                      "name": "plugin.yml",
+                      "browser_download_url": "https://github.com/Colter23/demo-plugin/releases/download/v1.0.0/plugin.yml",
+                      "size": 128
                     }
                   ]
                 }

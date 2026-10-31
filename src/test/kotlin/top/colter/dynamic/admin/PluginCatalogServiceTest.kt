@@ -75,6 +75,77 @@ class PluginCatalogServiceTest {
     }
 
     @Test
+    fun catalogShouldRejectIncompatibleReleaseBeforeDownloadingJar() {
+        val service = service(
+            catalogBytes = catalogJson(item("demo-plugin")).toByteArray(Charsets.UTF_8),
+            releaseApiVersion = "3.0.0",
+        )
+
+        val plugin = service.catalog().plugins.single()
+
+        assertEquals("3.0.0", plugin.apiVersion)
+        assertEquals("INCOMPATIBLE", plugin.catalogStatus)
+        assertFalse(plugin.updateAvailable)
+        assertTrue(assertFailsWith<IllegalArgumentException> { service.install("demo-plugin") }
+            .message!!.contains("API 版本不兼容"))
+    }
+
+    @Test
+    fun catalogShouldAcceptCompatibleApiMinorVersion() {
+        val api = CORE_PLUGIN_API_VERSION.substringBefore('.') + ".1.0"
+        val service = service(
+            catalogBytes = catalogJson(item("demo-plugin")).toByteArray(Charsets.UTF_8),
+            releaseApiVersion = api,
+        )
+
+        assertEquals("NOT_INSTALLED", service.catalog().plugins.single().catalogStatus)
+    }
+
+    @Test
+    fun catalogShouldFailClosedWhenReleaseDescriptorIsMissingOrInvalid() {
+        val catalog = catalogJson(item("demo-plugin")).toByteArray(Charsets.UTF_8)
+        val missing = service(catalogBytes = catalog, includeDescriptor = false).catalog().plugins.single()
+        assertEquals("RESOLVE_FAILED", missing.catalogStatus)
+        assertTrue(missing.error!!.contains("plugin.yml"))
+        for (descriptor in listOf(
+            "id: wrong\nname: wrong\nversion: 1.0.0\nmainClass: Demo\napiVersion: $CORE_PLUGIN_API_VERSION",
+            "id: demo-plugin\nname: Demo\nversion: 2.0.0\nmainClass: Demo\napiVersion: $CORE_PLUGIN_API_VERSION",
+            "id: demo-plugin\nname: Demo\nversion: 1.0.0\nmainClass: Demo",
+        )) {
+            assertEquals("RESOLVE_FAILED", service(catalogBytes = catalog, descriptorOverride = descriptor)
+                .catalog().plugins.single().catalogStatus)
+        }
+    }
+
+    @Test
+    fun catalogShouldSelectReleaseTagForCurrentApiMajor() {
+        val requests = mutableListOf<String>()
+        val source = item("demo-plugin").replace(
+            "\"provider\": \"GITHUB_RELEASE\",",
+            "\"provider\": \"GITHUB_RELEASE\", \"tag\": \"v0.9.0\", \"tagsByApiMajor\": {\"4\": \"v1.0.0\"},",
+        )
+        val service = service(
+            catalogBytes = catalogJson(source).toByteArray(Charsets.UTF_8), requests = requests,
+        )
+
+        service.catalog()
+
+        assertTrue(requests.any { it.endsWith("/releases/tags/v1.0.0") })
+        assertFalse(requests.any { it.endsWith("/releases/tags/v0.9.0") })
+    }
+
+    @Test
+    fun installShouldRejectDescriptorThatDisagreesWithJar() {
+        val service = service(
+            catalogBytes = catalogJson(item("demo-plugin")).toByteArray(Charsets.UTF_8),
+            jarBytes = pluginJarBytes("demo-plugin", "1.0.0", "3.0.0"),
+        )
+
+        assertTrue(assertFailsWith<IllegalArgumentException> { service.install("demo-plugin") }
+            .message!!.contains("Jar API 版本不匹配"))
+    }
+
+    @Test
     fun catalogShouldRejectInvalidReleaseSource() {
         val catalog = catalogJson(
             """
@@ -300,6 +371,10 @@ class PluginCatalogServiceTest {
         includeDigest: Boolean = true,
         unsafeAssetUrl: Boolean = false,
         checksumOverride: String? = null,
+        releaseApiVersion: String = CORE_PLUGIN_API_VERSION,
+        includeDescriptor: Boolean = true,
+        descriptorOverride: String? = null,
+        requests: MutableList<String> = mutableListOf(),
         installer: (File, String, String, Boolean, Boolean) -> PluginInstallResult = { _, id, version, _, _ ->
             PluginInstallResult(
                 pluginId = id,
@@ -330,6 +405,10 @@ class PluginCatalogServiceTest {
                 includeDigest = includeDigest,
                 unsafeAssetUrl = unsafeAssetUrl,
                 checksumOverride = checksumOverride,
+                releaseApiVersion = releaseApiVersion,
+                includeDescriptor = includeDescriptor,
+                descriptorOverride = descriptorOverride,
+                requests = requests,
             ),
             clock = { 1000L },
         )
@@ -381,7 +460,7 @@ class PluginCatalogServiceTest {
         """.trimIndent()
     }
 
-    private fun pluginJarBytes(id: String, version: String): ByteArray {
+    private fun pluginJarBytes(id: String, version: String, apiVersion: String = CORE_PLUGIN_API_VERSION): ByteArray {
         val output = ByteArrayOutputStream()
         JarOutputStream(output).use { jar ->
             jar.putNextEntry(JarEntry("plugin.yml"))
@@ -391,7 +470,7 @@ class PluginCatalogServiceTest {
                     name: $id
                     version: $version
                     mainClass: top.colter.dynamic.plugin.LifecycleRecordingPlugin
-                    apiVersion: $CORE_PLUGIN_API_VERSION
+                    apiVersion: $apiVersion
                 """.trimIndent().toByteArray(Charsets.UTF_8),
             )
             jar.closeEntry()
@@ -412,11 +491,24 @@ class PluginCatalogServiceTest {
         private val includeDigest: Boolean = true,
         private val unsafeAssetUrl: Boolean = false,
         private val checksumOverride: String? = null,
+        private val releaseApiVersion: String = CORE_PLUGIN_API_VERSION,
+        private val includeDescriptor: Boolean = true,
+        private val descriptorOverride: String? = null,
+        private val requests: MutableList<String> = mutableListOf(),
     ) : PluginCatalogDownloader {
         override fun downloadToByteArray(url: String, timeoutSeconds: Double, maxBytes: Long): ByteArray {
+            requests += url
             return when {
                 url.contains("api.github.com/repos/") -> releaseJson(url).toByteArray(Charsets.UTF_8)
                 url.endsWith(".sha256") -> checksumText(url).toByteArray(Charsets.UTF_8)
+                url.endsWith("/plugin.yml") -> {
+                    val repo = url.substringAfter("github.com/").substringBefore("/releases/")
+                    val id = com.fasterxml.jackson.databind.ObjectMapper().readTree(catalogBytes)
+                        ?.get("plugins")?.firstOrNull { it["release"]["repository"].asText() == repo }
+                        ?.get("id")?.asText() ?: repo.substringAfterLast('/')
+                    (descriptorOverride ?: "id: $id\nname: $id\nversion: $releaseVersion\nmainClass: Demo\napiVersion: $releaseApiVersion")
+                        .toByteArray(Charsets.UTF_8)
+                }
                 else -> catalogBytes
             }
         }
@@ -446,6 +538,9 @@ class PluginCatalogServiceTest {
             }
             val checksumUrl = "https://github.com/$repo/releases/download/v$releaseVersion/$jarName.sha256"
             val digest = if (includeDigest) """, "digest": "sha256:${sha256(jarBytes)}"""" else ""
+            val descriptorAsset = if (includeDescriptor) {
+                """, {"name": "plugin.yml", "browser_download_url": "https://github.com/$repo/releases/download/v$releaseVersion/plugin.yml", "size": 256}"""
+            } else ""
             return """
                 {
                   "tag_name": "v$releaseVersion",
@@ -460,7 +555,7 @@ class PluginCatalogServiceTest {
                       "name": "$jarName.sha256",
                       "browser_download_url": "$checksumUrl",
                       "size": 96
-                    }
+                    }$descriptorAsset
                   ]
                 }
             """.trimIndent()

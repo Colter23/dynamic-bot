@@ -166,12 +166,71 @@ class PluginManagerInstallUpdateTest {
         )
     }
 
+    @Test
+    fun installShouldReplaceIncompatibleVersionedJarWithoutDuplicate() {
+        val pluginDir = createTempDirectory("plugin-api-upgrade").toFile()
+        val downloadDir = createTempDirectory("plugin-api-upgrade-download").toFile()
+        val oldJar = createPluginJar(pluginDir, "catalog-plugin", "1.0.0",
+            fileName = "catalog-plugin-1.0.0-all.jar", apiVersion = "3.0.0")
+        val manager = PluginManager(pluginDirPath = pluginDir.path)
+        assertTrue(manager.loadAllPlugins().failedPlugins.containsKey("catalog-plugin"))
+        val downloaded = createPluginJar(downloadDir, "catalog-plugin", "1.1.0", fileName = "new.tmp")
+
+        val result = manager.installOrUpdatePluginJar(downloaded, "catalog-plugin", "1.1.0")
+
+        assertEquals("1.0.0", result.oldVersion)
+        assertEquals(PluginState.ACTIVE, manager.getAllPlugins().single().state)
+        assertEquals(oldJar.canonicalPath, File(manager.getAllPlugins().single().sourceJarPath).canonicalPath)
+        assertEquals(listOf(oldJar.name), pluginDir.listFiles()!!.map { it.name })
+    }
+
+    @Test
+    fun failedIncompatibleUpgradeShouldRestoreOriginalBytesWithoutLoadingOldPlugin() {
+        val pluginDir = createTempDirectory("plugin-api-upgrade-rollback").toFile()
+        val downloadDir = createTempDirectory("plugin-api-upgrade-rollback-download").toFile()
+        val oldJar = createPluginJar(pluginDir, "catalog-plugin", "1.0.0",
+            fileName = "catalog-plugin-1.0.0-all.jar", apiVersion = "3.0.0")
+        val original = oldJar.readBytes()
+        val manager = PluginManager(pluginDirPath = pluginDir.path)
+        manager.loadAllPlugins()
+        val downloaded = createPluginJar(downloadDir, "catalog-plugin", "1.1.0",
+            fileName = "broken.tmp", mainClass = "missing.Plugin")
+
+        assertFailsWith<ClassNotFoundException> {
+            manager.installOrUpdatePluginJar(downloaded, "catalog-plugin", "1.1.0")
+        }
+
+        assertTrue(original.contentEquals(oldJar.readBytes()))
+        assertTrue(manager.getAllPlugins().isEmpty())
+        assertEquals(listOf(oldJar.name), pluginDir.listFiles()!!.map { it.name })
+    }
+
+    @Test
+    fun installShouldRejectAmbiguousDuplicateJarsWithoutChangingFiles() {
+        val pluginDir = createTempDirectory("plugin-api-duplicate").toFile()
+        val downloadDir = createTempDirectory("plugin-api-duplicate-download").toFile()
+        val first = createPluginJar(pluginDir, "catalog-plugin", "1.0.0", fileName = "first.jar", apiVersion = "3.0.0")
+        val second = createPluginJar(pluginDir, "catalog-plugin", "1.0.0", fileName = "second.jar", apiVersion = "3.0.0")
+        val original = listOf(first.readBytes(), second.readBytes())
+        val downloaded = createPluginJar(downloadDir, "catalog-plugin", "1.1.0", fileName = "new.tmp")
+        val manager = PluginManager(pluginDirPath = pluginDir.path)
+
+        assertTrue(assertFailsWith<IllegalArgumentException> {
+            manager.installOrUpdatePluginJar(downloaded, "catalog-plugin", "1.1.0")
+        }.message!!.contains("插件 ID 重复"))
+
+        assertTrue(original[0].contentEquals(first.readBytes()))
+        assertTrue(original[1].contentEquals(second.readBytes()))
+        assertTrue(downloaded.exists())
+    }
+
     private fun createPluginJar(
         pluginDir: File,
         id: String,
         version: String,
         fileName: String = "$id.jar",
         mainClass: String = LifecycleRecordingPlugin::class.java.name,
+        apiVersion: String = CORE_PLUGIN_API_VERSION,
     ): File {
         val jarFile = pluginDir.resolve(fileName)
         JarOutputStream(FileOutputStream(jarFile)).use { output ->
@@ -182,7 +241,7 @@ class PluginManagerInstallUpdateTest {
                     name: Test Plugin $id
                     version: $version
                     mainClass: $mainClass
-                    apiVersion: $CORE_PLUGIN_API_VERSION
+                    apiVersion: $apiVersion
                 """.trimIndent().toByteArray(Charsets.UTF_8),
             )
             output.closeEntry()

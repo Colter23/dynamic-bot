@@ -11,6 +11,7 @@ import top.colter.dynamic.NetworkProxyConfig
 import top.colter.dynamic.NetworkProxyType
 import top.colter.dynamic.PluginCatalogConfig
 import top.colter.dynamic.core.plugin.CORE_PLUGIN_API_VERSION
+import top.colter.dynamic.core.plugin.PluginDescriptor
 import top.colter.dynamic.plugin.PluginInfo
 import top.colter.dynamic.plugin.PluginInstallResult
 import top.colter.dynamic.plugin.PluginScanner
@@ -228,6 +229,28 @@ public class PluginCatalogService(
             .takeIf { it.isNotBlank() }
             ?.removePrefix("v")
             ?: error("GitHub Release 缺少 tag_name：repo=${releaseSource.repository}")
+        val descriptorAsset = release.assets.firstOrNull { it.name == "plugin.yml" }
+            ?: error("插件发布缺少 plugin.yml，无法确认 API 兼容性：repo=${releaseSource.repository}，tag=${release.tagName}")
+        require(descriptorAsset.size in 1..PLUGIN_DESCRIPTOR_MAX_BYTES) {
+            "插件描述文件大小无效：repo=${releaseSource.repository}"
+        }
+        requireHttpsUrl(descriptorAsset.browserDownloadUrl, "插件描述文件下载地址")
+        val descriptorBytes = downloader.downloadToByteArray(
+            url = descriptorAsset.browserDownloadUrl,
+            timeoutSeconds = config.downloadTimeoutSeconds,
+            maxBytes = PLUGIN_DESCRIPTOR_MAX_BYTES,
+        )
+        val descriptorTree = yamlMapper.readTree(descriptorBytes)
+        require(descriptorTree?.get("apiVersion")?.isTextual == true) {
+            "插件发布描述缺少 apiVersion：pluginId=${source.id}"
+        }
+        val descriptor = yamlMapper.treeToValue(descriptorTree, PluginDescriptor::class.java)
+        require(descriptor.id == source.id && descriptor.version == version) {
+            "插件发布描述不匹配：catalog=${source.id}，tag=$version，descriptor=${descriptor.id}:${descriptor.version}"
+        }
+        require(Regex("^[0-9]+\\.[0-9]+\\.[0-9]+$").matches(descriptor.apiVersion)) {
+            "插件发布的 API 版本无效：pluginId=${source.id}，apiVersion=${descriptor.apiVersion}"
+        }
         val sha256 = asset.digest.sha256FromDigest()
             ?: fetchReleaseChecksum(releaseSource, release, asset, config)
 
@@ -236,7 +259,7 @@ public class PluginCatalogService(
             name = source.name,
             version = version,
             description = source.description,
-            apiVersion = CORE_PLUGIN_API_VERSION,
+            apiVersion = descriptor.apiVersion,
             downloadUrl = asset.browserDownloadUrl,
             sha256 = sha256,
             sizeBytes = asset.size,
@@ -250,7 +273,13 @@ public class PluginCatalogService(
         source: PluginReleaseSource,
         config: PluginCatalogConfig,
     ): GitHubReleaseResponse {
-        val releasePath = source.tag
+        val selectedTag = if (source.tagsByApiMajor.isEmpty()) {
+            source.tag
+        } else {
+            source.tagsByApiMajor[CORE_PLUGIN_API_VERSION.substringBefore('.')]
+                ?: error("插件没有适用于当前 API 的发布源：repo=${source.repository}，api=$CORE_PLUGIN_API_VERSION")
+        }
+        val releasePath = selectedTag
             ?.trim()
             ?.takeIf { it.isNotBlank() && !it.equals("latest", ignoreCase = true) }
             ?.let { "tags/${urlPathSegment(it)}" }
@@ -372,7 +401,7 @@ public class PluginCatalogService(
     }
 
     private fun requireInstallable(item: PluginCatalogItem) {
-        require(item.apiVersion == CORE_PLUGIN_API_VERSION) {
+        require(item.apiVersion.hasCompatibleApiMajor()) {
             "插件 API 版本不兼容：pluginId=${item.id}，catalog=${item.apiVersion}，current=$CORE_PLUGIN_API_VERSION"
         }
         requireHttpsUrl(item.downloadUrl, "插件下载地址")
@@ -455,7 +484,7 @@ public class PluginCatalogService(
     }
 
     private fun PluginCatalogItem.catalogStatus(installed: PluginInfo?): PluginCatalogStatus {
-        if (apiVersion != CORE_PLUGIN_API_VERSION) return PluginCatalogStatus.INCOMPATIBLE
+        if (!apiVersion.hasCompatibleApiMajor()) return PluginCatalogStatus.INCOMPATIBLE
         if (installed == null) return PluginCatalogStatus.NOT_INSTALLED
         return if (comparePluginVersions(version, installed.descriptor.version) > 0) {
             PluginCatalogStatus.UPDATE_AVAILABLE
@@ -500,6 +529,9 @@ public class PluginCatalogService(
             "插件 $pluginId 的 GitHub 仓库格式无效，应为 owner/repo"
         }
         require(source.assetPattern.isNotBlank()) { "插件 $pluginId 的 assetPattern 不能为空" }
+        require(source.tagsByApiMajor.all { (major, tag) -> major.toIntOrNull() != null && tag.isNotBlank() }) {
+            "插件 $pluginId 的 tagsByApiMajor 必须包含有效 API 主版本和发布标签"
+        }
         source.checksumAssetPattern
             ?.takeIf { it.isBlank() }
             ?.let { throw IllegalArgumentException("插件 $pluginId 的 checksumAssetPattern 不能为空字符串") }
@@ -526,6 +558,7 @@ public class PluginCatalogService(
         private const val CATALOG_MAX_BYTES: Long = 2L * 1024L * 1024L
         private const val GITHUB_RELEASE_MAX_BYTES: Long = 512L * 1024L
         private const val CHECKSUM_MAX_BYTES: Long = 64L * 1024L
+        private const val PLUGIN_DESCRIPTOR_MAX_BYTES: Long = 64L * 1024L
         private val PLUGIN_ID_REGEX = Regex("^[a-zA-Z0-9._-]+$")
         private val GITHUB_REPOSITORY_REGEX = Regex("^[a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+$")
         private val SHA256_REGEX = Regex("^[a-fA-F0-9]{64}$")
@@ -729,6 +762,7 @@ private data class PluginReleaseSource(
     val provider: String = "GITHUB_RELEASE",
     val repository: String,
     val tag: String? = null,
+    val tagsByApiMajor: Map<String, String> = emptyMap(),
     val assetPattern: String,
     val checksumAssetPattern: String? = null,
 )
@@ -795,6 +829,9 @@ private enum class PluginCatalogStatus {
     INCOMPATIBLE,
     RESOLVE_FAILED,
 }
+
+private fun String.hasCompatibleApiMajor(): Boolean =
+    substringBefore('.').toIntOrNull() == CORE_PLUGIN_API_VERSION.substringBefore('.').toIntOrNull()
 
 private fun requireHttpsUrl(url: String, label: String) {
     val scheme = runCatching { URI(url).scheme }.getOrNull()

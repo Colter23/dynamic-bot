@@ -43,6 +43,7 @@ bin/
 .DS_Store
 
 .kotlin
+__pycache__/
 **/src/test/resources/output*
 **/src/test/resources/cookie.json
 /config/
