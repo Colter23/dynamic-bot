@@ -253,6 +253,65 @@ class IncomingMessagePipelineTest {
     }
 
     @Test
+    fun `handle should dispatch duplicated trace id only once`() = runBlocking {
+        val eventBus = EventBus()
+        val recordedTraceIds = mutableSetOf<String>()
+        var recordCalls = 0
+        var dispatched = 0
+        val pipeline = pipeline(
+            eventBus = eventBus,
+            incomingConsumerDispatcher = { dispatched += 1 },
+            auditRecorder = IncomingMessageAuditRecorder { request ->
+                recordCalls += 1
+                synchronized(recordedTraceIds) { recordedTraceIds.add(request.traceId) }
+            },
+        )
+        val request = IncomingMessagePublishRequest(
+            message = testMessage(text = "/db help", messageId = "message-dup"),
+            traceId = "trace-dup",
+        )
+
+        pipeline.handle("onebot", request)
+        pipeline.handle("onebot", request)
+
+        assertEquals(2, recordCalls, "两次投递都应尝试写审计")
+        assertEquals(1, dispatched, "重复消息不应再次分发，否则命令会执行两遍")
+        eventBus.shutdown()
+    }
+
+    @Test
+    fun `handle should dispatch messages with different trace ids`() = runBlocking {
+        val eventBus = EventBus()
+        val recordedTraceIds = mutableSetOf<String>()
+        var dispatched = 0
+        val pipeline = pipeline(
+            eventBus = eventBus,
+            incomingConsumerDispatcher = { dispatched += 1 },
+            auditRecorder = IncomingMessageAuditRecorder { request ->
+                synchronized(recordedTraceIds) { recordedTraceIds.add(request.traceId) }
+            },
+        )
+
+        pipeline.handle(
+            "onebot",
+            IncomingMessagePublishRequest(
+                message = testMessage(text = "/db help", messageId = "message-a"),
+                traceId = "trace-a",
+            ),
+        )
+        pipeline.handle(
+            "onebot",
+            IncomingMessagePublishRequest(
+                message = testMessage(text = "/db help", messageId = "message-b"),
+                traceId = "trace-b",
+            ),
+        )
+
+        assertEquals(2, dispatched)
+        eventBus.shutdown()
+    }
+
+    @Test
     fun `handle should route command messages only to command event and mark dispatch context`() = runBlocking {
         val eventBus = EventBus()
         val commandEvent = CompletableDeferred<CommandEvent>()

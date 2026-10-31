@@ -4,6 +4,7 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.EncodeHintType
 import com.google.zxing.qrcode.QRCodeWriter
 import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -267,8 +268,14 @@ public class CommandListener(
         )
 
         val started = System.nanoTime()
-        val result = runCatching { match.handler.handle(invocation) }
-            .getOrElse { CommandExecutionResult.failed("命令执行失败：${it.message}") }
+        val result = try {
+            match.handler.handle(invocation)
+        } catch (e: CancellationException) {
+            // 取消必须原样抛出：关机/超时时不能被当成"命令执行失败"再走一遍审计与回复。
+            throw e
+        } catch (error: Throwable) {
+            CommandExecutionResult.failed("命令执行失败：${error.message}")
+        }
         recordCommandProcessing(
             event = event,
             stage = IncomingProcessingStage.COMMAND_EXECUTE,
@@ -281,7 +288,13 @@ public class CommandListener(
         )
 
         reply(event, result)
-        runCatching { result.afterReply?.invoke() }
+        try {
+            result.afterReply?.invoke()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (error: Throwable) {
+            commandListenerLogger.warn(error) { "命令收尾动作失败：commandPath=$commandPath" }
+        }
     }
 
     private fun reply(event: CommandEvent, result: CommandExecutionResult) {
@@ -1142,6 +1155,9 @@ private class ForwardCommandHandler(
             .mapNotNull { it.trim().takeIf(String::isNotBlank) }
             .distinct()
         if (targetIds.isEmpty()) return failed("消息目标 ID 不能为空")
+        if (targetIds.size > MAX_FORWARD_TARGETS) {
+            return failed("一次最多转发到 $MAX_FORWARD_TARGETS 个目标，请分批操作")
+        }
 
         val text = invocation.args.drop(3).joinToString(" ").trim()
         if (text.isBlank()) return failed("转发内容不能为空")
@@ -1162,6 +1178,11 @@ private class ForwardCommandHandler(
         return success(
             "已创建转发任务：目标=${result.targetCount}，新增投递=${result.newDeliveryCount}，已存在=${result.existingDeliveryCount}",
         )
+    }
+
+    private companion object {
+        /** 单条命令允许的目标上限，避免误贴一大段 ID 时瞬间产生海量投递。 */
+        private const val MAX_FORWARD_TARGETS: Int = 50
     }
 }
 

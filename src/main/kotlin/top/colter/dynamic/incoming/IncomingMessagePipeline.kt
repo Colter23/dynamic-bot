@@ -97,15 +97,6 @@ internal class IncomingMessagePipeline(
             return
         }
 
-        eventBus.broadcast(
-            IncomingMessageEvent(
-                sourcePlugin = sourcePlugin,
-                message = message,
-                traceId = traceId,
-                replyToMessageId = replyToMessageId,
-            ),
-        )
-
         val dispatchContext = IncomingMessageDispatchContext(
             message = message,
             sourcePlugin = sourcePlugin,
@@ -117,7 +108,7 @@ internal class IncomingMessagePipeline(
         )
         val recordPolicy = resolveRecordPolicy(intent, request.recordPolicyHint, auditModeResolver(dispatchContext))
         if (recordPolicy != IncomingMessageRecordPolicy.None) {
-            auditRecorder.recordMessage(
+            val recorded = auditRecorder.recordMessage(
                 IncomingAuditWriteRequest(
                     sourcePlugin = sourcePlugin,
                     message = message,
@@ -130,7 +121,22 @@ internal class IncomingMessagePipeline(
                     sourceEventId = request.sourceEventId,
                 ),
             )
+            // recordMessage 以 traceId 去重：同一条平台消息被重复投递时返回 false。
+            // 此时整条消息都不再往下走，避免观测、插件消费与命令被执行两遍。
+            if (!recorded) {
+                return
+            }
         }
+
+        eventBus.broadcast(
+            IncomingMessageEvent(
+                sourcePlugin = sourcePlugin,
+                message = message,
+                traceId = traceId,
+                replyToMessageId = replyToMessageId,
+            ),
+        )
+
         if (intent == IncomingMessageIntent.Command) {
             if (shouldDispatchCommand(commandContext)) {
                 eventBus.broadcast(

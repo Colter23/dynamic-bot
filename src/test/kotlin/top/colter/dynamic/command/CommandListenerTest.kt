@@ -930,6 +930,42 @@ class CommandListenerTest {
     }
 
     @Test
+    fun forwardShouldRejectTooManyTargets() = runBlocking {
+        initDb("command-forward-limit")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = adminConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val ids = (1..51).joinToString(",")
+        val result = dispatch(eventBus, listener, commandEvent("/db forward onebot GROUP $ids hello"))
+
+        assertEquals(CommandStatus.FAILED, result.status)
+        assertTrue(renderMessage(result).contains("最多转发到 50 个"), "text=${renderMessage(result)}")
+    }
+
+    @Test
+    fun forwardShouldAcceptWithinLimit() = runBlocking {
+        initDb("command-forward-within-limit")
+        val eventBus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { null },
+            config = adminConfig(),
+            commandRegistry = CommandRegistry(),
+            eventBus = eventBus,
+        )
+
+        val ids = (1..3).joinToString(",")
+        val result = dispatch(eventBus, listener, commandEvent("/db forward onebot GROUP $ids hello"))
+
+        assertEquals(CommandStatus.SUCCESS, result.status)
+        assertTrue(renderMessage(result).contains("已创建转发任务"), "text=${renderMessage(result)}")
+    }
+
+    @Test
     fun filterListShouldShowRebuildCommand() = runBlocking {
         initDb("command-filter-rebuild")
         seedSubscription()
