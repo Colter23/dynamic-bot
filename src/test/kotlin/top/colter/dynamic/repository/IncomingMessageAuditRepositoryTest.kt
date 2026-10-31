@@ -20,6 +20,19 @@ import top.colter.dynamic.initTestDatabase
 
 class IncomingMessageAuditRepositoryTest {
     @Test
+    fun receiptShouldNotAcknowledgeProcessingAndStartedMessagesMustNotBeReclaimed() {
+        initTestDatabase("incoming-dispatch-state")
+        val request = auditRequest(traceId = "dispatch", recordPolicy = IncomingMessageRecordPolicy.Audit)
+
+        assertTrue(IncomingMessageAuditRepository.recordMessage(request))
+        assertFalse(IncomingMessageAuditRepository.recordMessage(request))
+        assertTrue(IncomingMessageAuditRepository.tryBeginDispatch(request.traceId))
+        assertFalse(IncomingMessageAuditRepository.tryBeginDispatch(request.traceId))
+        IncomingMessageAuditRepository.markDispatchCompleted(request.traceId)
+        assertFalse(IncomingMessageAuditRepository.tryBeginDispatch(request.traceId))
+    }
+
+    @Test
     fun nonePolicyShouldNotCreateRecord() {
         initTestDatabase("incoming-audit-none")
 

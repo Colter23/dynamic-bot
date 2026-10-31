@@ -11,6 +11,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import top.colter.dynamic.core.tools.loggerFor
 
@@ -104,6 +106,14 @@ public class EventBus(
             }.invokeOnCompletion {
                 inFlightEvents.decrementAndGet()
             }
+        }
+    }
+
+    /** 关键业务在调用方协程中完成；保留背压，失败或取消由调用方处理。 */
+    public suspend inline fun <reified E : Any> dispatch(event: E) {
+        eventMap[eventKey<E>()]?.toList()?.forEach { entry ->
+            currentCoroutineContext().ensureActive()
+            entry.listener.onMessage(event)
         }
     }
 

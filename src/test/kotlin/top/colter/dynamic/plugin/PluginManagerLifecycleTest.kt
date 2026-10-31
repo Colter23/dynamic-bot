@@ -117,20 +117,20 @@ class PluginManagerLifecycleTest {
     }
 
     @Test
-    fun loadShouldRejectNonExactApiVersion() {
+    fun loadShouldRejectPreviousApiMajorVersion() {
         val pluginDir = createTempDirectory("plugin-manager-api-version").toFile()
         val manager = PluginManager(pluginDirPath = pluginDir.path)
         createPluginJar(
             pluginDir = pluginDir,
             id = "old-api",
             mainClass = LifecycleRecordingPlugin::class.java.name,
-            apiVersion = "2.0.0",
+            apiVersion = "3.0.0",
         )
 
         val result = manager.loadAllPlugins()
 
         assertTrue(result.loadedPlugins.isEmpty())
-        assertTrue(result.failedPlugins.getValue("old-api").contains("不兼容的 apiVersion=2.0.0"))
+        assertTrue(result.failedPlugins.getValue("old-api").contains("不兼容的 apiVersion=3.0.0"))
     }
 
     @Test

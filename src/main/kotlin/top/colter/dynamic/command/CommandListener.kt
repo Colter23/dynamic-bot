@@ -297,7 +297,7 @@ public class CommandListener(
         }
     }
 
-    private fun reply(event: CommandEvent, result: CommandExecutionResult) {
+    private suspend fun reply(event: CommandEvent, result: CommandExecutionResult) {
         // 空回复表示"不回复"：用于去重后的静默处理，避免向出口发一条空消息。
         if (result.reply.isEmpty()) return
         CommandResultEvent(
@@ -311,7 +311,7 @@ public class CommandListener(
             traceId = event.traceId,
             status = result.status,
             errorMessage = result.errorMessage,
-        ).let { eventBus.broadcast(it) }
+        ).let { eventBus.dispatch(it) }
     }
 
     private fun isPermissionFree(path: List<String>): Boolean {
@@ -322,7 +322,7 @@ public class CommandListener(
      * 权限不足必须给出反馈，否则用户会以为 Bot 坏了。
      * 但同一个人对同一条命令 10 分钟内只提示一次，避免被用来刷屏。
      */
-    private fun replyPermissionDenied(event: CommandEvent, spec: CommandSpec) {
+    private suspend fun replyPermissionDenied(event: CommandEvent, spec: CommandSpec) {
         val commandPath = spec.path.joinToString(" ")
         val key = "${event.context.senderId}|$commandPath"
         val now = System.currentTimeMillis()
@@ -1229,7 +1229,10 @@ private class SubscribeCommandHandler(
         }
         if (query.toLongOrNull() != null) {
             val publisherInfo = runCatching { lookupPlugin.fetchPublisherInfo(query) }
-                .getOrElse { return CommandExecutionResult.failed("获取发布者资料失败：${it.message ?: "未知错误"}") }
+                .getOrElse {
+                    if (it is CancellationException) throw it
+                    return CommandExecutionResult.failed("获取发布者资料失败：${it.message ?: "未知错误"}")
+                }
                 ?: return CommandExecutionResult.failed("未找到发布者：$platform:$query")
             return CommandExecutionResult.success(
                 service.subscribeResolved(invocation.context, platform, publisherInfo),
@@ -1239,6 +1242,7 @@ private class SubscribeCommandHandler(
         val candidates = runCatching {
             lookupPlugin.searchPublisherInfo(query, subscriptionComponent.maxCandidates())
         }.getOrElse {
+            if (it is CancellationException) throw it
             return CommandExecutionResult.failed("搜索发布者失败：${it.message ?: "未知错误"}")
         }
         if (candidates.isEmpty()) {
@@ -1271,14 +1275,20 @@ private class SubscribeCommandHandler(
         val done = mutableListOf<String>()
         val failed = mutableListOf<String>()
         distinctIds.forEach { id ->
-            val info = runCatching { lookupPlugin.fetchPublisherInfo(id) }.getOrNull()
+            val info = runCatching { lookupPlugin.fetchPublisherInfo(id) }.getOrElse {
+                if (it is CancellationException) throw it
+                null
+            }
             if (info == null) {
                 failed += "$id：未找到发布者"
                 return@forEach
             }
             runCatching { service.subscribeResolved(invocation.context, platform, info) }
                 .onSuccess { done += info.name }
-                .onFailure { failed += "$id：${it.message ?: "订阅失败"}" }
+                .onFailure {
+                    if (it is CancellationException) throw it
+                    failed += "$id：${it.message ?: "订阅失败"}"
+                }
         }
 
         if (failed.isEmpty()) {

@@ -13,10 +13,28 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
+import kotlinx.coroutines.CancellationException
 
 class EventBusTest {
 
     class TestEvent(val value: String) : Event
+
+    @Test
+    fun dispatchShouldPropagateFailureAndCancellation() = runBlocking {
+        for (failure in listOf(IllegalStateException("failed"), CancellationException("cancelled"))) {
+            val bus = EventBus()
+            bus.subscribe(object : Listener<TestEvent> {
+                override suspend fun onMessage(event: TestEvent) { throw failure }
+            })
+
+            val thrown = assertFailsWith<Exception> { bus.dispatch(TestEvent("critical")) }
+
+            assertTrue(thrown === failure)
+            assertEquals(0, bus.droppedEventCount())
+            bus.shutdown()
+        }
+    }
 
     @Test
     fun registerBroadcastAndRemoveShouldWork() = runBlocking {

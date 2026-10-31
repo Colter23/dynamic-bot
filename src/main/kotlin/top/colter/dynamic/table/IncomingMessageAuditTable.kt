@@ -37,6 +37,8 @@ public object IncomingMessageAuditTable : Table("incoming_message_audit") {
     public val rawPayloadSha256: Column<String?> = varchar(name = "raw_payload_sha256", length = 64).nullable()
     public val rawPayloadSize: Column<Int> = integer(name = "raw_payload_size").default(0)
     public val createdAt: Column<Instant> = timestamp(name = "created_at").clientDefault { nowInstant() }
+    // 旧记录没有可靠的完成信息，迁移时保留原去重语义，避免重投历史命令。
+    public val dispatchState: Column<String> = varchar(name = "dispatch_state", length = 20).default("COMPLETED")
 
     override val primaryKey: PrimaryKey = PrimaryKey(traceId)
 

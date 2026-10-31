@@ -1,6 +1,10 @@
 package top.colter.dynamic.incoming
 
 import java.util.UUID
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import top.colter.dynamic.CommandReceiveMode
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.command.CommandBootstrapService
@@ -25,6 +29,7 @@ import top.colter.dynamic.core.data.TargetKind
 import top.colter.dynamic.core.plugin.IncomingMessageDispatchContext
 import top.colter.dynamic.core.plugin.IncomingMessageIntent
 import top.colter.dynamic.core.plugin.IncomingMessagePublishRequest
+import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
 import top.colter.dynamic.event.EventBus
@@ -38,6 +43,8 @@ import top.colter.dynamic.repository.SubscriberStateCache
 
 internal fun interface IncomingMessageAuditRecorder {
     fun recordMessage(request: IncomingAuditWriteRequest): Boolean
+    fun tryBeginDispatch(traceId: String): Boolean = true
+    fun markDispatchCompleted(traceId: String) {}
 }
 
 internal class IncomingMessagePipeline(
@@ -47,13 +54,21 @@ internal class IncomingMessagePipeline(
     private val incomingConsumerDispatcher: suspend (IncomingMessageDispatchContext) -> Unit,
     private val auditModeResolver: suspend (IncomingMessageDispatchContext) -> IncomingMessageAuditMode = { IncomingMessageAuditMode.NONE },
     private val incomingBotAccountSelector: IncomingBotAccountSelector = IncomingBotAccountSelector(),
-    private val auditRecorder: IncomingMessageAuditRecorder = IncomingMessageAuditRecorder {
-        IncomingMessageAuditRepository.recordMessage(it)
+    private val auditRecorder: IncomingMessageAuditRecorder = object : IncomingMessageAuditRecorder {
+        override fun recordMessage(request: IncomingAuditWriteRequest): Boolean =
+            IncomingMessageAuditRepository.recordMessage(request)
+        override fun tryBeginDispatch(traceId: String): Boolean =
+            IncomingMessageAuditRepository.tryBeginDispatch(traceId)
+        override fun markDispatchCompleted(traceId: String) =
+            IncomingMessageAuditRepository.markDispatchCompleted(traceId)
     },
     private val commandBootstrapService: CommandBootstrapService? = null,
     private val pendingSelectionResolver: ((CommandContext, String) -> PendingSubscriptionSelection?)? = null,
     private val claimDeduplicator: ClaimMessageDeduplicator = ClaimMessageDeduplicator(),
 ) {
+    private val processingLocks = Array(64) { Mutex() }
+    private val startedTraces = LinkedHashSet<String>()
+
     private val claimHandler: ClaimCommandHandler? by lazy {
         commandBootstrapService?.let {
             ClaimCommandHandler(it, commandPrefixProvider = { configProvider().command.prefix })
@@ -120,8 +135,15 @@ internal class IncomingMessagePipeline(
             intent = intent,
         )
         val recordPolicy = resolveRecordPolicy(intent, request.recordPolicyHint, auditModeResolver(dispatchContext))
-        if (recordPolicy != IncomingMessageRecordPolicy.None) {
-            val recorded = auditRecorder.recordMessage(
+        if (recordPolicy == IncomingMessageRecordPolicy.None) {
+            dispatch(dispatchContext, commandText, linkUrls, hasSupportedLinks)
+            return
+        }
+        // 审计存在只表示收到了消息，不表示命令/链接已经执行。串行化同一 trace 的重投，
+        // 未开始的消息可在重投时恢复；已经开始的处理可能有副作用，不自动重放。
+        val started = processingLocks[(traceId.hashCode() and Int.MAX_VALUE) % processingLocks.size].withLock {
+            if (synchronized(startedTraces) { traceId in startedTraces }) return@withLock false
+            auditRecorder.recordMessage(
                 IncomingAuditWriteRequest(
                     sourcePlugin = sourcePlugin,
                     message = message,
@@ -134,13 +156,38 @@ internal class IncomingMessagePipeline(
                     sourceEventId = request.sourceEventId,
                 ),
             )
-            // recordMessage 以 traceId 去重：同一条平台消息被重复投递时返回 false。
-            // 此时整条消息都不再往下走，避免观测、插件消费与命令被执行两遍。
-            if (!recorded) {
-                return
+            currentCoroutineContext().ensureActive()
+            if (!auditRecorder.tryBeginDispatch(traceId)) {
+                return@withLock false
             }
+            synchronized(startedTraces) {
+                if (startedTraces.size >= 4_096) {
+                    startedTraces.iterator().also { it.next(); it.remove() }
+                }
+                startedTraces += traceId
+            }
+            true
         }
+        if (!started) return
+        try {
+            dispatch(dispatchContext, commandText, linkUrls, hasSupportedLinks)
+            currentCoroutineContext().ensureActive()
+            auditRecorder.markDispatchCompleted(traceId)
+        } catch (error: Throwable) {
+            loggerFor<IncomingMessagePipeline>().warn {
+                "入站消息处理中断，可能已产生副作用，不自动重放：traceId=$traceId，原因=${error.message.orEmpty()}"
+            }
+            throw error
+        }
+    }
 
+    private suspend fun dispatch(
+        dispatchContext: IncomingMessageDispatchContext,
+        commandText: String,
+        linkUrls: List<String>,
+        hasSupportedLinks: Boolean,
+    ) {
+        val (message, sourcePlugin, traceId, replyToMessageId, commandContext, rawText, intent) = dispatchContext
         eventBus.broadcast(
             IncomingMessageEvent(
                 sourcePlugin = sourcePlugin,
@@ -152,7 +199,7 @@ internal class IncomingMessagePipeline(
 
         if (intent == IncomingMessageIntent.Command) {
             if (shouldDispatchCommand(commandContext)) {
-                eventBus.broadcast(
+                eventBus.dispatch(
                     CommandEvent(
                         sourcePlugin = sourcePlugin,
                         context = commandContext,
@@ -163,7 +210,7 @@ internal class IncomingMessagePipeline(
                 )
             }
         } else if (rawText.isNotBlank() || hasSupportedLinks) {
-            eventBus.broadcast(
+            eventBus.dispatch(
                 IncomingTextMessageEvent(
                     sourcePlugin = sourcePlugin,
                     message = message,
@@ -216,7 +263,7 @@ internal class IncomingMessagePipeline(
                 ),
             )
             if (result.reply.isNotEmpty()) {
-                eventBus.broadcast(
+                eventBus.dispatch(
                     CommandResultEvent(
                         sourcePlugin = "main",
                         target = CommandTarget(message.target.withPreferredAccount(context.botAccountId), context.senderId),
@@ -248,14 +295,14 @@ internal class IncomingMessagePipeline(
         return true
     }
 
-    private fun replyToUser(
+    private suspend fun replyToUser(
         message: IncomingMessage,
         context: CommandContext,
         text: String,
         traceId: String,
         replyToMessageId: String,
     ) {
-        eventBus.broadcast(
+        eventBus.dispatch(
             CommandResultEvent(
                 sourcePlugin = "main",
                 target = CommandTarget(

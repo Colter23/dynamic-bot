@@ -15,6 +15,7 @@ import org.jetbrains.exposed.v1.jdbc.deleteWhere
 import org.jetbrains.exposed.v1.jdbc.insertIgnore
 import org.jetbrains.exposed.v1.jdbc.selectAll
 import org.jetbrains.exposed.v1.jdbc.transactions.transaction
+import org.jetbrains.exposed.v1.jdbc.update
 import top.colter.dynamic.core.data.IncomingMessage
 import top.colter.dynamic.core.data.IncomingMessageRecordPolicy
 import top.colter.dynamic.core.data.IncomingMessageRecordPolicyType
@@ -104,6 +105,24 @@ public data class IncomingProcessingWriteRequest(
 public object IncomingMessageAuditRepository {
     public const val TEXT_PREVIEW_MAX_LENGTH: Int = 300
 
+    /** 只认领尚未开始的处理；STARTED 可能已产生副作用，重启/重投不能自动重放。 */
+    public fun tryBeginDispatch(traceId: String): Boolean = transaction {
+        IncomingMessageAuditTable.update({
+            (IncomingMessageAuditTable.traceId eq traceId) and
+                (IncomingMessageAuditTable.dispatchState eq "RECEIVED")
+        }) {
+            it[dispatchState] = "STARTED"
+        } > 0
+    }
+
+    public fun markDispatchCompleted(traceId: String) {
+        transaction {
+            IncomingMessageAuditTable.update({ IncomingMessageAuditTable.traceId eq traceId }) {
+                it[dispatchState] = "COMPLETED"
+            }
+        }
+    }
+
     public fun recordMessage(request: IncomingAuditWriteRequest): Boolean {
         if (request.recordPolicy == IncomingMessageRecordPolicy.None) return false
         val normalizedTraceId = request.traceId.trim().takeIf { it.isNotBlank() } ?: return false
@@ -122,6 +141,7 @@ public object IncomingMessageAuditRepository {
         return transaction {
             IncomingMessageAuditTable.insertIgnore {
                 it[traceId] = normalizedTraceId
+                it[dispatchState] = "RECEIVED"
                 it[sourcePlugin] = request.sourcePlugin.trim().takeIf { value -> value.isNotBlank() } ?: "unknown"
                 it[platformId] = message.platformId.value
                 it[botAccountId] = message.botAccountId?.trim()?.takeIf(String::isNotBlank)

@@ -6,13 +6,17 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
 import kotlin.io.path.createTempDirectory
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.Job
 import top.colter.dynamic.CommandConfig
 import top.colter.dynamic.CommandReceiveMode
 import top.colter.dynamic.LinkParsingConfig
@@ -250,11 +254,10 @@ class IncomingMessagePipelineTest {
     }
 
     @Test
-    fun `候选确认排队后更换候选不得订阅新批次`() = runBlocking {
+    fun `候选确认绑定后更换候选不得订阅新批次`() = runBlocking {
         for (confirmationText in listOf("#1", "/db subscribe #1", "/db 订阅 #1")) {
             PersistenceManager.init(createTempDirectory("selection-batch").resolve("test.db").toString())
-            val dispatcher = QueuedDispatcher()
-            val bus = EventBus(dispatcher)
+            val bus = EventBus(Dispatchers.Unconfined)
             val config = MainDynamicConfig(command = CommandConfig(prefix = "/db", permissions = listOf(
                 CommandPermissionRule(senderId = "sender", role = CommandRole.MANAGER),
             )))
@@ -286,16 +289,20 @@ class IncomingMessagePipelineTest {
                 )))
             }
             offer("111")
+            // 绑定候选后、执行前产生新搜索，仍不能使用新候选。
+            val token = bus.subscribe(object : Listener<IncomingMessageEvent> {
+                override suspend fun onMessage(event: IncomingMessageEvent) {
+                    if (event.traceId == "old-confirmation") offer("222")
+                }
+            })
             pipeline.handle("onebot", IncomingMessagePublishRequest(message, traceId = "old-confirmation"))
-            offer("222")
-            dispatcher.drain()
 
             assertTrue(fetched.isEmpty(), confirmationText)
             assertTrue(processing.any { it.traceId == "old-confirmation" && it.result == IncomingProcessingResult.FAILED }, confirmationText)
             assertEquals(1, component.resolveSelection(context, "#1")?.index, "新候选仍然可用")
+            bus.unsubscribe(token)
 
             pipeline.handle("onebot", IncomingMessagePublishRequest(message.copy(messageId = "new"), traceId = "new-confirmation"))
-            dispatcher.drain()
             assertEquals(listOf("222"), fetched, confirmationText)
             assertNull(component.resolveSelection(context, "#1"))
             assertTrue(processing.any { it.traceId == "new-confirmation" && it.result == IncomingProcessingResult.SUCCEEDED }, confirmationText)
@@ -532,9 +539,155 @@ class IncomingMessagePipelineTest {
         pipeline.handle("onebot", request)
         pipeline.handle("onebot", request)
 
-        assertEquals(2, recordCalls, "两次投递都应尝试写审计")
+        assertEquals(1, recordCalls, "同进程重复消息应直接命中内存去重")
         assertEquals(1, dispatched, "重复消息不应再次分发，否则命令会执行两遍")
         eventBus.shutdown()
+    }
+
+    @Test
+    fun `critical command and reply should not be dropped when observation queue is full`() = runBlocking {
+        val dispatcher = QueuedDispatcher()
+        val bus = EventBus(dispatcher, maxInFlightEvents = 1)
+        var commands = 0
+        var replies = 0
+        bus.subscribe(object : Listener<IncomingMessageEvent> {
+            override suspend fun onMessage(event: IncomingMessageEvent) {}
+        })
+        bus.subscribe(object : Listener<CommandEvent> {
+            override suspend fun onMessage(event: CommandEvent) {
+                commands++
+                bus.dispatch(CommandResultEvent(
+                    sourcePlugin = "main",
+                    target = top.colter.dynamic.core.data.CommandTarget(event.context.target, event.context.senderId),
+                    chain = emptyList(), inReplyTo = event.replyToMessageId, traceId = event.traceId,
+                    status = top.colter.dynamic.core.data.CommandStatus.SUCCESS,
+                ))
+            }
+        })
+        bus.subscribe(object : Listener<CommandResultEvent> {
+            override suspend fun onMessage(event: CommandResultEvent) { replies++ }
+        })
+        val pipeline = pipeline(eventBus = bus)
+        val request = request("/db help", traceId = "queue-full")
+
+        pipeline.handle("onebot", request)
+        pipeline.handle("onebot", request)
+
+        assertEquals(1, commands)
+        assertEquals(1, replies)
+        assertEquals(0, bus.droppedEventCount())
+        dispatcher.drain()
+        bus.shutdown()
+    }
+
+    @Test
+    fun `critical link should not be dropped when observation queue is full`() = runBlocking {
+        val dispatcher = QueuedDispatcher()
+        val bus = EventBus(dispatcher, maxInFlightEvents = 1)
+        var links = 0
+        bus.subscribe(object : Listener<IncomingMessageEvent> {
+            override suspend fun onMessage(event: IncomingMessageEvent) {}
+        })
+        bus.subscribe(object : Listener<IncomingTextMessageEvent> {
+            override suspend fun onMessage(event: IncomingTextMessageEvent) { links++ }
+        })
+        val pipeline = pipeline(
+            eventBus = bus,
+            linkParseService = LinkParseService(resolversProvider = { listOf(MatchingLinkResolver("https://t.bilibili.com/")) }),
+        )
+
+        pipeline.handle("onebot", request("https://t.bilibili.com/123", traceId = "link-queue-full"))
+
+        assertEquals(1, links)
+        assertEquals(0, bus.droppedEventCount())
+        dispatcher.drain()
+        bus.shutdown()
+    }
+
+    @Test
+    fun `persisted receipt without processing should be handled after pipeline restart`() = runBlocking {
+        PersistenceManager.init(createTempDirectory("incoming-received-recovery").resolve("test.db").toString())
+        val bus = EventBus(Dispatchers.Unconfined)
+        var commands = 0
+        bus.subscribe(object : Listener<CommandEvent> {
+            override suspend fun onMessage(event: CommandEvent) { commands++ }
+        })
+        val request = request("/db help", traceId = "received-before-restart")
+        top.colter.dynamic.repository.IncomingMessageAuditRepository.recordMessage(IncomingAuditWriteRequest(
+            sourcePlugin = "onebot", message = request.message, traceId = request.traceId,
+            replyToMessageId = request.message.messageId, intent = IncomingMessageIntent.Command,
+            recordPolicy = IncomingMessageRecordPolicy.Audit, receivedAtEpochSeconds = 1,
+        ))
+        fun restarted() = IncomingMessagePipeline(
+            configProvider = { MainDynamicConfig() }, linkParseService = LinkParseService(resolversProvider = { emptyList() }),
+            eventBus = bus, incomingConsumerDispatcher = {},
+        )
+
+        restarted().handle("onebot", request)
+        restarted().handle("onebot", request)
+
+        assertEquals(1, commands)
+        bus.shutdown()
+    }
+
+    @Test
+    fun `cancellation after audit insert but before processing should allow redelivery`() = runBlocking {
+        val bus = EventBus(Dispatchers.Unconfined)
+        val recorder = RecordingAuditRecorder()
+        var childJob: Job? = null
+        var cancelBeforeStart = true
+        var commands = 0
+        val cancellingRecorder = object : IncomingMessageAuditRecorder {
+            override fun recordMessage(request: IncomingAuditWriteRequest): Boolean {
+                recorder.recordMessage(request)
+                if (cancelBeforeStart) childJob!!.cancel()
+                return true
+            }
+            override fun tryBeginDispatch(traceId: String): Boolean = recorder.tryBeginDispatch(traceId)
+            override fun markDispatchCompleted(traceId: String) = recorder.markDispatchCompleted(traceId)
+        }
+        bus.subscribe(object : Listener<CommandEvent> {
+            override suspend fun onMessage(event: CommandEvent) { commands++ }
+        })
+        val pipeline = pipeline(eventBus = bus, auditRecorder = cancellingRecorder)
+        val request = request("/db help", traceId = "cancel-before-start")
+        childJob = launch(start = kotlinx.coroutines.CoroutineStart.LAZY) { pipeline.handle("onebot", request) }
+        childJob!!.start()
+        childJob!!.join()
+        assertTrue(childJob!!.isCancelled)
+        assertEquals(0, commands)
+        assertEquals(0, recorder.dispatchCalls)
+
+        cancelBeforeStart = false
+        pipeline.handle("onebot", request)
+
+        assertEquals(1, commands)
+        assertEquals(2, recorder.dispatchCalls)
+        bus.shutdown()
+    }
+
+    @Test
+    fun `cancelled processing must not replay possible side effects on redelivery`() = runBlocking {
+        PersistenceManager.init(createTempDirectory("incoming-started-no-replay").resolve("test.db").toString())
+        val bus = EventBus(Dispatchers.Unconfined)
+        var commands = 0
+        bus.subscribe(object : Listener<CommandEvent> {
+            override suspend fun onMessage(event: CommandEvent) {
+                commands++
+                throw CancellationException("stopped after side effect")
+            }
+        })
+        fun restarted() = IncomingMessagePipeline(
+            configProvider = { MainDynamicConfig() }, linkParseService = LinkParseService(resolversProvider = { emptyList() }),
+            eventBus = bus, incomingConsumerDispatcher = {},
+        )
+        val request = request("/db help", traceId = "started-before-restart")
+
+        assertFailsWith<CancellationException> { restarted().handle("onebot", request) }
+        restarted().handle("onebot", request)
+
+        assertEquals(1, commands)
+        bus.shutdown()
     }
 
     @Test
@@ -901,6 +1054,7 @@ class IncomingMessagePipelineTest {
 
         assertEquals(IncomingMessageIntent.NonText, withTimeout(1_000) { dispatch.await() }.intent)
         assertEquals(0, recorder.records.size)
+        assertEquals(0, recorder.dispatchCalls)
         assertNull(withTimeoutOrNull(200) { textEvent.await() })
         eventBus.shutdown()
     }
@@ -985,6 +1139,7 @@ class IncomingMessagePipelineTest {
         pipeline.handle("onebot", request("hello"))
 
         assertEquals(0, recorder.records.size)
+        assertEquals(0, recorder.dispatchCalls)
     }
 
     @Test
@@ -999,6 +1154,7 @@ class IncomingMessagePipelineTest {
         pipeline.handle("onebot", request)
 
         assertEquals(0, recorder.records.size)
+        assertEquals(0, recorder.dispatchCalls)
     }
 
     @Test
@@ -1152,6 +1308,14 @@ class IncomingMessagePipelineTest {
 
     private class RecordingAuditRecorder : IncomingMessageAuditRecorder {
         val records: MutableList<IncomingAuditWriteRequest> = mutableListOf()
+        var dispatchCalls: Int = 0
+
+        override fun tryBeginDispatch(traceId: String): Boolean {
+            dispatchCalls++
+            return true
+        }
+
+        override fun markDispatchCompleted(traceId: String) { dispatchCalls++ }
 
         override fun recordMessage(request: IncomingAuditWriteRequest): Boolean {
             records += request

@@ -6,9 +6,39 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
 import top.colter.dynamic.core.data.DeliveryStatus
 
 class PersistenceManagerSchemaTest {
+    @Test
+    fun initShouldKeepLegacyIncomingAuditsDeduplicated() {
+        val dbPath = createTempDirectory("incoming-dispatch-migration").resolve("test.db").toString()
+        PersistenceManager.init(dbPath)
+        val request = IncomingAuditWriteRequest(
+            sourcePlugin = "onebot",
+            message = top.colter.dynamic.core.data.IncomingMessage(
+                platformId = top.colter.dynamic.core.data.PlatformId.of("onebot"),
+                target = top.colter.dynamic.core.data.TargetAddress.of("onebot", top.colter.dynamic.core.data.TargetKind.GROUP, "100"),
+                senderId = "sender", messageId = "legacy", text = "/db help",
+            ),
+            traceId = "legacy", replyToMessageId = "legacy",
+            intent = top.colter.dynamic.core.plugin.IncomingMessageIntent.Command,
+            recordPolicy = top.colter.dynamic.core.data.IncomingMessageRecordPolicy.Audit,
+            receivedAtEpochSeconds = 1,
+        )
+        IncomingMessageAuditRepository.recordMessage(request)
+        DriverManager.getConnection("jdbc:sqlite:$dbPath").use { connection ->
+            connection.createStatement().use { it.executeUpdate("ALTER TABLE incoming_message_audit DROP COLUMN dispatch_state") }
+        }
+        PersistenceManager.init(createTempDirectory("incoming-dispatch-switch").resolve("test.db").toString())
+
+        PersistenceManager.init(dbPath)
+
+        assertFalse(IncomingMessageAuditRepository.tryBeginDispatch("legacy"))
+        IncomingMessageAuditRepository.recordMessage(request.copy(traceId = "new"))
+        assertTrue(IncomingMessageAuditRepository.tryBeginDispatch("new"))
+    }
+
     @Test
     fun initShouldCreateFreshSchemaTables() {
         val tempDir = createTempDirectory("dynamic-bot-core-schema-db").toFile()

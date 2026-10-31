@@ -5,6 +5,8 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
+import kotlin.test.assertFailsWith
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
@@ -901,6 +903,77 @@ class CommandListenerTest {
 
         assertEquals(CommandStatus.FAILED, result.status)
         assertTrue(renderMessage(result).contains("一次最多订阅 10 个"))
+    }
+
+    @Test
+    fun subscribeShouldPropagateLookupAndSearchCancellation() = runBlocking {
+        for (query in listOf("111", "test-name", "111,222")) {
+            initDb("subscribe-cancel-lookup")
+            val calls = mutableListOf<String>()
+            val plugin = object : PublisherLookupPlugin {
+                override val platformId = PlatformId.of("bilibili")
+                override suspend fun fetchPublisherInfo(userId: String): PublisherInfo? {
+                    calls += userId
+                    throw CancellationException("lookup cancelled")
+                }
+                override suspend fun searchPublisherInfo(query: String, limit: Int): List<PublisherInfo> {
+                    calls += query
+                    throw CancellationException("search cancelled")
+                }
+            }
+            val bus = EventBus()
+            var replies = 0
+            bus.subscribe(object : Listener<CommandResultEvent> {
+                override suspend fun onMessage(event: CommandResultEvent) { replies++ }
+            })
+            val listener = CommandListener(
+                publisherLookupResolver = { plugin }, config = managerConfig(), eventBus = bus,
+                publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+            )
+
+            assertFailsWith<CancellationException> {
+                listener.onMessage(commandEvent("/db subscribe bilibili $query"))
+            }
+
+            assertEquals(listOf(query.substringBefore(',')), calls)
+            assertEquals(0, replies)
+            assertTrue(PublisherRepository.findAll().isEmpty())
+            bus.shutdown()
+        }
+    }
+
+    @Test
+    fun subscribeBatchShouldStopBeforeNextPublisherWhenFollowingIsCancelled() = runBlocking {
+        initDb("subscribe-cancel-follow")
+        val calls = mutableListOf<String>()
+        val lookup = object : PublisherLookupPlugin {
+            override val platformId = PlatformId.of("bilibili")
+            override suspend fun fetchPublisherInfo(userId: String): PublisherInfo {
+                calls += userId
+                return testPublisherInfo(key = PublisherKey.of("bilibili", externalId = userId))
+            }
+        }
+        val follow = object : PublisherFollowPlugin {
+            override val platformId = PlatformId.of("bilibili")
+            override suspend fun fetchPublisherInfo(userId: String): PublisherInfo? = lookup.fetchPublisherInfo(userId)
+            override suspend fun queryFollowState(userId: String): FollowState = FollowState.NOT_FOLLOWING
+            override suspend fun followPublisher(userId: String): FollowActionResult =
+                throw CancellationException("follow cancelled")
+        }
+        val bus = EventBus()
+        val listener = CommandListener(
+            publisherLookupResolver = { lookup }, publisherFollowResolver = { follow },
+            config = managerConfig(), eventBus = bus,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+        )
+
+        assertFailsWith<CancellationException> {
+            listener.onMessage(commandEvent("/db subscribe bilibili 111,222"))
+        }
+
+        assertEquals(listOf("111"), calls)
+        assertTrue(PublisherRepository.findAll().isEmpty())
+        bus.shutdown()
     }
 
     private fun seedSecondSubscription() {

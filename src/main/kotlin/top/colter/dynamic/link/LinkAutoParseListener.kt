@@ -104,7 +104,7 @@ internal class LinkAutoParseListener(
         logForwardResult(event, finalResult)
     }
 
-    private fun reply(event: IncomingTextMessageEvent, message: String, status: CommandStatus) {
+    private suspend fun reply(event: IncomingTextMessageEvent, message: String, status: CommandStatus) {
         CommandResultEvent(
             sourcePlugin = LINK_PARSE_EVENT_SOURCE,
             target = CommandTarget(
@@ -116,7 +116,7 @@ internal class LinkAutoParseListener(
             traceId = event.traceId,
             status = status,
             errorMessage = if (status == CommandStatus.FAILED) message else null,
-        ).let { eventBus.broadcast(it) }
+        ).let { eventBus.dispatch(it) }
     }
 
     private fun secondsToMillis(seconds: Double, minimumMillis: Long): Long {
