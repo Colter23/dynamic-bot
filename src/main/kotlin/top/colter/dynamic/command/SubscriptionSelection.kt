@@ -1,6 +1,9 @@
 package top.colter.dynamic.command
 
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
+import top.colter.dynamic.core.command.CommandExecutionResult
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.PublisherInfo
@@ -15,6 +18,8 @@ import top.colter.dynamic.repository.SubscriberRepository
 import top.colter.dynamic.repository.SubscriptionRepository
 
 private val selectionLogger = loggerFor<SubscriptionSelectionComponent>()
+
+internal data class PendingSubscriptionSelection(val index: Int, val batchId: String)
 
 /**
  * 订阅动作的共用实现：命令与"候选选择"两条入口都走这里，
@@ -104,13 +109,14 @@ internal class SessionSelectionStore(
         val name: String,
     )
 
-    internal data class Pending(
+    internal class Pending(
         val platformId: String,
         val candidates: List<Candidate>,
         val expiresAtMillis: Long,
+        val batchId: String = UUID.randomUUID().toString(),
     )
 
-    private val pending: MutableMap<String, Pending> = ConcurrentHashMap()
+    private val pending: ConcurrentHashMap<String, Pending> = ConcurrentHashMap()
 
     fun offer(context: CommandContext, platformId: String, candidates: List<Candidate>): Pending? {
         if (candidates.isEmpty()) return null
@@ -125,22 +131,29 @@ internal class SessionSelectionStore(
     }
 
     /** 取出序号对应的候选；索引越界、过期或不存在都返回 null。 */
-    fun take(context: CommandContext, index: Int): Pair<String, Candidate>? {
+    fun take(context: CommandContext, index: Int, batchId: String? = null): Pair<String, Candidate>? {
         val selection = validPending(context) ?: return null
+        if (batchId != null && selection.batchId != batchId) return null
         val candidate = selection.candidates.getOrNull(index - 1) ?: return null
-        pending.remove(key(context))
+        if (!pending.remove(key(context), selection)) return null
         return selection.platformId to candidate
     }
 
     /** 当前会话是否还有待选候选，以及候选数量；用于提示"序号无效"。 */
-    fun pendingCount(context: CommandContext): Int? {
-        return validPending(context)?.candidates?.size
+    fun pendingCount(context: CommandContext, batchId: String? = null): Int? {
+        val selection = validPending(context) ?: return null
+        if (batchId != null && selection.batchId != batchId) return null
+        return selection.candidates.size
+    }
+
+    fun resolve(context: CommandContext, index: Int): PendingSubscriptionSelection? {
+        return validPending(context)?.let { PendingSubscriptionSelection(index, it.batchId) }
     }
 
     private fun validPending(context: CommandContext): Pending? {
         val selection = pending[key(context)] ?: return null
         if (clock() > selection.expiresAtMillis) {
-            pending.remove(key(context))
+            pending.remove(key(context), selection)
             return null
         }
         return selection
@@ -199,29 +212,47 @@ public class SubscriptionSelectionComponent internal constructor(
         }
     }
 
-    /**
-     * 处理 `#序号` 形式的回复。
-     * 返回 null 表示不是候选选择消息，交给后续链路处理。
-     */
-    internal suspend fun handleSelection(context: CommandContext, rawText: String): String? {
+    /** 绑定当前候选批次但不消费，待命令权限校验通过后再原子取出。 */
+    internal fun resolveSelection(context: CommandContext, rawText: String): PendingSubscriptionSelection? {
         val index = parseSelection(rawText) ?: return null
-        val taken = store.take(context, index)
+        return store.resolve(context, index)
+    }
+
+    internal suspend fun handleSelection(
+        context: CommandContext,
+        rawText: String,
+        batchId: String? = null,
+    ): CommandExecutionResult? {
+        val index = parseSelection(rawText) ?: return null
+        val taken = store.take(context, index, batchId)
         if (taken == null) {
             // 有候选但序号越界时给出提示；没有候选则说明不是选择消息，交给后续链路。
-            val count = store.pendingCount(context) ?: return null
-            return "序号无效：请回复 #1 到 #$count（${SessionSelectionStore.SELECTION_TTL_MILLIS / 60_000} 分钟内有效）。"
+            val count = store.pendingCount(context, batchId)
+                ?: return if (batchId != null) {
+                    CommandExecutionResult.failed("候选已过期、已被使用或已更新，请重新搜索后选择。")
+                } else {
+                    null
+                }
+            return CommandExecutionResult.failed("序号无效：请回复 #1 到 #$count（${SessionSelectionStore.SELECTION_TTL_MILLIS / 60_000} 分钟内有效）。")
         }
         val (platform, candidate) = taken
         val lookup = service.lookup(platform)
-            ?: return "未找到发布者查询插件：$platform"
-        val publisherInfo = runCatching { lookup.fetchPublisherInfo(candidate.externalId) }
-            .getOrElse { return "获取发布者资料失败：${it.message ?: "未知错误"}" }
-            ?: return "未找到发布者：$platform:${candidate.externalId}"
-        return runCatching { service.subscribeResolved(context, platform, publisherInfo) }
-            .getOrElse { error ->
-                selectionLogger.warn(error) { "候选选择订阅失败：platform=$platform，externalId=${candidate.externalId}" }
-                "订阅失败：${error.message ?: "未知错误"}"
-            }
+            ?: return CommandExecutionResult.failed("未找到发布者查询插件：$platform")
+        val publisherInfo = try {
+            lookup.fetchPublisherInfo(candidate.externalId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            return CommandExecutionResult.failed("获取发布者资料失败：${error.message ?: "未知错误"}")
+        } ?: return CommandExecutionResult.failed("未找到发布者：$platform:${candidate.externalId}")
+        return try {
+            CommandExecutionResult.success(service.subscribeResolved(context, platform, publisherInfo))
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            selectionLogger.warn(error) { "候选选择订阅失败：platform=$platform，externalId=${candidate.externalId}" }
+            CommandExecutionResult.failed("订阅失败：${error.message ?: "未知错误"}")
+        }
     }
 
     private fun sanitize(value: String): String {

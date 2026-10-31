@@ -347,7 +347,7 @@ public object DynamicApplication : CoroutineScope {
             auditModeResolver = pluginManager::incomingAuditModeFor,
             incomingBotAccountSelector = incomingBotAccountSelector,
             commandBootstrapService = commandBootstrapService,
-            pendingSelectionHandler = subscriptionSelectionComponent::handleSelection,
+            pendingSelectionResolver = subscriptionSelectionComponent::resolveSelection,
         )
 
         listenerTokens += eventBus.subscribe(

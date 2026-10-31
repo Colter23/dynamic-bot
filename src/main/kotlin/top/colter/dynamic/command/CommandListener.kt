@@ -1203,6 +1203,13 @@ private class SubscribeCommandHandler(
     )
 
     override suspend fun handle(invocation: CommandInvocation): CommandExecutionResult {
+        if (invocation.args.size in 1..2 && SubscriptionSelectionComponent.parseSelection(invocation.args.first()) != null) {
+            // 第二个参数由入口绑定；缺少批次时不能回退到执行时的最新候选。
+            val batchId = invocation.args.getOrNull(1)
+                ?: return CommandExecutionResult.failed("候选已失效，请重新搜索后选择。")
+            return subscriptionComponent.handleSelection(invocation.context, invocation.args.first(), batchId)
+                ?: CommandExecutionResult.failed("候选已失效，请重新搜索后选择。")
+        }
         if (invocation.args.size < 2) {
             return CommandExecutionResult.failed("用法：$commandPrefix ${spec.usage}")
         }

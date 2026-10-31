@@ -7,6 +7,10 @@ import top.colter.dynamic.command.CommandBootstrapService
 import top.colter.dynamic.command.CommandBootstrapStatus
 import top.colter.dynamic.command.CommandClaimOutcome
 import top.colter.dynamic.command.CommandParser
+import top.colter.dynamic.command.ClaimCommandHandler
+import top.colter.dynamic.command.PendingSubscriptionSelection
+import top.colter.dynamic.core.command.CommandInvocation
+import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandStatus
 import top.colter.dynamic.core.data.CommandTarget
@@ -47,8 +51,15 @@ internal class IncomingMessagePipeline(
         IncomingMessageAuditRepository.recordMessage(it)
     },
     private val commandBootstrapService: CommandBootstrapService? = null,
-    private val pendingSelectionHandler: (suspend (CommandContext, String) -> String?)? = null,
+    private val pendingSelectionResolver: ((CommandContext, String) -> PendingSubscriptionSelection?)? = null,
+    private val claimDeduplicator: ClaimMessageDeduplicator = ClaimMessageDeduplicator(),
 ) {
+    private val claimHandler: ClaimCommandHandler? by lazy {
+        commandBootstrapService?.let {
+            ClaimCommandHandler(it, commandPrefixProvider = { configProvider().command.prefix })
+        }
+    }
+
     suspend fun handle(sourcePlugin: String, request: IncomingMessagePublishRequest) {
         val message = request.message
         if (SubscriberStateCache.stateOf(message.target).blocksInbound) return
@@ -64,7 +75,16 @@ internal class IncomingMessagePipeline(
         val rawText = message.commandText().trim()
         val commandContext = message.toCommandContext()
         val commandPrefix = config.command.prefix
-        val isCommand = rawText.isNotBlank() && CommandParser.parse(rawText, commandPrefix) != null
+        // 将候选批次带入内部命令，防止异步执行时误用后来搜索的候选。
+        val parsed = CommandParser.parse(rawText, commandPrefix)
+        val selectionText = if ((parsed?.commandName == "subscribe" || parsed?.commandName == "订阅") && parsed.args.size == 1) {
+            parsed.args.single()
+        } else {
+            rawText
+        }
+        val selection = pendingSelectionResolver?.invoke(commandContext, selectionText)
+        val commandText = selection?.let { "$commandPrefix subscribe #${it.index} ${it.batchId}" } ?: rawText
+        val isCommand = commandText.isNotBlank() && CommandParser.parse(commandText, commandPrefix) != null
         val linkUrls = if (isCommand) {
             emptyList()
         } else {
@@ -86,14 +106,7 @@ internal class IncomingMessagePipeline(
         }
 
         // 验证码消息在观测与审计之前拦截：它是一次性凭据，不该落库或进入插件消费链路。
-        if (handleBootstrapClaim(message, commandContext, rawText, traceId, replyToMessageId)) {
-            return
-        }
-
-        // `#序号` 候选选择：命中即消费，不再作为普通文本分发。
-        val selectionReply = pendingSelectionHandler?.invoke(commandContext, rawText)
-        if (selectionReply != null) {
-            replyToUser(message, commandContext, selectionReply, traceId, replyToMessageId)
+        if (handleBootstrapClaim(sourcePlugin, request, commandContext, rawText, traceId, replyToMessageId)) {
             return
         }
 
@@ -143,7 +156,7 @@ internal class IncomingMessagePipeline(
                     CommandEvent(
                         sourcePlugin = sourcePlugin,
                         context = commandContext,
-                        rawText = rawText,
+                        rawText = commandText,
                         traceId = traceId,
                         replyToMessageId = replyToMessageId,
                     ),
@@ -168,24 +181,63 @@ internal class IncomingMessagePipeline(
     }
 
     /**
-     * 命令系统未初始化时，拦截单聊里发来的验证码。
+     * 在所有观测、插件和审计之前处理认领凭据。
      *
-     * 只有"整段消息恰好是 6 位数字"才认为是验证码，避免吞掉正常聊天；
-     * 除认领成功与过期提示外一律静默，不向试探者暴露进度。
+     * 显式 claim 命令无论状态和参数是否有效都在此消费，避免凭据流入插件或审计。
+     * 裸六位数字只在未初始化的私聊中拦截，除认领成功与过期提示外一律静默。
      *
      * @return true 表示消息已被消费，不再进入后续分发。
      */
     private suspend fun handleBootstrapClaim(
-        message: IncomingMessage,
+        sourcePlugin: String,
+        request: IncomingMessagePublishRequest,
         context: CommandContext,
         rawText: String,
         traceId: String,
         replyToMessageId: String,
     ): Boolean {
+        val message = request.message
+        val parsed = CommandParser.parse(rawText, configProvider().command.prefix)
+        if (parsed?.commandName == "claim") {
+            val handler = claimHandler ?: return true
+            if (!shouldDispatchCommand(context)) return true
+            if (!claimDeduplicator.firstObservation(sourcePlugin, request, traceId)) return true
+            val result = handler.handle(
+                CommandInvocation(
+                    sourcePlugin = "main",
+                    context = context,
+                    rawText = rawText,
+                    traceId = traceId,
+                    replyToMessageId = replyToMessageId,
+                    tokens = parsed.tokens,
+                    matchedPath = listOf("claim"),
+                    args = parsed.args,
+                    role = CommandRole.USER,
+                ),
+            )
+            if (result.reply.isNotEmpty()) {
+                eventBus.broadcast(
+                    CommandResultEvent(
+                        sourcePlugin = "main",
+                        target = CommandTarget(message.target.withPreferredAccount(context.botAccountId), context.senderId),
+                        chain = result.reply,
+                        inReplyTo = replyToMessageId,
+                        traceId = traceId,
+                        status = result.status,
+                        errorMessage = result.errorMessage,
+                    ),
+                )
+            }
+            return true
+        }
         val service = commandBootstrapService ?: return false
         if (message.target.kind != TargetKind.USER) return false
         if (!service.isCandidate(rawText)) return false
-        if (service.snapshot().status == CommandBootstrapStatus.CLAIMED) return false
+        if (service.snapshot().status == CommandBootstrapStatus.CLAIMED) {
+            // 成功认领后的重复裸验证码仍须拦截，不能重新进入普通消息分发。
+            return claimDeduplicator.wasSeen(sourcePlugin, request, traceId)
+        }
+        if (!claimDeduplicator.firstObservation(sourcePlugin, request, traceId)) return true
 
         val replyText = when (service.claim(context, rawText)) {
             CommandClaimOutcome.CLAIMED -> "已认领系统管理员，现在可以使用管理命令。"
@@ -223,7 +275,8 @@ internal class IncomingMessagePipeline(
         return copy(accountId = normalized)
     }
 
-    private suspend fun shouldDispatchCommand(context: CommandContext): Boolean {        val mode = configProvider().command.receiveMode
+    private suspend fun shouldDispatchCommand(context: CommandContext): Boolean {
+        val mode = configProvider().command.receiveMode
         if (mode == CommandReceiveMode.ANY) return true
         val selection = incomingBotAccountSelector.select(context)
         if (selection.currentBotAccountId == null) return true

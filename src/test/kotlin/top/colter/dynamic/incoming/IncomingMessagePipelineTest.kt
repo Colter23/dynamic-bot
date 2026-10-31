@@ -1,11 +1,15 @@
 package top.colter.dynamic.incoming
 
+import kotlin.coroutines.CoroutineContext
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.io.path.createTempDirectory
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
@@ -14,6 +18,15 @@ import top.colter.dynamic.CommandReceiveMode
 import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.MainDynamicConfig
 import top.colter.dynamic.command.CommandBootstrapService
+import top.colter.dynamic.command.CommandListener
+import top.colter.dynamic.command.PendingSubscriptionSelection
+import top.colter.dynamic.command.SubscriptionSelectionComponent
+import top.colter.dynamic.command.SubscriptionService
+import top.colter.dynamic.core.data.CommandContext
+import top.colter.dynamic.core.data.IncomingProcessingResult
+import top.colter.dynamic.core.data.PublisherKey
+import top.colter.dynamic.core.plugin.PublisherLookupPlugin
+import top.colter.dynamic.draw.PublisherThemeInitializer
 import top.colter.dynamic.core.command.CommandPermissionRule
 import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.data.CommandRole
@@ -42,9 +55,254 @@ import top.colter.dynamic.event.IncomingTextMessageEvent
 import top.colter.dynamic.event.Listener
 import top.colter.dynamic.link.LinkParseService
 import top.colter.dynamic.repository.IncomingAuditWriteRequest
+import top.colter.dynamic.repository.IncomingProcessingWriteRequest
+import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.repository.SubscriberStateCache
+import top.colter.dynamic.testPublisherInfo
 
 class IncomingMessagePipelineTest {
+    @Test
+    fun `带前缀的认领成功错误群聊和已初始化请求都不会泄漏凭据`() = runBlocking {
+        for ((text, kind, initialized) in listOf(
+            Triple("/db claim 123456", TargetKind.USER, false),
+            Triple("/db CLAIM 000000", TargetKind.USER, false),
+            Triple("/db claim 无效凭据", TargetKind.USER, false),
+            Triple("/db claim 123456", TargetKind.GROUP, false),
+            Triple("/db claim 123456", TargetKind.USER, true),
+        )) {
+            val bus = EventBus(Dispatchers.Unconfined)
+            var config = MainDynamicConfig(command = CommandConfig(
+                prefix = "/db",
+                permissions = if (initialized) listOf(CommandPermissionRule(senderId = "admin", role = CommandRole.ADMIN)) else emptyList(),
+            ))
+            val service = CommandBootstrapService(
+                configProvider = { config },
+                configUpdater = { transform -> config = transform(config); ConfigApplyResult(changed = true) },
+                codeGenerator = { "123456" },
+            )
+            val recorder = RecordingAuditRecorder()
+            var observations = 0
+            var commands = 0
+            var consumers = 0
+            bus.subscribe(object : Listener<IncomingMessageEvent> {
+                override suspend fun onMessage(event: IncomingMessageEvent) { observations++ }
+            })
+            bus.subscribe(object : Listener<CommandEvent> {
+                override suspend fun onMessage(event: CommandEvent) { commands++ }
+            })
+            val pipeline = pipeline(
+                eventBus = bus,
+                configProvider = { config },
+                commandBootstrapService = service,
+                auditRecorder = recorder,
+                incomingConsumerDispatcher = { consumers++ },
+            )
+
+            pipeline.handle("onebot", IncomingMessagePublishRequest(
+                message = testMessage(text, targetKind = kind), traceId = "claim-test",
+            ))
+
+            assertEquals(0, observations, text)
+            assertEquals(0, commands, text)
+            assertEquals(0, consumers, text)
+            assertTrue(recorder.records.isEmpty(), text)
+            val expectedClaim = text == "/db claim 123456" && kind == TargetKind.USER && !initialized
+            assertEquals(expectedClaim, config.command.permissions.any { it.senderId == "sender" }, text)
+            bus.shutdown()
+        }
+    }
+
+    @Test
+    fun `候选确认走订阅权限审计和主 Bot 仲裁`() = runBlocking {
+        PersistenceManager.init(createTempDirectory("selection-pipeline").resolve("test.db").toString())
+        val bus = EventBus(Dispatchers.Unconfined)
+        var config = MainDynamicConfig(command = CommandConfig(prefix = "/db", requirePermissionRule = true))
+        var fetches = 0
+        val lookup = object : PublisherLookupPlugin {
+            override val platformId = PlatformId.of("bilibili")
+            override suspend fun fetchPublisherInfo(userId: String) = testPublisherInfo(
+                key = PublisherKey.of("bilibili", externalId = userId), name = "发布者",
+            ).also { fetches++ }
+        }
+        val component = SubscriptionSelectionComponent(SubscriptionService(
+            publisherLookupResolver = { lookup }, publisherFollowResolver = { null },
+            configProvider = { config }, eventBus = bus, themeInitializer = PublisherThemeInitializer { _, _ -> },
+        ))
+        val selector = IncomingBotAccountSelector(primaryBotAccountResolver = { "bot-a" })
+        val processing = mutableListOf<IncomingProcessingWriteRequest>()
+        bus.subscribe(CommandListener(
+            publisherLookupResolver = { lookup }, configProvider = { config }, subscriptionComponent = component,
+            eventBus = bus, incomingBotAccountSelector = selector,
+            publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+            incomingProcessingRecorder = { processing += it; true },
+        ))
+        val message = testMessage("#1", botAccountId = "bot-a", mentions = emptySet())
+        val context = CommandContext(target = message.target, senderId = message.senderId, botAccountId = "bot-a")
+        component.offerCandidates(context, "bilibili", listOf(testPublisherInfo(
+            key = PublisherKey.of("bilibili", externalId = "111"), name = "发布者",
+        )))
+        val recorder = RecordingAuditRecorder()
+        val pipeline = pipeline(
+            eventBus = bus, configProvider = { config }, incomingBotAccountSelector = selector,
+            auditRecorder = recorder, pendingSelectionResolver = component::resolveSelection,
+        )
+
+        pipeline.handle("onebot", IncomingMessagePublishRequest(message, traceId = "denied"))
+        assertEquals(0, fetches)
+        assertTrue(processing.any { it.result == IncomingProcessingResult.REJECTED && it.commandPath == "subscribe" })
+        assertEquals(1, component.resolveSelection(context, "#1")?.index)
+
+        config = config.copy(command = config.command.copy(permissions = listOf(
+            CommandPermissionRule(commandPath = "subscribe", senderId = "sender", role = CommandRole.MANAGER),
+        )))
+        val secondary = message.copy(botAccountId = "bot-b", target = message.target.copy(accountId = "bot-b"))
+        pipeline.handle("onebot", IncomingMessagePublishRequest(secondary, traceId = "secondary"))
+        assertEquals(0, fetches)
+        assertEquals(1, component.resolveSelection(context, "#1")?.index)
+
+        pipeline.handle("onebot", IncomingMessagePublishRequest(message, traceId = "accepted"))
+        assertEquals(1, fetches)
+        assertNull(component.resolveSelection(context, "#1"))
+        assertTrue(processing.any { it.traceId == "accepted" && it.result == IncomingProcessingResult.SUCCEEDED })
+        assertEquals(3, recorder.records.size)
+        assertTrue(recorder.records.all { it.intent == IncomingMessageIntent.Command && it.recordPolicy == IncomingMessageRecordPolicy.Audit })
+        bus.shutdown()
+    }
+
+    @Test
+    fun `重复认领事件不消耗额外次数且正确验证码仍可认领`() = runBlocking {
+        for (prefix in listOf("/db claim ", "")) {
+            val bus = EventBus(Dispatchers.Unconfined)
+            var config = MainDynamicConfig(command = CommandConfig(prefix = "/db"))
+            val service = CommandBootstrapService(
+                configProvider = { config },
+                configUpdater = { transform -> config = transform(config); ConfigApplyResult(changed = true) },
+                codeGenerator = { "123456" },
+            )
+            val recorder = RecordingAuditRecorder()
+            var observations = 0
+            var consumers = 0
+            var replies = 0
+            bus.subscribe(object : Listener<IncomingMessageEvent> {
+                override suspend fun onMessage(event: IncomingMessageEvent) { observations++ }
+            })
+            bus.subscribe(object : Listener<CommandResultEvent> {
+                override suspend fun onMessage(event: CommandResultEvent) { replies++ }
+            })
+            val pipeline = pipeline(
+                eventBus = bus, configProvider = { config }, commandBootstrapService = service,
+                auditRecorder = recorder, incomingConsumerDispatcher = { consumers++ },
+            )
+            val wrong = IncomingMessagePublishRequest(
+                message = testMessage(prefix + "000000", targetKind = TargetKind.USER),
+                traceId = "wrong", dedupeKey = "wrong-event",
+            )
+            repeat(3) { pipeline.handle("onebot", wrong.copy(traceId = "repeated-$it")) }
+            assertEquals(1, service.snapshot().recentAttempts, prefix)
+
+            val correct = IncomingMessagePublishRequest(
+                message = testMessage(prefix + "123456", messageId = "correct", targetKind = TargetKind.USER),
+                traceId = "correct", dedupeKey = "correct-event",
+            )
+            pipeline.handle("onebot", correct)
+            assertTrue(config.command.permissions.any { it.senderId == "sender" }, prefix)
+            val repliesAfterClaim = replies
+            pipeline.handle("onebot", correct)
+            assertEquals(repliesAfterClaim, replies, "重复成功事件不应再发送已初始化提示")
+            assertEquals(2, service.snapshot().recentAttempts, prefix)
+            assertEquals(0, observations, prefix)
+            assertEquals(0, consumers, prefix)
+            assertTrue(recorder.records.isEmpty(), prefix)
+            bus.shutdown()
+        }
+    }
+
+    @Test
+    fun `认领消息被仲裁忽略后同一事件仍可处理`() = runBlocking {
+        val bus = EventBus(Dispatchers.Unconfined)
+        var primaryBot = "bot-a"
+        var replies = 0
+        var config = MainDynamicConfig(command = CommandConfig(prefix = "/db"))
+        val service = CommandBootstrapService(
+            configProvider = { config },
+            configUpdater = { transform -> config = transform(config); ConfigApplyResult(changed = true) },
+            codeGenerator = { "123456" },
+        )
+        val pipeline = pipeline(
+            eventBus = bus, configProvider = { config }, commandBootstrapService = service,
+            incomingBotAccountSelector = IncomingBotAccountSelector(primaryBotAccountResolver = { primaryBot }),
+        )
+        bus.subscribe(object : Listener<CommandResultEvent> {
+            override suspend fun onMessage(event: CommandResultEvent) { replies++ }
+        })
+        val request = IncomingMessagePublishRequest(
+            message = testMessage("/db claim", botAccountId = "bot-b", mentions = emptySet()),
+            traceId = "claim-event", dedupeKey = "event",
+        )
+        pipeline.handle("onebot", request)
+        assertEquals(0, replies)
+        primaryBot = "bot-b"
+        pipeline.handle("onebot", request)
+        assertEquals(1, replies, "被仲裁忽略的事件不应提前占用去重键")
+        pipeline.handle("onebot", request)
+        assertEquals(1, replies, "处理后重复上报仍应去重")
+        bus.shutdown()
+    }
+
+    @Test
+    fun `候选确认排队后更换候选不得订阅新批次`() = runBlocking {
+        for (confirmationText in listOf("#1", "/db subscribe #1", "/db 订阅 #1")) {
+            PersistenceManager.init(createTempDirectory("selection-batch").resolve("test.db").toString())
+            val dispatcher = QueuedDispatcher()
+            val bus = EventBus(dispatcher)
+            val config = MainDynamicConfig(command = CommandConfig(prefix = "/db", permissions = listOf(
+                CommandPermissionRule(senderId = "sender", role = CommandRole.MANAGER),
+            )))
+            val fetched = mutableListOf<String>()
+            val processing = mutableListOf<IncomingProcessingWriteRequest>()
+            val lookup = object : PublisherLookupPlugin {
+                override val platformId = PlatformId.of("bilibili")
+                override suspend fun fetchPublisherInfo(userId: String) = testPublisherInfo(
+                    key = PublisherKey.of("bilibili", externalId = userId), name = userId,
+                ).also { fetched += userId }
+            }
+            val component = SubscriptionSelectionComponent(SubscriptionService(
+                publisherLookupResolver = { lookup }, publisherFollowResolver = { null },
+                configProvider = { config }, eventBus = bus, themeInitializer = PublisherThemeInitializer { _, _ -> },
+            ))
+            bus.subscribe(CommandListener(
+                publisherLookupResolver = { lookup }, configProvider = { config }, subscriptionComponent = component,
+                eventBus = bus, publisherThemeInitializer = PublisherThemeInitializer { _, _ -> },
+                incomingProcessingRecorder = { processing += it; true },
+            ))
+            val pipeline = pipeline(
+                eventBus = bus, configProvider = { config }, pendingSelectionResolver = component::resolveSelection,
+            )
+            val message = testMessage(confirmationText)
+            val context = CommandContext(target = message.target, senderId = message.senderId, botAccountId = message.botAccountId)
+            fun offer(id: String) {
+                component.offerCandidates(context, "bilibili", listOf(testPublisherInfo(
+                    key = PublisherKey.of("bilibili", externalId = id), name = id,
+                )))
+            }
+            offer("111")
+            pipeline.handle("onebot", IncomingMessagePublishRequest(message, traceId = "old-confirmation"))
+            offer("222")
+            dispatcher.drain()
+
+            assertTrue(fetched.isEmpty(), confirmationText)
+            assertTrue(processing.any { it.traceId == "old-confirmation" && it.result == IncomingProcessingResult.FAILED }, confirmationText)
+            assertEquals(1, component.resolveSelection(context, "#1")?.index, "新候选仍然可用")
+
+            pipeline.handle("onebot", IncomingMessagePublishRequest(message.copy(messageId = "new"), traceId = "new-confirmation"))
+            dispatcher.drain()
+            assertEquals(listOf("222"), fetched, confirmationText)
+            assertNull(component.resolveSelection(context, "#1"))
+            assertTrue(processing.any { it.traceId == "new-confirmation" && it.result == IncomingProcessingResult.SUCCEEDED }, confirmationText)
+            bus.shutdown()
+        }
+    }
+
     @Test
     fun `handle should broadcast incoming observation event with normalized ids`() = runBlocking {
         val eventBus = EventBus()
@@ -803,6 +1061,7 @@ class IncomingMessagePipelineTest {
         incomingBotAccountSelector: IncomingBotAccountSelector = IncomingBotAccountSelector(),
         auditRecorder: IncomingMessageAuditRecorder = IncomingMessageAuditRecorder { true },
         commandBootstrapService: CommandBootstrapService? = null,
+        pendingSelectionResolver: ((CommandContext, String) -> PendingSubscriptionSelection?)? = null,
     ): IncomingMessagePipeline {
         return IncomingMessagePipeline(
             configProvider = configProvider,
@@ -813,6 +1072,7 @@ class IncomingMessagePipelineTest {
             incomingBotAccountSelector = incomingBotAccountSelector,
             auditRecorder = auditRecorder,
             commandBootstrapService = commandBootstrapService,
+            pendingSelectionResolver = pendingSelectionResolver,
         )
     }
 
@@ -882,6 +1142,12 @@ class IncomingMessagePipelineTest {
                 ),
             )
         }
+    }
+
+    private class QueuedDispatcher : CoroutineDispatcher() {
+        private val queued = ArrayDeque<Runnable>()
+        override fun dispatch(context: CoroutineContext, block: Runnable) { queued.addLast(block) }
+        fun drain() { while (queued.isNotEmpty()) queued.removeFirst().run() }
     }
 
     private class RecordingAuditRecorder : IncomingMessageAuditRecorder {
