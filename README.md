@@ -58,12 +58,12 @@ Vtuber粉丝群等如果需要动态推送，管理员可加群联系我使用�
 
 从 [Releases](https://github.com/Colter23/dynamic-bot/releases) 下载适合当前系统的一键启动包：
 
-| 包 | 适用场景 |
-| --- | --- |
-| `dynamic-bot-v*-windows-x64-jre.zip` | Windows x64，内置 Java 21，解压后双击 `start.bat`。 |
-| `dynamic-bot-v*-linux-x64-jre.tar.gz` | Linux x64，内置 Java 21，解压后执行 `./start.sh`。 |
-| `dynamic-bot-v*-windows-x64.zip` | Windows x64，不带 JRE，需要本机已有 Java 17+。 |
-| `dynamic-bot-v*-linux-x64.tar.gz` | Linux x64，不带 JRE，需要本机已有 Java 17+。 |
+| 包                                     | 适用场景                                      |
+| ------------------------------------- | ----------------------------------------- |
+| `dynamic-bot-v*-windows-x64-jre.zip`  | Windows x64，内置 Java 21，解压后双击 `start.bat`。 |
+| `dynamic-bot-v*-linux-x64-jre.tar.gz` | Linux x64，内置 Java 21，解压后执行 `./start.sh`。  |
+| `dynamic-bot-v*-windows-x64.zip`      | Windows x64，不带 JRE，需要本机已有 Java 17+。       |
+| `dynamic-bot-v*-linux-x64.tar.gz`     | Linux x64，不带 JRE，需要本机已有 Java 17+。         |
 
 也可以直接下载 `dynamic-bot-*-all.jar` 手动运行：
 
@@ -119,12 +119,12 @@ Docker 首次生成主配置时，后台默认监听 `0.0.0.0`，方便从容器
 
 官方插件合集包只包含主程序发布时推荐搭配的插件版本，具体版本以包内 `MANIFEST.json` 为准。后续单独升级插件时，仍推荐在 Web 后台的插件页面更新。
 
-| 插件              | 用途 | 仓库 |
-|-----------------| --- | --- |
-| Bilibili 插件     | Bilibili 动态、直播和链接解析。 | [dynamic-bot-bilibili](https://github.com/Colter23/dynamic-bot-bilibili) |
-| 微博插件            | 微博动态来源。 | [dynamic-bot-weibo](https://github.com/Colter23/dynamic-bot-weibo) |
-| OneBot 插件       | OneBot/QQ 消息发送与接收。 | [dynamic-bot-onebot](https://github.com/Colter23/dynamic-bot-onebot) |
-| QQ 官方机器人插件 | QQ 官方机器人消息发送与接收。 | [dynamic-bot-qqbot](https://github.com/Colter23/dynamic-bot-qqbot) |
+| 插件          | 用途                   | 仓库                                                                       |
+| ----------- | -------------------- | ------------------------------------------------------------------------ |
+| Bilibili 插件 | Bilibili 动态、直播和链接解析。 | [dynamic-bot-bilibili](https://github.com/Colter23/dynamic-bot-bilibili) |
+| 微博插件        | 微博动态来源。              | [dynamic-bot-weibo](https://github.com/Colter23/dynamic-bot-weibo)       |
+| OneBot 插件   | OneBot/QQ 消息发送与接收。   | [dynamic-bot-onebot](https://github.com/Colter23/dynamic-bot-onebot)     |
+| QQ 官方机器人插件  | QQ 官方机器人消息发送与接收。     | [dynamic-bot-qqbot](https://github.com/Colter23/dynamic-bot-qqbot)       |
 
 一个常见的最小部署通常包含：
 
@@ -136,16 +136,16 @@ Docker 首次生成主配置时，后台默认监听 `0.0.0.0`，方便从容器
 
 常用运行目录：
 
-| 路径 | 说明 |
-| --- | --- |
-| `config/` | 主程序和插件配置。 |
-| `plugins/` | 插件 JAR。 |
-| `data/dynamic.db` | SQLite 数据库。 |
-| `data/plugins/` | 插件私有数据。 |
-| `data/images/` | 来源图片和推送渲染图缓存。 |
-| `data/videos/` | 链接解析视频缓存。 |
-| `data/fonts` | 绘图字体文件。 |
-| `logs/` | 本地滚动日志，默认保留 30 天，总大小上限 1GB。 |
+| 路径                | 说明                          |
+| ----------------- | --------------------------- |
+| `config/`         | 主程序和插件配置。                   |
+| `plugins/`        | 插件 JAR。                     |
+| `data/dynamic.db` | SQLite 数据库。                 |
+| `data/plugins/`   | 插件私有数据。                     |
+| `data/images/`    | 来源图片和推送渲染图缓存。               |
+| `data/videos/`    | 链接解析视频缓存。                   |
+| `data/fonts`      | 绘图字体文件。                     |
+| `logs/`           | 本地滚动日志，默认保留 30 天，总大小上限 1GB。 |
 
 大多数配置可以先使用默认值。首次部署通常只需要关注：
 
@@ -158,6 +158,15 @@ Docker 首次生成主配置时，后台默认监听 `0.0.0.0`，方便从容器
 这些配置可以在 Web 后台中调整，也可以直接编辑 `config/main.yml`。修改监听地址、端口等启动级配置后，需要重启主程序。
 
 日志默认同时输出到控制台和 `logs/dynamic-bot.log`。可通过环境变量 `LOG_LEVEL`、`LOG_DIR`、`LOG_FILE_MAX_SIZE`、`LOG_FILE_MAX_HISTORY`、`LOG_FILE_TOTAL_SIZE_CAP` 调整日志级别、文件目录和滚动策略。
+
+## 第三方插件目录
+
+| 插件        | 用途          | 仓库                                                                     |
+| --------- | ----------- | ---------------------------------------------------------------------- |
+| koishi 插件 | koishi适配器插件 | [dynamic-bot-koishi](https://github.com/incubator4/dynamic-bot-koishi) |
+
+如果你也制作了dynamic-bot的插件，可通过issue或pr的方式添加到此列表。
+dynamic-bot插件仓库建议添加 `dynamic-bot-plugin` Topics。
 
 ## 开发与贡献
 
