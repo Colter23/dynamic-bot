@@ -1,6 +1,6 @@
 # 发布顺序
 
-本轮版本：core 0.0.6（插件 API 4）、主程序 0.0.10、Bilibili 0.0.8、OneBot 0.0.8、微博 0.0.4、QQ 官方机器人 0.0.2。
+本轮版本：core 0.0.6（插件 API 4）、主程序 0.0.10、Bilibili 0.0.8、OneBot 0.0.8、微博 0.0.5、QQ 官方机器人 0.0.2。
 
 1. 先发布 core，等待 Maven Central 可获取 `top.colter.dynamic:dynamic-bot-core:0.0.6`。本地 composite build 成功不代表远程依赖已发布。
 2. 发布四个官方插件，确认每个 Release 都有对应版本的 `*-all.jar`、`*.sha256` 和从 JAR 导出的 `plugin.yml`。
