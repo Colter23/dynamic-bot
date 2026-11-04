@@ -218,11 +218,21 @@ async function openCookieLogin(platform) {
   }, { size: "small" });
 }
 
-function cookieHeaderFromJson(cookieJson) {
+export function cookieHeaderFromJson(cookieJson, platform = "", nowSeconds = Date.now() / 1000) {
   try {
-    const rows = JSON.parse(cookieJson || "[]");
+    const parsed = JSON.parse(cookieJson || "[]");
+    const rows = Array.isArray(parsed) ? parsed : parsed && parsed.cookies;
     if (!Array.isArray(rows)) return "";
-    const pairs = rows.map(item => {
+    const candidates = rows.filter(item => {
+      if (platform !== "weibo") return true;
+      const domain = String(item && item.domain || "").toLowerCase().replace(/^\./, "");
+      const hostOnly = item && item.hostOnly != null ? item.hostOnly : !String(item && item.domain || "").startsWith(".");
+      const path = String(item && item.path || "/");
+      const expires = Number(item && (item.expires ?? item.expirationDate));
+      return (domain === "weibo.com" || (!hostOnly && "weibo.com".endsWith(`.${domain}`)))
+        && path === "/" && (!Number.isFinite(expires) || expires <= 0 || expires > nowSeconds);
+    });
+    const pairs = candidates.map(item => {
       const name = String(item && item.name || "").trim();
       const value = item && item.value != null ? String(item.value) : "";
       return name ? `${name}=${value}` : "";
@@ -236,18 +246,20 @@ function cookieHeaderFromJson(cookieJson) {
 async function openCookieExport(platform) {
   const result = await api(`/platforms/${encodeURIComponent(platform)}/login/cookie/export`);
   const cookieJson = result.cookie || "";
-  const cookieHeader = cookieHeaderFromJson(cookieJson);
+  const cookieHeader = cookieHeaderFromJson(cookieJson, platform);
   const formats = [
     {
       key: "json",
       title: "JSON 格式",
-      description: "后端原样返回的浏览器 Cookie JSON，适合保存到 Bilibili 插件配置或再次导入后台。",
+      description: "完整浏览器 Cookie JSON，保留各域登录与续期凭据，备份和恢复登录请使用此格式。",
       value: cookieJson,
     },
     {
       key: "raw",
       title: "原始 Cookie 格式",
-      description: "形如 SESSDATA=xxxx;buvid4=xxxx;，适合复制到请求头或手动 Cookie 登录。",
+      description: platform === "weibo"
+        ? "仅包含适用于 weibo.com 首页的 Cookie，请求头不包含其他域的长期续期凭据。"
+        : "Cookie 请求头格式，适合复制到请求头或手动 Cookie 登录。",
       value: cookieHeader,
     },
   ];
