@@ -29,7 +29,9 @@ import kotlinx.coroutines.asExecutor
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -214,7 +216,7 @@ public class HttpImageDownloader(
         val idleTimeout = idleTimeoutMs.coerceAtLeast(1L)
         val startedAt = System.currentTimeMillis()
         val lastProgressAt = AtomicLong(startedAt)
-        val aborted = AtomicBoolean(false)
+        val timedOut = AtomicBoolean(false)
         val reader = CompletableFuture.supplyAsync(
             {
                 body.use { input ->
@@ -226,7 +228,6 @@ public class HttpImageDownloader(
             Dispatchers.IO.asExecutor(),
         )
         val abort: () -> Unit = {
-            aborted.set(true)
             runCatching { body.close() }
             reader.cancel(true)
         }
@@ -238,16 +239,17 @@ public class HttpImageDownloader(
                 if (now - lastProgressAt.get() < idleTimeout && now - startedAt < absoluteTimeoutMillis(idleTimeout)) {
                     continue
                 }
+                timedOut.set(true)
                 abort()
                 return@launch
             }
         }
         try {
             awaitBody(reader, abort)
-        } catch (e: CancellationException) {
-            throw e
         } catch (t: Throwable) {
-            if (aborted.get()) {
+            // 底层 Future 被超时看守取消不代表调用方取消，真正的任务取消仍原样传播。
+            currentCoroutineContext().ensureActive()
+            if (timedOut.get()) {
                 throw ImageDownloadException("读取图片响应体超时：uri=$uri，idleTimeoutMs=$idleTimeout", t)
             }
             throw t

@@ -1,12 +1,17 @@
 package top.colter.dynamic.task
 
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneId
@@ -173,6 +178,128 @@ class TaskSchedulerTest {
         assertEquals(2, completedSnapshot.runCount)
         assertNull(completedSnapshot.lastErrorSummary)
         assertEquals(clock.millis(), completedSnapshot.lastSuccessAtMillis)
+    }
+
+    @Test
+    fun cancelledOperationRetriesWithoutStoppingFixedDelayTask(): Unit = runTest {
+        val clock = MutableClock()
+        val scheduler = taskScheduler(clock)
+        var attempts = 0
+        scheduler.start(
+            TaskDefinition(
+                id = "cancelled-operation",
+                schedule = TaskSchedule.FixedDelay(50.milliseconds),
+                retryBackoff = 10.milliseconds,
+                action = {
+                    if (++attempts == 1) throw CancellationException("operation cancelled")
+                },
+            ),
+        )
+        runCurrent()
+
+        val failed = assertNotNull(scheduler.snapshot("cancelled-operation"))
+        assertTrue(scheduler.isRunning("cancelled-operation"))
+        assertEquals("operation cancelled", failed.lastErrorSummary)
+        assertEquals(1, failed.runCount)
+        assertEquals(clock.millis() + 10, failed.nextRunAtMillis)
+
+        advanceTimeBy(10)
+        runCurrent()
+
+        val recovered = assertNotNull(scheduler.snapshot("cancelled-operation"))
+        assertEquals(2, attempts)
+        assertEquals(TaskStatus.RUNNING, recovered.status)
+        assertNull(recovered.lastErrorSummary)
+        assertEquals(clock.millis() + 50, recovered.nextRunAtMillis)
+        scheduler.stop("cancelled-operation")
+    }
+
+    @Test
+    fun actionTimeoutRetriesWithoutCancellingOneShotTask(): Unit = runTest {
+        val clock = MutableClock()
+        val scheduler = taskScheduler(clock)
+        var attempts = 0
+        scheduler.start(
+            TaskDefinition(
+                id = "operation-timeout",
+                schedule = TaskSchedule.Once,
+                retryBackoff = 10.milliseconds,
+                action = {
+                    if (++attempts == 1) withTimeout(5) { awaitCancellation() }
+                },
+            ),
+        )
+        runCurrent()
+        advanceTimeBy(5)
+        runCurrent()
+
+        val failed = assertNotNull(scheduler.snapshot("operation-timeout"))
+        assertTrue(scheduler.isRunning("operation-timeout"))
+        assertNotNull(failed.lastErrorSummary)
+        assertEquals(1, failed.runCount)
+
+        advanceTimeBy(10)
+        runCurrent()
+
+        assertEquals(2, attempts)
+        assertEquals(TaskStatus.COMPLETED, scheduler.snapshot("operation-timeout")?.status)
+        assertNull(scheduler.snapshot("operation-timeout")?.lastErrorSummary)
+    }
+
+    @Test
+    fun stopDuringActionCancelsWithoutRetryingOrRecordingFailure(): Unit = runTest {
+        val scheduler = taskScheduler(MutableClock())
+        var attempts = 0
+        scheduler.start(
+            TaskDefinition(
+                id = "stop-action",
+                schedule = TaskSchedule.FixedDelay(50.milliseconds),
+                retryBackoff = 10.milliseconds,
+                action = {
+                    attempts++
+                    awaitCancellation()
+                },
+            ),
+        )
+        runCurrent()
+
+        assertTrue(scheduler.stop("stop-action"))
+        advanceTimeBy(100)
+        runCurrent()
+
+        val stopped = assertNotNull(scheduler.snapshot("stop-action"))
+        assertEquals(1, attempts)
+        assertEquals(TaskStatus.CANCELLED, stopped.status)
+        assertNull(stopped.lastErrorSummary)
+        assertNull(stopped.lastSuccessAtMillis)
+        assertNull(stopped.nextRunAtMillis)
+    }
+
+    @Test
+    fun actionCancellingItsOwnJobDoesNotRetry(): Unit = runTest {
+        val scheduler = taskScheduler(MutableClock())
+        var attempts = 0
+        scheduler.start(
+            TaskDefinition(
+                id = "self-cancel",
+                schedule = TaskSchedule.FixedDelay(50.milliseconds),
+                retryBackoff = 10.milliseconds,
+                action = {
+                    attempts++
+                    currentCoroutineContext().cancel()
+                },
+            ),
+        )
+        runCurrent()
+        advanceTimeBy(100)
+        runCurrent()
+
+        val stopped = assertNotNull(scheduler.snapshot("self-cancel"))
+        assertEquals(1, attempts)
+        assertEquals(TaskStatus.CANCELLED, stopped.status)
+        assertNull(stopped.lastErrorSummary)
+        assertNull(stopped.lastSuccessAtMillis)
+        assertNull(stopped.nextRunAtMillis)
     }
 
     @Test

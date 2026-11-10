@@ -12,6 +12,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import top.colter.dynamic.core.task.TaskDefinition
@@ -205,16 +206,23 @@ private class TaskRuntime(
 
         return try {
             task.action()
+            currentCoroutineContext().ensureActive()
             synchronized(lock) {
                 lastErrorSummary = null
                 lastSuccessAtMillis = clock.millis()
             }
             true
-        } catch (e: CancellationException) {
-            throw e
         } catch (t: Throwable) {
+            // 只有当前任务被取消才退出；内部操作取消或超时按本轮失败处理。
+            currentCoroutineContext().ensureActive()
             recordFailure(t)
-            logger.error(t) { "任务执行失败：taskId=${task.id}" }
+            logger.error(t) {
+                if (t is CancellationException) {
+                    "任务内部操作已取消，本轮按失败处理：taskId=${task.id}"
+                } else {
+                    "任务执行失败：taskId=${task.id}"
+                }
+            }
             false
         } finally {
             synchronized(lock) {
