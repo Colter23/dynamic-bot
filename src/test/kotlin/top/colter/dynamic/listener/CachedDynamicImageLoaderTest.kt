@@ -14,7 +14,9 @@ import kotlin.io.path.createTempDirectory
 import kotlin.io.path.exists
 import kotlin.io.path.writeBytes
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.test.fail
 import kotlinx.coroutines.delay
@@ -31,6 +33,56 @@ import top.colter.dynamic.testDynamicUpdate
 import top.colter.dynamic.testPublisherInfo
 
 class CachedDynamicImageLoaderTest {
+
+    @Test
+    fun loadShouldKeepPreviewAndOriginalInSeparateCaches(): Unit = runBlocking {
+        val root = createTempDirectory("dynamic-loader-preview")
+        val original = MediaRef("https://example.com/image.jpg", MediaKind.COVER)
+        val previewUrl = "${original.uri}@1920w_80q.webp"
+        val image = original.copy(previewUri = previewUrl)
+        val previewBytes = pngBytes(Color.GREEN, width = 3)
+        val originalBytes = pngBytes(Color.BLUE, width = 5)
+        val requested = mutableListOf<String>()
+        val loader = loader(root.toString()) { uri, _, _ ->
+            requested += uri
+            if (uri == previewUrl) previewBytes else originalBytes
+        }
+
+        loader.load(dynamic(avatar = image))
+        assertEquals(listOf(previewUrl), requested)
+        assertEquals(3, DynamicImageCache.image(image).width)
+        assertFalse(DynamicImageCache.pathFor("bilibili", MediaKind.COVER, original.uri).exists())
+        DynamicImageCache.clearMemory()
+        loader.load(dynamic(avatar = image))
+        assertEquals(listOf(previewUrl), requested)
+
+        loader.load(dynamic(avatar = original))
+        assertEquals(listOf(previewUrl, original.uri), requested)
+        assertContentEquals(originalBytes, DynamicImageCache.bytes(original))
+        assertEquals(5, DynamicImageCache.image(original).width)
+        assertEquals(3, DynamicImageCache.image(image).width)
+    }
+
+    @Test
+    fun failedPreviewShouldNotDownloadOriginalOrOverwriteItsCache(): Unit = runBlocking {
+        val root = createTempDirectory("dynamic-loader-preview-failure")
+        val original = MediaRef("https://example.com/image.jpg", MediaKind.IMAGE)
+        val bytes = pngBytes(Color.BLUE, width = 5)
+        val requested = mutableListOf<String>()
+        val loader = loader(root.toString()) { uri, _, _ ->
+            requested += uri
+            throw ImageDownloadException("timeout")
+        }
+        DynamicImageCache.store(original, "bilibili", MediaKind.IMAGE, bytes)
+        val image = original.copy(previewUri = "${original.uri}@1920w_80q.webp")
+
+        loader.load(dynamic(avatar = image))
+
+        assertEquals(listOf(image.previewUri), requested)
+        assertContentEquals(bytes, DynamicImageCache.bytes(original))
+        assertTrue(DynamicImageCache.image(image).width > 0)
+        assertFalse(DynamicImageCache.pathFor("bilibili", MediaKind.IMAGE, image.previewUri!!).exists())
+    }
 
     @Test
     fun loadShouldUseFullUriHashForSameFileNameOnDisk(): Unit = runBlocking {
@@ -213,12 +265,12 @@ class CachedDynamicImageLoaderTest {
         ),
     )
 
-    private fun pngBytes(color: Color): ByteArray {
-        val image = BufferedImage(2, 2, BufferedImage.TYPE_INT_RGB)
+    private fun pngBytes(color: Color, width: Int = 2): ByteArray {
+        val image = BufferedImage(width, 2, BufferedImage.TYPE_INT_RGB)
         val graphics = image.createGraphics()
         try {
             graphics.color = color
-            graphics.fillRect(0, 0, 2, 2)
+            graphics.fillRect(0, 0, width, 2)
         } finally {
             graphics.dispose()
         }

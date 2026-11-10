@@ -96,7 +96,7 @@ public object DynamicImageCache : DynamicImageResolver {
     }
 
     override fun image(image: MediaRef): Image {
-        return decode(bytes(image)) ?: placeholderImage()
+        return decode(bytes(image.forDrawing())) ?: placeholderImage()
     }
 
     public fun loadFromDisk(image: MediaRef, platformId: String, imageType: MediaKind): Boolean {
@@ -327,4 +327,9 @@ public object DynamicImageCache : DynamicImageResolver {
     private const val DEFAULT_MAX_READ_BYTES: Long = 20L * 1024L * 1024L
     private const val FILE_INDEX_MULTIPLIER: Int = 8
     private const val MIN_FILE_INDEX_ENTRIES: Int = 512
+}
+
+internal fun MediaRef.forDrawing(): MediaRef {
+    val preview = previewUri?.trim()?.takeIf { it.isNotEmpty() } ?: return this
+    return copy(uri = preview, previewUri = null)
 }

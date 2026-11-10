@@ -4,7 +4,7 @@ plugins {
 rootProject.name = "dynamic-bot"
 
 val localCore = file("../dynamic-bot-core")
-if (localCore.isDirectory) {
+if (localCore.isDirectory && providers.gradleProperty("useLocalCore").orNull != "false") {
     includeBuild(localCore)
 }
 

@@ -99,7 +99,7 @@ public class CachedDynamicImageLoader(
     }
 
     private suspend fun loadReference(platformId: String, reference: MediaReference) {
-        val image = reference.media
+        val image = reference.media.forDrawing()
         val imageType = reference.kind
         if (DynamicImageCache.loadFromDisk(image, platformId, imageType)) return
 

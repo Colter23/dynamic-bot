@@ -35,6 +35,21 @@ class PushTemplateRendererTest {
     private val renderer = PushTemplateRenderer()
 
     @Test
+    fun imageTemplateShouldSendOriginalUriWhenDrawingPreviewExists() {
+        val originalUri = "https://example.com/image.jpg"
+        val update = testDynamicUpdate(
+            payload = DynamicPayload(blocks = listOf(ImageGridBlock(images = listOf(ImageItem(
+                MediaRef(originalUri, MediaKind.IMAGE, previewUri = "$originalUri@1920w_80q.webp"),
+            ))))),
+        )
+
+        val image = assertIs<MessageContent.Image>(renderer.render("{images}", update, drawImage = null)
+            .single().content.single())
+
+        assertEquals(originalUri, image.image.uri)
+    }
+
+    @Test
     fun shouldRenderTextPlaceholdersAndKeepUnknownPlaceholders() {
         val chains = renderer.render(
             "{name} {uid} {did} {time} {content} {link} {unknown}",

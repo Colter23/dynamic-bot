@@ -7,6 +7,8 @@ import top.colter.dynamic.core.config.ConfigFieldType
 import top.colter.dynamic.core.config.ConfigFormSpec
 import top.colter.dynamic.core.config.ConfigMigration
 import top.colter.dynamic.core.config.ConfigurablePlugin
+import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
 import kotlin.io.path.createDirectories
 import kotlin.io.path.deleteIfExists
 import kotlin.io.path.exists
@@ -19,6 +21,24 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
 class ConfigServiceTest {
+
+    @Test
+    fun mediaPreviewShouldSurviveYamlRoundTripAndReadLegacyData() {
+        val store = YamlPluginDataStore("media-preview", createTempDirectory("media-preview-data"))
+        val image = MediaRef(
+            uri = "https://example.com/image.jpg",
+            kind = MediaKind.COVER,
+            previewUri = "https://example.com/image.jpg@1920w_80q.webp",
+        )
+        store.save("image", image)
+        assertEquals(image, store.reload("image", MediaRef::class))
+
+        store.resolvePath("legacy").writeText("uri: 'https://example.com/legacy.jpg'\nkind: COVER\n")
+        assertEquals(
+            MediaRef("https://example.com/legacy.jpg", MediaKind.COVER),
+            store.reload("legacy", MediaRef::class),
+        )
+    }
 
     data class TestConfig(
         val pollingIntervalMs: Long = 30000,

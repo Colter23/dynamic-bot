@@ -36,14 +36,14 @@ internal class LinkPublisherEnricher(
         val localMerged = storedPublisherResolver(incoming.key)
             ?.let { stored -> mergePublisherInfo(incoming, stored.toInfo()) }
             ?: incoming
-        if (!localMerged.needsLookup()) return localMerged
-
         val plugin = publisherLookupResolver(localMerged.platformId.value) ?: return localMerged
+        if (!localMerged.needsLookup()) return plugin.preparePublisherForDrawing(localMerged)
+
         val fetched = runCatching { plugin.fetchPublisherInfo(localMerged.externalId) }
             .onFailure { onLookupFailure(localMerged, it) }
             .getOrNull()
-            ?: return localMerged
-        return mergePublisherInfo(localMerged, fetched)
+        val merged = fetched?.let { mergePublisherInfo(localMerged, it) } ?: localMerged
+        return plugin.preparePublisherForDrawing(merged)
     }
 
     private fun PublisherInfo.needsLookup(): Boolean {
