@@ -26,11 +26,7 @@ import top.colter.dynamic.core.data.MessageRecordPolicy
 import top.colter.dynamic.core.data.OutboundMessageKind
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.TargetAddress
-import top.colter.dynamic.core.event.PublisherPersistenceMode
 import top.colter.dynamic.core.event.SourceUpdateDeliveryTags
-import top.colter.dynamic.core.event.SourceUpdatePublishRequest
-import top.colter.dynamic.core.event.SourceUpdatePublishResult
-import top.colter.dynamic.core.event.SourceUpdatePublisher
 import top.colter.dynamic.core.link.LinkKinds
 import top.colter.dynamic.core.link.LinkPreview
 import top.colter.dynamic.core.link.LinkResolution
@@ -38,8 +34,17 @@ import top.colter.dynamic.core.link.LinkResolver
 import top.colter.dynamic.core.link.LinkVideoDownloadRequest
 import top.colter.dynamic.core.link.LinkVideoDownloadResult
 import top.colter.dynamic.core.link.LinkVideoDownloader
+import top.colter.dynamic.core.link.LinkVideoResource
+import top.colter.dynamic.core.event.SourceUpdateDeliveryMode
+import top.colter.dynamic.template.TemplateSelector
+import top.colter.dynamic.template.TemplateContentKind
+import top.colter.dynamic.draw.DefaultDynamicDrawService
+import top.colter.dynamic.draw.DynamicDrawService
+import top.colter.dynamic.repository.SourceUpdateSnapshotRepository
+import top.colter.dynamic.repository.PublisherRepository
 import top.colter.dynamic.core.link.ParsedLink
 import top.colter.dynamic.core.plugin.OutboundMessagePublishRequest
+import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.core.tools.loggerFor
 import top.colter.dynamic.draw.DefaultLinkPreviewRenderer
@@ -61,12 +66,10 @@ private fun elapsedMillis(startedNanos: Long): Long {
 public class LinkParseService(
     private val resolversProvider: () -> List<LinkResolver>,
     private val configProvider: () -> MainDynamicConfig = { MainDynamicConfig() },
-    private val sourceUpdatePublisher: SourceUpdatePublisher = SourceUpdatePublisher {
-        SourceUpdatePublishResult.failed("来源更新发布器未配置")
-    },
     private val videoDownloadersProvider: () -> List<LinkVideoDownloader> = { emptyList() },
     private val publisherLookupResolver: (String) -> PublisherLookupPlugin? = { null },
     private val previewRenderer: LinkPreviewRenderer = DefaultLinkPreviewRenderer(),
+    private val dynamicDrawService: DynamicDrawService = DefaultDynamicDrawService(configProvider = configProvider),
     private val onMessagesQueued: suspend () -> Unit = {},
     private val outboundMessageService: OutboundMessageService = OutboundMessageService(
         onMessagesQueued = onMessagesQueued,
@@ -74,13 +77,13 @@ public class LinkParseService(
     private val progressMessenger: LinkParseProgressMessenger = NoopLinkParseProgressMessenger,
     private val backgroundScope: CoroutineScope? = null,
     private val projectRootProvider: () -> File = { File(System.getProperty("user.dir")) },
+    private val snapshotRecorder: suspend (String, SourceUpdate) -> Unit = { source, update -> SourceUpdateSnapshotRepository.upsert(source, update); Unit },
     private val incomingProcessingRecorder: (IncomingProcessingWriteRequest) -> Boolean = {
         IncomingMessageAuditRepository.recordProcessing(it)
     },
 ) {
     private val videoDownloadSemaphores: MutableMap<Int, Semaphore> = ConcurrentHashMap()
     private val videoDownloadLocks: MutableMap<String, VideoDownloadLock> = ConcurrentHashMap()
-    private val templateRenderer: LinkPreviewTemplateRenderer = LinkPreviewTemplateRenderer(previewRenderer)
     private val publisherEnricher: LinkPublisherEnricher = LinkPublisherEnricher(
         publisherLookupResolver = publisherLookupResolver,
         onLookupFailure = { publisher, error ->
@@ -169,19 +172,13 @@ public class LinkParseService(
 
             results += runCatching {
                 when (val resolution = candidate.resolver.resolveLink(parsedLink)) {
-                    is LinkResolution.Dynamic -> forwardDynamic(
-                        update = resolution.update,
-                        attachedVideo = resolution.attachedVideo,
-                        parsedLink = parsedLink,
-                        context = context,
-                        inReplyTo = inReplyTo,
-                        correlationId = correlationId,
-                    )
-                    is LinkResolution.Preview -> forwardPreview(resolution.preview, parsedLink, context, inReplyTo, correlationId)
-                    is LinkResolution.Message -> forwardMessage(resolution.batches, parsedLink, context, correlationId)
+                    is LinkResolution.Dynamic -> forwardResolved(resolution, context, inReplyTo, correlationId)
+                    is LinkResolution.Preview -> forwardResolved(resolution, context, inReplyTo, correlationId)
+                    is LinkResolution.Message -> forwardMessage(resolution.batches, parsedLink, context, correlationId, inReplyTo)
                     is LinkResolution.Failed -> LinkParseItemResult.Failed(parsedLink, resolution.reason)
                 }
             }.getOrElse { error ->
+                if (error is CancellationException) throw error
                 linkParseLogger.warn(error) {
                     "链接解析处理失败：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
                 }
@@ -245,6 +242,7 @@ public class LinkParseService(
             if (!resolver.safeMatchesLink(url)) return@forEach
             val parsedLink = runCatching { resolver.parseLink(url) }
                 .onFailure {
+                    if (it is CancellationException) throw it
                     linkParseLogger.warn(it) {
                         "链接识别失败：resolver=${resolver.platformId.value}，url=$url"
                     }
@@ -266,390 +264,118 @@ public class LinkParseService(
             .getOrDefault(false)
     }
 
-    private suspend fun forwardDynamic(
-        update: SourceUpdate,
-        attachedVideo: LinkPreview?,
-        parsedLink: ParsedLink,
+    private suspend fun forwardResolved(
+        resolution: LinkResolution,
         context: CommandContext,
         inReplyTo: String?,
         correlationId: String?,
     ): LinkParseItemResult {
-        val enrichedUpdate = enrichPublisherForLinkParse(update)
-        val sourcePublisher = enrichedUpdate.publisher
-        if (sourcePublisher.externalId.isBlank()) {
-            return LinkParseItemResult.Failed(parsedLink, "动态发布者 ID 缺失")
+        val config = configProvider()
+        val parsedLink = resolution.parsedLink
+        val update = (resolution as? LinkResolution.Dynamic)?.update?.let { publisherEnricher.enrich(it) }
+        val resource = when (resolution) {
+            is LinkResolution.Dynamic -> resolution.video
+            is LinkResolution.Preview -> resolution.video
+            else -> null
         }
-
-        val result = sourceUpdatePublisher.publish(
-            SourceUpdatePublishRequest(
-                sourcePlugin = LINK_PARSE_EVENT_SOURCE,
-                deliveryTargetAddress = context.target,
-                deliveryTag = LINK_PARSE_EVENT_LABEL,
-                correlationId = correlationId,
-                update = enrichedUpdate,
-                publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY,
-            ),
-        )
-        if (!result.accepted) {
-            return LinkParseItemResult.Failed(parsedLink, result.message.ifBlank { "链接转发失败" })
-        }
-
-        val forwarded = LinkParseItemResult.Forwarded(
-            parsedLink = parsedLink,
-            target = context.target,
-            deliveryCount = result.deliveryCount,
-        )
-        if (attachedVideo == null) return forwarded
-
-        // 动态里的视频是"附件"：卡片（含正文）已经通过来源更新发出，这里按模板补发视频。
-        val template = configProvider().linkParsing.templates.message
-        val templatePlan = runCatching { templateRenderer.plan(template) }.getOrElse { error ->
-            linkParseLogger.warn(error) {
-                "链接解析模板解析失败，跳过动态附带视频：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
-            }
-            return forwarded
-        }
-        if (!templatePlan.requiresVideo) return forwarded
-
-        return forwardVideoIfRequested(
-            templatePlan = templatePlan,
-            // 复用卡片已经补全过的发布者信息：附带视频的 publisher 通常没有 banner，
-            // 再走一次 enrich 会因 needsLookup() 触发一次平台接口查询，白白多打请求。
-            preview = attachedVideo.copy(publisher = enrichedUpdate.publisher),
-            parsedLink = parsedLink,
-            context = context,
-            inReplyTo = inReplyTo,
-            correlationId = correlationId,
-            currentResult = forwarded,
-            renderFallbackOnFailure = false,
-        )
-    }
-
-    private suspend fun enrichPublisherForLinkParse(update: SourceUpdate): SourceUpdate {
-        return publisherEnricher.enrich(update)
-    }
-
-    private suspend fun enrichPreviewForLinkParse(preview: LinkPreview): LinkPreview {
-        return publisherEnricher.enrich(preview)
-    }
-
-    private suspend fun forwardPreview(
-        preview: LinkPreview,
-        parsedLink: ParsedLink,
-        context: CommandContext,
-        inReplyTo: String?,
-        correlationId: String?,
-    ): LinkParseItemResult {
-        val enrichedPreview = enrichPreviewForLinkParse(preview)
-        val template = configProvider().linkParsing.templates.message
-        val templatePlan = runCatching {
-            templateRenderer.plan(template)
-        }.getOrElse { error ->
-            linkParseLogger.warn(error) {
-                "链接解析模板解析失败，回退为文本：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
-            }
-            return forwardMessage(
-                listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText())))),
-                parsedLink,
-                context,
-                correlationId,
+        val preview = when (resolution) {
+            is LinkResolution.Dynamic -> LinkPreview(
+                platformId = parsedLink.platformId, kind = LinkKinds.DYNAMIC, id = update!!.key.externalId,
+                url = update.link ?: parsedLink.normalizedUrl, title = "${update.publisher.name} 的动态",
+                publisher = update.publisher, durationSeconds = resource?.durationSeconds,
+                publishedAtEpochSeconds = update.occurredAtEpochSeconds,
             )
+            is LinkResolution.Preview -> publisherEnricher.enrich(resolution.preview)
+            else -> error("不支持的模板内容")
         }
-
-        val immediateBatches = runCatching {
-            templateRenderer.renderPlanPreview(templatePlan, enrichedPreview)
-        }.getOrElse { error ->
-            linkParseLogger.warn(error) {
-                "链接卡片模板渲染失败，回退为文本：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
-            }
-            listOf(MessageBatch(listOf(MessageContent.Text(enrichedPreview.fallbackText()))))
-        }
-        var currentResult = when {
-            immediateBatches.isEmpty() -> null
-            else -> when (val immediateResult = forwardMessage(immediateBatches, parsedLink, context, correlationId)) {
-                is LinkParseItemResult.Forwarded -> immediateResult
-                else -> return immediateResult
-            }
-        }
-
-        return forwardVideoIfRequested(
-            templatePlan = templatePlan,
-            preview = enrichedPreview,
-            parsedLink = parsedLink,
-            context = context,
-            inReplyTo = inReplyTo,
-            correlationId = correlationId,
-            currentResult = currentResult,
-            renderFallbackOnFailure = true,
-        )
-    }
-
-    /**
-     * 模板要求视频（含 `{video}`）时的统一下载/发送流程。
-     *
-     * - 视频链接（[LinkResolution.Preview]）：[renderFallbackOnFailure] = true，失败时回退渲染一次"无视频"模板，
-     *   因为卡片本身就是链接解析的产物，需要兜底。
-     * - 动态附带视频（[LinkResolution.Dynamic.attachedVideo]）：动态卡片已经发过，失败时只发失败提示，
-     *   不重复渲染卡片，[renderFallbackOnFailure] = false。
-     */
-    private suspend fun forwardVideoIfRequested(
-        templatePlan: LinkPreviewTemplatePlan,
-        preview: LinkPreview,
-        parsedLink: ParsedLink,
-        context: CommandContext,
-        inReplyTo: String?,
-        correlationId: String?,
-        currentResult: LinkParseItemResult.Forwarded?,
-        renderFallbackOnFailure: Boolean,
-    ): LinkParseItemResult {
-        if (!templatePlan.requiresVideo) {
-            return currentResult ?: forwardMessage(
-                listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))),
-                parsedLink,
-                context,
-                correlationId,
-            )
-        }
-
-        val downloadPlan = when (val planned = videoDownloadPlan(preview, parsedLink)) {
-            null -> {
-                if (!renderFallbackOnFailure) {
-                    return currentResult ?: LinkParseItemResult.Failed(parsedLink, "视频下载不可用")
-                }
-                val fallbackBatches = renderVideoFallbackBatches(templatePlan, preview, parsedLink)
-                return when {
-                    fallbackBatches.isNotEmpty() -> {
-                        val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context, correlationId)
-                        when (fallbackResult) {
-                            is LinkParseItemResult.Forwarded -> currentResult?.withAdditionalDeliveries(fallbackResult.deliveryCount)
-                                ?: fallbackResult
-                            else -> currentResult
-                                ?: forwardMessage(
-                                    listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))),
-                                    parsedLink,
-                                    context,
-                                    correlationId,
-                                )
-                        }
-                    }
-                    currentResult != null -> currentResult
-                    else -> forwardMessage(
-                        listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))),
-                        parsedLink,
-                        context,
-                        correlationId,
-                    )
-                }
-            }
-            is VideoDownloadPlan.NotSent -> {
-                val feedback = sendVideoPrompt(
-                    message = planned.message,
-                    parsedLink = parsedLink,
-                    context = context,
-                    inReplyTo = inReplyTo,
-                    correlationId = correlationId,
-                )
-                if (!renderFallbackOnFailure) {
-                    return currentResult?.withAdditionalDeliveries(feedback.deliveryCount)
-                        ?: videoPromptOnlyResult(feedback, parsedLink, context)
-                        ?: LinkParseItemResult.Failed(parsedLink, planned.message.ifBlank { "视频无法下载或推送" })
-                }
-                val fallbackBatches = renderVideoFallbackBatches(templatePlan, preview, parsedLink)
-                if (fallbackBatches.isNotEmpty()) {
-                    val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context, correlationId)
-                    return if (fallbackResult is LinkParseItemResult.Forwarded) {
-                        currentResult
-                            ?.withAdditionalDeliveries(fallbackResult.deliveryCount + feedback.deliveryCount)
-                            ?: fallbackResult.withAdditionalDeliveries(feedback.deliveryCount)
-                    } else {
-                        currentResult?.withAdditionalDeliveries(feedback.deliveryCount)
-                            ?: videoPromptOnlyResult(feedback, parsedLink, context)
-                            ?: LinkParseItemResult.Failed(parsedLink, planned.message.ifBlank { "视频无法下载或推送" })
-                    }
-                }
-                return currentResult?.withAdditionalDeliveries(feedback.deliveryCount)
-                    ?: videoPromptOnlyResult(feedback, parsedLink, context)
-                    ?: LinkParseItemResult.Failed(parsedLink, planned.message.ifBlank { "视频无法下载或推送" })
-            }
-            is VideoDownloadPlan.Download -> planned
-        }
-
-        val downloadPrompt = sendVideoPrompt(
-            message = downloadPlan.downloadingPrompt,
-            parsedLink = parsedLink,
-            context = context,
-            inReplyTo = inReplyTo,
-            correlationId = correlationId,
-        )
-        val withPrompt = currentResult?.withAdditionalDeliveries(downloadPrompt.deliveryCount)
-            ?: forwardedForContext(parsedLink, context, downloadPrompt.deliveryCount)
-        val scope = backgroundScope
-        if (scope != null && !templatePlan.requiresVideoInForward) {
-            launchVideoDownloadFollowUp(
-                scope = scope,
-                templatePlan = templatePlan,
-                preview = preview,
-                parsedLink = parsedLink,
-                context = context,
-                downloader = downloadPlan.downloader,
-                currentResult = withPrompt,
-                downloadPromptReceipt = downloadPrompt.receipt,
-                inReplyTo = inReplyTo,
-                correlationId = correlationId,
-                renderFallbackOnFailure = renderFallbackOnFailure,
-            )
-            return withPrompt
-        }
-
-        return forwardVideoAfterDownload(
-            templatePlan = templatePlan,
-            preview = preview,
-            parsedLink = parsedLink,
-            context = context,
-            downloader = downloadPlan.downloader,
-            currentResult = withPrompt,
-            downloadPromptReceipt = downloadPrompt.receipt,
-            inReplyTo = inReplyTo,
-            correlationId = correlationId,
-            renderFallbackOnFailure = renderFallbackOnFailure,
-        )
-    }
-
-    private fun launchVideoDownloadFollowUp(
-        scope: CoroutineScope,
-        templatePlan: LinkPreviewTemplatePlan,
-        preview: LinkPreview,
-        parsedLink: ParsedLink,
-        context: CommandContext,
-        downloader: LinkVideoDownloader,
-        currentResult: LinkParseItemResult.Forwarded,
-        downloadPromptReceipt: LinkParseProgressReceipt?,
-        inReplyTo: String?,
-        correlationId: String?,
-        renderFallbackOnFailure: Boolean,
-    ) {
-        scope.launch {
+        if (update != null && update.publisher.externalId.isBlank()) return LinkParseItemResult.Failed(parsedLink, "动态发布者 ID 缺失")
+        val selected = TemplateSelector.select(config.templates, parsedLink.platformId.value,
+            if (update != null) TemplateContentKind.of(update) else TemplateContentKind.ofLink(preview.kind),
+            SourceUpdateDeliveryMode.LINK_PREVIEW)
+        val templateRenderer = LinkPreviewTemplateRenderer(previewRenderer.withConfig(config))
+        val drawService = dynamicDrawService.withConfig(config)
+        val plan = templateRenderer.plan(selected.template)
+        val session = templateRenderer.session(preview, update) {
             try {
-                val result = forwardVideoAfterDownload(
-                    templatePlan = templatePlan,
-                    preview = preview,
-                    parsedLink = parsedLink,
-                    context = context,
-                    downloader = downloader,
-                    currentResult = currentResult,
-                    downloadPromptReceipt = downloadPromptReceipt,
-                    inReplyTo = inReplyTo,
-                    correlationId = correlationId,
-                    renderFallbackOnFailure = renderFallbackOnFailure,
-                )
-                val addedDeliveries = (result.deliveryCount - currentResult.deliveryCount).coerceAtLeast(0)
-                if (addedDeliveries > 0) {
-                    linkParseLogger.info {
-                        "链接视频补发完成：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，附加投递=$addedDeliveries"
-                    }
-                }
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Throwable) {
-                linkParseLogger.warn(e) {
-                    "链接视频后续推送失败：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，原因=${e.message ?: "未知错误"}"
-                }
+                drawService.render(update!!, PublisherRepository.findByKey(update.publisher.key))
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                linkParseLogger.warn { "链接动态绘图失败，回退为文本：update=${update!!.key.stableValue()}" }
+                null
             }
         }
-    }
-
-    private suspend fun forwardVideoAfterDownload(
-        templatePlan: LinkPreviewTemplatePlan,
-        preview: LinkPreview,
-        parsedLink: ParsedLink,
-        context: CommandContext,
-        downloader: LinkVideoDownloader,
-        currentResult: LinkParseItemResult.Forwarded,
-        downloadPromptReceipt: LinkParseProgressReceipt?,
-        inReplyTo: String?,
-        correlationId: String?,
-        renderFallbackOnFailure: Boolean,
-    ): LinkParseItemResult.Forwarded {
-        try {
-            val video = when (val outcome = downloadVideo(preview, parsedLink, downloader)) {
-                is VideoDownloadOutcome.Downloaded -> outcome.result
-                is VideoDownloadOutcome.NotSent -> {
-                    val feedback = sendVideoPrompt(
-                        message = outcome.message,
-                        parsedLink = parsedLink,
-                        context = context,
-                        inReplyTo = inReplyTo,
-                        correlationId = correlationId,
-                    )
-                    if (!renderFallbackOnFailure) {
-                        return currentResult.withAdditionalDeliveries(feedback.deliveryCount)
-                    }
-                    val fallbackBatches = runCatching {
-                        templateRenderer.renderPlanVideoFallback(templatePlan, preview)
-                    }.getOrElse { error ->
-                        linkParseLogger.warn(error) {
-                            "链接视频模板回退渲染失败，跳过视频消息：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
-                        }
-                        emptyList()
-                    }
-                    if (fallbackBatches.isNotEmpty()) {
-                        val fallbackResult = forwardMessage(fallbackBatches, parsedLink, context, correlationId)
-                        return when (fallbackResult) {
-                            is LinkParseItemResult.Forwarded -> currentResult.withAdditionalDeliveries(
-                                fallbackResult.deliveryCount + feedback.deliveryCount,
-                            )
-                            else -> currentResult.withAdditionalDeliveries(feedback.deliveryCount)
-                        }
-                    }
-                    return currentResult.withAdditionalDeliveries(feedback.deliveryCount)
-                }
+        update?.let { snapshotRecorder(LINK_PARSE_EVENT_SOURCE, it) }
+        var count = 0
+        var contentCount = 0
+        suspend fun publish(batches: List<MessageBatch>): LinkParseItemResult.Failed? {
+            if (batches.isEmpty()) return null
+            return when (val result = forwardMessage(batches, parsedLink, context, correlationId, inReplyTo, update?.key)) {
+                is LinkParseItemResult.Forwarded -> { count += result.deliveryCount; contentCount++; null }
+                is LinkParseItemResult.Failed -> result
+                else -> LinkParseItemResult.Failed(parsedLink, "链接结果发送失败")
             }
-            val videoBatches = runCatching {
-                templateRenderer.renderPlanVideo(templatePlan, preview, video)
-                    .takeIf { it.isNotEmpty() }
-                    ?: error("视频模板未产生可发送内容")
-            }.getOrElse { error ->
-                linkParseLogger.warn(error) {
-                    "链接视频模板渲染失败，跳过视频消息：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
-                }
-                val feedback = sendVideoPrompt(
-                    message = videoFailurePrompt(configProvider().linkParsing.videoDownload, preview, parsedLink, "视频消息渲染失败"),
-                    parsedLink = parsedLink,
-                    context = context,
-                    inReplyTo = inReplyTo,
-                    correlationId = correlationId,
-                )
-                return currentResult.withAdditionalDeliveries(feedback.deliveryCount)
-            }
-            val videoResult = forwardMessage(videoBatches, parsedLink, context, correlationId)
-            return if (videoResult is LinkParseItemResult.Forwarded) {
-                currentResult.copy(deliveryCount = currentResult.deliveryCount + videoResult.deliveryCount)
-            } else {
-                val feedback = sendVideoPrompt(
-                    message = videoFailurePrompt(
-                        configProvider().linkParsing.videoDownload,
-                        preview,
-                        parsedLink,
-                        videoResult.failureReason(),
-                    ),
-                    parsedLink = parsedLink,
-                    context = context,
-                    inReplyTo = inReplyTo,
-                    correlationId = correlationId,
-                )
-                currentResult.withAdditionalDeliveries(feedback.deliveryCount)
-            }
-        } finally {
-            recallVideoPrompt(downloadPromptReceipt)
         }
+        publish(session.render(plan.immediateSteps))?.let { return it }
+        suspend fun finish(): LinkParseItemResult {
+            if (plan.requiresVideo) {
+                val downloadPreview = preview.copy(kind = LinkKinds.VIDEO, durationSeconds = resource?.durationSeconds ?: preview.durationSeconds)
+                val downloadPlan = if (resource == null) VideoDownloadPlan.NotSent(
+                    if (preview.kind == LinkKinds.VIDEO) videoFailurePrompt(config.linkParsing.videoDownload, downloadPreview, parsedLink, "当前内容未提供可下载视频") else "")
+                    else videoDownloadPlan(downloadPreview, parsedLink, config.linkParsing.videoDownload)
+                var prompt: VideoPromptResult? = null
+                try {
+                    val outcome = when (downloadPlan) {
+                        is VideoDownloadPlan.Download -> {
+                            prompt = sendVideoPrompt(downloadPlan.downloadingPrompt, parsedLink, context, inReplyTo, correlationId)
+                            count += prompt.deliveryCount
+                            downloadVideo(downloadPreview, parsedLink, downloadPlan.downloader, config.linkParsing.videoDownload, resource)
+                        }
+                        is VideoDownloadPlan.NotSent -> VideoDownloadOutcome.NotSent(downloadPlan.message)
+                        null -> VideoDownloadOutcome.NotSent("当前内容不支持视频下载")
+                    }
+                    val video = (outcome as? VideoDownloadOutcome.Downloaded)?.result
+                    if (outcome is VideoDownloadOutcome.NotSent) {
+                        count += sendVideoPrompt(outcome.message, parsedLink, context, inReplyTo, correlationId).deliveryCount
+                    }
+                    publish(session.render(plan.videoSteps, video))?.let { failure ->
+                        if (video != null) sendVideoPrompt(
+                            videoFailurePrompt(config.linkParsing.videoDownload, downloadPreview, parsedLink, "发送未完成，请查看消息记录后再决定是否重发"),
+                            parsedLink, context, inReplyTo, correlationId,
+                        )
+                        return failure
+                    }
+                } finally {
+                    if (config.linkParsing.progressReply.recallOnComplete) prompt?.receipt?.let { progressMessenger.recall(it) }
+                }
+            }
+            if (contentCount == 0) {
+                val fallback = if (update == null) preview.fallbackText() else
+                    top.colter.dynamic.listener.PushTemplateRenderer().render("{name}\\n{content}\\n{link}", update, null)
+                        .flatMap { it.content }.filterIsInstance<MessageContent.Text>().joinToString("\n") { it.fallbackText }
+                publish(listOf(MessageBatch(listOf(MessageContent.Text(fallback)))))?.let { return it }
+            }
+            return LinkParseItemResult.Forwarded(parsedLink, context.target, count)
+        }
+        if (plan.requiresVideo && !plan.requiresVideoInForward && backgroundScope != null) {
+            backgroundScope.launch {
+                try {
+                    val result = finish()
+                    if (result is LinkParseItemResult.Failed) linkParseLogger.warn { "链接后续发送失败：${result.reason}" }
+                } catch (error: CancellationException) { throw error }
+                catch (error: Exception) { linkParseLogger.warn { "链接后续处理失败：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}" } }
+            }
+            return LinkParseItemResult.Forwarded(parsedLink, context.target, count)
+        }
+        return finish()
     }
 
     private suspend fun downloadVideo(
         preview: LinkPreview,
         parsedLink: ParsedLink,
         downloader: LinkVideoDownloader,
+        config: LinkVideoDownloadConfig = configProvider().linkParsing.videoDownload,
+        resource: LinkVideoResource? = null,
     ): VideoDownloadOutcome {
-        val config = configProvider().linkParsing.videoDownload
         if (preview.kind != LinkKinds.VIDEO) {
             return VideoDownloadOutcome.NotSent(
                 videoFailurePrompt(config, preview, parsedLink, "当前链接不是视频"),
@@ -692,6 +418,7 @@ public class LinkParseService(
             maxBytes = config.maxFileBytes,
             quality = config.quality,
             ffmpegPath = resolveFfmpegPath(config),
+            resource = resource,
         )
 
         return try {
@@ -734,8 +461,8 @@ public class LinkParseService(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Throwable) {
-            linkParseLogger.warn(e) {
-                "链接视频下载失败，已回退预览：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，原因=${e.message ?: "未知错误"}"
+            linkParseLogger.warn {
+                "链接视频下载失败，已回退预览：platform=${parsedLink.platformId.value}，id=${parsedLink.targetId}，类型=${e::class.simpleName}"
             }
             VideoDownloadOutcome.NotSent(e.toVideoDownloadFeedback(config, preview, parsedLink))
         }
@@ -744,8 +471,8 @@ public class LinkParseService(
     private fun videoDownloadPlan(
         preview: LinkPreview,
         parsedLink: ParsedLink,
+        config: LinkVideoDownloadConfig = configProvider().linkParsing.videoDownload,
     ): VideoDownloadPlan? {
-        val config = configProvider().linkParsing.videoDownload
         if (preview.kind != LinkKinds.VIDEO) return null
 
         val duration = preview.durationSeconds
@@ -784,26 +511,13 @@ public class LinkParseService(
         )
     }
 
-    private suspend fun renderVideoFallbackBatches(
-        templatePlan: LinkPreviewTemplatePlan,
-        preview: LinkPreview,
-        parsedLink: ParsedLink,
-    ): List<MessageBatch> {
-        return runCatching {
-            templateRenderer.renderPlanVideoFallback(templatePlan, preview)
-        }.getOrElse { error ->
-            linkParseLogger.warn(error) {
-                "链接视频模板回退渲染失败，跳过视频消息：platform=${parsedLink.platformId.value}，kind=${parsedLink.kind}，target=${parsedLink.targetId}"
-            }
-            emptyList()
-        }
-    }
-
     private suspend fun forwardMessage(
         batches: List<MessageBatch>,
         parsedLink: ParsedLink,
         context: CommandContext,
         correlationId: String?,
+        inReplyTo: String? = null,
+        sourceUpdateKey: top.colter.dynamic.core.data.UpdateKey? = null,
     ): LinkParseItemResult {
         if (batches.isEmpty()) {
             return LinkParseItemResult.Failed(parsedLink, "链接解析结果为空")
@@ -813,6 +527,7 @@ public class LinkParseService(
             OutboundMessagePublishRequest(
                 sourcePlugin = LINK_PARSE_EVENT_SOURCE,
                 messageId = buildLinkParseMessageId(parsedLink),
+                sourceUpdateKey = sourceUpdateKey,
                 targets = listOf(context.target),
                 batches = batches,
                 renderVariant = LINK_PARSE_EVENT_LABEL,
@@ -820,9 +535,22 @@ public class LinkParseService(
                 importance = MessageImportance.LOW,
                 recordPolicy = MessageRecordPolicy.Transient(retentionSeconds = LINK_RESULT_RETENTION_SECONDS),
                 correlationId = correlationId?.trim()?.takeIf { it.isNotBlank() },
+                replyToMessageId = inReplyTo,
                 deliveryPolicy = MessageDeliveryPolicy(requireActiveTarget = false),
             ),
         )
+        // 回执未知不重放当前批次，也不阻断后续独立的视频等步骤；投递记录保留 SEND_UNKNOWN。
+        val canContinue = result.sendResults.isNotEmpty() && result.sendResults.all {
+            it is MessageSendResult.Sent || it is MessageSendResult.Uncertain
+        }
+        if (!result.accepted && !canContinue) {
+            return LinkParseItemResult.Failed(parsedLink, "链接结果未完整发送，请在消息记录中查看状态")
+        }
+        if (result.sendResults.any { it is MessageSendResult.Uncertain }) {
+            linkParseLogger.warn {
+                "链接结果发送状态未知，保留记录并继续后续独立步骤，不自动重发：messageId=${result.message.id}，target=${context.target.stableValue()}"
+            }
+        }
         return LinkParseItemResult.Forwarded(
             parsedLink = parsedLink,
             target = context.target,
@@ -849,45 +577,6 @@ public class LinkParseService(
             correlationId,
         )
         return VideoPromptResult(deliveryCount = (feedback as? LinkParseItemResult.Forwarded)?.deliveryCount ?: 0)
-    }
-
-    private suspend fun videoPromptOnlyResult(
-        prompt: VideoPromptResult,
-        parsedLink: ParsedLink,
-        context: CommandContext,
-    ): LinkParseItemResult.Forwarded? {
-        if (!prompt.hasOutput) return null
-        return forwardedForContext(parsedLink, context, prompt.deliveryCount)
-    }
-
-    private suspend fun forwardedForContext(
-        parsedLink: ParsedLink,
-        context: CommandContext,
-        deliveryCount: Int,
-    ): LinkParseItemResult.Forwarded {
-        return LinkParseItemResult.Forwarded(
-            parsedLink = parsedLink,
-            target = context.target,
-            deliveryCount = deliveryCount,
-        )
-    }
-
-    private suspend fun recallVideoPrompt(receipt: LinkParseProgressReceipt?) {
-        if (receipt == null) return
-        if (!configProvider().linkParsing.progressReply.recallOnComplete) return
-        progressMessenger.recall(receipt)
-    }
-
-    private fun LinkParseItemResult.Forwarded.withAdditionalDeliveries(count: Int): LinkParseItemResult.Forwarded {
-        return if (count > 0) copy(deliveryCount = deliveryCount + count) else this
-    }
-
-    private fun LinkParseItemResult.failureReason(): String {
-        return when (this) {
-            is LinkParseItemResult.Failed -> reason
-            is LinkParseItemResult.Duplicate -> "重复链接"
-            is LinkParseItemResult.Forwarded -> "视频消息提交失败"
-        }
     }
 
     private fun dedupeKey(context: CommandContext, parsedLink: ParsedLink): String {
@@ -1071,7 +760,8 @@ public class LinkParseService(
         preview: LinkPreview,
         parsedLink: ParsedLink,
     ): String {
-        val reason = message?.trim()?.takeIf { it.isNotBlank() } ?: "下载失败，原因未知"
+        val reason = message?.trim()?.replace(Regex("https?://[^\\s]+"), "[资源地址已隐藏]")
+            ?.takeIf { it.isNotBlank() } ?: "下载失败，原因未知"
         val isSizeExceeded = reason.contains("maxBytes", ignoreCase = true) ||
             reason.contains("大小") ||
             reason.contains("size", ignoreCase = true)
@@ -1112,10 +802,7 @@ public class LinkParseService(
     private data class VideoPromptResult(
         val receipt: LinkParseProgressReceipt? = null,
         val deliveryCount: Int = 0,
-    ) {
-        val hasOutput: Boolean
-            get() = receipt != null || deliveryCount > 0
-    }
+    )
 
     private data class VideoDownloadLock(
         val mutex: Mutex = Mutex(),

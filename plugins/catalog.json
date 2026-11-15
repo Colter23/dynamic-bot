@@ -9,7 +9,7 @@
         "provider": "GITHUB_RELEASE",
         "repository": "Colter23/dynamic-bot-bilibili",
         "tag": "v0.0.7",
-        "tagsByApiMajor": { "4": "latest" },
+        "tagsByApiMajor": { "4": "v0.0.8", "5": "latest" },
         "assetPattern": "dynamic-bot-bilibili-*-all.jar",
         "checksumAssetPattern": "dynamic-bot-bilibili-*-all.jar.sha256"
       },
@@ -32,7 +32,7 @@
         "provider": "GITHUB_RELEASE",
         "repository": "Colter23/dynamic-bot-weibo",
         "tag": "v0.0.3",
-        "tagsByApiMajor": { "4": "latest" },
+        "tagsByApiMajor": { "4": "v0.0.5", "5": "latest" },
         "assetPattern": "dynamic-bot-weibo-*-all.jar",
         "checksumAssetPattern": "dynamic-bot-weibo-*-all.jar.sha256"
       },
@@ -55,7 +55,7 @@
         "provider": "GITHUB_RELEASE",
         "repository": "Colter23/dynamic-bot-onebot",
         "tag": "v0.0.7",
-        "tagsByApiMajor": { "4": "latest" },
+        "tagsByApiMajor": { "4": "v0.0.8", "5": "latest" },
         "assetPattern": "dynamic-bot-onebot-*-all.jar",
         "checksumAssetPattern": "dynamic-bot-onebot-*-all.jar.sha256"
       },
@@ -73,7 +73,7 @@
         "provider": "GITHUB_RELEASE",
         "repository": "Colter23/dynamic-bot-qqbot",
         "tag": "v0.0.1",
-        "tagsByApiMajor": { "4": "latest" },
+        "tagsByApiMajor": { "4": "v0.0.2", "5": "latest" },
         "assetPattern": "dynamic-bot-qqbot-*-all.jar",
         "checksumAssetPattern": "dynamic-bot-qqbot-*-all.jar.sha256"
       },

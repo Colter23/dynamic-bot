@@ -28,7 +28,8 @@ import top.colter.dynamic.core.event.PublisherPersistenceMode
 import top.colter.dynamic.core.event.SourceUpdateDeliveryMode
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishResult
-import top.colter.dynamic.core.event.deliveryMode
+import top.colter.dynamic.template.TemplateSelector
+import top.colter.dynamic.template.TemplateContentKind
 import top.colter.dynamic.core.plugin.OutboundMessagePublishRequest
 import top.colter.dynamic.draw.DefaultDynamicDrawService
 import top.colter.dynamic.draw.DynamicDrawService
@@ -74,9 +75,10 @@ public class SourceUpdateProcessor(
             logger.debug {
                 "开始处理来源更新：source=${request.sourcePlugin}，event=${request.update.eventType.value}，update=${request.update.key.stableValue()}"
             }
+            val config = runtimeConfigProvider()
             when (request.update.payload) {
-                is DynamicPayload -> handleDynamic(request, request.update)
-                is LivePayload -> handleLive(request, request.update)
+                is DynamicPayload -> handleDynamic(request, request.update, config)
+                is LivePayload -> handleLive(request, request.update, config)
             }
         } catch (e: CancellationException) {
             // 取消要原样向上抛：这里吞掉会让插件停止和检测超时都打不断这条链路。
@@ -87,7 +89,7 @@ public class SourceUpdateProcessor(
         }
     }
 
-    private suspend fun handleDynamic(request: SourceUpdatePublishRequest, update: SourceUpdate): SourceUpdatePublishResult {
+    private suspend fun handleDynamic(request: SourceUpdatePublishRequest, update: SourceUpdate, config: MainDynamicConfig): SourceUpdatePublishResult {
         val (normalizedUpdate, storedPublisher) = normalizePublisher(update, request.publisherPersistenceMode)
         val deliveryMode = request.deliveryMode
         val requireActiveTarget = !deliveryMode.isOnDemandPreview
@@ -115,7 +117,7 @@ public class SourceUpdateProcessor(
             return SourceUpdatePublishResult.ignored("所有目标均未订阅该事件、被过滤或订阅时间晚于动态时间")
         }
 
-        val chain = buildMessageBatches(resolveDynamicTemplate(), normalizedUpdate, storedPublisher)
+        val chain = buildMessageBatches(resolveTemplate(request, normalizedUpdate, config), normalizedUpdate, storedPublisher, config)
         return publishMessage(
             sourcePlugin = request.sourcePlugin,
             update = normalizedUpdate,
@@ -124,17 +126,20 @@ public class SourceUpdateProcessor(
             skipReason = "update=${normalizedUpdate.key.stableValue()}",
             messageIdNonce = request.onDemandPreviewMessageIdNonce(deliveryMode),
             correlationId = request.correlationId,
+            replyToMessageId = request.replyToMessageId,
             requireActiveTarget = requireActiveTarget,
             deliveryMode = deliveryMode,
         )
     }
 
-    private suspend fun handleLive(request: SourceUpdatePublishRequest, update: SourceUpdate): SourceUpdatePublishResult {
+    private suspend fun handleLive(request: SourceUpdatePublishRequest, update: SourceUpdate, config: MainDynamicConfig): SourceUpdatePublishResult {
         val (normalizedUpdate, storedPublisher) = normalizePublisher(update, request.publisherPersistenceMode)
-        storedPublisher?.let { publisher ->
+        storedPublisher?.takeUnless { request.deliveryMode.isOnDemandPreview }?.let { publisher ->
             PublisherLiveRecordRepository.recordLiveEvent(publisher.id, normalizedUpdate)
         }
-        val targets = resolveTargets(request.deliveryTarget, request.deliveryTargetAddress, storedPublisher)
+        val candidates = resolveTargets(request.deliveryTarget, request.deliveryTargetAddress, storedPublisher,
+            requireActiveTarget = !request.deliveryMode.isOnDemandPreview)
+        val targets = if (request.deliveryMode.isOnDemandPreview) candidates else candidates
             .filterSubscribedBefore(normalizedUpdate.occurredAtEpochSeconds)
             .let { applySubscriptionRules(normalizedUpdate, it) }
         logger.debug {
@@ -145,7 +150,7 @@ public class SourceUpdateProcessor(
             return SourceUpdatePublishResult.ignored("没有可投递目标")
         }
 
-        val chain = buildMessageBatches(resolveLiveTemplate(normalizedUpdate), normalizedUpdate, storedPublisher)
+        val chain = buildMessageBatches(resolveTemplate(request, normalizedUpdate, config), normalizedUpdate, storedPublisher, config)
         return publishMessage(
             sourcePlugin = request.sourcePlugin,
             update = normalizedUpdate,
@@ -153,6 +158,10 @@ public class SourceUpdateProcessor(
             batches = chain,
             skipReason = "update=${normalizedUpdate.key.stableValue()}",
             correlationId = request.correlationId,
+            replyToMessageId = request.replyToMessageId,
+            deliveryMode = request.deliveryMode,
+            requireActiveTarget = !request.deliveryMode.isOnDemandPreview,
+            messageIdNonce = request.onDemandPreviewMessageIdNonce(request.deliveryMode),
         )
     }
 
@@ -248,14 +257,20 @@ public class SourceUpdateProcessor(
         template: String,
         update: SourceUpdate,
         storedPublisher: Publisher?,
+        config: MainDynamicConfig,
     ): RenderedPushBatches {
         val drawImage = if (templateRenderer.requiresDraw(template, update)) {
-            renderImage(update, storedPublisher)
+            renderImage(update, storedPublisher, runtimeDrawService.withConfig(config))
         } else {
             null
         }
-        val normalBatches = templateRenderer.render(template, update, drawImage)
-        val mentionAllBatches = if (PushTemplateRenderer.hasMentionAllPlaceholder(template)) {
+        val renderedNormal = templateRenderer.render(template, update, drawImage)
+        val normalBatches = renderedNormal.ifEmpty {
+            templateRenderer.render("{name}\\n{content}\\n{link}", update, null)
+        }
+        val mentionAllBatches = if (renderedNormal.isEmpty()) {
+            normalBatches.withMentionAllAtTail()
+        } else if (PushTemplateRenderer.hasMentionAllPlaceholder(template)) {
             templateRenderer.render(template, update, drawImage, mentionAll = true)
         } else {
             normalBatches.withMentionAllAtTail()
@@ -263,9 +278,9 @@ public class SourceUpdateProcessor(
         return RenderedPushBatches(normal = normalBatches, mentionAll = mentionAllBatches)
     }
 
-    private suspend fun renderImage(update: SourceUpdate, storedPublisher: Publisher?): MediaRef? {
+    private suspend fun renderImage(update: SourceUpdate, storedPublisher: Publisher?, drawService: DynamicDrawService): MediaRef? {
         return try {
-            runtimeDrawService.render(update, storedPublisher)
+            drawService.render(update, storedPublisher)
         } catch (e: CancellationException) {
             throw e
         } catch (t: Throwable) {
@@ -274,19 +289,9 @@ public class SourceUpdateProcessor(
         }
     }
 
-    private fun resolveDynamicTemplate(): String {
-        return runtimeConfigProvider().templates.dynamic
-    }
-
-    private fun resolveLiveTemplate(update: SourceUpdate): String {
-        update.payload as? LivePayload ?: return runtimeConfigProvider().templates.dynamic
-        val templates = runtimeConfigProvider().templates
-        return when (update.eventType) {
-            SourceEventType.LIVE_STARTED -> templates.liveStarted
-            SourceEventType.LIVE_ENDED -> templates.liveEnded
-            else -> templates.dynamic
-        }
-    }
+    private fun resolveTemplate(request: SourceUpdatePublishRequest, update: SourceUpdate, config: MainDynamicConfig): String =
+        TemplateSelector.select(config.templates, update.publisher.platformId.value,
+            TemplateContentKind.of(update), request.deliveryMode).template
 
     private suspend fun publishMessage(
         sourcePlugin: String,
@@ -296,6 +301,7 @@ public class SourceUpdateProcessor(
         skipReason: String,
         messageIdNonce: String? = null,
         correlationId: String? = null,
+        replyToMessageId: String? = null,
         requireActiveTarget: Boolean = true,
         deliveryMode: SourceUpdateDeliveryMode = SourceUpdateDeliveryMode.SUBSCRIPTION,
     ): SourceUpdatePublishResult {
@@ -324,6 +330,7 @@ public class SourceUpdateProcessor(
                 correlationId,
                 requireActiveTarget,
                 deliveryMode,
+                replyToMessageId,
             ),
             publishMessageVariant(
                 sourcePlugin,
@@ -335,10 +342,12 @@ public class SourceUpdateProcessor(
                 correlationId,
                 requireActiveTarget,
                 deliveryMode,
+                replyToMessageId,
             ),
         )
         val newDeliveryCount = results.sumOf { it.newDeliveries.size }
         return when {
+            results.any { !it.accepted } -> SourceUpdatePublishResult.failed("来源更新未完整发送，请查看消息投递记录")
             newDeliveryCount > 0 -> {
                 logger.info {
                     "来源更新已创建投递任务：update=${update.key.stableValue()}，消息变体=${results.size}，新增投递=$newDeliveryCount"
@@ -363,6 +372,7 @@ public class SourceUpdateProcessor(
         correlationId: String?,
         requireActiveTarget: Boolean = true,
         deliveryMode: SourceUpdateDeliveryMode = SourceUpdateDeliveryMode.SUBSCRIPTION,
+        replyToMessageId: String? = null,
     ): OutboundMessagePublishResult? {
         if (targets.isEmpty() || batches.isEmpty()) return null
 
@@ -378,6 +388,7 @@ public class SourceUpdateProcessor(
                 importance = deliveryMode.messageImportance(),
                 recordPolicy = deliveryMode.recordPolicy(),
                 correlationId = correlationId?.trim()?.takeIf { it.isNotBlank() },
+                replyToMessageId = replyToMessageId,
                 deliveryPolicy = MessageDeliveryPolicy(requireActiveTarget = requireActiveTarget),
             ),
         )
@@ -401,8 +412,7 @@ public class SourceUpdateProcessor(
         deliveryMode: SourceUpdateDeliveryMode,
     ): String? {
         if (!deliveryMode.isOnDemandPreview) return null
-        val tag = deliveryTag?.trim()?.takeIf { it.isNotBlank() } ?: return null
-        return "$tag:${System.currentTimeMillis()}:${UUID.randomUUID()}"
+        return "${deliveryMode.name}:${System.currentTimeMillis()}:${UUID.randomUUID()}"
     }
 
     private fun SourceUpdateDeliveryMode.outboundMessageKind(): OutboundMessageKind {

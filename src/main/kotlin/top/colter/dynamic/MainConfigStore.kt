@@ -19,8 +19,10 @@ import top.colter.dynamic.core.plugin.MessageSinkRoutingStrategy
 import top.colter.dynamic.admin.AdminLogBuffer
 import top.colter.dynamic.draw.DrawLayoutRegistry
 import top.colter.dynamic.draw.DrawThemeFactory
-import top.colter.dynamic.link.LinkPreviewTemplateRenderer
 import top.colter.dynamic.listener.PushTemplateRenderer
+import top.colter.dynamic.template.MessageTemplateEngine
+import top.colter.dynamic.template.TemplateContentKind
+import top.colter.dynamic.template.value
 
 public class MainConfigStore(
     private val configService: ConfigService = YamlConfigService(),
@@ -133,80 +135,23 @@ private fun MainDynamicConfig.withGeneratedMediaDeliverySecrets(secretProvider: 
     }
 }
 
-private fun mergeLegacyLinkTemplates(
-    previewTemplate: String?,
-    videoTemplate: String?,
-    includeVideo: Boolean,
-): String {
-    val preview = previewTemplate
-        ?.trim()
-        ?.takeIf { it.isNotBlank() }
-        ?: LinkParseTemplates.DEFAULT_MESSAGE_TEMPLATE.substringBefore("\\r")
-    if (!includeVideo) return preview
-    if (preview.contains("{video}")) return preview
-
-    val video = videoTemplate
-        ?.trim()
-        ?.takeIf { it.isNotBlank() }
-        ?: "{video}"
-    return "$preview\\r$video"
-}
-
-private fun rawBoolean(value: Any?): Boolean? {
-    return when (value) {
-        is Boolean -> value
-        is String -> value.equals("true", ignoreCase = true)
-        else -> null
-    }
-}
-
-private fun removeVideoTemplateSteps(template: String): String {
-    if (!template.contains("{video}")) return template
-
-    fun cleanChain(value: String): String {
-        return value
-            .split("\\r")
-            .filterNot { it.contains("{video}") }
-            .joinToString("\\r")
-    }
-
-    val result = buildString {
-        var index = 0
-        while (index < template.length) {
-            val start = template.indexOf("{>>}", startIndex = index)
-            if (start == -1) {
-                append(cleanChain(template.substring(index)))
-                break
-            }
-            append(cleanChain(template.substring(index, start)))
-            val contentStart = start + "{>>}".length
-            val close = template.indexOf("{<<}", startIndex = contentStart)
-            if (close == -1) {
-                append(cleanChain(template.substring(start)))
-                break
-            }
-            val forwardContent = template.substring(contentStart, close)
-            if (!forwardContent.contains("{video}")) {
-                append("{>>}")
-                append(forwardContent)
-                append("{<<}")
-            }
-            index = close + "{<<}".length
-        }
-    }.trimChainSeparators()
-
-    return result.takeIf { it.isNotBlank() } ?: LinkParseTemplates.DEFAULT_MESSAGE_TEMPLATE
-}
-
-private fun String.trimChainSeparators(): String {
-    var value = this
-    while (value.startsWith("\\r")) value = value.removePrefix("\\r")
-    while (value.endsWith("\\r")) value = value.removeSuffix("\\r")
-    return value.trim()
-}
-
 public object MainConfigForms {
     public val migrations: List<ConfigMigration> = listOf(
+        ConfigMigration(
+            id = "main-unified-message-templates",
+            description = "统一模板配置；动态链接使用完整模板，下播模板支持拆分消息",
+        ) {
+            if (contains("linkParsing.templates")) {
+                val old = (get("linkParsing.templates.message") as? String)?.takeIf { it.isNotBlank() } ?: "{draw}"
+                listOf("video", "live", "user", "link").forEach { kind ->
+                    if (!contains("templates.$kind")) set("templates.$kind", old)
+                }
+                if (old.trim() != "{draw}" && !contains("templates.linkParsing.dynamic")) {
+                    set("templates.linkParsing.dynamic", old)
+                }
+                remove("linkParsing.templates")
+            }
+        },
         ConfigMigration(
             id = "main-draw-width-to-scale",
             description = "draw.width 改为 draw.scale，并按 1000dp 基准宽度换算",
@@ -225,34 +170,12 @@ public object MainConfigForms {
             description = "主项目的模板、命令、订阅、链接解析、图片缓存、绘图和 Web 后台设置。",
             fields = listOf(
                 ConfigFieldSpec(
-                    path = "templates.dynamic",
-                    label = "动态模板",
-                    type = ConfigFieldType.TEXTAREA,
+                    path = "templates",
+                    label = "消息模板",
+                    type = ConfigFieldType.JSON,
                     section = "消息模板",
-                    description = "动态通知的发送格式。\n可使用 {draw}、{name}、{uid}、{did}、{time}、{content}、{images}、{link}、{links}。\\n 表示换行，\\r 表示拆成多条消息，{>>}...{<<} 会作为合并转发发送。",
-                    component = "MESSAGE_TEMPLATE_EDITOR",
-                    metadata = mapOf("templateKind" to "DYNAMIC"),
-                    required = true,
-                ),
-                ConfigFieldSpec(
-                    path = "templates.liveStarted",
-                    label = "开播模板",
-                    type = ConfigFieldType.TEXTAREA,
-                    section = "消息模板",
-                    description = "开播通知的发送格式。\n可使用 {draw}、{name}、{uid}、{rid}、{time}、{title}、{area}、{cover}、{link}。\\n 表示换行，\\r 表示拆成多条消息，{>>}...{<<} 会作为合并转发发送。",
-                    component = "MESSAGE_TEMPLATE_EDITOR",
-                    metadata = mapOf("templateKind" to "LIVE_STARTED"),
-                    required = true,
-                ),
-                ConfigFieldSpec(
-                    path = "templates.liveEnded",
-                    label = "下播模板",
-                    type = ConfigFieldType.TEXTAREA,
-                    section = "消息模板",
-                    description = "下播通知的发送格式。\n可使用 {name}、{uid}、{rid}、{title}、{area}、{startTime}、{endTime}、{duration}、{link}。\\n 表示换行，{>>}...{<<} 会作为合并转发发送。",
-                    component = "MESSAGE_TEMPLATE_EDITOR",
-                    metadata = mapOf("templateKind" to "LIVE_ENDED"),
-                    required = true,
+                    description = "按来源平台和用途设置模板。空白覆盖表示继承；视频仅在链接解析且模板包含 {video} 时下载。",
+                    component = "MESSAGE_TEMPLATES",
                 ),
                 ConfigFieldSpec(
                     path = "command.prefix",
@@ -357,16 +280,6 @@ public object MainConfigForms {
                     type = ConfigFieldType.BOOLEAN,
                     section = "链接解析",
                     description = "完成后自动撤回解析中提示。\n如果目标平台不支持撤回，会自动忽略，不影响解析结果发送。",
-                ),
-                ConfigFieldSpec(
-                    path = "linkParsing.templates.message",
-                    label = "链接解析模板",
-                    type = ConfigFieldType.TEXTAREA,
-                    section = "链接解析模板",
-                    description = "链接解析结果的发送格式。\n可使用 {draw}、{cover}、{video}、{name}、{uid}、{id}、{kind}、{title}、{content}、{duration}、{size}、{stats}、{link}。\\n 表示换行，\\r 表示拆成多条消息，{>>}...{<<} 会作为合并转发发送。模板包含 {video} 时才会尝试下载视频；{video} 放在合并转发外会下载完成后单独发送，放在合并转发内会等待视频后发送该合并转发。",
-                    component = "MESSAGE_TEMPLATE_EDITOR",
-                    metadata = mapOf("templateKind" to "LINK_MESSAGE"),
-                    required = true,
                 ),
                 ConfigFieldSpec(
                     path = "linkParsing.videoDownload.maxDurationSeconds",
@@ -977,7 +890,7 @@ public object MainConfigForms {
             path.startsWith("command.") ||
                 path.startsWith("subscription.") ||
                 path.startsWith("notifications.") -> "基础设置"
-            path.startsWith("templates.") ||
+            (path == "templates" || path.startsWith("templates.")) ||
                 path.startsWith("draw.") -> "推送内容"
             path.startsWith("linkParsing.") -> "链接解析"
             path.startsWith("messageRouting.") ||
@@ -1014,9 +927,7 @@ public object MainConfigForms {
             "notifications.dedupeSeconds",
             "notifications.routeMonitorIntervalSeconds",
             "notifications.routeUnavailableNotifyDelaySeconds",
-            "templates.dynamic",
-            "templates.liveStarted",
-            "templates.liveEnded",
+            "templates",
             "draw.layout",
             "draw.outputFormat",
             "draw.themeColors",
@@ -1030,7 +941,6 @@ public object MainConfigForms {
             "draw.font.typography.letterSpacingEm",
             "linkParsing.autoParseEnabled",
             "linkParsing.fallbackTriggerMode",
-            "linkParsing.templates.message",
             "linkParsing.maxLinksPerMessage",
             "linkParsing.autoDedupeTtlSeconds",
             "linkParsing.progressReply.text",
@@ -1121,8 +1031,17 @@ public object MainConfigForms {
         }
         require(config.linkParsing.maxLinksPerMessage >= 1) { "单条消息最大解析链接数至少为 1" }
         require(config.linkParsing.autoDedupeTtlSeconds >= 0.0) { "自动去重时间窗口不能为负数" }
-        require(config.linkParsing.templates.message.isNotBlank()) { "链接解析模板不能为空" }
-        LinkPreviewTemplateRenderer.validate(config.linkParsing.templates.message)
+        listOf(config.templates.video, config.templates.live, config.templates.user, config.templates.link).forEach {
+            require(it.isNotBlank()) { "基础消息模板不能为空" }
+            MessageTemplateEngine.compile(it)
+        }
+        val overrides = listOf(config.templates.linkParsing, config.templates.manualQuery) +
+            config.templates.platforms.flatMap { listOf(it.base, it.linkParsing, it.manualQuery) }
+        overrides.forEach { override -> TemplateContentKind.entries.forEach { MessageTemplateEngine.compile(override.value(it)) } }
+        require(config.templates.platforms.all { it.platformId.isNotBlank() }) { "模板来源平台不能为空" }
+        require(config.templates.platforms.map { it.platformId.trim().lowercase() }.distinct().size == config.templates.platforms.size) {
+            "模板来源平台不能重复"
+        }
         val videoDownload = config.linkParsing.videoDownload
         require(videoDownload.maxDurationSeconds >= 0) { "视频最大时长不能为负数" }
         require(videoDownload.maxFileMegabytes.isFiniteNumber()) { "视频最大大小必须是有效数字" }

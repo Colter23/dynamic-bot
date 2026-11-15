@@ -1,6 +1,7 @@
 package top.colter.dynamic.link
 
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CancellationException
 import top.colter.dynamic.core.data.MediaKind
 import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.PlatformId
@@ -15,6 +16,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertSame
+import kotlin.test.assertFailsWith
 
 class LinkPublisherEnricherTest {
     private val banner = MediaRef("https://example.com/banner.jpg", MediaKind.COVER)
@@ -124,6 +126,21 @@ class LinkPublisherEnricherTest {
         )
 
         assertSame(publisher, enricher.enrich(testDynamicUpdate(publisher = publisher)).publisher)
+    }
+
+    @Test
+    fun `cancelled lookup must not continue drawing or report platform failure`() = runBlocking {
+        val plugin = PreviewLookupPlugin(failure = CancellationException("cancelled"))
+        var failures = 0
+        val enricher = LinkPublisherEnricher(
+            storedPublisherResolver = { null },
+            publisherLookupResolver = { plugin },
+            onLookupFailure = { _, _ -> failures++ },
+        )
+
+        assertFailsWith<CancellationException> { enricher.enrich(testDynamicUpdate()) }
+        assertEquals(0, plugin.prepareCount)
+        assertEquals(0, failures)
     }
 
     private inner class PreviewLookupPlugin(

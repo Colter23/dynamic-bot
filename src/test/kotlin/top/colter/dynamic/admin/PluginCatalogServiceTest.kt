@@ -122,7 +122,7 @@ class PluginCatalogServiceTest {
         val requests = mutableListOf<String>()
         val source = item("demo-plugin").replace(
             "\"provider\": \"GITHUB_RELEASE\",",
-            "\"provider\": \"GITHUB_RELEASE\", \"tag\": \"v0.9.0\", \"tagsByApiMajor\": {\"4\": \"v1.0.0\"},",
+            "\"provider\": \"GITHUB_RELEASE\", \"tag\": \"v0.9.0\", \"tagsByApiMajor\": {\"${CORE_PLUGIN_API_VERSION.substringBefore('.')}\": \"v1.0.0\"},",
         )
         val service = service(
             catalogBytes = catalogJson(source).toByteArray(Charsets.UTF_8), requests = requests,

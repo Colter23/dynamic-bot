@@ -1,4 +1,5 @@
 export function createMessageTemplateEditor(deps) {
+  const fieldCatalog = deps.catalog;
   const esc = deps.esc;
   const attr = deps.attr;
   const doc = deps.document || document;
@@ -883,7 +884,7 @@ export function createMessageTemplateEditor(deps) {
         });
         return;
       }
-      const parts = kind === "LIVE_ENDED" ? [segment.value] : segment.value.split("\\r");
+      const parts = segment.value.split("\\r");
       parts.forEach(text => {
         if (text.length) blocks.push({ type: "message", text });
       });
@@ -931,60 +932,12 @@ export function createMessageTemplateEditor(deps) {
   }
 
   function messageTemplatePlaceholders(kind) {
-    const common = [
-      { value: "{name}", label: "{name}", title: "发布者名称" },
-      { value: "{uid}", label: "{uid}", title: "发布者 ID" },
-      { value: "{link}", label: "{link}", title: "主链接" },
-      { value: "{atAll}", label: "{atAll}", title: "@全体" },
-    ];
-    if (kind && kind.startsWith("LINK_")) {
-      return [
-        { value: "{draw}", label: "{draw}", title: "预览绘图" },
-        { value: "{cover}", label: "{cover}", title: "封面图" },
-        { value: "{video}", label: "{video}", title: "下载后的视频" },
-        { value: "{name}", label: "{name}", title: "发布者 / 账号名称" },
-        { value: "{uid}", label: "{uid}", title: "发布者 / 账号 ID" },
-        { value: "{id}", label: "{id}", title: "链接对象 ID" },
-        { value: "{kind}", label: "{kind}", title: "链接类型" },
-        { value: "{title}", label: "{title}", title: "标题" },
-        { value: "{content}", label: "{content}", title: "描述 / 正文" },
-        { value: "{link}", label: "{link}", title: "链接" },
-        { value: "{stats}", label: "{stats}", title: "数据指标" },
-        { value: "{duration}", label: "{duration}", title: "时长" },
-        { value: "{size}", label: "{size}", title: "视频大小" },
-      ];
-    }
-    if (kind === "LIVE_STARTED") {
-      return [
-        { value: "{draw}", label: "{draw}", title: "直播绘图" },
-        ...common,
-        { value: "{rid}", label: "{rid}", title: "直播间 ID" },
-        { value: "{time}", label: "{time}", title: "开播时间" },
-        { value: "{title}", label: "{title}", title: "直播标题" },
-        { value: "{area}", label: "{area}", title: "直播分区" },
-        { value: "{cover}", label: "{cover}", title: "封面图" },
-      ];
-    }
-    if (kind === "LIVE_ENDED") {
-      return [
-        ...common,
-        { value: "{rid}", label: "{rid}", title: "直播间 ID" },
-        { value: "{title}", label: "{title}", title: "直播标题" },
-        { value: "{area}", label: "{area}", title: "直播分区" },
-        { value: "{startTime}", label: "{startTime}", title: "开始时间" },
-        { value: "{endTime}", label: "{endTime}", title: "结束时间" },
-        { value: "{duration}", label: "{duration}", title: "直播时长" },
-      ];
-    }
-    return [
-      { value: "{draw}", label: "{draw}", title: "动态绘图" },
-      ...common,
-      { value: "{did}", label: "{did}", title: "动态 ID" },
-      { value: "{time}", label: "{time}", title: "发布时间" },
-      { value: "{content}", label: "{content}", title: "动态正文" },
-      { value: "{images}", label: "{images}", title: "动态图片" },
-      { value: "{links}", label: "{links}", title: "附加链接" },
-    ];
+    const catalogKind = ({ LINK_VIDEO: "VIDEO", LINK_MESSAGE: "VIDEO", LINK_LIVE: "LIVE", LINK_USER: "USER", LINK_OTHER: "LINK" })[kind] || kind;
+    const catalog = fieldCatalog?.kinds?.find(item => item.key === catalogKind);
+    return (catalog?.fields || []).map(key => {
+      const field = fieldCatalog.fields.find(item => item.key === key);
+      return { value: `{${key}}`, label: `{${key}}`, title: field?.label || key };
+    });
   }
 
   function messageTemplateForwardToken(kind) {
@@ -1065,7 +1018,7 @@ export function createMessageTemplateEditor(deps) {
         if (nodes.length) batches.push({ type: "forward", nodes });
         return;
       }
-      const fragments = kind === "LIVE_ENDED" ? [segment.value] : segment.value.split("\\r");
+      const fragments = segment.value.split("\\r");
       fragments.forEach((fragment, index) => {
         if (index > 0) flush();
         current += renderMessageTemplateFragment(fragment.replace(/\\n/g, "\n"), kind, true);
@@ -1084,7 +1037,7 @@ export function createMessageTemplateEditor(deps) {
   }
 
   function messageTemplatePlainPreviewBatches(source, kind) {
-    const fragments = kind === "LIVE_ENDED" ? [source] : source.split("\\r");
+    const fragments = source.split("\\r");
     return fragments
       .map(fragment => renderMessageTemplateFragment(fragment.replace(/\\n/g, "\n"), kind).trim())
       .filter(Boolean)
@@ -1137,6 +1090,7 @@ export function createMessageTemplateEditor(deps) {
   }
 
   function messageTemplateSampleValues(kind) {
+    kind = normalizeKind(kind);
     if (kind && kind.startsWith("LINK_")) {
       return {
         draw: "【链接预览图】",
@@ -1145,10 +1099,12 @@ export function createMessageTemplateEditor(deps) {
         name: "示例 UP",
         uid: "000000000",
         id: kind === "LINK_LIVE" ? "230001" : (kind === "LINK_USER" ? "000000000" : "BV1xx411c7mD"),
-        kind: kind === "LINK_LIVE" ? "直播" : (kind === "LINK_USER" ? "用户" : "视频"),
-        title: kind === "LINK_LIVE" ? "今晚一起写代码" : (kind === "LINK_USER" ? "示例 UP 的主页" : "示例视频标题"),
-        content: kind === "LINK_USER" ? "Bilibili 用户 000000000" : "这里是链接解析拿到的简介内容。",
-        link: kind === "LINK_LIVE" ? "https://live.bilibili.com/230001" : (kind === "LINK_USER" ? "https://space.bilibili.com/000000000" : "https://www.bilibili.com/video/BV1xx411c7mD"),
+        kind: kind === "LINK_LIVE" ? "直播" : (kind === "LINK_USER" ? "用户" : (kind === "LINK_OTHER" ? "链接" : "视频")),
+        title: kind === "LINK_LIVE" ? "今晚一起写代码" : (kind === "LINK_USER" ? "示例发布者的主页" : (kind === "LINK_OTHER" ? "示例链接标题" : "示例视频标题")),
+        content: "这里是链接解析拿到的简介内容。",
+        link: kind === "LINK_LIVE" ? "https://live.bilibili.com/230001" : (kind === "LINK_USER" ? "https://space.bilibili.com/000000000" : (kind === "LINK_OTHER" ? "https://example.com/post" : "https://www.bilibili.com/video/BV1xx411c7mD")),
+        url: "https://example.com/post",
+        time: "2026年06月16日 20:30:00",
         stats: "12.3万播放 / 456弹幕 / 789点赞",
         duration: "3m 21s",
         size: "18.5 MB",
@@ -1159,12 +1115,14 @@ export function createMessageTemplateEditor(deps) {
         draw: "【直播绘图】",
         name: "示例主播",
         uid: "000000000",
+        id: "230001",
         rid: "230001",
         time: "2026年06月16日 20:30:00",
         title: "今晚一起写代码",
         area: "科技 / 编程",
         cover: "【直播封面】",
         link: "https://live.bilibili.com/230001",
+        url: "https://live.bilibili.com/230001",
         atAll: "@全体",
       };
     }
@@ -1172,6 +1130,7 @@ export function createMessageTemplateEditor(deps) {
       return {
         name: "示例主播",
         uid: "000000000",
+        id: "230001",
         rid: "230001",
         title: "今晚一起写代码",
         area: "科技 / 编程",
@@ -1179,18 +1138,23 @@ export function createMessageTemplateEditor(deps) {
         endTime: "2026年06月16日 22:04:00",
         duration: "1h 34m",
         link: "https://live.bilibili.com/230001",
+        url: "https://live.bilibili.com/230001",
         atAll: "@全体",
       };
     }
     return {
       draw: "【动态绘图】",
+      video: "【视频文件】",
+      size: "18.5 MB",
       name: "示例发布者",
       uid: "000000000",
+      id: "987654321",
       did: "987654321",
       time: "2026年06月16日 20:30:00",
       content: "今天更新了一组开发进度，顺便整理了几张截图。",
       images: "【图片 1】\n【图片 2】",
       link: "https://t.bilibili.com/987654321",
+      url: "https://t.bilibili.com/987654321",
       links: "https://example.com/post\nhttps://example.com/detail",
       atAll: "@全体",
     };
@@ -1206,8 +1170,15 @@ export function createMessageTemplateEditor(deps) {
   }
 
   function templateKindLabel(kind) {
+    const catalogKind = ({ LINK_VIDEO: "VIDEO", LINK_MESSAGE: "VIDEO", LINK_LIVE: "LIVE", LINK_USER: "USER", LINK_OTHER: "LINK" })[kind] || kind;
+    const catalogLabel = fieldCatalog?.kinds?.find(item => item.key === catalogKind)?.label;
+    if (catalogLabel) return `${catalogLabel}模板`;
     const map = {
       DYNAMIC: "动态推送模板",
+      VIDEO: "视频模板",
+      LIVE: "直播间模板",
+      USER: "用户模板",
+      LINK: "其他链接模板",
       LIVE_STARTED: "开播推送模板",
       LIVE_ENDED: "下播推送模板",
       LINK_MESSAGE: "链接解析模板",
@@ -1220,11 +1191,11 @@ export function createMessageTemplateEditor(deps) {
 
   function normalizeKind(kind) {
     const value = String(kind || "DYNAMIC").toUpperCase();
-    return value === "LINK_MESSAGE" ? "LINK_VIDEO" : value;
+    return ({ LINK_MESSAGE: "LINK_VIDEO", VIDEO: "LINK_VIDEO", LIVE: "LINK_LIVE", USER: "LINK_USER", LINK: "LINK_OTHER" })[value] || value;
   }
 
   function supportsMessageSplit(kind) {
-    return normalizeKind(kind) !== "LIVE_ENDED";
+    return true;
   }
 
   return {

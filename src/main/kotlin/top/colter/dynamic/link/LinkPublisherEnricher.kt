@@ -1,5 +1,6 @@
 package top.colter.dynamic.link
 
+import kotlinx.coroutines.CancellationException
 import top.colter.dynamic.core.data.Publisher
 import top.colter.dynamic.core.data.PublisherInfo
 import top.colter.dynamic.core.data.PublisherKey
@@ -40,7 +41,10 @@ internal class LinkPublisherEnricher(
         if (!localMerged.needsLookup()) return plugin.preparePublisherForDrawing(localMerged)
 
         val fetched = runCatching { plugin.fetchPublisherInfo(localMerged.externalId) }
-            .onFailure { onLookupFailure(localMerged, it) }
+            .onFailure {
+                if (it is CancellationException) throw it
+                onLookupFailure(localMerged, it)
+            }
             .getOrNull()
         val merged = fetched?.let { mergePublisherInfo(localMerged, it) } ?: localMerged
         return plugin.preparePublisherForDrawing(merged)

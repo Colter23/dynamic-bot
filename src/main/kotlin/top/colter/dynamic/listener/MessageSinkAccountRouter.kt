@@ -99,15 +99,20 @@ public class MessageSinkAccountRouter(
         for (candidate in ordered) {
             val route = candidate.route
             val result = runCatching { action(candidate) }
-                .getOrElse { error -> MessageSendResult.failed(error.message ?: "${actionLabel}失败", retryable = true) }
+                .getOrElse { error ->
+                    if (error is kotlinx.coroutines.CancellationException) throw error
+                    MessageSendResult.failed(error.message ?: "${actionLabel}失败", retryable = true)
+                }
             when (result) {
                 is MessageSendResult.Sent -> {
                     clearFailure(route.routeId)
                     return result.withRoute(route)
                 }
                 is MessageSendResult.PartiallySent -> {
-                    markFailure(route.routeId, policy)
-                    onRouteFailure(candidate)
+                    if (result.routeFailure) {
+                        markFailure(route.routeId, policy)
+                        onRouteFailure(candidate)
+                    }
                     accountRouterLogger.warn {
                         "$actionLabel 已部分成功，停止路线切换：target=${target.stableValue()}，routeId=${route.routeId}，原因=${result.reason}"
                     }
@@ -120,8 +125,10 @@ public class MessageSinkAccountRouter(
                     return result.withRoute(route)
                 }
                 is MessageSendResult.Failed -> {
-                    markFailure(route.routeId, policy)
-                    onRouteFailure(candidate)
+                    if (result.routeFailure) {
+                        markFailure(route.routeId, policy)
+                        onRouteFailure(candidate)
+                    }
                     failures += "${route.routeId}=${result.reason}"
                     if (!result.retryable) {
                         return result

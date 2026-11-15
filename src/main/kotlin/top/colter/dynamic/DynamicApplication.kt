@@ -316,9 +316,9 @@ public object DynamicApplication : CoroutineScope {
             recallMessage = deliveryDispatcher::recallMessage,
         )
         val linkParseService = LinkParseService(
+            dynamicDrawService = DefaultDynamicDrawService(configProvider = configStore::current, assetResolver = drawAssetRegistry),
             resolversProvider = { pluginManager.getLinkResolvers() },
             configProvider = configStore::current,
-            sourceUpdatePublisher = sourceUpdatePublisher,
             videoDownloadersProvider = { pluginManager.getLinkVideoDownloaders() },
             publisherLookupResolver = { platformId -> pluginManager.findPublisherLookupPlugin(platformId) },
             previewRenderer = DefaultLinkPreviewRenderer(

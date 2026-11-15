@@ -46,6 +46,7 @@ import top.colter.dynamic.event.MessageEvent
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishStatus
 import top.colter.dynamic.core.event.SourceUpdateDeliveryTags
+import top.colter.dynamic.core.event.SourceUpdateDeliveryMode
 import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.draw.DynamicDrawService
 import top.colter.dynamic.link.LINK_PARSE_EVENT_LABEL
@@ -153,6 +154,7 @@ class SourceUpdateDynamicTest {
             sourcePlugin = "test",
             deliveryTarget = subscriber,
             deliveryTag = LINK_PARSE_EVENT_LABEL,
+            deliveryMode = SourceUpdateDeliveryMode.LINK_PREVIEW,
             update = demoDynamic(publisher),
         )
 
@@ -169,8 +171,8 @@ class SourceUpdateDynamicTest {
         assertEquals(OutboundMessageKind.LINK_RESULT, firstEvent.message.kind)
         assertEquals(MessageRecordPolicyType.TRANSIENT, firstEvent.message.recordPolicy.policyType)
         assertNotEquals(firstEvent.message.id, secondEvent.message.id)
-        assertTrue(firstEvent.message.id.contains(":default:link-parse:"))
-        assertTrue(secondEvent.message.id.contains(":default:link-parse:"))
+        assertTrue(firstEvent.message.id.contains(":default:LINK_PREVIEW:"))
+        assertTrue(secondEvent.message.id.contains(":default:LINK_PREVIEW:"))
     }
 
     @Test
@@ -191,6 +193,7 @@ class SourceUpdateDynamicTest {
             sourcePlugin = "test",
             deliveryTarget = pausedSubscriber,
             deliveryTag = SourceUpdateDeliveryTags.MANUAL_QUERY,
+            deliveryMode = SourceUpdateDeliveryMode.MANUAL_QUERY,
             update = demoDynamic(publisher),
         )
 
@@ -204,8 +207,8 @@ class SourceUpdateDynamicTest {
         assertEquals(OutboundMessageKind.INTERACTION_REPLY, firstEvent.message.kind)
         assertEquals(MessageRecordPolicyType.TRANSIENT, firstEvent.message.recordPolicy.policyType)
         assertEquals(false, firstEvent.message.deliveryPolicy.requireActiveTarget)
-        assertTrue(firstEvent.message.id.contains(":default:manual-query:"))
-        assertTrue(secondEvent.message.id.contains(":default:manual-query:"))
+        assertTrue(firstEvent.message.id.contains(":default:MANUAL_QUERY:"))
+        assertTrue(secondEvent.message.id.contains(":default:MANUAL_QUERY:"))
         assertTrue(firstEvent.message.id != secondEvent.message.id)
         assertTrue(firstEvent.message.batches.flattenContent().none { it is MessageContent.MentionAll })
         assertTrue(secondEvent.message.batches.flattenContent().none { it is MessageContent.MentionAll })
@@ -237,6 +240,7 @@ class SourceUpdateDynamicTest {
                 sourcePlugin = "test",
                 deliveryTarget = subscriber,
                 deliveryTag = LINK_PARSE_EVENT_LABEL,
+                deliveryMode = SourceUpdateDeliveryMode.LINK_PREVIEW,
                 update = demoDynamic(publisher),
             ),
         )
@@ -245,7 +249,7 @@ class SourceUpdateDynamicTest {
         assertEquals(SourceUpdatePublishStatus.ENQUEUED, result.status)
         assertEquals(OutboundMessageKind.LINK_RESULT, event.message.kind)
         assertEquals("default", event.message.renderVariant)
-        assertTrue(event.message.id.contains(":default:link-parse:"))
+        assertTrue(event.message.id.contains(":default:LINK_PREVIEW:"))
         assertEquals("通知\nDemo UP", event.message.batches.single().content.single().fallbackText)
         assertTrue(event.message.batches.flattenContent().none { it is MessageContent.MentionAll })
         assertNull(withTimeoutOrNull(300) { received.receive() })
@@ -262,6 +266,7 @@ class SourceUpdateDynamicTest {
         val listener = SourceUpdateProcessor(
             config = MainDynamicConfig(templates = PushTemplates(dynamic = "{name} {link}")),
             eventBus = eventBus,
+            outboundMessageService = OutboundMessageService(sendNow = { MessageSendResult.sent("sent") }),
         )
         val received = captureMessageEvent(eventBus)
 
@@ -270,6 +275,7 @@ class SourceUpdateDynamicTest {
                 sourcePlugin = "test",
                 deliveryTarget = pausedSubscriber,
                 deliveryTag = LINK_PARSE_EVENT_LABEL,
+                deliveryMode = SourceUpdateDeliveryMode.LINK_PREVIEW,
                 update = demoDynamic(publisher),
             ),
         )
@@ -299,6 +305,7 @@ class SourceUpdateDynamicTest {
                 sourcePlugin = "test",
                 deliveryTargetAddress = blockedSubscriber.address,
                 deliveryTag = LINK_PARSE_EVENT_LABEL,
+                deliveryMode = SourceUpdateDeliveryMode.LINK_PREVIEW,
                 update = demoDynamic(publisher),
             ),
         )
@@ -453,6 +460,29 @@ class SourceUpdateDynamicTest {
         assertTrue(forward.nodes.single().batches.single().content.none { it is MessageContent.MentionAll })
         assertEquals("\n", contents[1].fallbackText)
         assertTrue(contents[2] is MessageContent.MentionAll)
+    }
+
+    @Test
+    fun shouldKeepFallbackContentWhenTemplateOnlyContainsMentionAll() = runBlocking {
+        initDb("dynamic-listener-at-all-only-fallback")
+        val eventBus = EventBus()
+        val publisher = createPublisher()
+        val subscriber = createSubscriber()
+        SubscriptionRepository.subscribe(subscriber.id, publisher.id, SubscriptionPolicy(
+            enabledEvents = setOf(SubscriptionEventKind.DYNAMIC),
+            mentionAllEvents = setOf(SubscriptionEventKind.DYNAMIC),
+        ))
+        val listener = SourceUpdateProcessor(
+            config = MainDynamicConfig(templates = PushTemplates(dynamic = "{atAll}")),
+            eventBus = eventBus,
+        )
+        val received = captureMessageEvent(eventBus)
+
+        listener.process(SourceUpdatePublishRequest(sourcePlugin = "test", update = demoDynamic(publisher)))
+
+        val contents = withTimeout(3_000) { received.await() }.message.batches.single().content
+        assertTrue(contents.any { it is MessageContent.Text && "Demo UP" in it.fallbackText })
+        assertTrue(contents.last() is MessageContent.MentionAll)
     }
 
     @Test

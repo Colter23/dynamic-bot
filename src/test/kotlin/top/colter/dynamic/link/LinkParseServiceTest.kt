@@ -8,6 +8,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNull
+import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
@@ -18,7 +19,8 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import top.colter.dynamic.LinkParseProgressReplyConfig
 import top.colter.dynamic.LinkParseTriggerMode
-import top.colter.dynamic.LinkParseTemplates
+import top.colter.dynamic.PushTemplates
+import top.colter.dynamic.TemplateOverrides
 import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.LinkVideoDownloadConfig
 import top.colter.dynamic.MainDynamicConfig
@@ -26,6 +28,7 @@ import top.colter.dynamic.command.CommandListener
 import top.colter.dynamic.command.CommandRegistry
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.CommandStatus
+import top.colter.dynamic.core.data.DeliveryStatus
 import top.colter.dynamic.core.data.DynamicMetric
 import top.colter.dynamic.core.data.IncomingMessage
 import top.colter.dynamic.core.data.MediaKind
@@ -44,9 +47,12 @@ import top.colter.dynamic.core.link.LinkResolution
 import top.colter.dynamic.core.link.LinkResolver
 import top.colter.dynamic.core.link.LinkVideoDownloadRequest
 import top.colter.dynamic.core.link.LinkVideoDownloadResult
+import top.colter.dynamic.core.link.LinkVideoResource
 import top.colter.dynamic.core.link.LinkVideoDownloader
 import top.colter.dynamic.core.link.ParsedLink
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
+import top.colter.dynamic.core.plugin.MessageSendRequest
+import top.colter.dynamic.core.plugin.MessageSendResult
 import top.colter.dynamic.draw.LinkPreviewRenderer
 import top.colter.dynamic.event.CommandEvent
 import top.colter.dynamic.event.CommandResultEvent
@@ -74,9 +80,9 @@ class LinkParseServiceTest {
                 command = top.colter.dynamic.CommandConfig(requirePermissionRule = false),
                 linkParsing = LinkParsingConfig(maxLinksPerMessage = 5),
             ),
-            linkParseService = LinkParseService(
+            linkParseService = linkService(
                 resolversProvider = { listOf(resolver) },
-                sourceUpdatePublisher = sourceUpdates,
+                snapshotRecorder = { source, update -> sourceUpdates.publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             ),
             commandRegistry = CommandRegistry(),
             eventBus = eventBus,
@@ -110,9 +116,9 @@ class LinkParseServiceTest {
             ),
         )
         val sourceUpdates = RecordingSourceUpdatePublisher()
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(resolver) },
-            sourceUpdatePublisher = sourceUpdates,
+            snapshotRecorder = { source, update -> sourceUpdates.publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             publisherLookupResolver = {
                 FakePublisherLookupPlugin(
                     testPublisherInfo(
@@ -168,9 +174,9 @@ class LinkParseServiceTest {
                 banner = MediaRef("https://example.com/remote-banner.png", MediaKind.COVER),
             )
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(resolver) },
-            sourceUpdatePublisher = sourceUpdates,
+            snapshotRecorder = { source, update -> sourceUpdates.publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             publisherLookupResolver = { lookup },
         )
 
@@ -210,7 +216,7 @@ class LinkParseServiceTest {
             )
         )
         var renderedPreview: LinkPreview? = null
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = {
                 listOf(
                     FakeVideoLinkResolver(
@@ -225,9 +231,7 @@ class LinkParseServiceTest {
             },
             configProvider = {
                 MainDynamicConfig(
-                    linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{draw}"),
-                    ),
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{draw}", video = "{draw}", live = "{draw}", user = "{draw}", link = "{draw}")),
                 )
             },
             publisherLookupResolver = { lookup },
@@ -261,7 +265,7 @@ class LinkParseServiceTest {
             )
         )
         var renderedPreview: LinkPreview? = null
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = {
                 listOf(
                     FakeVideoLinkResolver(
@@ -276,9 +280,7 @@ class LinkParseServiceTest {
             },
             configProvider = {
                 MainDynamicConfig(
-                    linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{draw}"),
-                    ),
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{draw}", video = "{draw}", live = "{draw}", user = "{draw}", link = "{draw}")),
                 )
             },
             publisherLookupResolver = { lookup },
@@ -312,7 +314,7 @@ class LinkParseServiceTest {
                 banner = MediaRef("https://example.com/remote-banner.png", MediaKind.COVER),
             )
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = {
                 listOf(
                     FakeUserLinkResolver(
@@ -327,9 +329,7 @@ class LinkParseServiceTest {
             },
             configProvider = {
                 MainDynamicConfig(
-                    linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{cover}"),
-                    ),
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{cover}", video = "{cover}", live = "{cover}", user = "{cover}", link = "{cover}")),
                 )
             },
             publisherLookupResolver = { lookup },
@@ -364,9 +364,9 @@ class LinkParseServiceTest {
                     ),
                 )
             },
-            linkParseService = LinkParseService(
+            linkParseService = linkService(
                 resolversProvider = { listOf(resolver) },
-                sourceUpdatePublisher = sourceUpdates,
+                snapshotRecorder = { source, update -> sourceUpdates.publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             ),
             progressMessenger = messenger,
         )
@@ -403,9 +403,9 @@ class LinkParseServiceTest {
                     ),
                 )
             },
-            linkParseService = LinkParseService(
+            linkParseService = linkService(
                 resolversProvider = { listOf(resolver) },
-                sourceUpdatePublisher = sourceUpdates,
+                snapshotRecorder = { source, update -> sourceUpdates.publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             ),
         )
 
@@ -435,9 +435,9 @@ class LinkParseServiceTest {
                     ),
                 )
             },
-            linkParseService = LinkParseService(
+            linkParseService = linkService(
                 resolversProvider = { listOf(resolver) },
-                sourceUpdatePublisher = sourceUpdates,
+                snapshotRecorder = { source, update -> sourceUpdates.publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             ),
             progressMessenger = messenger,
         )
@@ -474,9 +474,9 @@ class LinkParseServiceTest {
                     ),
                 )
             },
-            linkParseService = LinkParseService(
+            linkParseService = linkService(
                 resolversProvider = { listOf(resolver) },
-                sourceUpdatePublisher = sourceUpdates,
+                snapshotRecorder = { source, update -> sourceUpdates.publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             ),
             progressMessenger = messenger,
         )
@@ -512,9 +512,9 @@ class LinkParseServiceTest {
                     ),
                 )
             },
-            linkParseService = LinkParseService(
+            linkParseService = linkService(
                 resolversProvider = { listOf(resolver) },
-                sourceUpdatePublisher = sourceUpdates,
+                snapshotRecorder = { source, update -> sourceUpdates.publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             ),
             progressMessenger = messenger,
         )
@@ -547,7 +547,7 @@ class LinkParseServiceTest {
                     ),
                 )
             },
-            linkParseService = LinkParseService(
+            linkParseService = linkService(
                 resolversProvider = { listOf(resolver) },
             ),
             eventBus = eventBus,
@@ -581,7 +581,7 @@ class LinkParseServiceTest {
                     ),
                 )
             },
-            linkParseService = LinkParseService(
+            linkParseService = linkService(
                 resolversProvider = { listOf(resolver) },
             ),
             eventBus = eventBus,
@@ -616,7 +616,7 @@ class LinkParseServiceTest {
                     ),
                 )
             },
-            linkParseService = LinkParseService(
+            linkParseService = linkService(
                 resolversProvider = { listOf(FailedVideoResolver()) },
             ),
             eventBus = eventBus,
@@ -644,9 +644,9 @@ class LinkParseServiceTest {
                     ),
                 )
             },
-            linkParseService = LinkParseService(
+            linkParseService = linkService(
                 resolversProvider = { listOf(resolver) },
-                sourceUpdatePublisher = sourceUpdates,
+                snapshotRecorder = { source, update -> sourceUpdates.publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             ),
             incomingBotAccountSelector = IncomingBotAccountSelector(primaryBotAccountResolver = { "42" }),
         )
@@ -674,9 +674,9 @@ class LinkParseServiceTest {
                     ),
                 )
             },
-            linkParseService = LinkParseService(
+            linkParseService = linkService(
                 resolversProvider = { listOf(resolver) },
-                sourceUpdatePublisher = sourceUpdates,
+                snapshotRecorder = { source, update -> sourceUpdates.publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             ),
             incomingBotAccountSelector = IncomingBotAccountSelector(primaryBotAccountResolver = { "42" }),
         )
@@ -707,9 +707,9 @@ class LinkParseServiceTest {
                     ),
                 )
             },
-            linkParseService = LinkParseService(
+            linkParseService = linkService(
                 resolversProvider = { listOf(resolver) },
-                sourceUpdatePublisher = sourceUpdates,
+                snapshotRecorder = { source, update -> sourceUpdates.publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             ),
             incomingBotAccountSelector = IncomingBotAccountSelector(primaryBotAccountResolver = { "42" }),
         )
@@ -739,9 +739,9 @@ class LinkParseServiceTest {
                     ),
                 )
             },
-            linkParseService = LinkParseService(
+            linkParseService = linkService(
                 resolversProvider = { listOf(resolver) },
-                sourceUpdatePublisher = sourceUpdates,
+                snapshotRecorder = { source, update -> sourceUpdates.publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             ),
             incomingBotAccountSelector = IncomingBotAccountSelector(
                 primaryBotAccountResolver = { "42" },
@@ -787,12 +787,13 @@ class LinkParseServiceTest {
                 assertEquals(listOf("视频下载中，请稍候..."), messenger.sentTexts)
             },
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(resolver) },
             configProvider = {
                 MainDynamicConfig(
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{draw}\\r{video}", video = "{draw}\\r{video}", live = "{draw}\\r{video}", user = "{draw}\\r{video}", link = "{draw}\\r{video}")),
                     linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{draw}\\r{video}"),
+
                         videoDownload = LinkVideoDownloadConfig(
                             maxDurationSeconds = 300,
                             maxFileMegabytes = 1.0,
@@ -842,12 +843,13 @@ class LinkParseServiceTest {
                 durationSeconds = 120,
             ),
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeVideoLinkResolver(linkKind = LinkKinds.DYNAMIC)) },
             configProvider = {
                 MainDynamicConfig(
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{video}", video = "{video}", live = "{video}", user = "{video}", link = "{video}")),
                     linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{video}"),
+
                         videoDownload = LinkVideoDownloadConfig(cacheRoot = cacheRoot.toString()),
                     ),
                 )
@@ -885,17 +887,18 @@ class LinkParseServiceTest {
                 durationSeconds = 120,
             ),
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeAttachedVideoLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{video}", video = "{video}", live = "{video}", user = "{video}", link = "{video}")),
                     linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{video}"),
+
                         videoDownload = LinkVideoDownloadConfig(cacheRoot = cacheRoot.toString()),
                     ),
                 )
             },
-            sourceUpdatePublisher = sourceUpdates,
+            snapshotRecorder = { source, update -> sourceUpdates.publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             videoDownloadersProvider = { listOf(downloader) },
         )
 
@@ -933,9 +936,9 @@ class LinkParseServiceTest {
                 fileSizeBytes = 4,
             ),
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeAttachedVideoLinkResolver()) },
-            sourceUpdatePublisher = sourceUpdates,
+            snapshotRecorder = { source, update -> sourceUpdates.publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             videoDownloadersProvider = { listOf(downloader) },
         )
 
@@ -961,12 +964,13 @@ class LinkParseServiceTest {
                 fileSizeBytes = 4,
             ),
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeAttachedVideoLinkResolver(durationSeconds = null)) },
             configProvider = {
                 MainDynamicConfig(
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{video}", video = "{video}", live = "{video}", user = "{video}", link = "{video}")),
                     linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{video}"),
+
                         videoDownload = LinkVideoDownloadConfig(
                             cacheRoot = cacheRoot.toString(),
                             maxDurationSeconds = 0,
@@ -974,7 +978,7 @@ class LinkParseServiceTest {
                     ),
                 )
             },
-            sourceUpdatePublisher = RecordingSourceUpdatePublisher(),
+            snapshotRecorder = { source, update -> RecordingSourceUpdatePublisher().publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             videoDownloadersProvider = { listOf(downloader) },
         )
 
@@ -996,17 +1000,18 @@ class LinkParseServiceTest {
                 fileSizeBytes = 4,
             ),
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeAttachedVideoLinkResolver(durationSeconds = null)) },
             configProvider = {
                 MainDynamicConfig(
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{video}", video = "{video}", live = "{video}", user = "{video}", link = "{video}")),
                     linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{video}"),
+
                         videoDownload = LinkVideoDownloadConfig(maxDurationSeconds = 300),
                     ),
                 )
             },
-            sourceUpdatePublisher = RecordingSourceUpdatePublisher(),
+            snapshotRecorder = { source, update -> RecordingSourceUpdatePublisher().publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             videoDownloadersProvider = { listOf(downloader) },
         )
 
@@ -1025,7 +1030,7 @@ class LinkParseServiceTest {
     }
 
     @Test
-    fun `dynamic attached video download failure only sends failure prompt`() = runBlocking {
+    fun `dynamic video failure keeps useful unsent content and sends failure prompt`() = runBlocking {
         initDb("dynamic-attached-video-failure")
         val cacheRoot = createTempDirectory("dynamic-bot-attached-video-failure")
         val downloader = FakeVideoDownloader(
@@ -1035,18 +1040,19 @@ class LinkParseServiceTest {
             ),
             onRequest = { error("boom") },
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeAttachedVideoLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{video}（{name}）")),
                     linkParsing = LinkParsingConfig(
                         // 让"无视频回退"可辨识：回退会渲染出「（demo video）」
-                        templates = LinkParseTemplates(message = "{video}（{title}）"),
+
                         videoDownload = LinkVideoDownloadConfig(cacheRoot = cacheRoot.toString()),
                     ),
                 )
             },
-            sourceUpdatePublisher = RecordingSourceUpdatePublisher(),
+            snapshotRecorder = { source, update -> RecordingSourceUpdatePublisher().publish(SourceUpdatePublishRequest(source, update, deliveryTag = LINK_PARSE_EVENT_LABEL, deliveryMode = top.colter.dynamic.core.event.SourceUpdateDeliveryMode.LINK_PREVIEW, publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY)) },
             videoDownloadersProvider = { listOf(downloader) },
         )
 
@@ -1059,27 +1065,25 @@ class LinkParseServiceTest {
         assertEquals(1, downloader.requests.size)
         val messages = MessageDeliveryRepository.findRecent(limit = 10)
             .mapNotNull { message -> MessageDeliveryRepository.findMessage(message.messageId) }
-        // 卡片已通过来源更新发出；下载失败时是"下载中提示 + 失败提示"，且不再渲染"无视频"的回退卡片
-        assertEquals(2, messages.size)
+        // 下载失败只移除视频字段，保留尚未发送的正文，不重复生成动态卡片。
+        assertEquals(3, messages.size)
         assertTrue(messages.none { message -> message.batches.single().content.any { it is MessageContent.Video } })
         val texts = messages
             .mapNotNull { message -> message.batches.singleOrNull()?.content?.singleOrNull() as? MessageContent.Text }
             .map { text -> text.fallbackText }
         assertTrue(texts.any { it.contains("视频下载中") })
         assertTrue(texts.any { it.contains("视频下载或推送未完成") })
-        assertFalse(texts.any { it.contains("（demo video）") })
+        assertTrue(texts.any { it.startsWith("（") && it.endsWith("）") })
     }
 
     @Test
     fun `video preview stats placeholder should render metrics`() = runBlocking {
         initDb("video-preview-stats")
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeVideoLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
-                    linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{stats}"),
-                    ),
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{stats}", video = "{stats}", live = "{stats}", user = "{stats}", link = "{stats}")),
                 )
             },
             previewRenderer = LinkPreviewRenderer {
@@ -1101,17 +1105,13 @@ class LinkParseServiceTest {
     }
 
     @Test
-    fun `missing preview placeholders should be removed from rendered text`() = runBlocking {
+    fun `missing preview fields are removed while unknown fields remain visible`() = runBlocking {
         initDb("live-preview-missing-placeholders")
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeLiveLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
-                    linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(
-                            message = "标题：{title} 大小：{size}\\n未知：{not_exists}\\n{stats}\\r{video}",
-                        ),
-                    ),
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "标题：{title} 大小：{size}\\n未知：{not_exists}\\n{stats}\\r{video}", video = "标题：{title} 大小：{size}\\n未知：{not_exists}\\n{stats}\\r{video}", live = "标题：{title} 大小：{size}\\n未知：{not_exists}\\n{stats}\\r{video}", user = "标题：{title} 大小：{size}\\n未知：{not_exists}\\n{stats}\\r{video}", link = "标题：{title} 大小：{size}\\n未知：{not_exists}\\n{stats}\\r{video}")),
                 )
             },
             previewRenderer = LinkPreviewRenderer {
@@ -1130,11 +1130,11 @@ class LinkParseServiceTest {
             .mapNotNull { MessageDeliveryRepository.findMessage(it.messageId) }
             .single()
         val text = message.batches.single().content.single() as MessageContent.Text
-        assertEquals("标题：demo live\n42在线", text.fallbackText)
+        assertEquals("标题：demo live\n未知：{not_exists}\n42在线", text.fallbackText)
         assertTrue(text.fallbackText.startsWith("标题：demo live"))
-        assertFalse(text.fallbackText.contains("{"))
+        assertTrue(text.fallbackText.contains("{not_exists}"))
         assertFalse(text.fallbackText.contains("大小"))
-        assertFalse(text.fallbackText.contains("未知"))
+        assertTrue(text.fallbackText.contains("未知"))
     }
 
     @Test
@@ -1177,12 +1177,13 @@ class LinkParseServiceTest {
                 fileSizeBytes = 512L * 1024L * 1024L,
             ),
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeVideoLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{draw}\\r{video}", video = "{draw}\\r{video}", live = "{draw}\\r{video}", user = "{draw}\\r{video}", link = "{draw}\\r{video}")),
                     linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{draw}\\r{video}"),
+
                         videoDownload = LinkVideoDownloadConfig(
                             maxFileMegabytes = 0.0,
                             cacheRoot = cacheRoot.toString(),
@@ -1227,12 +1228,13 @@ class LinkParseServiceTest {
                 releaseDownload.await()
             },
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeVideoLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{draw}\\r{video}", video = "{draw}\\r{video}", live = "{draw}\\r{video}", user = "{draw}\\r{video}", link = "{draw}\\r{video}")),
                     linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{draw}\\r{video}"),
+
                         videoDownload = LinkVideoDownloadConfig(
                             maxFileMegabytes = 1.0,
                             cacheRoot = cacheRoot.toString(),
@@ -1303,12 +1305,13 @@ class LinkParseServiceTest {
                 }
             },
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeVideoLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{draw}\\r{video}", video = "{draw}\\r{video}", live = "{draw}\\r{video}", user = "{draw}\\r{video}", link = "{draw}\\r{video}")),
                     linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{draw}\\r{video}"),
+
                         videoDownload = LinkVideoDownloadConfig(
                             maxConcurrentDownloads = 2,
                             maxFileMegabytes = 1.0,
@@ -1354,15 +1357,11 @@ class LinkParseServiceTest {
     @Test
     fun `link preview should use configured text template without drawing`() = runBlocking {
         initDb("preview-template-text")
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeVideoLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
-                    linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(
-                            message = "【{kind}】{title}\\n{name}@{uid}\\n{content}\\n{link}",
-                        ),
-                    ),
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "【{kind}】{title}\\n{name}@{uid}\\n{content}\\n{link}", video = "【{kind}】{title}\\n{name}@{uid}\\n{content}\\n{link}", live = "【{kind}】{title}\\n{name}@{uid}\\n{content}\\n{link}", user = "【{kind}】{title}\\n{name}@{uid}\\n{content}\\n{link}", link = "【{kind}】{title}\\n{name}@{uid}\\n{content}\\n{link}")),
                 )
             },
             previewRenderer = LinkPreviewRenderer {
@@ -1396,12 +1395,13 @@ class LinkParseServiceTest {
                 fileSizeBytes = 4,
             ),
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeVideoLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{title}\\n{link}", video = "{title}\\n{link}", live = "{title}\\n{link}", user = "{title}\\n{link}", link = "{title}\\n{link}")),
                     linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{title}\\n{link}"),
+
                         videoDownload = LinkVideoDownloadConfig(
                             maxFileMegabytes = 1.0,
                             cacheRoot = cacheRoot.toString(),
@@ -1448,12 +1448,13 @@ class LinkParseServiceTest {
                 releaseDownload.await()
             },
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeVideoLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{>>}{draw}\\r{video}{<<}", video = "{>>}{draw}\\r{video}{<<}", live = "{>>}{draw}\\r{video}{<<}", user = "{>>}{draw}\\r{video}{<<}", link = "{>>}{draw}\\r{video}{<<}")),
                     linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{>>}{draw}\\r{video}{<<}"),
+
                         videoDownload = LinkVideoDownloadConfig(
                             maxFileMegabytes = 1.0,
                             cacheRoot = cacheRoot.toString(),
@@ -1507,12 +1508,13 @@ class LinkParseServiceTest {
                 fileSizeBytes = 4,
             ),
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeVideoLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{>>}{title}\\n{content}\\r{cover}\\r{video}{<<}", video = "{>>}{title}\\n{content}\\r{cover}\\r{video}{<<}", live = "{>>}{title}\\n{content}\\r{cover}\\r{video}{<<}", user = "{>>}{title}\\n{content}\\r{cover}\\r{video}{<<}", link = "{>>}{title}\\n{content}\\r{cover}\\r{video}{<<}")),
                     linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{>>}{title}\\n{content}\\r{cover}\\r{video}{<<}"),
+
                         videoDownload = LinkVideoDownloadConfig(
                             maxDurationSeconds = 60,
                             maxFileMegabytes = 1.0,
@@ -1562,12 +1564,13 @@ class LinkParseServiceTest {
                 fileSizeBytes = 4,
             ),
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeVideoLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{draw}\\r{video}", video = "{draw}\\r{video}", live = "{draw}\\r{video}", user = "{draw}\\r{video}", link = "{draw}\\r{video}")),
                     linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{draw}\\r{video}"),
+
                         videoDownload = LinkVideoDownloadConfig(
                             maxDurationSeconds = 60,
                             maxFileMegabytes = 1.0,
@@ -1607,13 +1610,11 @@ class LinkParseServiceTest {
     @Test
     fun `live link with video only template should fallback to preview text`() = runBlocking {
         initDb("live-video-only-template")
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeLiveLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
-                    linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{>>}{title}\\n{content}\\r{cover}\\r{video}{<<}"),
-                    ),
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{>>}{title}\\n{content}\\r{cover}\\r{video}{<<}", video = "{>>}{title}\\n{content}\\r{cover}\\r{video}{<<}", live = "{>>}{title}\\n{content}\\r{cover}\\r{video}{<<}", user = "{>>}{title}\\n{content}\\r{cover}\\r{video}{<<}", link = "{>>}{title}\\n{content}\\r{cover}\\r{video}{<<}")),
                 )
             },
             previewRenderer = LinkPreviewRenderer {
@@ -1661,12 +1662,13 @@ class LinkParseServiceTest {
                 fileSizeBytes = 4,
             ),
         )
-        val service = LinkParseService(
+        val service = linkService(
             resolversProvider = { listOf(FakeVideoLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{draw}\\r{video}", video = "{draw}\\r{video}", live = "{draw}\\r{video}", user = "{draw}\\r{video}", link = "{draw}\\r{video}")),
                     linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{draw}\\r{video}"),
+
                         videoDownload = LinkVideoDownloadConfig(
                             maxFileMegabytes = 1.0,
                             cacheRoot = cacheRoot.toString(),
@@ -1691,6 +1693,209 @@ class LinkParseServiceTest {
         assertEquals(ffmpeg.toFile().absolutePath, downloader.requests.single().ffmpegPath)
     }
 
+    @Test
+    fun `dynamic video uses one forward and preserves reply correlation`() = runBlocking {
+        initDb("unified-dynamic-video")
+        val downloader = FakeVideoDownloader(LinkVideoDownloadResult(MediaRef("video.mp4", MediaKind.VIDEO), 4))
+        var draws = 0
+        val service = linkService(
+            resolversProvider = { listOf(FakeAttachedVideoLinkResolver()) },
+            configProvider = { MainDynamicConfig(templates = PushTemplates(linkParsing = TemplateOverrides(
+                dynamic = "{>>}{content}\\r{draw}\\r{video}\\r尾部{<<}",
+            ))) },
+            videoDownloadersProvider = { listOf(downloader) },
+            dynamicDrawService = top.colter.dynamic.draw.DynamicDrawService { _, _ ->
+                draws++
+                MediaRef("draw.png", MediaKind.IMAGE)
+            },
+            progressMessenger = RecordingProgressMessenger(),
+        )
+        val result = service.parseAndDispatch("https://t.bilibili.com/12345", commandEvent("").context,
+            inReplyTo = "platform-message", correlationId = "internal-trace")
+        assertTrue(result.failures.isEmpty())
+        val message = MessageDeliveryRepository.findRecent(limit = 10)
+            .mapNotNull { MessageDeliveryRepository.findMessage(it.messageId) }.single()
+        val forward = message.batches.single().content.single() as MessageContent.Forward
+        assertEquals(4, forward.nodes.size)
+        assertEquals(1, draws)
+        assertEquals(1, downloader.requests.size)
+        assertNotNull(downloader.requests.single().resource)
+        assertEquals("platform-message", message.replyToMessageId)
+        assertEquals("internal-trace", message.correlationId)
+        assertNotNull(message.sourceUpdateKey)
+    }
+
+    @Test
+    fun `failed download preserves suffix order without repeating rendered prefix`() = runBlocking {
+        initDb("unified-video-order")
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var draws = 0
+        val downloader = FakeVideoDownloader(LinkVideoDownloadResult(MediaRef("video.mp4", MediaKind.VIDEO), 4), onRequest = {
+            started.complete(Unit)
+            release.await()
+            error("资源暂不可用")
+        })
+        val service = linkService(
+            resolversProvider = { listOf(FakeAttachedVideoLinkResolver()) },
+            configProvider = { MainDynamicConfig(templates = PushTemplates(linkParsing = TemplateOverrides(
+                dynamic = "前言{draw}\\r大小：{size}\\r{video}\\r尾部{draw}",
+            ))) },
+            videoDownloadersProvider = { listOf(downloader) },
+            dynamicDrawService = top.colter.dynamic.draw.DynamicDrawService { _, _ ->
+                draws++
+                MediaRef("draw.png", MediaKind.IMAGE)
+            },
+            progressMessenger = RecordingProgressMessenger(),
+        )
+        val job = async { service.parseAndDispatch("https://t.bilibili.com/23456", commandEvent("").context, inReplyTo = "message") }
+        withTimeout(3_000) { started.await() }
+        val prefix = MessageDeliveryRepository.findRecent(limit = 10)
+            .mapNotNull { MessageDeliveryRepository.findMessage(it.messageId) }.single()
+        assertEquals("前言", prefix.batches.single().content.first().fallbackText)
+        release.complete(Unit)
+        assertTrue(withTimeout(3_000) { job.await() }.failures.isEmpty())
+        val messages = MessageDeliveryRepository.findRecent(limit = 10).mapNotNull { MessageDeliveryRepository.findMessage(it.messageId) }
+        assertEquals(2, messages.size)
+        assertEquals(1, messages.count { it.batches.first().content.first().fallbackText == "前言" })
+        assertEquals(1, messages.count { it.batches.first().content.first().fallbackText == "尾部" })
+        assertEquals(1, draws)
+    }
+
+    @Test
+    fun `uncertain drawing receipt still sends video and suffix without replay`() = runBlocking {
+        initDb("unknown-prefix-video")
+        val requests = mutableListOf<MessageSendRequest>()
+        val downloader = FakeVideoDownloader(LinkVideoDownloadResult(MediaRef("video.mp4", MediaKind.VIDEO), 4))
+        val messenger = RecordingProgressMessenger()
+        val service = linkService(
+            resolversProvider = { listOf(FakeVideoLinkResolver()) },
+            configProvider = { MainDynamicConfig(templates = PushTemplates(linkParsing = TemplateOverrides(
+                video = "{draw}\\r{video}\\r尾部",
+            ))) },
+            videoDownloadersProvider = { listOf(downloader) },
+            progressMessenger = messenger,
+            sendNow = { request ->
+                requests += request
+                if (requests.size == 1) MessageSendResult.uncertain("missing receipt")
+                else MessageSendResult.sent("video-receipt")
+            },
+        )
+
+        val result = service.parseAndDispatch("https://www.bilibili.com/video/BV1xx411c7mD", commandEvent("").context,
+            inReplyTo = "platform-message", correlationId = "internal-trace")
+
+        assertTrue(result.failures.isEmpty())
+        assertEquals(2, result.forwarded.single().deliveryCount)
+        assertEquals(1, downloader.requests.size)
+        assertEquals(2, requests.size)
+        assertTrue(requests[0].message.batches.single().content.single() is MessageContent.Image)
+        val remaining = requests[1].message.batches.flatMap { it.content }
+        assertTrue(remaining.first() is MessageContent.Video)
+        assertEquals("尾部", remaining.last().fallbackText)
+        assertTrue(remaining.none { it is MessageContent.Image })
+        assertTrue(requests.all { it.message.replyToMessageId == "platform-message" && it.message.correlationId == "internal-trace" })
+        assertEquals(listOf("视频下载中，请稍候..."), messenger.sentTexts)
+        assertEquals(listOf("progress-1"), messenger.recalledIds)
+        assertEquals(setOf(DeliveryStatus.SEND_UNKNOWN, DeliveryStatus.SENT),
+            MessageDeliveryRepository.findRecent(limit = 10).map { it.status }.toSet())
+    }
+
+    @Test
+    fun `uncertain prefix continues video in background`() = runBlocking {
+        initDb("unknown-prefix-background")
+        val videoSent = CompletableDeferred<Unit>()
+        val requests = mutableListOf<MessageSendRequest>()
+        val downloader = FakeVideoDownloader(LinkVideoDownloadResult(MediaRef("video.mp4", MediaKind.VIDEO), 4))
+        val service = linkService(
+            resolversProvider = { listOf(FakeVideoLinkResolver()) },
+            configProvider = { MainDynamicConfig(templates = PushTemplates(linkParsing = TemplateOverrides(
+                video = "{title}\\r{video}",
+            ))) },
+            videoDownloadersProvider = { listOf(downloader) },
+            backgroundScope = this,
+            progressMessenger = RecordingProgressMessenger(),
+            sendNow = { request ->
+                requests += request
+                if (requests.size == 1) MessageSendResult.uncertain("missing receipt")
+                else {
+                    videoSent.complete(Unit)
+                    MessageSendResult.sent("video-receipt")
+                }
+            },
+        )
+
+        val result = service.parseAndDispatch("https://www.bilibili.com/video/BV1xx411c7mD", commandEvent("").context,
+            inReplyTo = "platform-message")
+        assertTrue(result.failures.isEmpty())
+        withTimeout(3_000) { videoSent.await() }
+        assertEquals(1, downloader.requests.size)
+        assertEquals(2, requests.size)
+        assertTrue(requests.last().message.batches.single().content.single() is MessageContent.Video)
+    }
+
+    @Test
+    fun `uncertain final receipt does not trigger fallback or replay`() = runBlocking {
+        initDb("unknown-final")
+        var sends = 0
+        val service = linkService(
+            resolversProvider = { listOf(FakeVideoLinkResolver()) },
+            configProvider = { MainDynamicConfig(templates = PushTemplates(linkParsing = TemplateOverrides(video = "{draw}"))) },
+            sendNow = { sends++; MessageSendResult.uncertain("missing receipt") },
+        )
+
+        val result = service.parseAndDispatch("https://www.bilibili.com/video/BV1xx411c7mD", commandEvent("").context)
+
+        assertTrue(result.failures.isEmpty())
+        assertEquals(1, result.forwarded.size)
+        assertEquals(1, sends)
+        assertEquals(DeliveryStatus.SEND_UNKNOWN, MessageDeliveryRepository.findRecent(limit = 10).single().status)
+    }
+
+    @Test
+    fun `failed or partially sent prefix still stops remaining steps`() = runBlocking {
+        for ((index, sendResult) in listOf(
+            MessageSendResult.failed("rejected", retryable = false),
+            MessageSendResult.partiallySent(listOf(MessageSendResult.receipt("partial")), "incomplete"),
+        ).withIndex()) {
+            initDb("rejected-prefix-$index")
+            var sends = 0
+            val downloader = FakeVideoDownloader(LinkVideoDownloadResult(MediaRef("video.mp4", MediaKind.VIDEO), 4))
+            val service = linkService(
+                resolversProvider = { listOf(FakeVideoLinkResolver()) },
+                configProvider = { MainDynamicConfig(templates = PushTemplates(linkParsing = TemplateOverrides(
+                    video = "{draw}\\r{video}\\r尾部",
+                ))) },
+                videoDownloadersProvider = { listOf(downloader) },
+                sendNow = { sends++; sendResult },
+            )
+
+            val result = service.parseAndDispatch("https://www.bilibili.com/video/BV1xx411c7mD", commandEvent("").context)
+
+            assertEquals(1, result.failures.size)
+            assertEquals(1, sends)
+            assertTrue(downloader.requests.isEmpty())
+        }
+    }
+
+    @Test
+    fun `preview draw failure still publishes useful fallback text`() = runBlocking {
+        initDb("preview-draw-fallback")
+        val service = linkService(
+            resolversProvider = { listOf(FakeVideoLinkResolver()) },
+            previewRenderer = LinkPreviewRenderer { error("图片不可用") },
+        )
+
+        val result = service.parseAndDispatch("https://www.bilibili.com/video/BV1xx411c7mD", commandEvent("").context)
+
+        assertTrue(result.failures.isEmpty())
+        val message = MessageDeliveryRepository.findRecent(limit = 10)
+            .mapNotNull { MessageDeliveryRepository.findMessage(it.messageId) }.single()
+        val text = message.batches.flatMap { it.content }.joinToString("") { it.fallbackText }
+        assertTrue("demo video" in text)
+        assertTrue("https://www.bilibili.com/video/BV1xx411c7mD" in text)
+    }
+
     private suspend fun dispatchCommand(
         eventBus: EventBus,
         listener: CommandListener,
@@ -1708,6 +1913,28 @@ class LinkParseServiceTest {
         listener.onMessage(event)
         return withTimeout(3_000) { result.await() }
     }
+
+    private fun linkService(
+        resolversProvider: () -> List<LinkResolver>,
+        configProvider: () -> MainDynamicConfig = { MainDynamicConfig(templates = PushTemplates(dynamic = "{name}\\n{content}\\n{link}")) },
+        snapshotRecorder: suspend (String, top.colter.dynamic.core.data.SourceUpdate) -> Unit = { source, update -> top.colter.dynamic.repository.SourceUpdateSnapshotRepository.upsert(source, update); Unit },
+        videoDownloadersProvider: () -> List<LinkVideoDownloader> = { emptyList() },
+        publisherLookupResolver: (String) -> PublisherLookupPlugin? = { null },
+        previewRenderer: LinkPreviewRenderer = LinkPreviewRenderer { MediaRef("https://example.com/draw.png", MediaKind.IMAGE) },
+        progressMessenger: LinkParseProgressMessenger = NoopLinkParseProgressMessenger,
+        backgroundScope: kotlinx.coroutines.CoroutineScope? = null,
+        projectRootProvider: () -> java.io.File = { java.io.File(System.getProperty("user.dir")) },
+        dynamicDrawService: top.colter.dynamic.draw.DynamicDrawService = top.colter.dynamic.draw.DynamicDrawService { _, _ -> MediaRef("https://example.com/dynamic.png", MediaKind.IMAGE) },
+        sendNow: suspend (MessageSendRequest) -> MessageSendResult = { MessageSendResult.sent("test-id") },
+    ): LinkParseService = LinkParseService(
+        resolversProvider = resolversProvider, configProvider = configProvider,
+        snapshotRecorder = snapshotRecorder, videoDownloadersProvider = videoDownloadersProvider,
+        publisherLookupResolver = publisherLookupResolver, previewRenderer = previewRenderer,
+        dynamicDrawService = dynamicDrawService,
+        progressMessenger = progressMessenger, backgroundScope = backgroundScope,
+        projectRootProvider = projectRootProvider,
+        outboundMessageService = top.colter.dynamic.message.OutboundMessageService(sendNow = sendNow),
+    )
 
     private fun initDb(suffix: String) {
         val tempDir = createTempDirectory("dynamic-bot-main-link-$suffix").toFile()
@@ -1969,6 +2196,7 @@ class LinkParseServiceTest {
                     ),
                     durationSeconds = 120,
                 ),
+                video = LinkVideoResource(platformId, parsedLink.targetId, 120),
             )
         }
     }
@@ -2021,7 +2249,7 @@ class LinkParseServiceTest {
             return LinkResolution.Dynamic(
                 parsedLink = parsedLink,
                 update = update,
-                attachedVideo = attachedVideo,
+                video = attachedVideo?.let { LinkVideoResource(it.platformId, it.id, it.durationSeconds) },
             )
         }
     }

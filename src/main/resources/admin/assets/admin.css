@@ -9104,3 +9104,24 @@
   font-size: 13px;
   line-height: 1.7;
 }
+    .template-set-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .template-set-toolbar label { display: flex; align-items: center; gap: 8px; }
+    .template-set-toolbar select { width: auto; min-width: 120px; }
+    .template-set-row {
+      display: grid;
+      grid-template-columns: 80px minmax(0, 1fr) auto auto;
+      align-items: center;
+      gap: 8px;
+      padding: 9px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .template-set-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+    @media (max-width: 600px) {
+      .template-set-row { grid-template-columns: minmax(0, 1fr) auto auto; }
+      .template-set-preview { grid-column: 1 / -1; grid-row: 2; }
+    }

@@ -4,6 +4,8 @@ import kotlin.io.path.createTempDirectory
 import kotlin.io.path.writeBytes
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlinx.coroutines.async
@@ -200,6 +202,31 @@ class DeliveryDispatcherTest {
             listOf("bot-a:message-cooldown-1", "bot-b:message-cooldown-1", "bot-b:message-cooldown-2"),
             sink.sent,
         )
+    }
+
+    @Test
+    fun `单条回复被拒绝或部分成功不会冷却账号也不会切换重发`() = runBlocking {
+        initDb("message-rejection-no-cooldown")
+        for (partial in listOf(false, true)) {
+            val sink = RoutedRecordingSink(
+                accountIds = listOf("bot-a", "bot-b"),
+                result = { _, request ->
+                    if (request.message.id == "rejected-$partial") {
+                        if (partial) MessageSendResult.partiallySent(
+                            listOf(MessageSendResult.receipt("sent-prefix")), "回复条数已达上限", routeFailure = false,
+                        ) else MessageSendResult.failed("回复窗口已过期", retryable = false, routeFailure = false)
+                    } else MessageSendResult.sent("receipt-${request.message.id}")
+                },
+            )
+            val firstTarget = testTargetAddress(platformId = "qq", kind = TargetKind.GROUP, externalId = "group-a")
+            val otherTarget = firstTarget.copy(externalId = "group-b")
+            val dispatcher = dispatcher(sink, routing = primaryBackupRouting())
+            val rejected = dispatcher.sendNow(MessageSendRequest(testMessage("rejected-$partial", firstTarget), firstTarget))
+            if (partial) assertFalse(assertIs<MessageSendResult.PartiallySent>(rejected).routeFailure)
+            else assertFalse(assertIs<MessageSendResult.Failed>(rejected).routeFailure)
+            assertIs<MessageSendResult.Sent>(dispatcher.sendNow(MessageSendRequest(testMessage("next-$partial", otherTarget), otherTarget)))
+            assertEquals(listOf("bot-a:rejected-$partial", "bot-a:next-$partial"), sink.sent)
+        }
     }
 
     @Test
@@ -520,6 +547,33 @@ class DeliveryDispatcherTest {
         assertEquals(16, results.sumOf { it.sent })
         assertTrue(sink.maxInFlight <= 2)
         assertEquals(16, MessageDeliveryRepository.countByStatus(DeliveryStatus.SENT))
+    }
+
+    @Test
+    fun `route priority applies before forward adaptation and failover starts from original`() = runBlocking {
+        initDb("forward-route-priority")
+        val target = testTargetAddress(platformId = "qq", kind = TargetKind.GROUP, externalId = "10001")
+        val primary = RoutedRecordingSink(listOf("bot-a"), result = { _, _ -> MessageSendResult.failed("确定未发送", retryable = true) })
+        val backup = RoutedRecordingSink(listOf("bot-b"), features = setOf(MessageSinkFeature.MERGED_FORWARD))
+        val original = mergedForwardMessage("forward-failover-original", target)
+        MessageDeliveryRepository.enqueue(original)
+        val stats = dispatcher(primary, backup, routing = primaryBackupRouting()).dispatchDue()
+        assertEquals(1, stats.sent)
+        assertEquals(1, primary.sentMessages.size)
+        assertTrue(primary.sentMessages.single().batches.none { batch -> batch.content.any { it is MessageContent.Forward } })
+        assertEquals(original.batches, backup.sentMessages.single().batches)
+    }
+
+    @Test
+    fun `flattening forward never turns internal mention all into group notification`() {
+        val batches = listOf(MessageBatch(listOf(MessageContent.Forward(
+            fallbackText = "转发", nodes = listOf(ForwardNode(senderId = "1", senderName = "测试", time = 1, batches = listOf(
+                MessageBatch(listOf(MessageContent.Text("正文"), MessageContent.MentionAll(""))),
+            ))),
+        ))))
+        val flat = batches.withMergedForwardFallback()
+        assertTrue(flat.flatMap { it.content }.none { it is MessageContent.MentionAll })
+        assertTrue(flat.flatMap { it.content }.any { it.fallbackText == "正文" })
     }
 
     private fun dispatcher(

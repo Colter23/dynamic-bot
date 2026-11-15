@@ -5,7 +5,6 @@ import top.colter.dynamic.core.data.DynamicContentNodeLink
 import top.colter.dynamic.core.data.DynamicContentNodeMention
 import top.colter.dynamic.core.data.DynamicContentNodeTag
 import top.colter.dynamic.core.data.DynamicPayload
-import top.colter.dynamic.core.data.ForwardNode
 import top.colter.dynamic.core.data.ImageGridBlock
 import top.colter.dynamic.core.data.LivePayload
 import top.colter.dynamic.core.data.MediaRef
@@ -17,6 +16,10 @@ import top.colter.dynamic.core.data.SourceEventType
 import top.colter.dynamic.core.data.SourceUpdate
 import top.colter.dynamic.core.data.TextBlock
 import top.colter.dynamic.util.formatTime
+import top.colter.dynamic.template.MessageTemplateEngine
+import top.colter.dynamic.template.TemplateSender
+import top.colter.dynamic.template.TemplateStep
+import top.colter.dynamic.core.link.LinkVideoDownloadResult
 
 public class PushTemplateRenderer {
     public fun requiresDraw(template: String, update: SourceUpdate): Boolean {
@@ -32,136 +35,32 @@ public class PushTemplateRenderer {
         update: SourceUpdate,
         drawImage: MediaRef?,
         mentionAll: Boolean = false,
+        video: LinkVideoDownloadResult? = null,
+        steps: List<TemplateStep> = MessageTemplateEngine.compile(template).steps,
+        missing: (String) -> Unit = {},
+        unknown: (String) -> Unit = {},
     ): List<MessageBatch> {
-        val splitConversation = update.eventType != SourceEventType.LIVE_ENDED
-        return renderTemplate(
-            template = template,
-            update = update,
-            splitConversation = splitConversation,
-            appendPlaceholder = { contents, placeholder, key, mentionAllAllowed ->
+        return MessageTemplateEngine.render(
+            steps,
+            TemplateSender(update.publisher.externalId, update.publisher.name, update.publisher.avatar, update.occurredAtEpochSeconds),
+            resolve = { key, mentionAllAllowed ->
+                val contents = mutableListOf<MessageContent>()
                 when (key) {
-                    AT_ALL_PLACEHOLDER -> if (mentionAll && mentionAllAllowed) contents += MessageContent.MentionAll(fallbackText = "")
-                    else appendText(contents, DISABLED_MENTION_ALL_MARKER)
+                    "atAll" -> if (mentionAll && mentionAllAllowed) contents += MessageContent.MentionAll(fallbackText = "")
+                    "video" -> video?.let { contents += MessageContent.Video(fallbackText = "", video = it.video, altText = it.title) }
+                    "size" -> video?.let { appendText(contents, "%.1f MB".format(java.util.Locale.ROOT, it.fileSizeBytes / 1048576.0)) }
+                    "id" -> appendText(contents, update.key.externalId)
+                    "url" -> appendText(contents, update.link.orEmpty())
                     else -> when (val payload = update.payload) {
-                        is DynamicPayload -> appendDynamicPlaceholder(contents, placeholder, key, update, payload, drawImage)
-                        is LivePayload -> appendLivePlaceholder(contents, placeholder, key, update, payload, drawImage)
+                        is DynamicPayload -> appendDynamicPlaceholder(contents, "", key, update, payload, drawImage)
+                        is LivePayload -> appendLivePlaceholder(contents, "", key, update, payload, drawImage)
                     }
                 }
+                contents.takeIf { it.any { item -> item !is MessageContent.Text || item.fallbackText.isNotBlank() } }
             },
+            missing = missing,
+            unknown = unknown,
         )
-    }
-
-    private fun renderTemplate(
-        template: String,
-        update: SourceUpdate,
-        splitConversation: Boolean,
-        appendPlaceholder: (MutableList<MessageContent>, String, String, Boolean) -> Unit,
-    ): List<MessageBatch> {
-        val batches = mutableListOf<MessageBatch>()
-        val current = mutableListOf<MessageContent>()
-
-        fun flush() {
-            MessageBatch(current.toList()).normalizedOrNull()?.let { batches += it }
-            current.clear()
-        }
-
-        val normalizedTemplate = normalizeTemplateEscapes(template)
-        parseTemplateSegments(normalizedTemplate).forEach { segment ->
-            when (segment) {
-                is TemplateSegment.Text -> appendTextSegment(
-                    contents = current,
-                    template = segment.value,
-                    splitConversation = splitConversation,
-                    flush = ::flush,
-                    appendPlaceholder = appendPlaceholder,
-                )
-                is TemplateSegment.Forward -> renderForwardContent(segment.value, update, appendPlaceholder)
-                    ?.let { forward ->
-                        flush()
-                        current += forward
-                        flush()
-                    }
-            }
-        }
-        flush()
-        return batches
-    }
-
-    private fun appendTextSegment(
-        contents: MutableList<MessageContent>,
-        template: String,
-        splitConversation: Boolean,
-        flush: () -> Unit,
-        appendPlaceholder: (MutableList<MessageContent>, String, String, Boolean) -> Unit,
-    ) {
-        if (!splitConversation) {
-            appendRenderedFragment(contents, template, appendPlaceholder)
-            return
-        }
-
-        template.split(CHAIN_SEPARATOR).forEachIndexed { index, fragment ->
-            if (index > 0) flush()
-            appendRenderedFragment(contents, fragment, appendPlaceholder)
-        }
-    }
-
-    private fun appendRenderedFragment(
-        contents: MutableList<MessageContent>,
-        template: String,
-        appendPlaceholder: (MutableList<MessageContent>, String, String, Boolean) -> Unit,
-    ) {
-        val rendered = renderBatch(template.replace(LINE_BREAK, "\n"), mentionAllAllowed = true, appendPlaceholder)
-        contents += rendered.content
-    }
-
-    private fun renderForwardContent(
-        template: String,
-        update: SourceUpdate,
-        appendPlaceholder: (MutableList<MessageContent>, String, String, Boolean) -> Unit,
-    ): MessageContent.Forward? {
-        val nodes = template.split(CHAIN_SEPARATOR)
-            .mapNotNull { nodeTemplate ->
-                renderBatch(nodeTemplate.replace(LINE_BREAK, "\n"), mentionAllAllowed = false, appendPlaceholder)
-                    .normalizedOrNull()
-                    ?.let { batch ->
-                        ForwardNode(
-                            senderId = update.publisher.externalId,
-                            senderName = update.publisher.name,
-                            senderAvatar = update.publisher.avatar,
-                            time = update.occurredAtEpochSeconds,
-                            batches = listOf(batch),
-                        )
-                    }
-            }
-        if (nodes.isEmpty()) return null
-
-        val title = "${update.publisher.name} 的原始内容"
-        return MessageContent.Forward(
-            fallbackText = "[合并转发] $title",
-            title = title,
-            summary = "共 ${nodes.size} 条内容",
-            sourceName = update.publisher.name,
-            sourceAvatar = update.publisher.avatar,
-            nodes = nodes,
-        )
-    }
-
-    private fun renderBatch(
-        template: String,
-        mentionAllAllowed: Boolean,
-        appendPlaceholder: (MutableList<MessageContent>, String, String, Boolean) -> Unit,
-    ): MessageBatch {
-        val contents = mutableListOf<MessageContent>()
-        var currentIndex = 0
-
-        PLACEHOLDER_REGEX.findAll(template).forEach { match ->
-            appendText(contents, template.substring(currentIndex, match.range.first))
-            appendPlaceholder(contents, match.value, match.groupValues[1], mentionAllAllowed)
-            currentIndex = match.range.last + 1
-        }
-        appendText(contents, template.substring(currentIndex))
-
-        return MessageBatch(contents)
     }
 
     private fun appendDynamicPlaceholder(
@@ -383,125 +282,18 @@ public class PushTemplateRenderer {
         }
     }
 
-    private fun MessageBatch.normalizedOrNull(): MessageBatch? {
-        val normalized = content
-            .removeDisabledMentionAllPlaceholder()
-            .trimBoundaryText()
-            .filterNot { it is MessageContent.Text && it.fallbackText.isEmpty() }
-        return if (normalized.isEmpty()) null else MessageBatch(normalized)
-    }
-
-    private fun List<MessageContent>.removeDisabledMentionAllPlaceholder(): List<MessageContent> {
-        if (none { it is MessageContent.Text && DISABLED_MENTION_ALL_MARKER in it.fallbackText }) return this
-        return map { content ->
-            if (content is MessageContent.Text) {
-                content.copy(fallbackText = content.fallbackText.removeDisabledMentionAllPlaceholder())
-            } else {
-                content
-            }
-        }
-    }
-
-    private fun String.removeDisabledMentionAllPlaceholder(): String {
-        if (DISABLED_MENTION_ALL_MARKER !in this) return this
-        return replace("\r\n", "\n")
-            .replace('\r', '\n')
-            .split('\n')
-            .mapNotNull { line ->
-                if (DISABLED_MENTION_ALL_MARKER !in line) return@mapNotNull line
-                val cleaned = DISABLED_MENTION_ALL_MARKER_REGEX
-                    .replace(line, " ")
-                    .trim()
-                cleaned.takeIf { it.isNotBlank() }
-            }
-            .joinToString("\n")
-    }
-
-    private fun List<MessageContent>.trimBoundaryText(): List<MessageContent> {
-        if (isEmpty()) return this
-        val result = toMutableList()
-        (result.firstOrNull() as? MessageContent.Text)?.let {
-            result[0] = it.copy(fallbackText = it.fallbackText.trimStart('\r', '\n'))
-        }
-        (result.lastOrNull() as? MessageContent.Text)?.let {
-            result[result.lastIndex] = it.copy(fallbackText = it.fallbackText.trimEnd('\r', '\n'))
-        }
-        return result
-    }
-
-    private sealed interface TemplateSegment {
-        data class Text(val value: String) : TemplateSegment
-        data class Forward(val value: String) : TemplateSegment
-    }
-
     public companion object {
         public fun hasMentionAllPlaceholder(template: String): Boolean {
-            return parseTemplateSegments(normalizeTemplateEscapes(template))
-                .filterIsInstance<TemplateSegment.Text>()
-                .any { segment ->
-                    PLACEHOLDER_REGEX.findAll(segment.value).any { it.groupValues[1] == AT_ALL_PLACEHOLDER }
-                }
+            return MessageTemplateEngine.compile(template).steps.any { !it.forward && "atAll" in it.fields }
         }
 
         public fun validateForwardBlockSyntax(template: String) {
-            parseTemplateSegments(normalizeTemplateEscapes(template))
-        }
-
-        private fun normalizeTemplateEscapes(template: String): String {
-            return WRAPPED_ESCAPE_MARKER_REGEX.replace(template) {
-                "\\${it.groupValues[1]}"
-            }
-        }
-
-        private fun parseTemplateSegments(template: String): List<TemplateSegment> {
-            val segments = mutableListOf<TemplateSegment>()
-            var index = 0
-
-            while (index < template.length) {
-                val nextStart = template.indexOf(FORWARD_START, startIndex = index)
-                val nextEnd = template.indexOf(FORWARD_END, startIndex = index)
-                require(nextEnd == -1 || (nextStart != -1 && nextStart < nextEnd)) {
-                    "合并转发模板结束标记 $FORWARD_END 缺少开始标记 $FORWARD_START"
-                }
-
-                if (nextStart == -1) {
-                    segments += TemplateSegment.Text(template.substring(index))
-                    break
-                }
-
-                if (nextStart > index) {
-                    segments += TemplateSegment.Text(template.substring(index, nextStart))
-                }
-
-                val contentStart = nextStart + FORWARD_START.length
-                val close = template.indexOf(FORWARD_END, startIndex = contentStart)
-                require(close != -1) {
-                    "合并转发模板开始标记 $FORWARD_START 缺少结束标记 $FORWARD_END"
-                }
-                val nestedStart = template.indexOf(FORWARD_START, startIndex = contentStart)
-                require(nestedStart == -1 || nestedStart > close) {
-                    "合并转发模板不支持嵌套 $FORWARD_START"
-                }
-
-                segments += TemplateSegment.Forward(template.substring(contentStart, close))
-                index = close + FORWARD_END.length
-            }
-
-            return segments
+            MessageTemplateEngine.compile(template)
         }
 
         private const val DRAW_PLACEHOLDER: String = "{draw}"
-        private const val AT_ALL_PLACEHOLDER: String = "atAll"
-        private const val DISABLED_MENTION_ALL_MARKER: String = "\u0000PUSH_TEMPLATE_DISABLED_AT_ALL\u0000"
-        private val DISABLED_MENTION_ALL_MARKER_REGEX: Regex = Regex("[ \\t]*${Regex.escape(DISABLED_MENTION_ALL_MARKER)}[ \\t]*")
-        private const val FORWARD_START: String = "{>>}"
-        private const val FORWARD_END: String = "{<<}"
-        private const val LINE_BREAK: String = "\\n"
-        private const val CHAIN_SEPARATOR: String = "\\r"
         private const val SECONDS_PER_MINUTE: Long = 60
         private const val SECONDS_PER_HOUR: Long = 60 * SECONDS_PER_MINUTE
         private const val SECONDS_PER_DAY: Long = 24 * SECONDS_PER_HOUR
-        private val PLACEHOLDER_REGEX: Regex = Regex("\\{([a-zA-Z0-9_]+)\\}")
-        private val WRAPPED_ESCAPE_MARKER_REGEX: Regex = Regex("""\\+[ \t]*\r?\n[ \t]*([nr])""")
     }
 }

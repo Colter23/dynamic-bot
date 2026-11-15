@@ -58,6 +58,15 @@ import top.colter.dynamic.link.LinkPreviewTemplateRenderResult
 import top.colter.dynamic.link.LinkPreviewTemplateRenderer
 import top.colter.dynamic.listener.PushTemplateRenderer
 import top.colter.dynamic.repository.PublisherRepository
+import top.colter.dynamic.template.TemplateSelector
+import top.colter.dynamic.template.TemplateContentKind
+import top.colter.dynamic.template.MessageTemplateEngine
+import top.colter.dynamic.core.event.SourceUpdateDeliveryMode
+import top.colter.dynamic.core.plugin.MessageSinkPlugin
+import top.colter.dynamic.core.plugin.MessageSinkFeature
+import top.colter.dynamic.listener.withMergedForwardFallback
+import top.colter.dynamic.listener.containsMergedForward
+import kotlinx.coroutines.CancellationException
 
 public class AdminTestService(
     private val resolversProvider: () -> List<LinkResolver> = { emptyList() },
@@ -68,6 +77,7 @@ public class AdminTestService(
     private val storedPublisherResolver: (PublisherKey) -> Publisher? = { PublisherRepository.findByKey(it) },
     private val publisherLookupResolver: (String) -> PublisherLookupPlugin? = { null },
     private val nowEpochSeconds: () -> Long = { System.currentTimeMillis() / 1000 },
+    private val sinksProvider: () -> List<MessageSinkPlugin> = { emptyList() },
 ) {
     private val presetSpecs: List<MockPresetSpec> by lazy { buildPresetSpecs() }
     private val publisherEnricher: LinkPublisherEnricher = LinkPublisherEnricher(
@@ -93,7 +103,13 @@ public class AdminTestService(
                 else -> throw IllegalArgumentException("测试模式无效：${request.mode}")
             }
         }
-        return response.copy(elapsedMillis = elapsed)
+        val sink = request.sinkPluginId?.takeIf { it.isNotBlank() }?.let { id ->
+            sinksProvider().firstOrNull { it.transportId == id } ?: throw IllegalArgumentException("预览渠道不可用：$id")
+        }
+        val degrade = sink != null && MessageSinkFeature.MERGED_FORWARD !in sink.supportedMessageFeatures && response.batches.containsMergedForward()
+        val batches = if (degrade) response.batches.withMergedForwardFallback() else response.batches
+        return response.copy(elapsedMillis = elapsed, batches = batches, media = collectMedia(batches),
+            warnings = response.warnings + if (degrade) listOf("所选渠道不支持合并转发，已按顺序展开；实际发送可能继续拆分并受平台回复配额限制") else emptyList())
     }
 
     private suspend fun previewMock(request: AdminTestPreviewRequest): AdminTestPreviewResponse {
@@ -110,6 +126,7 @@ public class AdminTestService(
             update = update,
             templateOverride = request.template,
             presetOptions = request.presetOptions,
+            purpose = request.purpose ?: "SUBSCRIPTION",
         )
     }
 
@@ -132,6 +149,7 @@ public class AdminTestService(
                 update = publisherEnricher.enrich(resolution.update),
                 templateOverride = request.template,
                 presetOptions = request.presetOptions,
+                purpose = request.purpose ?: "LINK_PREVIEW",
             )
             is LinkResolution.Preview -> renderLinkPreview(
                 mode = TEST_MODE_REAL_LINK,
@@ -139,6 +157,7 @@ public class AdminTestService(
                 preview = publisherEnricher.enrich(resolution.preview),
                 templateOverride = request.template,
                 presetOptions = request.presetOptions,
+                purpose = request.purpose ?: "LINK_PREVIEW",
             )
             is LinkResolution.Message -> response(
                 mode = TEST_MODE_REAL_LINK,
@@ -171,23 +190,34 @@ public class AdminTestService(
         update: SourceUpdate,
         templateOverride: String?,
         presetOptions: AdminTestPresetOptions = AdminTestPresetOptions(),
+        purpose: String = "SUBSCRIPTION",
     ): AdminTestPreviewResponse {
+        val renderContext = renderContextFor(presetOptions)
+        val selected = TemplateSelector.select(renderContext.configProvider().templates, update.publisher.platformId.value,
+            TemplateContentKind.of(update), SourceUpdateDeliveryMode.valueOf(purpose))
         val template = templateOverride.normalizedTemplate()
-            ?: templateFor(update)
+            ?: selected.template
         val templateSource = if (templateOverride.normalizedTemplate() == null) {
-            templateSourceFor(update)
+            selected.source
         } else {
             "OVERRIDE"
         }
         val warnings = mutableListOf<String>()
-        val renderContext = renderContextFor(presetOptions)
         val storedPublisher = storedPublisherResolver(update.publisher.key)
         val drawImage = if (templateRenderer.requiresDraw(template, update)) {
             renderDraw(update, storedPublisher, warnings, renderContext.drawService)
         } else {
             null
         }
-        val batches = templateRenderer.render(template, update, drawImage)
+        val missing = linkedSetOf<String>()
+        val unknown = linkedSetOf<String>()
+        val batches = templateRenderer.render(template, update, drawImage, missing = { missing += it }, unknown = { unknown += it }).ifEmpty {
+            warnings += "模板渲染结果为空，已回退为文本"
+            templateRenderer.render("{name}\\n{content}\\n{link}", update, null)
+        }
+        if ("video" in MessageTemplateEngine.compile(template).fields) warnings += "视频步骤待下载；预览仅显示无视频内容，不会下载或发送"
+        if (unknown.isNotEmpty()) warnings += "未知字段保留原文：${unknown.joinToString { "{$it}" }}"
+        if (missing.isNotEmpty()) warnings += "字段没有可用数据，已自动清理：${missing.joinToString { "{$it}" }}"
         if (batches.isEmpty()) {
             warnings += "模板渲染结果为空"
         }
@@ -213,16 +243,19 @@ public class AdminTestService(
         preview: LinkPreview,
         templateOverride: String?,
         presetOptions: AdminTestPresetOptions = AdminTestPresetOptions(),
+        purpose: String = "LINK_PREVIEW",
     ): AdminTestPreviewResponse {
+        val renderContext = renderContextFor(presetOptions)
+        val selected = TemplateSelector.select(renderContext.configProvider().templates, preview.platformId.value,
+            TemplateContentKind.ofLink(preview.kind), SourceUpdateDeliveryMode.valueOf(purpose))
         val template = templateOverride.normalizedTemplate()
-            ?: configProvider().linkParsing.templates.message
+            ?: selected.template
         val templateSource = if (templateOverride.normalizedTemplate() == null) {
-            "LINK_PARSING_TEMPLATE"
+            selected.source
         } else {
             "OVERRIDE"
         }
         val warnings = mutableListOf<String>()
-        val renderContext = renderContextFor(presetOptions)
         val linkTemplateRenderer = LinkPreviewTemplateRenderer(
             DefaultLinkPreviewRenderer(
                 configProvider = renderContext.configProvider,
@@ -232,6 +265,7 @@ public class AdminTestService(
         val renderResult = runCatching {
             linkTemplateRenderer.renderPreviewResult(template, preview)
         }.getOrElse { error ->
+            if (error is CancellationException) throw error
             warnings += "链接预览模板渲染失败：${error.message ?: error::class.simpleName.orEmpty()}"
             LinkPreviewTemplateRenderResult(
                 batches = listOf(MessageBatch(listOf(MessageContent.Text(preview.fallbackText())))),
@@ -267,6 +301,7 @@ public class AdminTestService(
         return runCatching {
             effectiveDrawService.render(update, storedPublisher)
         }.getOrElse { error ->
+            if (error is CancellationException) throw error
             warnings += "绘图失败，已继续渲染文本模板：${error.message ?: error::class.simpleName.orEmpty()}"
             null
         }
@@ -274,12 +309,14 @@ public class AdminTestService(
 
     private fun LinkPreviewTemplateDiagnostics.toAdminWarnings(): List<String> {
         return buildList {
+            if (drawFailed) add("绘图失败，已继续渲染文本模板")
             if (missingPlaceholders.isNotEmpty()) {
                 add("链接预览模板中 ${missingPlaceholders.sorted().joinToString("、") { "{$it}" }} 没有可用数据，已自动清理")
             }
             if (previewSkippedVideoPlaceholders) {
                 add("测试台链接预览不会下载视频，{video}/{size} 只会在真实视频下载阶段渲染")
             }
+            if (unknownPlaceholders.isNotEmpty()) add("未知字段保留原文：${unknownPlaceholders.joinToString { "{$it}" }}")
         }
     }
 
@@ -287,9 +324,13 @@ public class AdminTestService(
         options: AdminTestPresetOptions,
     ): AdminTestRenderContext {
         val themeColors = options.themeColors?.trim()?.takeIf { it.isNotBlank() }
-            ?: return AdminTestRenderContext(configProvider, drawService)
+            ?: run {
+                val snapshot = configProvider()
+                return AdminTestRenderContext({ snapshot }, drawService.withConfig(snapshot))
+            }
+        val snapshot = configProvider()
         val effectiveConfigProvider = {
-            val config = configProvider()
+            val config = snapshot
             config.copy(
                 draw = config.draw.copy(
                     autoTheme = false,
@@ -299,7 +340,7 @@ public class AdminTestService(
         }
         return AdminTestRenderContext(
             configProvider = effectiveConfigProvider,
-            drawService = drawServiceFactory?.invoke(effectiveConfigProvider) ?: drawService,
+            drawService = drawServiceFactory?.invoke(effectiveConfigProvider) ?: drawService.withConfig(effectiveConfigProvider()),
         )
     }
 
@@ -307,27 +348,13 @@ public class AdminTestService(
         resolvers.forEach { resolver ->
             val matches = runCatching { resolver.matchesLink(input) }.getOrDefault(false)
             if (!matches) return@forEach
-            val parsed = runCatching { resolver.parseLink(input) }.getOrNull() ?: return@forEach
+            val parsed = runCatching { resolver.parseLink(input) }.getOrElse {
+                if (it is CancellationException) throw it
+                null
+            } ?: return@forEach
             return ParsedLinkCandidate(resolver, parsed)
         }
         return null
-    }
-
-    private fun templateFor(update: SourceUpdate): String {
-        val templates = configProvider().templates
-        return when (update.eventType) {
-            SourceEventType.LIVE_STARTED -> templates.liveStarted
-            SourceEventType.LIVE_ENDED -> templates.liveEnded
-            else -> templates.dynamic
-        }
-    }
-
-    private fun templateSourceFor(update: SourceUpdate): String {
-        return when (update.eventType) {
-            SourceEventType.LIVE_STARTED -> "PUSH_TEMPLATE_LIVE_STARTED"
-            SourceEventType.LIVE_ENDED -> "PUSH_TEMPLATE_LIVE_ENDED"
-            else -> "PUSH_TEMPLATE_DYNAMIC"
-        }
     }
 
     private fun response(

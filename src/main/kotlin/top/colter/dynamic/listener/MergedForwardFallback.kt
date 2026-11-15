@@ -59,7 +59,8 @@ private fun MessageContent.Forward.toFallbackBatches(): List<MessageBatch> {
                 if (index == 0) {
                     add(MessageContent.Text("${node.senderName}:\n"))
                 }
-                addAll(batch.content)
+                // 防御插件直接构造的合并转发：降级不能把内部全体通知提升为群通知。
+                addAll(batch.content.filterNot { it is MessageContent.MentionAll })
             }
             if (content.isNotEmpty()) {
                 batches += MessageBatch(content)

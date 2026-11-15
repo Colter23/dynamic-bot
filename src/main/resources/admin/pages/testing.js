@@ -19,6 +19,7 @@ let notify;
 let openModal;
 let closeModal;
 let handleError;
+let templateCatalog;
 
 const TEST_VIEWS = ["preview", "media", "data"];
 
@@ -40,7 +41,7 @@ function bindContext(nextCtx) {
     openModal,
     closeModal,
   } = ctx.ui);
-  messageTemplateEditor = createMessageTemplateEditor({ esc, attr, document });
+  messageTemplateEditor = createMessageTemplateEditor({ esc, attr, document, catalog: templateCatalog });
   hydrateMediaImages = ctx.hydrateMediaImages;
   releaseMediaObjectUrls = ctx.releaseMediaObjectUrls;
   handleError = ctx.handleError;
@@ -77,6 +78,8 @@ function pageState() {
 
 export async function mount(nextCtx) {
   bindContext(nextCtx);
+  templateCatalog = await api("/template-catalog");
+  messageTemplateEditor = createMessageTemplateEditor({ esc, attr, document, catalog: templateCatalog });
   await loadPresets();
   applySelectedPresetDefaults(false);
   renderLayout();
@@ -168,6 +171,19 @@ function renderLayout() {
               ${modeOption("REAL_LINK", "真实链接", "调用插件解析请求", state.mode)}
             </div>
 
+            <div class="testing-compact-grid">
+              <label class="field"><span>模板用途</span><select id="testingPurpose">
+                ${option("", "自动", state.purpose || "")}
+                ${option("SUBSCRIPTION", "订阅推送", state.purpose || "")}
+                ${option("LINK_PREVIEW", "链接解析", state.purpose || "")}
+                ${option("MANUAL_QUERY", "最新动态查询", state.purpose || "")}
+              </select></label>
+              <label class="field"><span>发送渠道</span><select id="testingSink">
+                ${option("", "原始消息计划", state.sinkPluginId || "")}
+                ${(templateCatalog?.sinks || []).map(sink => option(sink.id, sink.name, state.sinkPluginId || "")).join("")}
+              </select></label>
+            </div>
+
             <div class="testing-control-group" data-testing-mock-field>
               <div class="testing-section-head">
                 <div>
@@ -187,7 +203,7 @@ function renderLayout() {
             <div class="testing-control-group" data-testing-real-field>
               <div class="testing-section-head">
                 <div>
-                  <strong>Bilibili 链接</strong>
+                  <strong>来源链接</strong>
                   <span>通过已加载插件执行真实解析。</span>
                 </div>
               </div>
@@ -340,6 +356,8 @@ function bindControls() {
     "#testingIncludeArticleCard",
     "#testingIncludeAdditionalCard",
     "#testingIncludeRepost",
+    "#testingPurpose",
+    "#testingSink",
   ].forEach(selector => {
     const node = root.querySelector(selector);
     if (node) node.onchange = readControls;
@@ -356,6 +374,8 @@ function bindControls() {
 function readControls() {
   const state = pageState();
   state.mode = root.querySelector("input[name='testingMode']:checked")?.value || state.mode || "MOCK";
+  state.purpose = root.querySelector("#testingPurpose")?.value || "";
+  state.sinkPluginId = root.querySelector("#testingSink")?.value || "";
   state.presetId = root.querySelector("#testingPreset")?.value || state.presetId;
   state.link = root.querySelector("#testingLink")?.value.trim() || "";
   state.template = root.querySelector("#testingTemplate")?.value || "";
@@ -476,6 +496,8 @@ function buildPreviewRequest() {
     presetOptions: presetOptionsRequest(),
     link: state.link,
     template: state.template,
+    purpose: state.purpose || null,
+    sinkPluginId: state.sinkPluginId || null,
   };
   if (state.mode === "MOCK" && state.useCustomJson) {
     request.customUpdate = parseCustomJson();
@@ -636,9 +658,14 @@ function resultTemplateAvailable() {
 function currentTemplateKind() {
   const state = pageState();
   const result = state.result;
-  if (result?.templateSource === "PUSH_TEMPLATE_LIVE_STARTED") return "LIVE_STARTED";
-  if (result?.templateSource === "PUSH_TEMPLATE_LIVE_ENDED") return "LIVE_ENDED";
-  if (result?.templateSource === "LINK_PARSING_TEMPLATE" || result?.resolutionType === "PREVIEW") {
+  if (result?.update) {
+    const eventType = platformValue(result.update.key?.eventType || result.update.eventType).trim().toUpperCase();
+    if (eventType === "LIVE.STARTED" || eventType === "LIVE_STARTED") return "LIVE_STARTED";
+    if (eventType === "LIVE.ENDED" || eventType === "LIVE_ENDED") return "LIVE_ENDED";
+    return "DYNAMIC";
+  }
+  if (result?.resolutionType === "DYNAMIC") return "DYNAMIC";
+  if (result?.resolutionType === "PREVIEW") {
     return linkTemplateKind(result?.parsedLink);
   }
   if (state.mode === "REAL_LINK") return linkTemplateKind(result?.parsedLink);

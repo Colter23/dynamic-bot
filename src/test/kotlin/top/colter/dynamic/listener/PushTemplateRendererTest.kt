@@ -329,11 +329,11 @@ class PushTemplateRendererTest {
     }
 
     @Test
-    fun shouldNotSplitLiveEndedOnConversationSeparator() {
+    fun shouldSplitLiveEndedOnConversationSeparator() {
         val chains = renderer.render("{name}\\r{duration}", demoLiveEnded(), drawImage = null)
 
-        assertEquals(1, chains.size)
-        assertTrue(chains.single().content.single().fallbackText.contains("\\r"))
+        assertEquals(2, chains.size)
+        assertEquals("Demo UP", chains.first().content.single().fallbackText)
     }
 
     private fun demoDynamic(): SourceUpdate {

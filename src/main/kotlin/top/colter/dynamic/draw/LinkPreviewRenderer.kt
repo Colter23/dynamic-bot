@@ -31,6 +31,8 @@ import top.colter.skiko.data.Ratio
 
 public fun interface LinkPreviewRenderer {
     public suspend fun render(preview: LinkPreview): MediaRef
+
+    public fun withConfig(config: MainDynamicConfig): LinkPreviewRenderer = this
 }
 
 public class DefaultLinkPreviewRenderer(
@@ -41,6 +43,10 @@ public class DefaultLinkPreviewRenderer(
     private val runtimeDrawService: DynamicDrawService by lazy {
         drawService ?: DefaultDynamicDrawService(configProvider = configProvider)
     }
+
+    override fun withConfig(config: MainDynamicConfig): LinkPreviewRenderer = DefaultLinkPreviewRenderer(
+        configProvider = { config }, drawService = runtimeDrawService.withConfig(config), nowEpochSeconds = nowEpochSeconds,
+    )
 
     override suspend fun render(preview: LinkPreview): MediaRef {
         val incomingPublisher = preview.publisher

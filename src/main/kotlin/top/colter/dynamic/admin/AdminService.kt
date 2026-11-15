@@ -1,5 +1,7 @@
 package top.colter.dynamic.admin
 
+import top.colter.dynamic.template.TemplateSinkDto
+
 import com.fasterxml.jackson.databind.JsonNode
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory
@@ -970,6 +972,11 @@ public class AdminService(
             }
             .sortedWith(compareBy<PublisherPlatformDto> { it.platformId }.thenBy { it.pluginId })
     }
+
+    public fun templateSinks(): List<TemplateSinkDto> = messageSinkProvider()
+        .map { TemplateSinkDto(it.instance.transportId, it.info.descriptor.name) }
+        .distinctBy { it.id }
+        .sortedBy { it.id }
 
     public suspend fun searchPublishers(platformId: String?, query: String?): List<PublisherCandidateDto> {
         val platform = platformId?.trim()?.lowercase()?.takeIf { it.isNotBlank() }

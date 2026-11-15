@@ -33,6 +33,7 @@ internal class PublisherLatestUpdateCommandHandler(
                 publisherInput = publisherInput,
                 target = invocation.context.target,
                 correlationId = invocation.traceId,
+                replyToMessageId = invocation.replyToMessageId,
             )
         ) {
             is PublisherLatestUpdateDispatchResult.Forwarded -> CommandExecutionResult.success(

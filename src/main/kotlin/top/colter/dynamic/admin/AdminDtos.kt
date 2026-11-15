@@ -33,6 +33,8 @@ public data class AdminTestPreviewRequest(
     val customUpdate: SourceUpdate? = null,
     val link: String? = null,
     val template: String? = null,
+    val purpose: String? = null,
+    val sinkPluginId: String? = null,
 )
 
 @Serializable

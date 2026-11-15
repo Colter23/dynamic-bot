@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "apiVersion": "4.0.0",
+  "apiVersion": "5.0.0",
   "plugins": [
     {
       "id": "bilibili-publisher",

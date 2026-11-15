@@ -33,6 +33,13 @@ public data class PushTemplates(
     val dynamic: String = DEFAULT_DYNAMIC_TEMPLATE,
     val liveStarted: String = DEFAULT_LIVE_STARTED_TEMPLATE,
     val liveEnded: String = DEFAULT_LIVE_ENDED_TEMPLATE,
+    val video: String = "{draw}",
+    val live: String = "{draw}",
+    val user: String = "{draw}",
+    val link: String = "{draw}",
+    val linkParsing: TemplateOverrides = TemplateOverrides(),
+    val manualQuery: TemplateOverrides = TemplateOverrides(),
+    val platforms: List<PlatformTemplates> = emptyList(),
 ) {
     public companion object {
         public const val DEFAULT_DYNAMIC_TEMPLATE: String = "{draw}\n{name}@动态\n{link}"
@@ -40,6 +47,24 @@ public data class PushTemplates(
         public const val DEFAULT_LIVE_ENDED_TEMPLATE: String = "{name} 直播结束啦!\n直播时长：{duration}"
     }
 }
+
+/** 空值表示继承；用途覆盖优先于基础模板，平台用途覆盖优先于全局用途覆盖。 */
+public data class TemplateOverrides(
+    val dynamic: String = "",
+    val liveStarted: String = "",
+    val liveEnded: String = "",
+    val video: String = "",
+    val live: String = "",
+    val user: String = "",
+    val link: String = "",
+)
+
+public data class PlatformTemplates(
+    val platformId: String = "",
+    val base: TemplateOverrides = TemplateOverrides(),
+    val linkParsing: TemplateOverrides = TemplateOverrides(),
+    val manualQuery: TemplateOverrides = TemplateOverrides(),
+)
 
 public data class WebAdminConfig(
     val enabled: Boolean = true,
@@ -100,7 +125,6 @@ public data class LinkParsingConfig(
     val maxLinksPerMessage: Int = 1,
     val autoDedupeTtlSeconds: Double = 60.0,
     val progressReply: LinkParseProgressReplyConfig = LinkParseProgressReplyConfig(),
-    val templates: LinkParseTemplates = LinkParseTemplates(),
     val videoDownload: LinkVideoDownloadConfig = LinkVideoDownloadConfig(),
     val platformCardLinksEnabled: Boolean = false,
 )
@@ -115,14 +139,6 @@ public data class LinkParseProgressReplyConfig(
     val text: String = "链接解析中，请稍候...",
     val recallOnComplete: Boolean = true,
 )
-
-public data class LinkParseTemplates(
-    val message: String = DEFAULT_MESSAGE_TEMPLATE,
-) {
-    public companion object {
-        public const val DEFAULT_MESSAGE_TEMPLATE: String = "{draw}"
-    }
-}
 
 public data class LinkVideoDownloadConfig(
     val maxDurationSeconds: Long = 300,

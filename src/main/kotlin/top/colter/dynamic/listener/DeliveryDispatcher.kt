@@ -97,14 +97,13 @@ public class DeliveryDispatcher(
 
         val routed = resolveRoutedSinks(request.target)
         if (routed.routedSinkIds.isNotEmpty()) {
-            val (sendRequest, candidates) = prepareRoutedSendRequest(request, routed.candidates)
             return accountRouter.sendMessage(
-                candidates = candidates,
+                candidates = routed.candidates,
                 policy = routingConfigProvider().policyFor(request.target.platformId.value),
-                request = sendRequest,
+                request = request,
                 prepareRequest = { candidate ->
                     rewriteSendRequest(
-                        sendRequest,
+                        adaptForSink(request, candidate.sink),
                         candidate.route.mediaDeliveryProfileId,
                         mediaRouteContext(candidate),
                     )
@@ -204,43 +203,40 @@ public class DeliveryDispatcher(
         return if (message == request.message) request else request.copy(message = message)
     }
 
-    private fun prepareRoutedSendRequest(
-        request: MessageSendRequest,
-        candidates: List<MessageSinkRouteCandidate>,
-    ): Pair<MessageSendRequest, List<MessageSinkRouteCandidate>> {
-        if (!request.message.batches.containsMergedForward()) return request to candidates
-        val supported = candidates.filter { candidate ->
-            MessageSinkFeature.MERGED_FORWARD in candidate.sink.supportedMessageFeatures
-        }
-        return if (supported.isNotEmpty()) {
-            request to supported
-        } else {
-            request.withMergedForwardFallback() to candidates
-        }
-    }
-
     private suspend fun prepareDirectSendRequest(
         request: MessageSendRequest,
         sink: MessageSinkPlugin,
     ): MessageSendRequest {
-        val prepared = if (!request.message.batches.containsMergedForward() ||
+        val prepared = adaptForSink(request, sink)
+        return rewriteSendRequest(prepared, sink.mediaDeliveryProfileId, mediaRouteContext(sink))
+    }
+
+    private fun adaptForSink(request: MessageSendRequest, sink: MessageSinkPlugin): MessageSendRequest =
+        if (!request.message.batches.containsMergedForward() ||
             MessageSinkFeature.MERGED_FORWARD in sink.supportedMessageFeatures
         ) {
             request
         } else {
             request.withMergedForwardFallback()
         }
-        return rewriteSendRequest(prepared, sink.mediaDeliveryProfileId, mediaRouteContext(sink))
-    }
 
     private suspend fun sendWithDirectSink(
         request: MessageSendRequest,
         sink: MessageSinkPlugin,
     ): MessageSendResult {
         val result = runCatching { sink.sendMessage(request) }
-            .getOrElse { error -> MessageSendResult.failed(error.message ?: "消息发送失败", retryable = true) }
+            .getOrElse { error ->
+                if (error is kotlinx.coroutines.CancellationException) throw error
+                MessageSendResult.failed(error.message ?: "消息发送失败", retryable = true)
+            }
             .withTransportId(sink.transportId)
-        if (result is MessageSendResult.Failed || result is MessageSendResult.PartiallySent || result is MessageSendResult.Uncertain) {
+        val routeFailed = when (result) {
+            is MessageSendResult.Failed -> result.routeFailure
+            is MessageSendResult.PartiallySent -> result.routeFailure
+            is MessageSendResult.Uncertain -> true
+            is MessageSendResult.Sent -> false
+        }
+        if (routeFailed) {
             outboundMediaService?.invalidateRoute(mediaRouteContext(sink))
         }
         return result

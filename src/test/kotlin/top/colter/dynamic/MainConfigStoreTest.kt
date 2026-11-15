@@ -14,6 +14,50 @@ import top.colter.dynamic.core.config.reload
 
 class MainConfigStoreTest {
     @Test
+    fun legacyTemplatesMigrateOnceAndPreserveExplicitOverrides() {
+        val service = YamlConfigService(createTempDirectory("unified-template-migration"))
+        val path = service.resolvePath(MainDynamicConfig.CONFIG_ID)
+        val original = """
+            templates:
+              dynamic: '{name}'
+              video: '新视频模板'
+              manualQuery:
+                dynamic: '手动查询'
+            linkParsing:
+              templates:
+                message: '{>>}{draw}\r{video}{<<}'
+        """.trimIndent()
+        path.writeText(original)
+        val first = MainConfigStore(service).loadOrCreate { "token" }
+        assertEquals("{name}", first.templates.dynamic)
+        assertEquals("新视频模板", first.templates.video)
+        assertEquals("{>>}{draw}\\r{video}{<<}", first.templates.linkParsing.dynamic)
+        assertEquals("手动查询", first.templates.manualQuery.dynamic)
+        val backup = path.resolveSibling("main.yml.before-unified-templates.bak")
+        assertEquals(original, backup.readText())
+        val rewritten = path.readText()
+        val second = MainConfigStore(service).loadOrCreate { "ignored" }
+        assertEquals(first, second)
+        assertEquals(rewritten, path.readText())
+        assertEquals(original, backup.readText())
+    }
+
+    @Test
+    fun defaultLegacyLinkTemplateInheritsDynamicBase() {
+        val service = YamlConfigService(createTempDirectory("unified-template-default"))
+        service.resolvePath(MainDynamicConfig.CONFIG_ID).writeText("""
+            templates:
+              dynamic: '{content}'
+            linkParsing:
+              templates:
+                message: '{draw}'
+        """.trimIndent())
+        val loaded = MainConfigStore(service).loadOrCreate { "token" }
+        assertEquals("", loaded.templates.linkParsing.dynamic)
+        assertEquals("{draw}", loaded.templates.video)
+    }
+
+    @Test
     fun shouldPersistGeneratedAdminToken() {
         val configService = YamlConfigService(createTempDirectory("dynamic-bot-main-config"))
         val store = MainConfigStore(configService)
@@ -59,7 +103,7 @@ class MainConfigStoreTest {
 
         assertEquals(DrawOutputFormat.PNG, config.draw.outputFormat)
         assertEquals(1.0, config.draw.scale)
-        assertEquals("{draw}", config.linkParsing.templates.message)
+        assertEquals("{draw}", config.templates.video)
         assertEquals(0.0, config.linkParsing.videoDownload.maxFileMegabytes)
         assertFalse(config.linkParsing.platformCardLinksEnabled)
 
@@ -74,7 +118,7 @@ class MainConfigStoreTest {
                 "draw.font.typography.lineHeightScale",
                 "draw.font.typography.letterSpacingEm",
                 "linkParsing.platformCardLinksEnabled",
-                "linkParsing.templates.message",
+                "templates",
                 "linkParsing.videoDownload.prompts.downloading",
                 "linkParsing.videoDownload.prompts.failed",
                 "mediaDelivery.defaultProfileId",
@@ -317,8 +361,8 @@ class MainConfigStoreTest {
         assertFalse(byPath.getValue("draw.outputFormat").advanced)
         assertEquals("推送内容", byPath.getValue("draw.font.typography.autoNormalize").section)
         assertTrue(byPath.getValue("draw.font.typography.autoNormalize").advanced)
-        assertEquals("链接解析", byPath.getValue("linkParsing.templates.message").section)
-        assertEquals("MESSAGE_TEMPLATE_EDITOR", byPath.getValue("linkParsing.templates.message").component)
+        assertEquals("推送内容", byPath.getValue("templates").section)
+        assertEquals("MESSAGE_TEMPLATES", byPath.getValue("templates").component)
         assertEquals("链接解析", byPath.getValue("linkParsing.platformCardLinksEnabled").section)
         assertFalse(byPath.getValue("linkParsing.platformCardLinksEnabled").advanced)
         assertEquals("发送与媒体", byPath.getValue("mediaDelivery.profiles").section)

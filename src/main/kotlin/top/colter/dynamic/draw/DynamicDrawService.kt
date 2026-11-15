@@ -20,6 +20,8 @@ import top.colter.dynamic.draw.resource.PlatformDrawAssetResolver
 
 public fun interface DynamicDrawService {
     public suspend fun render(update: SourceUpdate, storedPublisher: Publisher?): MediaRef
+
+    public fun withConfig(config: MainDynamicConfig): DynamicDrawService = this
 }
 
 public class DefaultDynamicDrawService(
@@ -31,6 +33,10 @@ public class DefaultDynamicDrawService(
     private val runtimeImageLoader: DynamicImageLoader by lazy {
         imageLoader ?: CachedDynamicImageLoader(configProvider().imageCache)
     }
+
+    override fun withConfig(config: MainDynamicConfig): DynamicDrawService = DefaultDynamicDrawService(
+        configProvider = { config }, imageLoader = runtimeImageLoader, assetResolver = assetResolver, themeService = themeService,
+    )
 
     override suspend fun render(update: SourceUpdate, storedPublisher: Publisher?): MediaRef {
         val config = configProvider()

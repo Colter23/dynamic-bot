@@ -3,6 +3,8 @@ package top.colter.dynamic.publisher
 import top.colter.dynamic.core.data.TargetAddress
 import top.colter.dynamic.core.event.PublisherPersistenceMode
 import top.colter.dynamic.core.event.SourceUpdateDeliveryTags
+import top.colter.dynamic.core.event.SourceUpdateDeliveryMode
+import kotlinx.coroutines.CancellationException
 import top.colter.dynamic.core.event.SourceUpdatePublishRequest
 import top.colter.dynamic.core.event.SourceUpdatePublishStatus
 import top.colter.dynamic.core.event.SourceUpdatePublisher
@@ -38,6 +40,7 @@ public class PublisherLatestUpdateService(
         publisherInput: String,
         target: TargetAddress,
         correlationId: String? = null,
+        replyToMessageId: String? = null,
     ): PublisherLatestUpdateDispatchResult {
         val normalizedPlatformId = platformId.trim()
         if (normalizedPlatformId.isBlank()) {
@@ -52,6 +55,7 @@ public class PublisherLatestUpdateService(
         val resolution = runCatching {
             provider.fetchLatestPublisherUpdate(PublisherLatestUpdateRequest(normalizedInput))
         }.getOrElse { error ->
+            if (error is CancellationException) throw error
             return PublisherLatestUpdateDispatchResult.Failed(error.message ?: "查询最新更新失败")
         }
         val update = when (resolution) {
@@ -67,10 +71,13 @@ public class PublisherLatestUpdateService(
                     deliveryTargetAddress = target,
                     deliveryTag = SourceUpdateDeliveryTags.MANUAL_QUERY,
                     correlationId = correlationId,
+                    replyToMessageId = replyToMessageId,
+                    deliveryMode = SourceUpdateDeliveryMode.MANUAL_QUERY,
                     publisherPersistenceMode = PublisherPersistenceMode.READ_ONLY,
                 ),
             )
         }.getOrElse { error ->
+            if (error is CancellationException) throw error
             return PublisherLatestUpdateDispatchResult.Failed(error.message ?: "最新更新投递失败")
         }
         return when (publishResult.status) {

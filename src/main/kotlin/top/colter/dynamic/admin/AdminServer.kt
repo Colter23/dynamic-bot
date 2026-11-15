@@ -108,6 +108,7 @@ public class AdminServer(
                 registeredLocalMediaLookup = DatabaseAdminRegisteredLocalMediaLookup,
             ),
             testService = AdminTestService(
+                sinksProvider = { pluginManager.getMessageSinkPlugins().map { it.instance } },
                 resolversProvider = { pluginManager.getLinkResolvers() },
                 configProvider = configProvider,
                 drawService = adminDrawService,
@@ -230,6 +231,15 @@ public fun Application.adminModule(context: AdminServerContext) {
             get("/test/presets") {
                 if (!call.ensureAuthorized(context)) return@get
                 call.respondApi { context.testService.presets() }
+            }
+            get("/template-catalog") {
+                if (!call.ensureAuthorized(context)) return@get
+                call.respondApi {
+                    top.colter.dynamic.template.TemplateCatalog.describe().copy(
+                        platforms = context.service.publisherPlatforms().map { it.platformId }.distinct(),
+                        sinks = context.service.templateSinks(),
+                    )
+                }
             }
             get("/dashboard") {
                 if (!call.ensureAuthorized(context)) return@get

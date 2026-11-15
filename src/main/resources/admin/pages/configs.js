@@ -37,6 +37,7 @@ let beginPageRequest;
 let isCurrentPageRequest;
 let invalidatePageRequests;
 let messageTemplateEditor;
+let templateCatalog;
 
 function bindContext(nextCtx) {
   ctx = nextCtx;
@@ -71,7 +72,7 @@ function bindContext(nextCtx) {
     bindTargetSourceToggles,
     selectedTargetPriorityAccount,
   } = ctx.ui);
-  messageTemplateEditor = createMessageTemplateEditor({ esc, attr, document });
+  messageTemplateEditor = createMessageTemplateEditor({ esc, attr, document, catalog: templateCatalog });
   hydrateMediaImages = ctx.hydrateMediaImages;
   beginPageRequest = ctx.beginPageRequest;
   isCurrentPageRequest = ctx.isCurrentPageRequest;
@@ -84,6 +85,8 @@ function pageRoot() {
 
 export async function mount(nextCtx) {
   bindContext(nextCtx);
+  templateCatalog = await api("/template-catalog");
+  messageTemplateEditor = createMessageTemplateEditor({ esc, attr, document, catalog: templateCatalog });
   window.addEventListener("beforeunload", configBeforeUnload);
   await loadConfigs(ctx.force);
 }
@@ -156,6 +159,14 @@ export async function handleAction(nextCtx, { action, button, id }) {
   }
   if (action === "edit-message-template") {
     await withButtonLoading(button, "打开中...", () => openMessageTemplateModal(button.dataset.path));
+    return true;
+  }
+  if (action === "edit-template-set") {
+    openTemplateSetEditor(button.dataset.kind);
+    return true;
+  }
+  if (action === "restore-template-set") {
+    updateTemplateSet(button.dataset.kind, "", true);
     return true;
   }
   if (action === "add-onebot-connection") {
@@ -424,6 +435,7 @@ async function renderConfigDetail(id, request = beginPageRequest("configs")) {
   wireConfigFieldVisibility(detail);
   wireConfigFieldSearch(detail);
   wireMediaDeliveryField(detail);
+  bindTemplateSet();
   applyConfigSectionTabs(activeSection);
   updateConfigDirtyState(detail);
 }
@@ -940,6 +952,7 @@ async function toggleConfigSecret(button) {
 }
 
 function configFieldHtml(detail, field) {
+  if (field.component === "MESSAGE_TEMPLATES") return templateSetHtml(detail, field);
   if (field.component === "HIDDEN") return hiddenConfigFieldHtml(detail, field);
   if (field.component === "MESSAGE_TEMPLATE_EDITOR") return messageTemplateFieldHtml(detail, field);
   if (field.component === "MESSAGE_ROUTING_POLICY_TABLE") return messageRoutingPlatformPoliciesFieldHtml(detail, field);
@@ -979,6 +992,104 @@ function configFieldHtml(detail, field) {
     id,
     `<input id="${attr(id)}" data-config-path="${attr(field.path)}" data-config-type="${field.type}" type="${inputType}"${numberAttrs}${readOnlyInputAttrs(field)} value="${attr(value)}">`,
   );
+}
+
+const templateKeys = { DYNAMIC: "dynamic", LIVE_STARTED: "liveStarted", LIVE_ENDED: "liveEnded", VIDEO: "video", LIVE: "live", USER: "user", LINK: "link" };
+
+function templateSetHtml(detail, field) {
+  return configCompositeFieldHtml(field, "cfg-template-set", "", `
+    <input id="cfg-template-set" type="hidden" data-config-path="templates" data-config-type="JSON" value="${attr(JSON.stringify(detail.values.templates || {}))}">
+    <div class="template-set-toolbar">
+      <label>来源平台 <select id="templateSetPlatform"><option value="">全局</option></select></label>
+      <label>用途 <select id="templateSetPurpose"><option value="base">基础模板</option><option value="linkParsing">链接解析</option><option value="manualQuery">最新动态查询</option></select></label>
+    </div>
+    <div id="templateSetRows"></div>`, "message-template-field");
+}
+
+function readTemplateSet() {
+  return JSON.parse(root.querySelector("#cfg-template-set")?.value || "{}");
+}
+
+function normalizeTemplatePlatformId(value) {
+  return String(value || "").trim().toLowerCase();
+}
+
+function templateSetScope(templates, create = false) {
+  const platform = normalizeTemplatePlatformId(root.querySelector("#templateSetPlatform")?.value);
+  const purpose = root.querySelector("#templateSetPurpose")?.value || "base";
+  let owner = templates;
+  if (platform) {
+    owner = (templates.platforms || []).find(item => normalizeTemplatePlatformId(item.platformId) === platform);
+    if (!owner && create) {
+      owner = { platformId: platform };
+      (templates.platforms ||= []).push(owner);
+    }
+    if (!owner) return {};
+  }
+  if (!platform && purpose === "base") return owner;
+  if (create) return owner[purpose] ||= {};
+  return owner[purpose] || {};
+}
+
+function effectiveTemplate(templates, key) {
+  const platform = normalizeTemplatePlatformId(root.querySelector("#templateSetPlatform")?.value);
+  const purpose = root.querySelector("#templateSetPurpose")?.value || "base";
+  const scoped = (templates.platforms || []).find(item => normalizeTemplatePlatformId(item.platformId) === platform);
+  return [purpose !== "base" && scoped?.[purpose]?.[key], purpose !== "base" && templates[purpose]?.[key], scoped?.base?.[key], templates[key]]
+    .find(value => typeof value === "string" && value.trim()) || "";
+}
+
+function renderTemplateSetRows() {
+  const container = root.querySelector("#templateSetRows");
+  if (!container || !templateCatalog) return;
+  const templates = readTemplateSet();
+  const scope = templateSetScope(templates);
+  const globalBase = !root.querySelector("#templateSetPlatform").value && root.querySelector("#templateSetPurpose").value === "base";
+  container.innerHTML = templateCatalog.kinds.map(kind => {
+    const key = templateKeys[kind.key];
+    const value = scope[key] || "";
+    return `<div class="template-set-row">
+      <span>${esc(kind.label)}</span>
+      <span class="template-set-preview" title="${attr(value || effectiveTemplate(templates, key))}">${esc(value ? messageTemplateInlineText(value, kind.key) : "继承 · " + messageTemplateInlineText(effectiveTemplate(templates, key), kind.key))}</span>
+      <button type="button" class="compact" data-action="edit-template-set" data-kind="${attr(kind.key)}">编辑</button>
+      <button type="button" class="compact" data-action="restore-template-set" data-kind="${attr(kind.key)}">${globalBase ? "恢复默认" : "继承"}</button>
+    </div>`;
+  }).join("");
+}
+
+async function bindTemplateSet() {
+  const platform = root.querySelector("#templateSetPlatform");
+  if (!platform) return;
+  const ids = new Set([...(templateCatalog?.platforms || []), ...(readTemplateSet().platforms || []).map(item => item.platformId)]
+    .map(normalizeTemplatePlatformId).filter(Boolean));
+  platform.innerHTML = `<option value="">全局</option>` + [...ids].map(id => `<option value="${attr(id)}">${esc(id)}</option>`).join("");
+  platform.addEventListener("change", renderTemplateSetRows);
+  root.querySelector("#templateSetPurpose").addEventListener("change", renderTemplateSetRows);
+  renderTemplateSetRows();
+}
+
+function updateTemplateSet(kind, value, restore = false) {
+  const templates = readTemplateSet();
+  const scope = templateSetScope(templates, true);
+  const globalBase = !root.querySelector("#templateSetPlatform").value && root.querySelector("#templateSetPurpose").value === "base";
+  scope[templateKeys[kind]] = restore && globalBase ? templateCatalog.kinds.find(item => item.key === kind).defaultTemplate : value;
+  const input = root.querySelector("#cfg-template-set");
+  input.value = JSON.stringify(templates);
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  renderTemplateSetRows();
+}
+
+function openTemplateSetEditor(kind) {
+  const templates = readTemplateSet();
+  const value = templateSetScope(templates)[templateKeys[kind]] || "";
+  const globalBase = !root.querySelector("#templateSetPlatform").value && root.querySelector("#templateSetPurpose").value === "base";
+  openModal("编辑消息模板", messageTemplateEditor.editorHtml({ value, kind }), async () => {
+    const next = $("messageTemplateEditorInput").value;
+    if (globalBase && !next.trim()) throw new Error("基础模板不能为空");
+    updateTemplateSet(kind, next);
+    closeModal();
+  }, { size: "wide" });
+  messageTemplateEditor.bindEditor({ kind });
 }
 
 function hiddenConfigFieldHtml(detail, field) {

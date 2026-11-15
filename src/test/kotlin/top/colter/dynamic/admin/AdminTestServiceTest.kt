@@ -16,10 +16,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
-import top.colter.dynamic.LinkParseTemplates
+import top.colter.dynamic.PushTemplates
+import top.colter.dynamic.TemplateOverrides
 import top.colter.dynamic.LinkParsingConfig
 import top.colter.dynamic.MainDynamicConfig
-import top.colter.dynamic.PushTemplates
 import top.colter.dynamic.core.data.DynamicBlockRole
 import top.colter.dynamic.core.data.DynamicMediaCardKind
 import top.colter.dynamic.core.data.DynamicMetric
@@ -47,6 +47,30 @@ import top.colter.dynamic.testPublisherInfo
 import top.colter.dynamic.testPublisherKey
 
 class AdminTestServiceTest {
+    @Test
+    fun previewUsesSelectedSinkCapabilitiesWithoutSending() = runBlocking {
+        val sink = object : top.colter.dynamic.core.plugin.MessageSinkPlugin {
+            override val transportId = "qqbot"
+            override val supportedTargetPlatforms = setOf(PlatformId.of("qq-official"))
+            override suspend fun sendMessage(request: top.colter.dynamic.core.plugin.MessageSendRequest): top.colter.dynamic.core.plugin.MessageSendResult =
+                error("预览不能发送消息")
+        }
+        val service = AdminTestService(
+            storedPublisherResolver = { null },
+            sinksProvider = { listOf(sink) },
+        )
+
+        val response = service.preview(AdminTestPreviewRequest(
+            template = "{>>}第一条\\r第二条{<<}", sinkPluginId = "qqbot",
+        ))
+
+        assertEquals(2, response.batches.size)
+        assertTrue(response.batches.flatMap { it.content }.none { it is MessageContent.Forward })
+        assertTrue(response.batches[0].content.any { "第一条" in it.fallbackText })
+        assertTrue(response.batches[1].content.any { "第二条" in it.fallbackText })
+        assertTrue(response.warnings.any { "不支持合并转发" in it })
+    }
+
     @Test
     fun presetsShouldIncludeRecommendedCombinationsAndBoundaryCases() {
         val service = AdminTestService()
@@ -77,7 +101,7 @@ class AdminTestServiceTest {
 
         assertEquals("OK", response.status)
         assertEquals("MOCK_SOURCE_UPDATE", response.resolutionType)
-        assertEquals("PUSH_TEMPLATE_DYNAMIC", response.templateSource)
+        assertEquals("全局基础模板", response.templateSource)
         assertEquals("D:/tmp/admin-test-draw.png", response.drawImage?.uri)
         assertEquals(1, drawService.renderCalls)
         assertTrue(response.media.any { it.uri == "D:/tmp/admin-test-draw.png" })
@@ -334,9 +358,7 @@ class AdminTestServiceTest {
             },
             configProvider = {
                 MainDynamicConfig(
-                    linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{name}\\r{cover}"),
-                    ),
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{name}\\r{cover}", video = "{name}\\r{cover}", live = "{name}\\r{cover}", user = "{name}\\r{cover}", link = "{name}\\r{cover}")),
                 )
             },
             drawService = FakeDrawService(),
@@ -379,9 +401,7 @@ class AdminTestServiceTest {
             resolversProvider = { listOf(resolver) },
             configProvider = {
                 MainDynamicConfig(
-                    linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(message = "{draw}\n{stats}"),
-                    ),
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "{draw}\n{stats}", video = "{draw}\n{stats}", live = "{draw}\n{stats}", user = "{draw}\n{stats}", link = "{draw}\n{stats}")),
                 )
             },
             drawService = baseDrawService,
@@ -399,7 +419,7 @@ class AdminTestServiceTest {
 
         assertEquals("OK", response.status)
         assertEquals("PREVIEW", response.resolutionType)
-        assertEquals("LINK_PARSING_TEMPLATE", response.templateSource)
+        assertEquals("全局用途覆盖", response.templateSource)
         assertEquals("D:/tmp/admin-test-themed-draw.png", response.drawImage?.uri)
         assertEquals(0, baseDrawService.renderCalls)
         assertEquals(1, themedDrawService.renderCalls)
@@ -428,11 +448,7 @@ class AdminTestServiceTest {
             resolversProvider = { listOf(FakePreviewLinkResolver()) },
             configProvider = {
                 MainDynamicConfig(
-                    linkParsing = LinkParsingConfig(
-                        templates = LinkParseTemplates(
-                            message = "标题：{title}\\n大小：{size}\\n未知：{not_exists}\\r{video}",
-                        ),
-                    ),
+                    templates = PushTemplates(linkParsing = TemplateOverrides(dynamic = "标题：{title}\\n大小：{size}\\n未知：{not_exists}\\r{video}", video = "标题：{title}\\n大小：{size}\\n未知：{not_exists}\\r{video}", live = "标题：{title}\\n大小：{size}\\n未知：{not_exists}\\r{video}", user = "标题：{title}\\n大小：{size}\\n未知：{not_exists}\\r{video}", link = "标题：{title}\\n大小：{size}\\n未知：{not_exists}\\r{video}")),
                 )
             },
             drawService = FakeDrawService(),
@@ -447,8 +463,9 @@ class AdminTestServiceTest {
         )
 
         assertEquals("WARN", response.status)
-        assertEquals("标题：Preview video", (response.batches.single().content.single() as MessageContent.Text).fallbackText)
-        assertTrue(response.warnings.any { "{not_exists}" in it && "{size}" in it })
+        assertEquals("标题：Preview video\n未知：{not_exists}", (response.batches.single().content.single() as MessageContent.Text).fallbackText)
+        assertTrue(response.warnings.any { "{not_exists}" in it && "保留" in it })
+        assertTrue(response.warnings.any { "{size}" in it && "清理" in it })
         assertTrue(response.warnings.any { "不会下载视频" in it })
     }
 

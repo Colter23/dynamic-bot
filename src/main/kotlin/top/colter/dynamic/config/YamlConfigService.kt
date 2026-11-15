@@ -202,6 +202,12 @@ internal class YamlDocumentStore(
         val normalized = objectMapper.valueToTree<JsonNode>(value)
         val defaultsFilled = normalized != document.root
         if (document.changed || defaultsFilled) {
+            if ("main-unified-message-templates" in appliedMigrations) {
+                val backup = path.resolveSibling("${path.fileName}.before-unified-templates.bak")
+                // 不覆盖此前备份；备份失败时终止迁移，避免丢失用户原模板。
+                if (!Files.exists(backup)) Files.copy(path, backup)
+                logger.info { "消息模板配置已备份；动态链接改用完整模板，下播模板支持 \\r 拆分消息" }
+            }
             writeAtomically(path, value)
             val reasons = buildList {
                 if (appliedMigrations.isNotEmpty()) {
