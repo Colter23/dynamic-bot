@@ -366,6 +366,8 @@ internal class IncomingMessagePipeline(
         return CommandContext(
             target = target,
             senderId = senderId,
+            senderName = senderName,
+            senderAvatar = senderAvatar,
             botAccountId = botAccountId?.trim()?.takeIf { it.isNotBlank() },
             mentionedAccountIds = commandMentionedAccountIds(),
         )

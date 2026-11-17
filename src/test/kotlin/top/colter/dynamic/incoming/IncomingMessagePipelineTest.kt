@@ -35,6 +35,8 @@ import top.colter.dynamic.core.command.CommandPermissionRule
 import top.colter.dynamic.core.config.ConfigApplyResult
 import top.colter.dynamic.core.data.CommandRole
 import top.colter.dynamic.core.data.MessageContent
+import top.colter.dynamic.core.data.MediaKind
+import top.colter.dynamic.core.data.MediaRef
 import top.colter.dynamic.core.data.IncomingMessage
 import top.colter.dynamic.core.data.IncomingMessageAuditMode
 import top.colter.dynamic.core.data.IncomingMessageRecordPolicy
@@ -914,13 +916,15 @@ class IncomingMessagePipelineTest {
                 IncomingMessageSegment.Text(" /db help"),
             ),
             mentions = setOf("bot-1"),
-        )
+        ).copy(senderName = "群内昵称", senderAvatar = MediaRef("https://example.com/avatar.png", MediaKind.AVATAR))
 
         pipeline.handle("qqbot", IncomingMessagePublishRequest(message = message, traceId = "trace-1"))
 
         val command = withTimeout(1_000) { commandEvent.await() }
         assertEquals("/db help", command.rawText)
         assertEquals(setOf("bot-1"), command.context.mentionedAccountIds)
+        assertEquals(message.senderName, command.context.senderName)
+        assertEquals(message.senderAvatar, command.context.senderAvatar)
         eventBus.shutdown()
     }
 
