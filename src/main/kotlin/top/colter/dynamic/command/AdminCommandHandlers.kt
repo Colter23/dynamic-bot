@@ -34,6 +34,7 @@ internal fun claimOutcomeResult(outcome: CommandClaimOutcome, prefix: String): C
 internal class WhoamiCommandHandler : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("whoami"),
+        aliases = listOf(listOf("会话信息")),
         description = "显示当前会话的标识",
         usage = "whoami",
         requiredRole = CommandRole.USER,
@@ -66,7 +67,8 @@ internal class ClaimCommandHandler(
         get() = commandPrefixProvider()
 
     override val spec: CommandSpec = CommandSpec(
-        path = listOf("claim"),
+        path = listOf(COMMAND_NAME),
+        aliases = listOf(listOf(CHINESE_ALIAS)),
         description = "使用验证码认领系统管理员",
         usage = "claim <验证码>",
         requiredRole = CommandRole.USER,
@@ -98,8 +100,12 @@ internal class ClaimCommandHandler(
         return true
     }
 
-    private companion object {
+    companion object {
+        private const val COMMAND_NAME = "claim"
+        private const val CHINESE_ALIAS = "认领"
         private const val INITIALIZED_NOTIFY_INTERVAL_MILLIS: Long = 10 * 60 * 1000L
+
+        fun matches(commandName: String): Boolean = commandName == COMMAND_NAME || commandName == CHINESE_ALIAS
     }
 }
 
@@ -113,6 +119,7 @@ internal class GrantCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("grant"),
+        aliases = listOf(listOf("授权")),
         description = "授予指定用户命令权限",
         usage = "grant <platform> <senderId> <角色> [会话类型] [目标ID]",
         requiredRole = CommandRole.ADMIN,
@@ -180,6 +187,7 @@ internal class RevokeCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("revoke"),
+        aliases = listOf(listOf("撤权")),
         description = "撤销指定用户的命令权限",
         usage = "revoke <platform> <senderId> [命令路径]",
         requiredRole = CommandRole.ADMIN,

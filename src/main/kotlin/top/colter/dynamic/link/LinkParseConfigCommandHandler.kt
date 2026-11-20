@@ -26,7 +26,7 @@ private class LinkParseStatusCommandHandler(
 ) : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("link"),
-        aliases = listOf(listOf("link", "status")),
+        aliases = listOf(listOf("link", "status"), listOf("链接"), listOf("链接", "状态")),
         description = "查看当前会话的链接解析触发方式",
         usage = "link",
         requiredRole = CommandRole.USER,
@@ -61,6 +61,7 @@ private class LinkParseSetCommandHandler(
 ) : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("link", "set"),
+        aliases = listOf(listOf("链接", "设置")),
         description = "设置当前会话的链接解析触发方式",
         usage = "link set <off|mention|always>",
         requiredRole = CommandRole.MANAGER,
@@ -94,6 +95,7 @@ private class LinkParseClearCommandHandler(
 ) : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("link", "clear"),
+        aliases = listOf(listOf("链接", "清除")),
         description = "清除当前会话的链接解析配置",
         usage = "link clear",
         requiredRole = CommandRole.MANAGER,

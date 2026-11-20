@@ -225,7 +225,7 @@ public class CommandListener(
             reply(event, CommandExecutionResult.failed("未知命令：${tokens.joinToString(" ")}"))
             return
         }
-        val commandPath = match.matchedPath.joinToString(" ")
+        val commandPath = match.spec.path.joinToString(" ")
         recordCommandProcessing(
             event = event,
             stage = IncomingProcessingStage.COMMAND_PARSE,
@@ -682,8 +682,9 @@ private class HelpCommandHandler(
     private fun subCommandsOf(prefixTokens: List<String>, commands: List<CommandSpec>): List<CommandSpec> {
         val prefix = prefixTokens.map { it.lowercase() }
         return commands.filter { spec ->
-            val path = spec.path.map { it.lowercase() }
-            path.size > prefix.size && path.take(prefix.size) == prefix
+            (listOf(spec.path) + spec.aliases).any { path ->
+                path.size > prefix.size && path.take(prefix.size).map { it.lowercase() } == prefix
+            }
         }
     }
 
@@ -713,14 +714,18 @@ private class HelpCommandHandler(
 
     private fun formatCommand(spec: CommandSpec): String {
         val usage = "$commandPrefix ${spec.usage}".trim()
-        return if (spec.description.isBlank()) usage else "$usage - ${spec.description}"
+        val name = if (spec.aliases.isEmpty()) usage else "$usage（别名：${formatAliases(spec)}）"
+        return if (spec.description.isBlank()) name else "$name - ${spec.description}"
     }
+
+    private fun formatAliases(spec: CommandSpec): String =
+        spec.aliases.joinToString("、") { "$commandPrefix ${it.joinToString(" ")}" }
 
     private fun describeCommand(spec: CommandSpec): String {
         return buildString {
             appendLine("命令：$commandPrefix ${spec.path.joinToString(" ")}")
             if (spec.aliases.isNotEmpty()) {
-                appendLine("别名：${spec.aliases.joinToString("、") { "$commandPrefix ${it.joinToString(" ")}" }}")
+                appendLine("别名：${formatAliases(spec)}")
             }
             appendLine("用法：$commandPrefix ${spec.usage}")
             appendLine("说明：${spec.description.ifBlank { "-" }}")
@@ -1087,7 +1092,7 @@ private class StopApplicationCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("stop"),
-        aliases = listOf(listOf("shutdown")),
+        aliases = listOf(listOf("shutdown"), listOf("停止")),
         description = "停止主程序",
         usage = "stop",
         requiredRole = CommandRole.ADMIN,
@@ -1135,6 +1140,7 @@ private class ForwardCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("forward"),
+        aliases = listOf(listOf("转发")),
         description = "批量转发文本消息到指定目标",
         usage = "forward <platform> <kind> <targetIds> <message...>",
         requiredRole = CommandRole.ADMIN,
@@ -1591,6 +1597,7 @@ private class TemplateListCommandHandler(
 ) : CommandHandler {
     override val spec: CommandSpec = CommandSpec(
         path = listOf("template", "list"),
+        aliases = listOf(listOf("模板", "列表")),
         description = "列出消息模板",
         usage = "template list",
         requiredRole = CommandRole.USER,
@@ -1620,6 +1627,7 @@ private class ThemeCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("theme"),
+        aliases = listOf(listOf("主题色")),
         description = "查看或设置当前会话已订阅发布者的绘图主题色",
         usage = "theme <show|set|clear> <platform> <publisherUserId> [#FE65A6;#BFFAFF]",
         requiredRole = CommandRole.MANAGER,
@@ -1694,6 +1702,7 @@ private class FilterAddElementCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "add", "element"),
+        aliases = listOf(listOf("过滤", "添加", "元素")),
         description = "为订阅添加动态元素屏蔽规则",
         usage = "filter add element <platform> <publisherUserId> <text|image|video|card|poll|repost>",
         requiredRole = CommandRole.MANAGER,
@@ -1731,6 +1740,7 @@ private class FilterAddContentCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "add", "content"),
+        aliases = listOf(listOf("过滤", "添加", "内容")),
         description = "为订阅添加内容屏蔽规则",
         usage = "filter add content <platform> <publisherUserId> <keyword|regex> <pattern...>",
         requiredRole = CommandRole.MANAGER,
@@ -1776,6 +1786,7 @@ private class FilterListCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "list"),
+        aliases = listOf(listOf("过滤", "列表")),
         description = "列出当前会话订阅过滤规则",
         usage = "filter list [platform] [publisherUserId]",
         requiredRole = CommandRole.USER,
@@ -1841,6 +1852,7 @@ private class FilterRemoveCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "remove"),
+        aliases = listOf(listOf("过滤", "删除")),
         description = "删除订阅过滤规则",
         usage = "filter remove <ruleId>",
         requiredRole = CommandRole.MANAGER,
@@ -1880,6 +1892,7 @@ private class FilterClearCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("filter", "clear"),
+        aliases = listOf(listOf("过滤", "清空")),
         description = "清空订阅过滤规则",
         usage = "filter clear <platform> <publisherUserId> [confirm]",
         requiredRole = CommandRole.MANAGER,

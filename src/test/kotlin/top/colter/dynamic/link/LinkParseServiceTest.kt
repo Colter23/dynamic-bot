@@ -91,7 +91,7 @@ class LinkParseServiceTest {
         val result = dispatchCommand(
             eventBus,
             listener,
-            commandEvent("/db parse https://t.bilibili.com/1 https://t.bilibili.com/2"),
+            commandEvent("/db 解析 https://t.bilibili.com/1 https://t.bilibili.com/2"),
         )
         val first = withTimeout(3_000) { sourceUpdates.receive() }
         val second = withTimeout(3_000) { sourceUpdates.receive() }

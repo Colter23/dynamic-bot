@@ -240,23 +240,27 @@ class CommandListenerTest {
             publisherLookupResolver = { null },
             config = MainDynamicConfig(
                 command = top.colter.dynamic.CommandConfig(
-                    permissions = listOf(CommandPermissionRule(senderId = "sender", role = CommandRole.ADMIN)),
+                    permissions = listOf(
+                        CommandPermissionRule(commandPath = "link *", senderId = "sender", role = CommandRole.MANAGER),
+                    ),
                 ),
             ),
             commandRegistry = CommandRegistry(),
             eventBus = eventBus,
         )
 
-        val setResult = dispatch(eventBus, listener, commandEvent("/db link set always"))
+        val setResult = dispatch(eventBus, listener, commandEvent("/db 链接 设置 always"))
         val stored = assertNotNull(
             LinkParseTargetConfigRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")),
         )
         val statusResult = dispatch(eventBus, listener, commandEvent("/db link status"))
-        val clearResult = dispatch(eventBus, listener, commandEvent("/db link clear"))
+        val statusAliasResult = dispatch(eventBus, listener, commandEvent("/db 链接 状态"))
+        val clearResult = dispatch(eventBus, listener, commandEvent("/db 链接 清除"))
 
         assertEquals(CommandStatus.SUCCESS, setResult.status)
         assertEquals(LinkParseTriggerMode.ALWAYS, stored.triggerMode)
         assertTrue(renderMessage(statusResult).contains("匹配到链接就解析"))
+        assertEquals(renderMessage(statusResult), renderMessage(statusAliasResult))
         assertEquals(CommandStatus.SUCCESS, clearResult.status)
         assertTrue(LinkParseTargetConfigRepository.findByAddress(TargetAddress.of("onebot", TargetKind.GROUP, "100")) == null)
     }
@@ -322,6 +326,7 @@ class CommandListenerTest {
         assertTrue(text.contains("【过滤】"), "text=$text")
         assertTrue(text.contains("【系统】"), "text=$text")
         assertTrue(text.contains("/db subscribe"), "text=$text")
+        assertTrue(text.contains("别名：/db 订阅"), "text=$text")
     }
 
     @Test
@@ -335,11 +340,12 @@ class CommandListenerTest {
             eventBus = eventBus,
         )
 
-        val result = dispatch(eventBus, listener, commandEvent("/db help filter add element"))
+        val result = dispatch(eventBus, listener, commandEvent("/db 帮助 过滤 添加 元素"))
 
         assertEquals(CommandStatus.SUCCESS, result.status)
         val text = renderMessage(result)
         assertTrue(text.contains("用法：/db filter add element"), "text=$text")
+        assertTrue(text.contains("别名：/db 过滤 添加 元素"), "text=$text")
         assertTrue(text.contains("权限：目标管理员"), "text=$text")
     }
 
@@ -395,10 +401,12 @@ class CommandListenerTest {
             eventBus = eventBus,
         )
 
-        val result = dispatch(eventBus, listener, commandEvent("/db help filter"))
+        val english = dispatch(eventBus, listener, commandEvent("/db help filter"))
+        val result = dispatch(eventBus, listener, commandEvent("/db 帮助 过滤"))
 
         assertEquals(CommandStatus.SUCCESS, result.status)
         val text = renderMessage(result)
+        assertEquals(renderMessage(english), text)
         assertTrue(text.contains("/db filter add element"), "text=$text")
         assertTrue(text.contains("/db filter clear"), "text=$text")
     }
@@ -488,7 +496,7 @@ class CommandListenerTest {
         assertEquals(CommandStatus.FAILED, first.status)
         assertTrue(renderMessage(first).contains("没有该命令的权限"))
 
-        val second = dispatchOrNull(eventBus, listener, commandEvent("/db status"))
+        val second = dispatchOrNull(eventBus, listener, commandEvent("/db 状态"))
         assertEquals(null, second, "同一用户同一命令不应重复提示")
     }
 
@@ -510,7 +518,7 @@ class CommandListenerTest {
         assertTrue(renderMessage(prompt).contains("确认停止"))
         assertEquals(null, stopReason, "首条消息不应直接停机")
 
-        val confirmed = dispatch(eventBus, listener, commandEvent("/db stop confirm"))
+        val confirmed = dispatch(eventBus, listener, commandEvent("/db 停止 confirm"))
         assertEquals(CommandStatus.SUCCESS, confirmed.status)
         assertNotNull(stopReason)
     }

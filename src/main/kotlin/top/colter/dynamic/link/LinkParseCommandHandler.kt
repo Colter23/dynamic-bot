@@ -16,6 +16,7 @@ internal class LinkParseCommandHandler(
 
     override val spec: CommandSpec = CommandSpec(
         path = listOf("parse"),
+        aliases = listOf(listOf("解析")),
         description = "解析并转发链接",
         usage = "parse <link...>",
         requiredRole = CommandRole.USER,

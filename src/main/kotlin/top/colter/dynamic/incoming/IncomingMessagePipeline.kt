@@ -12,6 +12,7 @@ import top.colter.dynamic.command.CommandBootstrapStatus
 import top.colter.dynamic.command.CommandClaimOutcome
 import top.colter.dynamic.command.CommandParser
 import top.colter.dynamic.command.ClaimCommandHandler
+import top.colter.dynamic.command.ParsedCommand
 import top.colter.dynamic.command.PendingSubscriptionSelection
 import top.colter.dynamic.core.command.CommandInvocation
 import top.colter.dynamic.core.data.CommandRole
@@ -90,8 +91,13 @@ internal class IncomingMessagePipeline(
         val rawText = message.commandText().trim()
         val commandContext = message.toCommandContext()
         val commandPrefix = config.command.prefix
-        // 将候选批次带入内部命令，防止异步执行时误用后来搜索的候选。
         val parsed = CommandParser.parse(rawText, commandPrefix)
+        // 验证码消息在观测与审计之前拦截：它是一次性凭据，不该落库或进入插件消费链路。
+        if (handleBootstrapClaim(sourcePlugin, request, commandContext, rawText, parsed, traceId, replyToMessageId)) {
+            return
+        }
+
+        // 将候选批次带入内部命令，防止异步执行时误用后来搜索的候选。
         val selectionText = if ((parsed?.commandName == "subscribe" || parsed?.commandName == "订阅") && parsed.args.size == 1) {
             parsed.args.single()
         } else {
@@ -118,11 +124,6 @@ internal class IncomingMessagePipeline(
             hasSupportedLinks -> IncomingMessageIntent.LinkText
             rawText.isNotBlank() -> IncomingMessageIntent.PlainText
             else -> IncomingMessageIntent.NonText
-        }
-
-        // 验证码消息在观测与审计之前拦截：它是一次性凭据，不该落库或进入插件消费链路。
-        if (handleBootstrapClaim(sourcePlugin, request, commandContext, rawText, traceId, replyToMessageId)) {
-            return
         }
 
         val dispatchContext = IncomingMessageDispatchContext(
@@ -230,7 +231,7 @@ internal class IncomingMessagePipeline(
     /**
      * 在所有观测、插件和审计之前处理认领凭据。
      *
-     * 显式 claim 命令无论状态和参数是否有效都在此消费，避免凭据流入插件或审计。
+     * 显式认领命令（含别名）无论状态和参数是否有效都在此消费，避免凭据流入插件或审计。
      * 裸六位数字只在未初始化的私聊中拦截，除认领成功与过期提示外一律静默。
      *
      * @return true 表示消息已被消费，不再进入后续分发。
@@ -240,12 +241,12 @@ internal class IncomingMessagePipeline(
         request: IncomingMessagePublishRequest,
         context: CommandContext,
         rawText: String,
+        parsed: ParsedCommand?,
         traceId: String,
         replyToMessageId: String,
     ): Boolean {
         val message = request.message
-        val parsed = CommandParser.parse(rawText, configProvider().command.prefix)
-        if (parsed?.commandName == "claim") {
+        if (parsed != null && ClaimCommandHandler.matches(parsed.commandName)) {
             val handler = claimHandler ?: return true
             if (!shouldDispatchCommand(context)) return true
             if (!claimDeduplicator.firstObservation(sourcePlugin, request, traceId)) return true
@@ -257,7 +258,7 @@ internal class IncomingMessagePipeline(
                     traceId = traceId,
                     replyToMessageId = replyToMessageId,
                     tokens = parsed.tokens,
-                    matchedPath = listOf("claim"),
+                    matchedPath = listOf(parsed.commandName),
                     args = parsed.args,
                     role = CommandRole.USER,
                 ),

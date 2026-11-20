@@ -28,6 +28,7 @@ import top.colter.dynamic.command.SubscriptionSelectionComponent
 import top.colter.dynamic.command.SubscriptionService
 import top.colter.dynamic.core.data.CommandContext
 import top.colter.dynamic.core.data.IncomingProcessingResult
+import top.colter.dynamic.core.data.IncomingProcessingStage
 import top.colter.dynamic.core.data.PublisherKey
 import top.colter.dynamic.core.plugin.PublisherLookupPlugin
 import top.colter.dynamic.draw.PublisherThemeInitializer
@@ -59,8 +60,10 @@ import top.colter.dynamic.event.EventBus
 import top.colter.dynamic.event.IncomingMessageEvent
 import top.colter.dynamic.event.IncomingTextMessageEvent
 import top.colter.dynamic.event.Listener
+import top.colter.dynamic.initTestDatabase
 import top.colter.dynamic.link.LinkParseService
 import top.colter.dynamic.repository.IncomingAuditWriteRequest
+import top.colter.dynamic.repository.IncomingMessageAuditRepository
 import top.colter.dynamic.repository.IncomingProcessingWriteRequest
 import top.colter.dynamic.repository.PersistenceManager
 import top.colter.dynamic.repository.SubscriberStateCache
@@ -75,6 +78,10 @@ class IncomingMessagePipelineTest {
             Triple("/db claim 无效凭据", TargetKind.USER, false),
             Triple("/db claim 123456", TargetKind.GROUP, false),
             Triple("/db claim 123456", TargetKind.USER, true),
+            Triple("/db 认领 123456", TargetKind.USER, false),
+            Triple("/db 认领 无效凭据", TargetKind.USER, false),
+            Triple("/db 认领 123456", TargetKind.GROUP, false),
+            Triple("/db 认领 123456", TargetKind.USER, true),
         )) {
             val bus = EventBus(Dispatchers.Unconfined)
             var config = MainDynamicConfig(command = CommandConfig(
@@ -112,8 +119,44 @@ class IncomingMessagePipelineTest {
             assertEquals(0, commands, text)
             assertEquals(0, consumers, text)
             assertTrue(recorder.records.isEmpty(), text)
-            val expectedClaim = text == "/db claim 123456" && kind == TargetKind.USER && !initialized
+            val expectedClaim = text.endsWith(" 123456") && kind == TargetKind.USER && !initialized
             assertEquals(expectedClaim, config.command.permissions.any { it.senderId == "sender" }, text)
+            bus.shutdown()
+        }
+    }
+
+    @Test
+    fun `命令审计按主路径查到中英文调用并保留原始预览`() = runBlocking {
+        initTestDatabase("command-alias-audit")
+        val bus = EventBus(Dispatchers.Unconfined)
+        val config = MainDynamicConfig(command = CommandConfig(requirePermissionRule = false))
+        bus.subscribe(CommandListener(publisherLookupResolver = { null }, config = config, eventBus = bus))
+        val pipeline = IncomingMessagePipeline(
+            configProvider = { config },
+            linkParseService = LinkParseService(resolversProvider = { emptyList() }),
+            eventBus = bus,
+            incomingConsumerDispatcher = {},
+        )
+
+        try {
+            val commands = mapOf("canonical" to "/db link", "alias" to "/db 链接 状态")
+            commands.forEach { (traceId, text) ->
+                pipeline.handle("onebot", request(text, traceId = traceId))
+            }
+
+            val records = IncomingMessageAuditRepository.findRecent(commandPath = "link")
+            assertEquals(commands, records.associate { it.message.traceId to it.message.textPreview })
+            records.forEach { record ->
+                assertEquals(
+                    mapOf(
+                        IncomingProcessingStage.COMMAND_PARSE to IncomingProcessingResult.MATCHED,
+                        IncomingProcessingStage.COMMAND_EXECUTE to IncomingProcessingResult.SUCCEEDED,
+                    ),
+                    record.processing.associate { it.stage to it.result },
+                )
+                assertEquals(setOf("link"), record.processing.map { it.commandPath }.toSet())
+            }
+        } finally {
             bus.shutdown()
         }
     }
