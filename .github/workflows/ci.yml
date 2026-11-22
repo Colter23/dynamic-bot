@@ -226,7 +226,7 @@ jobs:
           - \`dynamic-bot-v${image_version}-official-plugins.zip\`：包含本版本推荐搭配的 Bilibili、微博、OneBot 和 QQ 官方机器人插件。
 
           升级注意：
-          - 本版本使用插件 API 4，旧 API 3 插件需要配套更新。
+          - 本版本使用插件 API 5，插件需使用 API 5 兼容版本。
           - 升级前停止程序并备份 \`config/\`、\`data/\`；手动替换插件时移除对应旧 JAR，同一插件只保留一个 JAR。
 
           Docker 镜像：

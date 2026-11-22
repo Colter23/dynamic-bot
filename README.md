@@ -68,7 +68,7 @@ Vtuber粉丝群等如果需要动态推送，管理员可加群联系我使用�
 也可以直接下载 `dynamic-bot-*-all.jar` 手动运行：
 
 ```powershell
-java -jar dynamic-bot-0.0.10-all.jar
+java -jar dynamic-bot-0.0.11-all.jar
 ```
 
 默认后台地址：
@@ -92,7 +92,7 @@ http://127.0.0.1:2233
 
 不要直接把新包完整解压覆盖旧运行目录，避免误覆盖配置、数据库、插件数据或日志。插件如有新版本，推荐在 Web 后台的插件页面单独更新。
 
-**从 0.0.9 及更早版本升级：** 主程序 0.0.10 使用插件 API 4，需配套更新 Bilibili 0.0.8、微博 0.0.4、OneBot 0.0.8、QQ 官方机器人 0.0.2 或兼容后续版本。旧 API 3 插件无法加载，可在新主程序后台安装兼容版本以替换原 JAR。手动更新时，先移除对应旧 JAR，再放入新版；同一插件只保留一个 JAR，保留插件配置和数据。私有插件也需要用新 core 重新编译。
+**从 0.0.10 及更早版本升级：** 主程序 0.0.11 使用插件 API 5，需配套更新 Bilibili 0.0.9、微博 0.0.6、OneBot 0.0.9、QQ 官方机器人 0.0.3 或兼容后续版本。旧 API 4 插件无法加载，可在新主程序后台安装兼容版本以替换原 JAR。手动更新时，先移除对应旧 JAR，再放入新版；同一插件只保留一个 JAR，保留插件配置和数据。私有插件也需要用 core 0.0.7 重新编译。
 
 ### Docker 运行
 
@@ -167,7 +167,7 @@ Docker 首次生成主配置时，后台默认监听 `0.0.0.0`，方便从容器
 
 首次加载旧模板配置时会生成 `config/main.yml.before-unified-templates.bak`。自定义旧链接模板迁移为动态链接的完整用途覆盖，不再与动态模板叠加；旧默认 `{draw}` 则继承动态基础模板。已有新配置优先，备份只创建一次。
 
-本轮模板重构将插件 API 提升为 **5**，需要将主项目和插件作为一组重新构建。API 4 插件应升级后再使用；此说明不代表已发布新版本。
+本版本模板重构将插件 API 提升为 **5**，主项目和官方插件已按 API 5 配套发布。API 4 插件不能与本版本主项目混用。
 
 日志默认同时输出到控制台和 `logs/dynamic-bot.log`。可通过环境变量 `LOG_LEVEL`、`LOG_DIR`、`LOG_FILE_MAX_SIZE`、`LOG_FILE_MAX_HISTORY`、`LOG_FILE_TOTAL_SIZE_CAP` 调整日志级别、文件目录和滚动策略。
 
@@ -203,7 +203,7 @@ dynamic-bot插件仓库建议添加 `dynamic-bot-plugin` Topics。
 发布用的一键启动包由 CI 自动生成；本地需要验证包结构时，可以在 Linux/macOS Shell 或已安装 `zip`、`tar`、`curl` 等工具的环境中运行：
 
 ```bash
-INCLUDE_JRE_PACKAGES=false ./scripts/package-release.sh 0.0.10 build/libs/dynamic-bot-0.0.10-all.jar release
+INCLUDE_JRE_PACKAGES=false ./scripts/package-release.sh 0.0.11 build/libs/dynamic-bot-0.0.11-all.jar release
 ```
 
 开发插件时，请优先依赖 `dynamic-bot-core` 中的公开 API，不要直接依赖主程序内部实现。提交代码前建议至少运行：
